@@ -21,5 +21,18 @@
     "test": "pnpm -r test",
     "test:e2e": "pnpm --filter @pdf-editor/web test:e2e",
     "ci": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.14",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "~1.63.0",
+    "@types/node": "^22.20.4",
+    "@vitest/browser-playwright": "^5.0.2",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.1",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
   }
 }

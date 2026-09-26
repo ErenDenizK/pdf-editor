@@ -11,7 +11,8 @@ outside contributors. See `docs/research/03-platform-constraints.md` §5–7.
 
 ## Decision
 
-- **Vite 8**, **TypeScript 7** (strict, `tsgo` for typecheck), **pnpm** workspaces
+- **Vite 8**, **TypeScript** (strict; pinned to 6.0, the last JavaScript-based release,
+  until typescript-eslint supports the native 7.x compiler), **pnpm** workspaces
   (`apps/web`, `packages/engine`, `packages/document-model`, `packages/ui`).
 - **React 19** with the React Compiler.
 - **Zustand** for stores; a custom snapshot history stack (ADR-0005); a small explicit

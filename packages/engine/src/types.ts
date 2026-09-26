@@ -5,9 +5,8 @@
  */
 
 import type {
+  DestinationView,
   DocumentMetadata,
-  OutlineNode,
-  PageLabelRange,
   Rect,
   Rotation,
   SecurityPolicy,
@@ -58,15 +57,29 @@ export interface OpenOptions extends EngineCallOptions {
   readonly password?: string;
 }
 
+/**
+ * Outline as the engine sees it: destinations are page indices inside the source.
+ * The document model maps these to PageIds when the source is added to a workspace.
+ */
+export interface EngineOutlineNode {
+  readonly title: string;
+  readonly destination?:
+    | { readonly kind: 'page'; readonly pageIndex: number; readonly view?: DestinationView }
+    | { readonly kind: 'uri'; readonly uri: string }
+    | { readonly kind: 'unresolved'; readonly reason: string };
+  readonly open: boolean;
+  readonly children: readonly EngineOutlineNode[];
+}
+
 export interface OpenedDocument {
   readonly id: SourceId;
   readonly pageCount: number;
+  /** Per page: unrotated size, intrinsic /Rotate, and page label when the document has labels. */
   readonly pages: readonly { readonly size: Size; readonly rotation: Rotation; readonly label?: string }[];
   readonly fingerprint: string;
   readonly flags: SourceFlags;
   readonly metadata: DocumentMetadata;
-  readonly outline: readonly OutlineNode[];
-  readonly labels: readonly PageLabelRange[];
+  readonly outline: readonly EngineOutlineNode[];
 }
 
 // ---------------------------------------------------------------------------
