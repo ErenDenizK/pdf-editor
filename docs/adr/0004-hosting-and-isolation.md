@@ -1,6 +1,6 @@
 # ADR-0004: Static hosting, workers, and no cross-origin isolation
 
-**Status:** proposed · **Date:** 2026-09-26
+**Status:** accepted · **Date:** 2026-09-26
 
 ## Context
 
@@ -39,3 +39,8 @@ Site limit 1 GB, 10-minute `Cache-Control`, project sites live under `/repo/`.
 - No first-visit reload, no Safari CORP headaches, no private-mode breakage.
 - If a future feature needs threads (e.g. a Rust component with rayon), it must be an
   opt-in path with a fallback.
+
+## Discussion summary
+
+Reviewed with the project owner on 2026-09-26. The owner delegated the decision to the
+project lead; the recommendation above was adopted as written.

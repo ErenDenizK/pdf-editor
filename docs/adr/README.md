@@ -7,9 +7,11 @@ only after discussion with the project owner; the discussion summary is appended
 
 | # | Title | Status |
 |---|---|---|
-| 0001 | Project license | proposed |
-| 0002 | PDF engine stack | proposed |
-| 0003 | Frontend stack | proposed |
-| 0004 | Static hosting, workers and no cross-origin isolation | proposed |
-| 0005 | Virtual document model and history | proposed |
-| 0006 | Branching, versioning and commit conventions | proposed |
+| 0001 | Project license | accepted |
+| 0002 | PDF engine stack | accepted |
+| 0003 | Frontend stack | accepted |
+| 0004 | Static hosting, workers and no cross-origin isolation | accepted |
+| 0005 | Virtual document model and history | accepted |
+| 0006 | Branching, versioning and commit conventions | accepted |
+| 0007 | Delivery targets: web first, desktop as escalation path | accepted |
+| 0008 | qpdf integration deferred to M3 and built from source | accepted |

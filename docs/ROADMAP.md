@@ -18,7 +18,7 @@ Goal: a repository a Microsoft/Google-grade team would be comfortable contributi
   GitHub Pages from `main`; preview build artifact on PRs.
 - Engine abstraction layer (`packages/engine`): `PdfRenderer`, `PdfEditor`,
   `PdfAssembler`, `PdfPlumber` interfaces; PDFium worker with Comlink; pdf-lib assembly
-  worker; qpdf built from source in CI.
+  worker. qpdf is integrated in M3 (ADR-0008).
 - Test corpus (`test/fixtures/`) with provenance notes and licenses for every file.
 - Design tokens and the base UI shell (app frame, panels, command palette skeleton).
 - Docs: this set, plus `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`.
@@ -75,6 +75,7 @@ Exit: annotations created here render identically in Acrobat Reader, Chrome and 
 | Compress: image downsample + JPEG re-encode with presets | own + P | skips SMask/CCITT/JBIG2 |
 | PDF → images (PNG/JPEG at DPI) | P | |
 | Repair broken files with notice | P + Q | |
+| qpdf built from source in CI behind `PdfPlumber` | Q | ADR-0008 |
 
 Exit: v1.0 success criteria met → **v1.0.0**, merge `develop` into `main`, tag.
 

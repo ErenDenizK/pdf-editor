@@ -1,6 +1,6 @@
 # ADR-0001: Project license
 
-**Status:** proposed · **Date:** 2026-09-26
+**Status:** accepted · **Date:** 2026-09-26
 
 ## Context
 
@@ -41,3 +41,8 @@ listing bundled third-party components (PDFium, qpdf, tesseract, fonts, CMaps).
   MuPDF; going MIT/Apache → AGPL is possible, the reverse is not.
 - **MIT**: equivalent in practice; Apache-2.0 preferred for the patent clause.
 - **Dual license / open core**: explicitly against the project's principles.
+
+## Discussion summary
+
+Reviewed with the project owner on 2026-09-26. The owner delegated the decision to the
+project lead; the recommendation above was adopted as written.

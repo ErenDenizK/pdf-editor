@@ -1,6 +1,6 @@
 # ADR-0006: Branching, versioning and commit conventions
 
-**Status:** proposed · **Date:** 2026-09-26
+**Status:** accepted · **Date:** 2026-09-26
 
 ## Decision
 
@@ -24,3 +24,8 @@ This planning work is being pushed to the branch `claude/zealous-pasteur-6mqn1l`
 branch assigned to the automated session. The project owner decides whether to rename it
 to `develop` or to merge it into a newly created `develop`; the automated session does not
 push to other branches without explicit permission.
+
+## Discussion summary
+
+Reviewed with the project owner on 2026-09-26. The owner delegated the decision to the
+project lead; the recommendation above was adopted as written.

@@ -1,6 +1,6 @@
 # ADR-0003: Frontend stack
 
-**Status:** proposed · **Date:** 2026-09-26
+**Status:** accepted · **Date:** 2026-09-26
 
 ## Context
 
@@ -45,3 +45,8 @@ outside contributors. See `docs/research/03-platform-constraints.md` §5–7.
   droppable count. Rejected.
 - **Tailwind**: viable, but tokens + CSS Modules keep the design system explicit and
   reviewable. Can be revisited if velocity suffers.
+
+## Discussion summary
+
+Reviewed with the project owner on 2026-09-26. The owner delegated the decision to the
+project lead; the recommendation above was adopted as written.

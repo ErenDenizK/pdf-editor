@@ -1,6 +1,6 @@
 # ADR-0002: PDF engine stack
 
-**Status:** proposed · **Date:** 2026-09-26 · **Depends on:** ADR-0001
+**Status:** accepted · **Date:** 2026-09-26 · **Depends on:** ADR-0001
 
 ## Context
 
@@ -57,3 +57,8 @@ annotations and form values.
 - **MuPDF.js only**: best API, AGPL; rejected by ADR-0001.
 - **pdfcpu WASM**: 8 MB Go runtime, unofficial builds; rejected.
 - **Stock `@hyzyla/pdfium`**: render-only wrapper; rejected in favor of EmbedPDF's build.
+
+## Discussion summary
+
+Reviewed with the project owner on 2026-09-26. The owner delegated the decision to the
+project lead; the recommendation above was adopted as written.

@@ -1,6 +1,6 @@
 # ADR-0005: Virtual document model and history
 
-**Status:** proposed · **Date:** 2026-09-26
+**Status:** accepted · **Date:** 2026-09-26
 
 ## Context
 
@@ -33,3 +33,8 @@ inside an engine instance, while structural edits are pure data.
   export pipeline owns that sequencing; tests cover it with golden files.
 - Duplicating a page that carries form widgets requires a policy (clone field with new
   name vs shared value); the model records the choice per page.
+
+## Discussion summary
+
+Reviewed with the project owner on 2026-09-26. The owner delegated the decision to the
+project lead; the recommendation above was adopted as written.
