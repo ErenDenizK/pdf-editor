@@ -3,10 +3,12 @@
 > A free, open-source PDF editor that runs entirely in your browser. Nothing is uploaded.
 > One workspace, not forty tools.
 
-**Status: M0 (foundation) complete, M1 (light table) in progress.** You can open PDFs and
-see them rendered, navigate, rotate, delete and undo. Merging, drag-and-drop and export land
-in M1. See [`docs/ROADMAP.md`](docs/ROADMAP.md). Development happens on the integration
-branch; `main` receives milestones.
+**Status: M1 complete (v0.1 candidate), M2 (viewer and annotations) next.** Open many PDFs,
+arrange their pages on the light table (drag-and-drop, split, merge, interleave, rotate,
+images as pages), and export a verified file whose bookmarks, links, labels and form fields
+are reconciled. English and Turkish UI, offline PWA, no network after load. CI runs on
+Chromium, Firefox and WebKit. See [`docs/ROADMAP.md`](docs/ROADMAP.md). Development
+happens on the integration branch; `main` receives milestones.
 
 ## What it will do
 

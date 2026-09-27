@@ -27,7 +27,7 @@ Exit: `pnpm run ci` green; a page from a dropped PDF renders in the shell; deplo
 Status: all three met except the first production deploy, which needs GitHub Pages enabled
 on the repository and a merge to `main` (owner action).
 
-## M1 — Light table and structural editing  (→ v0.1)
+## M1 — Light table and structural editing  (→ v0.1) — **done 2026-09-27**
 
 The mandatory feature: merge many PDFs with drag-and-drop reordering.
 
