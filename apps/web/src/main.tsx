@@ -11,11 +11,14 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './app';
+import { startServiceWorker } from './pwa/register';
 
 const container = document.getElementById('root');
 if (!container) {
   throw new Error('Root container #root is missing from index.html');
 }
+
+startServiceWorker();
 
 createRoot(container).render(
   <StrictMode>

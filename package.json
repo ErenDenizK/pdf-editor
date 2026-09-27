@@ -15,7 +15,7 @@
     "build": "pnpm -r --workspace-concurrency=1 build",
     "preview": "pnpm --filter @pdf-editor/web preview",
     "typecheck": "pnpm -r typecheck",
-    "lint": "eslint . --max-warnings=0",
+    "lint": "pnpm --filter @pdf-editor/web i18n && eslint . --max-warnings=0",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "test": "pnpm -r test",

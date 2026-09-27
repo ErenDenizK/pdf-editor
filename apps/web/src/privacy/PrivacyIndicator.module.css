@@ -1,0 +1,119 @@
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 22px;
+  margin: 0 calc(var(--space-2) * -1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .trigger:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.trigger[data-popup-open] {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.trigger[data-state='external'] {
+  color: var(--warning);
+}
+
+/* A small filled dot: success when clean, warning otherwise. Text carries meaning. */
+.mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.trigger[data-state='external'] .mark {
+  background: var(--warning);
+}
+
+.dot {
+  color: var(--text-tertiary);
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.popup {
+  width: min(360px, calc(100vw - 16px));
+}
+
+.section {
+  display: grid;
+  gap: 2px;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-hairline);
+}
+
+.heading {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.value {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 18px;
+  text-wrap: pretty;
+}
+
+.code {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.urls {
+  display: grid;
+  gap: 2px;
+  max-height: 120px;
+  overflow: auto;
+  color: var(--warning);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.urls li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swMark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+
+.swMark[data-status='ready'] {
+  background: var(--success);
+}
+
+.swMark[data-status='error'] {
+  background: var(--warning);
+}

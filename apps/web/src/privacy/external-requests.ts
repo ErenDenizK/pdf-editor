@@ -26,9 +26,14 @@ export interface ExternalRequestSnapshot {
   readonly count: number;
   /** Distinct external origins, in order of first request. */
   readonly origins: readonly string[];
+  /** Distinct external URLs, in order of first request, at most MAX_LISTED_URLS. */
+  readonly urls: readonly string[];
 }
 
-const EMPTY: ExternalRequestSnapshot = { count: 0, origins: [] };
+/** Cap on listed URLs so a misbehaving page cannot grow the list without bound. */
+export const MAX_LISTED_URLS = 50;
+
+const EMPTY: ExternalRequestSnapshot = { count: 0, origins: [], urls: [] };
 let snapshot: ExternalRequestSnapshot = EMPTY;
 const listeners = new Set<() => void>();
 let started = false;
@@ -37,14 +42,16 @@ function record(entries: readonly PerformanceEntry[]): void {
   const origin = location.origin;
   let count = snapshot.count;
   const origins = [...snapshot.origins];
+  const urls = [...snapshot.urls];
   for (const entry of entries) {
     if (!isExternalRequest(entry.name, origin)) continue;
     count += 1;
     const entryOrigin = new URL(entry.name).origin;
     if (!origins.includes(entryOrigin)) origins.push(entryOrigin);
+    if (urls.length < MAX_LISTED_URLS && !urls.includes(entry.name)) urls.push(entry.name);
   }
   if (count !== snapshot.count) {
-    snapshot = { count, origins };
+    snapshot = { count, origins, urls };
     for (const listener of listeners) listener();
   }
 }

@@ -46,6 +46,8 @@ export default defineConfig(
     '**/test-results/',
     '**/blob-report/',
     '.changeset/',
+    // Compiled i18n messages (Paraglide), regenerated from apps/web/messages.
+    'apps/web/src/i18n/paraglide/',
   ]),
 
   // Baseline for every file.

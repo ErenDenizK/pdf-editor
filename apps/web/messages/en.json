@@ -1,0 +1,371 @@
+{
+  "$schema": "https://inlang.com/schema/inlang-message-format",
+  "common_close": "Close",
+  "common_cancel": "Cancel",
+  "pages_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} page",
+        "countPlural=*": "{count} pages"
+      }
+    }
+  ],
+  "files_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} file",
+        "countPlural=*": "{count} files"
+      }
+    }
+  ],
+  "documents_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} document",
+        "countPlural=*": "{count} documents"
+      }
+    }
+  ],
+  "percent": "{value}%",
+  "tabs_label": "Open documents",
+  "open_files": "Open files",
+  "search_commands": "Search commands",
+  "search_commands_placeholder": "Search commands…",
+  "right_panel_hide": "Hide right panel",
+  "right_panel_show": "Show right panel",
+  "empty_title": "Drop PDFs to start",
+  "empty_title_dragging": "Release to open",
+  "empty_body_local": "Files open on this device and are never uploaded.",
+  "empty_body_combine": "Drop several to combine them.",
+  "empty_hints_label": "Get started",
+  "keyboard_shortcuts": "Keyboard shortcuts",
+  "stage_start_label": "Start",
+  "stage_no_pages_title": "No pages left",
+  "stage_no_pages_body": "Undo brings deleted pages back.",
+  "stage_drop_overlay": "Drop to open in new tabs",
+  "view_mode_label": "View mode",
+  "mode_read": "Read",
+  "mode_arrange": "Arrange",
+  "mode_read_long": "Read mode",
+  "mode_arrange_long": "Arrange mode",
+  "drop_no_pdfs": "No PDF files found in the drop",
+  "nav_label": "Navigator",
+  "nav_views_label": "Navigator views",
+  "nav_resize": "Resize navigator",
+  "view_pages": "Pages",
+  "view_outline": "Outline",
+  "view_files": "Files",
+  "no_document_title": "No document open",
+  "pages_empty_body": "Page thumbnails appear here.",
+  "pages_none_title": "No pages",
+  "pages_none_body": "This document has no pages left.",
+  "files_empty_title": "No files open",
+  "files_empty_body": "Every file you open stays on this device.",
+  "pages_list_label": "Pages of {title}",
+  "page_option_label": "Page {label}",
+  "page_option_label_with_index": "Page {position} ({label})",
+  "outline_empty_no_document_body": "Bookmarks of the open document appear here.",
+  "outline_empty_title": "No outline",
+  "outline_empty_body": "This document has no bookmarks.",
+  "outline_tree_label": "Outline of {title}",
+  "outline_unresolved": "Target page was removed",
+  "outline_link_tooltip": "External link: {uri}",
+  "outline_link_confirm": "Open this link in a new tab?",
+  "outline_link_leaves": "It leaves this app and contacts {host}.",
+  "outline_link_open": "Open link",
+  "outline_link_unsupported": "This link type cannot be opened: {uri}",
+  "outline_page_label": "Page {label}",
+  "status_opening": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Opening {count} file…",
+        "countPlural=*": "Opening {count} files…"
+      }
+    }
+  ],
+  "status_page_of": "Page {current} of {total}",
+  "status_selected": "{count} selected",
+  "status_selected_in_documents": "{count} selected in {documents} documents",
+  "privacy_local_only": "Local only",
+  "privacy_external_requests": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["count", "countPlural"],
+      "match": {
+        "count=0, countPlural=*": "No external requests",
+        "count=*, countPlural=one": "{count} external request",
+        "count=*, countPlural=*": "{count} external requests"
+      }
+    }
+  ],
+  "privacy_title_clean": "Nothing has left this device",
+  "privacy_title_external": "This page contacted other servers",
+  "privacy_body": "Files are read into memory in this tab and are never uploaded. The count is measured live from the browser’s resource timing: every request to an origin other than this site is counted.",
+  "privacy_requests_heading": "External requests",
+  "privacy_requests_none": "None observed.",
+  "privacy_csp_heading": "Content Security Policy",
+  "privacy_csp_body": "This page may connect only to its own origin; code, fonts and data from other servers are blocked by the browser.",
+  "privacy_offline_heading": "Offline",
+  "sw_status_unsupported": "Not available in this browser.",
+  "sw_status_development": "Service worker is off in development.",
+  "sw_status_installing": "Installing for offline use…",
+  "sw_status_ready": "Installed · works offline",
+  "sw_status_update": "Installed · update available",
+  "sw_status_error": "Offline support could not be installed.",
+  "zoom_in": "Zoom in",
+  "zoom_out": "Zoom out",
+  "zoom_value_label": "Zoom {percent}",
+  "zoom_fit_width": "Fit width",
+  "zoom_fit_page": "Fit page",
+  "update_title": "Update available",
+  "update_body": "Reloading applies it and closes open documents.",
+  "update_reload": "Reload",
+  "update_later": "Later",
+  "offline_ready_announcement": "Ready to work offline",
+  "password_title": "Password required",
+  "password_skip_label": "Skip this file",
+  "password_description": "{name} is protected. The password is used on this device only.",
+  "password_label": "Password",
+  "password_incorrect": "That password did not open the file. Try again.",
+  "password_skip": "Skip file",
+  "password_open": "Open",
+  "palette_title": "Command palette",
+  "palette_commands_label": "Commands",
+  "palette_no_match": "No commands match “{query}”",
+  "palette_recent": "Recent",
+  "palette_navigate": "Navigate",
+  "palette_run": "Run",
+  "shortcuts_in_focus": "In focus",
+  "shortcuts_move_tabs": "Move between tabs",
+  "shortcuts_close_tab": "Close focused tab",
+  "shortcuts_move_tools": "Move between tools",
+  "shortcuts_resize_panel": "Resize a focused panel edge",
+  "shortcuts_move_focus_pages": "Move focus between pages",
+  "shortcuts_extend_selection": "Extend page selection",
+  "shortcuts_toggle_selection": "Toggle page selection",
+  "shortcuts_move_row": "Move pages one row",
+  "shortcuts_open_in_read": "Open page in Read mode",
+  "shortcuts_outline_expand": "Expand or collapse an outline item",
+  "toolbar_label": "Tools",
+  "tool_select": "Select",
+  "tool_highlight": "Highlight",
+  "tool_ink": "Ink",
+  "tool_text": "Text",
+  "tool_shapes": "Shapes",
+  "tool_note": "Note",
+  "action_rotate_pages": "Rotate pages",
+  "action_delete_pages": "Delete pages",
+  "action_extract_pages": "Extract pages",
+  "action_coming_soon": "Coming in M1",
+  "action_coming_soon_tooltip": "{label} · Coming in M1",
+  "action_select_pages_first": "Select pages first",
+  "inspector_label": "Inspector",
+  "inspector_resize": "Resize inspector",
+  "inspector_selection": "Selection",
+  "inspector_properties": "Properties",
+  "inspector_history": "History",
+  "inspector_info": "Info",
+  "inspector_no_properties_title": "No properties",
+  "inspector_no_properties_body": "Properties of the selection appear here.",
+  "inspector_nothing_selected_title": "Nothing selected",
+  "inspector_nothing_selected_body": "Select pages or annotations to act on them.",
+  "inspector_selected": "Selected",
+  "inspector_from_documents": " from {count} documents",
+  "inspector_pages": "Pages",
+  "inspector_no_changes_title": "No changes yet",
+  "inspector_no_changes_body": "Every edit is recorded here and can be undone.",
+  "inspector_history_label": "Undo history",
+  "info_name": "Name",
+  "info_files": "Files",
+  "info_size": "Size",
+  "info_pages": "Pages",
+  "info_modified": "Modified",
+  "info_notes": "Notes",
+  "badge_encrypted": "encrypted",
+  "badge_encrypted_explanation": "Encrypted: opened with its password. Exporting writes an unencrypted copy unless you set a password.",
+  "badge_repaired": "repaired",
+  "badge_repaired_explanation": "Repaired: the file was damaged and rebuilt on open. Exporting writes a repaired copy, never an incremental save onto the broken file.",
+  "badge_form": "has form",
+  "badge_form_explanation": "Has form: fields and values are kept on export; fields from different files are renamed by source when names collide.",
+  "badge_xfa": "XFA",
+  "badge_xfa_explanation": "XFA: this form uses XFA, which is not supported. Exporting keeps the regular form fields and removes the XFA data.",
+  "badge_signed": "signed",
+  "badge_signed_explanation": "Signed: exporting will invalidate the signature unless saved incrementally.",
+  "badge_tagged": "tagged",
+  "badge_tagged_explanation": "Tagged: exporting keeps the accessibility structure when it can; if it cannot stay intact it is removed and you are told.",
+  "history_start": "Start",
+  "history_open": "Open {name}",
+  "history_close": "Close {name}",
+  "history_move": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Move {count} page",
+        "countPlural=*": "Move {count} pages"
+      }
+    }
+  ],
+  "history_rotate": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Rotate {count} page",
+        "countPlural=*": "Rotate {count} pages"
+      }
+    }
+  ],
+  "history_delete": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Delete {count} page",
+        "countPlural=*": "Delete {count} pages"
+      }
+    }
+  ],
+  "history_duplicate": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Duplicate {count} page",
+        "countPlural=*": "Duplicate {count} pages"
+      }
+    }
+  ],
+  "announce_opened": "Opened {name}",
+  "announce_opened_many": "Opened {count} files",
+  "announce_skipped": "Skipped {name}: {reason}",
+  "announce_closed": "Closed {name}",
+  "announce_rotated_right": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Rotated {count} page right",
+        "countPlural=*": "Rotated {count} pages right"
+      }
+    }
+  ],
+  "announce_rotated_left": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Rotated {count} page left",
+        "countPlural=*": "Rotated {count} pages left"
+      }
+    }
+  ],
+  "announce_deleted": [
+    {
+      "declarations": ["input count", "input shortcut", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Deleted {count} page. Undo with {shortcut}",
+        "countPlural=*": "Deleted {count} pages. Undo with {shortcut}"
+      }
+    }
+  ],
+  "announce_moved": [
+    {
+      "declarations": [
+        "input count",
+        "input position",
+        "input title",
+        "local countPlural = count: plural"
+      ],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Moved {count} page to position {position} in {title}",
+        "countPlural=*": "Moved {count} pages to position {position} in {title}"
+      }
+    }
+  ],
+  "announce_selected": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Selected {count} page",
+        "countPlural=*": "Selected {count} pages"
+      }
+    }
+  ],
+  "announce_duplicated": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Duplicated {count} page",
+        "countPlural=*": "Duplicated {count} pages"
+      }
+    }
+  ],
+  "announce_undid": "Undid {label}",
+  "announce_redid": "Redid {label}",
+  "announce_thumbnail_size": "Thumbnail size {size}",
+  "announce_language": "Language: {language}",
+  "undo_hint_mac": "Command Z",
+  "undo_hint_other": "Control Z",
+  "rotated_degrees": ", rotated {degrees} degrees",
+  "failure_no_password": "no password",
+  "failure_unsupported_encryption": "unsupported encryption",
+  "failure_corrupt": "the file is damaged",
+  "failure_read_failed": "the file could not be read",
+  "failure_unsupported": "unsupported file",
+  "failure_out_of_memory": "not enough memory",
+  "failure_engine": "the engine failed",
+  "group_file": "File",
+  "group_general": "General",
+  "group_edit": "Edit",
+  "group_pages": "Pages",
+  "group_view": "View",
+  "group_zoom": "Zoom",
+  "group_tools": "Tools",
+  "group_language": "Language",
+  "cmd_open_files": "Open files…",
+  "cmd_close_tab": "Close tab",
+  "cmd_close_tab_note": "Browsers usually keep this key; press Delete on a focused tab instead.",
+  "cmd_palette": "Command palette",
+  "cmd_shortcuts": "Keyboard shortcuts",
+  "cmd_clear_selection": "Clear tool and selection",
+  "cmd_undo": "Undo",
+  "cmd_redo": "Redo",
+  "cmd_select_all": "Select all pages",
+  "cmd_rotate_right": "Rotate pages right",
+  "cmd_rotate_left": "Rotate pages left",
+  "cmd_delete_pages": "Delete pages",
+  "cmd_duplicate_pages": "Duplicate pages",
+  "cmd_duplicate_pages_note": "Some browsers keep Mod+D for bookmarks outside the light table.",
+  "cmd_move_backward": "Move pages back one slot",
+  "cmd_move_forward": "Move pages forward one slot",
+  "cmd_toggle_left_panel": "Toggle left panel",
+  "cmd_toggle_right_panel": "Toggle right panel",
+  "cmd_show_pages": "Show pages",
+  "cmd_show_outline": "Show outline",
+  "cmd_show_files": "Show files",
+  "cmd_mode_read": "Switch to Read",
+  "cmd_mode_arrange": "Switch to Arrange",
+  "cmd_zoom_in": "Zoom in",
+  "cmd_zoom_out": "Zoom out",
+  "cmd_zoom_fit": "Zoom to fit width",
+  "cmd_zoom_fit_page": "Zoom to fit page",
+  "cmd_zoom_actual": "Actual size",
+  "cmd_thumbnails_larger": "Larger thumbnails",
+  "cmd_thumbnails_smaller": "Smaller thumbnails",
+  "cmd_thumbnails_note": "Mod+Scroll in Arrange mode",
+  "cmd_tool": "{tool} tool",
+  "file_picker_description": "PDF documents"
+}

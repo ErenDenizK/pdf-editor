@@ -16,3 +16,4 @@ only after discussion with the project owner; the discussion summary is appended
 | 0007 | Delivery targets: web first, desktop as escalation path | accepted |
 | 0008 | qpdf integration deferred to M3 and built from source | accepted |
 | 0009 | Headless accessibility primitives: Base UI | accepted |
+| 0010 | i18n with Paraglide JS and offline PWA with vite-plugin-pwa | accepted |
