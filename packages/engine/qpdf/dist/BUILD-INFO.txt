@@ -1,0 +1,4 @@
+qpdf v12.4.2, zlib v1.3.1, libjpeg-turbo 3.1.2
+emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 6.0.10 (d6c521a7f05449857c76bd99e396895583cf2083)
+ac94d4e4dc4f832a268210d4b12d739b9393f123ff2b0ea2c642861837f222fe  qpdf.mjs
+830c557aa86b15407af9463cd52b07dcee37b8ea774795c5012db18f3313e1ac  qpdf.wasm

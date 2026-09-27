@@ -1,0 +1,3 @@
+.build/
+# The wasm build output is committed (ADR-0008); the root .gitignore ignores dist/.
+!dist/

@@ -1,0 +1,58 @@
+# qpdf WebAssembly build (ADR-0008). Rebuilds packages/engine/qpdf/dist from pinned
+# upstream sources with a pinned Emscripten and fails when the committed artifact differs,
+# so the wasm the app ships is always the one this script produces from source.
+name: qpdf wasm
+
+on:
+  push:
+    paths:
+      - 'packages/engine/qpdf/**'
+      - '.github/workflows/qpdf-wasm.yml'
+  pull_request:
+    paths:
+      - 'packages/engine/qpdf/**'
+      - '.github/workflows/qpdf-wasm.yml'
+  schedule:
+    # Weekly, to notice when a pinned tag or the toolchain download stops working.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Keep in sync with packages/engine/qpdf/dist/BUILD-INFO.txt.
+  EMSDK_VERSION: 6.0.10
+
+jobs:
+  build:
+    name: Build qpdf.wasm from source and compare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build cmake
+
+      - name: Install Emscripten ${{ env.EMSDK_VERSION }}
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
+
+      - name: Build
+        run: |
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          packages/engine/qpdf/build.sh "$RUNNER_TEMP/qpdf-build"
+
+      - name: Compare with the committed artifact
+        run: git diff --exit-code --stat -- packages/engine/qpdf/dist
+
+      - name: Upload the build
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qpdf-wasm
+          path: packages/engine/qpdf/dist
+          retention-days: 14
