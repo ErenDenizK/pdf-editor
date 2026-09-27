@@ -121,3 +121,11 @@ export function findSourceByFingerprint(
 ): SourceDocument | undefined {
   return Object.values<SourceDocument>(ws.sources).find((s) => s.fingerprint === fingerprint);
 }
+
+/**
+ * Sources with recorded engine edits (annotations, form values). Export serializes these
+ * through the engine (`PdfEditor.save()`) instead of using their original bytes.
+ */
+export function sourcesWithEngineEdits(ws: Workspace): Set<SourceId> {
+  return new Set(ws.engineEdits.map((edit) => edit.source));
+}

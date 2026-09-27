@@ -190,7 +190,8 @@ describe('with an open document', () => {
     const saved = await adapter.save(sid('doc'));
     const reopened = await PDFDocument.load(saved);
     const annots = reopened.getPage(0).node.Annots();
-    expect(annots?.size()).toBe(1);
+    // The highlight and the popup `save()` adds for its comment.
+    expect(annots?.size()).toBe(2);
 
     await adapter.deleteAnnotation(sid('doc'), 0, created.id);
     list = await adapter.listAnnotations(sid('doc'), 0);

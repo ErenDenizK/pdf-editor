@@ -79,6 +79,13 @@ export interface OpenedDocument {
     readonly size: Size;
     readonly rotation: Rotation;
     readonly label?: string;
+    /**
+     * The effective CropBox in unrotated user space (lower-left origin). Glyph rects, search
+     * hits, annotation rects and render clips are absolute user space, so a viewer mapping
+     * them onto the rendered (cropped) page subtracts `cropBox.x` / `cropBox.y`. Absent when
+     * the engine does not report page boxes (then the crop starts at (0, 0)).
+     */
+    readonly cropBox?: Rect;
   }[];
   readonly fingerprint: string;
   readonly flags: SourceFlags;
@@ -126,7 +133,23 @@ export interface TextRun {
 export interface SearchHit {
   readonly pageIndex: number;
   readonly rects: readonly Rect[];
+  /** Text around the match: some characters before, the match, some after. */
   readonly context: string;
+  /** Offset of the match in `context`. */
+  readonly matchStart?: number;
+  /** Length of the match in `context`. */
+  readonly matchLength?: number;
+}
+
+export interface SearchOptions extends EngineCallOptions {
+  readonly matchCase?: boolean;
+  readonly wholeWord?: boolean;
+  /**
+   * Called once per searched page, in page order, as soon as that page is done (also for
+   * pages without hits, so callers can show progress). The final result still contains
+   * every hit.
+   */
+  readonly onProgress?: (hits: readonly SearchHit[], pageIndex: number) => void;
 }
 
 export interface PdfRenderer {
@@ -139,11 +162,7 @@ export interface PdfRenderer {
     pageIndex: number,
     options?: EngineCallOptions,
   ): Promise<readonly TextRun[]>;
-  search(
-    id: SourceId,
-    query: string,
-    options?: EngineCallOptions & { readonly matchCase?: boolean; readonly wholeWord?: boolean },
-  ): Promise<readonly SearchHit[]>;
+  search(id: SourceId, query: string, options?: SearchOptions): Promise<readonly SearchHit[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,14 +215,34 @@ export interface InkAnnotation extends AnnotationBase {
   readonly strokeWidth: number;
 }
 
+/** Line ending styles (/LE, ISO 32000-2 Table 179). An arrow is a line with `open-arrow`. */
+export type LineEnding =
+  | 'none'
+  | 'square'
+  | 'circle'
+  | 'diamond'
+  | 'open-arrow'
+  | 'closed-arrow'
+  | 'butt'
+  | 'r-open-arrow'
+  | 'r-closed-arrow'
+  | 'slash';
+
 export interface ShapeAnnotation extends AnnotationBase {
   readonly kind: 'square' | 'circle' | 'line' | 'polygon' | 'polyline';
   readonly strokeWidth: number;
+  /** Line: [start, end]. Polygon / polyline: the vertices. Square / circle: unused. */
   readonly vertices?: readonly { readonly x: number; readonly y: number }[];
+  /** Line and polyline only; absent = none at both ends. */
+  readonly lineEndings?: { readonly start?: LineEnding; readonly end?: LineEnding };
 }
 
 export interface FreeTextAnnotation extends AnnotationBase {
   readonly kind: 'free-text';
+  /**
+   * The text shown (and written to /Contents, so `contents` mirrors it). Latin-1 /
+   * WinAnsi only for now: other characters are refused (`unsupported`), see the README.
+   */
   readonly text: string;
   readonly fontSize: number;
   readonly fontFamily?: string;
@@ -212,13 +251,24 @@ export interface FreeTextAnnotation extends AnnotationBase {
 
 export interface NoteAnnotation extends AnnotationBase {
   readonly kind: 'text';
+  /** Icon name (/Name): Comment, Note, Help, Insert, Key, NewParagraph, Paragraph. */
   readonly icon?: string;
+  /** Whether the note's popup is open (/Popup /Open); written by `save()`. */
   readonly open?: boolean;
 }
 
 export interface StampAnnotation extends AnnotationBase {
   readonly kind: 'stamp';
+  /**
+   * The appearance: a PNG or JPEG image, or a one-page PDF whose page becomes the
+   * appearance (`application/pdf`, as returned by `PdfiumAdapter.getAnnotationAppearance`).
+   * Listing does not return it (it would render every stamp); ask for it when needed.
+   */
   readonly imageBlob?: Blob;
+  /**
+   * Named stamp (/Name), e.g. `Approved`, `Draft`, `Confidential`. Without an `imageBlob`
+   * the engine generates a text-only appearance showing the name (see STAMP_NAMES).
+   */
   readonly name?: string;
 }
 
@@ -243,8 +293,12 @@ export type Annotation =
  */
 export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
-/** An annotation to be created; the engine assigns the id. */
-export type NewAnnotation = DistributiveOmit<Annotation, 'id'>;
+/**
+ * An annotation to be created. Without `id` the engine assigns one; with `id` the engine
+ * writes it as the annotation's /NM (used by undo/redo and replay to restore the same id).
+ * The id must be unique within the document; creating a duplicate id fails.
+ */
+export type NewAnnotation = DistributiveOmit<Annotation, 'id'> & { readonly id?: string };
 
 export type FormFieldKind =
   | 'text'
@@ -270,9 +324,19 @@ export interface FormField {
 export interface SaveOptions extends EngineCallOptions {
   /** Append-only save preserving prior revisions (signed documents). */
   readonly incremental?: boolean;
+  /**
+   * Bake annotation appearances into the page content and remove the annotations (links
+   * and popups excepted: links stay interactive, popups go with their parents).
+   */
   readonly flattenAnnotations?: boolean;
   readonly flattenForms?: boolean;
   readonly removeSecurity?: boolean;
+  /**
+   * Write comment popups (default true): notes and markup annotations with text get a
+   * /Popup annotation. `false` removes every /Popup from the output; the text stays in
+   * /Contents.
+   */
+  readonly includeComments?: boolean;
 }
 
 export interface PdfEditor {
@@ -311,6 +375,17 @@ export interface PdfEditor {
 
   /** Serialize the (edited) source. Result bytes are transferred to the caller. */
   save(id: SourceId, options?: SaveOptions): Promise<ArrayBuffer>;
+
+  /**
+   * Optional: the appearance of one annotation as a one-page PDF (`application/pdf`), e.g.
+   * to recreate a deleted stamp through `createAnnotation({ ..., imageBlob })`.
+   */
+  getAnnotationAppearance?(
+    id: SourceId,
+    pageIndex: number,
+    annotationId: string,
+    options?: EngineCallOptions,
+  ): Promise<Blob>;
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +452,49 @@ export interface SourceInspection {
   readonly pageLabels?: readonly string[];
   /** Catalog /Lang, when present. */
   readonly language?: string;
+  /**
+   * Outline items in pre-order (depth first, as `OpenedDocument.outline` lists them): the
+   * open state (/Count > 0) and, for /XYZ destinations, which of left/top/zoom are given
+   * (PDFium reports absent values as 0, which is also a valid coordinate).
+   */
+  readonly outline?: readonly OutlineItemFacts[];
+  /**
+   * Open state of the popups of note (/Text) annotations, per page. `index` is the
+   * position in the page's /Annots; `nm` the note's /NM when it has one.
+   */
+  readonly noteStates?: readonly NoteStateFact[];
+}
+
+export interface OutlineItemFacts {
+  readonly open: boolean;
+  /** Present for explicit or named /XYZ destinations: `null` = keep current. */
+  readonly xyz?: {
+    readonly left: number | null;
+    readonly top: number | null;
+    readonly zoom: number | null;
+  };
+}
+
+export interface NoteStateFact {
+  readonly pageIndex: number;
+  readonly index: number;
+  readonly nm?: string;
+  readonly open: boolean;
+}
+
+/** What `PdfEditor.save()` asks the annotation post-pass (annotations/finalize.ts) to do. */
+export interface AnnotationFinalizeRequest {
+  /** /NM of the annotations created or updated since open: they get /P, /M, /F Print. */
+  readonly touched: readonly string[];
+  /** Popup open state per note /NM (notes not listed keep their popup's state). */
+  readonly noteOpen: Readonly<Record<string, boolean>>;
+  /** Opacity per annotation /NM the engine could not write (stamps): /CA + ExtGState. */
+  readonly opacity: Readonly<Record<string, number>>;
+  /** See `SaveOptions.includeComments`. */
+  readonly includeComments: boolean;
+  /** Modification date for annotations lacking /M, as an ISO string. */
+  readonly now: string;
+  readonly password?: string;
 }
 
 export interface InspectOptions extends EngineCallOptions {
@@ -386,6 +504,58 @@ export interface InspectOptions extends EngineCallOptions {
 export interface SourceInspector {
   /** Reads `bytes` without mutating them. Never rejects for damaged files; returns `{}`. */
   inspect(bytes: ArrayBuffer, options?: InspectOptions): Promise<SourceInspection>;
+  /**
+   * Optional: runs the annotation post-pass of `PdfEditor.save()` off the caller's thread
+   * (the assembly worker). `bytes` may be transferred. Without it the adapter runs the same
+   * code in its own thread.
+   */
+  finalizeAnnotations?(
+    bytes: ArrayBuffer,
+    request: AnnotationFinalizeRequest,
+    options?: EngineCallOptions,
+  ): Promise<ArrayBuffer>;
+  /**
+   * Optional: `checkAnnotationConformance` off the caller's thread (used by the verifier).
+   * `bytes` may be transferred.
+   */
+  checkAnnotations?(
+    bytes: ArrayBuffer,
+    options?: { readonly ids?: readonly string[]; readonly password?: string },
+    callOptions?: EngineCallOptions,
+  ): Promise<AnnotationConformanceReport>;
+}
+
+/** Rules of `checkAnnotationConformance` (annotations/conformance.ts documents each). */
+export type AnnotationConformanceRule =
+  | 'ap'
+  | 'rect'
+  | 'quad-points'
+  | 'page'
+  | 'nm'
+  | 'print'
+  | 'modified'
+  | 'opacity'
+  | 'blend'
+  | 'popup'
+  | 'font';
+
+export interface AnnotationConformanceProblem {
+  /** -1 for document-wide problems (duplicate /NM, unparseable file). */
+  readonly pageIndex: number;
+  /** Position in the page's /Annots; -1 for document-wide problems. */
+  readonly index: number;
+  readonly subtype: string;
+  readonly nm?: string;
+  readonly rule: AnnotationConformanceRule;
+  readonly message: string;
+}
+
+/** Result of `checkAnnotationConformance` (annotations/conformance.ts). */
+export interface AnnotationConformanceReport {
+  readonly ok: boolean;
+  /** Annotations per page, widgets and popups excluded. */
+  readonly counts: readonly number[];
+  readonly problems: readonly AnnotationConformanceProblem[];
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +605,19 @@ export interface VerificationExpectation {
   readonly formFieldNames?: readonly string[];
   /** User (open) password of an encrypted output; the verifier opens it with this. */
   readonly password?: string;
+  /**
+   * Expected number of annotations per output page index, counting what
+   * `PdfEditor.listAnnotations` reports except links (the assembler may drop links whose
+   * target is not exported). Pages not listed are not checked.
+   */
+  readonly annotationCounts?: Readonly<Record<number, number>>;
+  /** Run `checkAnnotationConformance` on the output (annotations were edited). */
+  readonly checkAnnotations?: boolean;
+  /**
+   * With `checkAnnotations`: report conformance problems only for these /NM values (the
+   * annotations this app wrote); other annotations come from the sources as they were.
+   */
+  readonly annotationIds?: readonly string[];
 }
 
 export interface VerificationResult {

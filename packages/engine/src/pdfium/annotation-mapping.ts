@@ -6,6 +6,8 @@
 import {
   PdfActionType,
   PdfAnnotationBorderStyle,
+  PdfAnnotationLineEnding,
+  PdfBlendMode,
   PdfAnnotationName,
   type PdfAnnotationFlagName,
   type PdfAnnotationObject,
@@ -36,9 +38,14 @@ import {
   type AnnotationBase,
   type AnnotationKind,
   EngineError,
+  type InkAnnotation,
+  type LineEnding,
+  type MarkupAnnotation,
   type NewAnnotation,
+  type ShapeAnnotation,
 } from '../types';
 import {
+  annotationRectToUser,
   deviceToUserPoint,
   deviceToUserRect,
   type PageGeometry,
@@ -48,6 +55,48 @@ import {
 } from './coords';
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+
+/** Named stamps with a generated text-only appearance (spec §3: Draft, Approved, ...). */
+export const STAMP_NAMES = [
+  'Approved',
+  'Experimental',
+  'NotApproved',
+  'AsIs',
+  'Expired',
+  'NotForPublicRelease',
+  'Confidential',
+  'Final',
+  'Sold',
+  'Departmental',
+  'ForComment',
+  'TopSecret',
+  'Draft',
+  'ForPublicRelease',
+] as const;
+
+/** Note icons PDF viewers draw for /Text annotations (ISO 32000-2 §12.5.6.4). */
+export const NOTE_ICONS = [
+  'Comment',
+  'Key',
+  'Note',
+  'Help',
+  'NewParagraph',
+  'Paragraph',
+  'Insert',
+] as const;
+
+/** `#rrggbb` as `#RRGGBB`; other values unchanged. */
+function normalizeColor(color: string): string {
+  return /^#[0-9a-f]{6}$/i.test(color) ? color.toUpperCase() : color;
+}
+
+/**
+ * PDFium stores opacity as 8 bits (/CA = n/255). Two-decimal values survive the roundtrip
+ * exactly when rounded back to two decimals (|n/255 - v| <= 1/510 < 0.005).
+ */
+export function roundOpacity(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 
 // ---------------------------------------------------------------------------
 // Fonts
@@ -91,7 +140,7 @@ function baseFrom(
     id: a.id,
     kind,
     pageIndex: a.pageIndex,
-    rect: deviceToUserRect(g, a.rect),
+    rect: annotationRectToUser(g, a.rect),
   };
   if (a.author) base.author = a.author;
   if (a.contents) base.contents = a.contents;
@@ -114,9 +163,9 @@ function withColors(
   interior: string | undefined,
   opacity: number | undefined,
 ): void {
-  if (color && color !== 'transparent') base.color = color;
-  if (interior && interior !== 'transparent') base.interiorColor = interior;
-  if (opacity !== undefined) base.opacity = opacity;
+  if (color && color !== 'transparent') base.color = normalizeColor(color);
+  if (interior && interior !== 'transparent') base.interiorColor = normalizeColor(interior);
+  if (opacity !== undefined) base.opacity = roundOpacity(opacity);
 }
 
 /**
@@ -181,6 +230,7 @@ export function fromEmbedPdf(a: PdfAnnotationObject, g: PageGeometry): Annotatio
           deviceToUserPoint(g, l.linePoints.start),
           deviceToUserPoint(g, l.linePoints.end),
         ],
+        ...readLineEndings(l.lineEndings),
       };
     }
     case PdfAnnotationSubtype.POLYGON:
@@ -194,6 +244,7 @@ export function fromEmbedPdf(a: PdfAnnotationObject, g: PageGeometry): Annotatio
         kind,
         strokeWidth: p.strokeWidth,
         vertices: p.vertices.map((v) => deviceToUserPoint(g, v)),
+        ...(a.type === PdfAnnotationSubtype.POLYLINE ? readLineEndings(a.lineEndings) : {}),
       };
     }
     case PdfAnnotationSubtype.FREETEXT: {
@@ -207,23 +258,22 @@ export function fromEmbedPdf(a: PdfAnnotationObject, g: PageGeometry): Annotatio
         text: f.contents ?? '',
         fontSize: f.fontSize,
         ...(family === undefined ? {} : { fontFamily: family }),
-        ...(f.fontColor ? { textColor: f.fontColor } : {}),
+        ...(f.fontColor ? { textColor: normalizeColor(f.fontColor) } : {}),
       };
     }
     case PdfAnnotationSubtype.TEXT: {
       const t = a;
       const base = baseFrom(a, g, 'text');
       withColors(base, t.strokeColor, undefined, t.opacity);
-      const icon = t.name;
-      const iconName = icon === undefined ? undefined : PdfAnnotationName[icon];
+      const iconName = annotationName(t.name);
       return { ...base, kind: 'text', ...(iconName === undefined ? {} : { icon: iconName }) };
     }
     case PdfAnnotationSubtype.STAMP: {
       const s = a;
       const base = baseFrom(a, g, 'stamp');
-      const icon = s.name;
-      const name = icon === undefined ? undefined : PdfAnnotationName[icon];
-      // TODO(M2): expose the appearance as `imageBlob` via renderPageAnnotation.
+      const name = annotationName(s.name);
+      // The appearance is not listed (see StampAnnotation.imageBlob); the adapter adds
+      // the opacity it keeps for stamps (EmbedPDF does not write /CA for them).
       return { ...base, kind: 'stamp', ...(name === undefined ? {} : { name }) };
     }
     case PdfAnnotationSubtype.LINK: {
@@ -250,19 +300,123 @@ export function fromEmbedPdf(a: PdfAnnotationObject, g: PageGeometry): Annotatio
   }
 }
 
+const LINE_ENDINGS: Readonly<Record<LineEnding, PdfAnnotationLineEnding>> = {
+  none: PdfAnnotationLineEnding.None,
+  square: PdfAnnotationLineEnding.Square,
+  circle: PdfAnnotationLineEnding.Circle,
+  diamond: PdfAnnotationLineEnding.Diamond,
+  'open-arrow': PdfAnnotationLineEnding.OpenArrow,
+  'closed-arrow': PdfAnnotationLineEnding.ClosedArrow,
+  butt: PdfAnnotationLineEnding.Butt,
+  'r-open-arrow': PdfAnnotationLineEnding.ROpenArrow,
+  'r-closed-arrow': PdfAnnotationLineEnding.RClosedArrow,
+  slash: PdfAnnotationLineEnding.Slash,
+};
+
+function lineEndingName(value: PdfAnnotationLineEnding | undefined): LineEnding | undefined {
+  const entry = Object.entries(LINE_ENDINGS).find(([, v]) => v === value);
+  return entry?.[0] as LineEnding | undefined;
+}
+
+function readLineEndings(
+  endings: { start: PdfAnnotationLineEnding; end: PdfAnnotationLineEnding } | undefined,
+): { lineEndings?: { start?: LineEnding; end?: LineEnding } } {
+  const start = lineEndingName(endings?.start);
+  const end = lineEndingName(endings?.end);
+  const out: { start?: LineEnding; end?: LineEnding } = {};
+  if (start && start !== 'none') out.start = start;
+  if (end && end !== 'none') out.end = end;
+  return out.start || out.end ? { lineEndings: out } : {};
+}
+
+function writeLineEndings(a: NewAnnotation): {
+  lineEndings?: { start: PdfAnnotationLineEnding; end: PdfAnnotationLineEnding };
+} {
+  if (a.kind !== 'line' && a.kind !== 'polyline') return {};
+  return {
+    lineEndings: {
+      start: LINE_ENDINGS[a.lineEndings?.start ?? 'none'],
+      end: LINE_ENDINGS[a.lineEndings?.end ?? 'none'],
+    },
+  };
+}
+
+function annotationName(name: PdfAnnotationName | undefined): string | undefined {
+  if (name === undefined || name === PdfAnnotationName.Unknown) return undefined;
+  return PdfAnnotationName[name];
+}
+
 // ---------------------------------------------------------------------------
 // ours -> EmbedPDF
 // ---------------------------------------------------------------------------
 
 function flagNames(a: NewAnnotation): PdfAnnotationFlagName[] {
-  if (!a.flags) {
-    return ['print'];
-  }
   const names: PdfAnnotationFlagName[] = [];
-  if (a.flags.hidden) names.push('hidden');
-  if (a.flags.print ?? true) names.push('print');
-  if (a.flags.locked) names.push('locked');
+  if (a.flags?.hidden) names.push('hidden');
+  if (a.flags?.print ?? true) names.push('print');
+  if (a.flags?.locked) names.push('locked');
+  // Note icons keep their size and orientation when zoomed or on rotated pages, as
+  // Acrobat writes them.
+  if (a.kind === 'text') names.push('noZoom', 'noRotate');
   return names;
+}
+
+function pointsBounds(points: readonly { x: number; y: number }[], pad: number): Rect | undefined {
+  if (points.length === 0) return undefined;
+  const rect = unionRect(points.map((p) => ({ x: p.x, y: p.y, width: 0, height: 0 }))) as Rect;
+  return {
+    x: rect.x - pad,
+    y: rect.y - pad,
+    width: rect.width + 2 * pad,
+    height: rect.height + 2 * pad,
+  };
+}
+
+/**
+ * The /Rect written for an annotation. Box kinds use `rect` as given. Kinds whose geometry
+ * lives elsewhere (quads, ink paths, vertices) get the smallest rect that encloses both the
+ * given rect (when it is not empty) and the geometry, padded by half the stroke width so
+ * the appearance stream (clipped to /Rect) shows the whole stroke.
+ */
+export function effectiveRect(a: NewAnnotation): Rect {
+  const given = a.rect.width > 0 || a.rect.height > 0 ? a.rect : undefined;
+  let geometry: Rect | undefined;
+  switch (a.kind) {
+    case 'highlight':
+    case 'underline':
+    case 'strikeout':
+    case 'squiggly':
+    case 'redact':
+      geometry = unionRect(a.quads);
+      break;
+    case 'ink':
+      geometry = pointsBounds(a.paths.flat(), a.strokeWidth / 2);
+      break;
+    case 'line':
+    case 'polygon':
+    case 'polyline': {
+      // Line endings are drawn around the end points, a few stroke widths wide.
+      const endings = a.kind === 'polygon' ? undefined : a.lineEndings;
+      const decorated = [endings?.start, endings?.end].some((e) => e !== undefined && e !== 'none');
+      const pad = decorated ? Math.max(a.strokeWidth * 5, 6) : a.strokeWidth / 2;
+      geometry = pointsBounds(a.vertices ?? [], pad);
+      break;
+    }
+    default:
+      break;
+  }
+  if (!geometry) return a.rect;
+  return given ? (unionRect([given, geometry]) as Rect) : geometry;
+}
+
+/** Whether a user-space rect (or point list) is the same within `tolerance` points. */
+export function sameRect(a: Rect, b: Rect, tolerance = 0.01): boolean {
+  return (
+    Math.abs(a.x - b.x) <= tolerance &&
+    Math.abs(a.y - b.y) <= tolerance &&
+    Math.abs(a.width - b.width) <= tolerance &&
+    Math.abs(a.height - b.height) <= tolerance
+  );
 }
 
 function iconFromName(name: string | undefined): PdfAnnotationName | undefined {
@@ -275,17 +429,18 @@ function iconFromName(name: string | undefined): PdfAnnotationName | undefined {
  * then generates one (and writes it to /NM).
  */
 export function toEmbedPdf(a: NewAnnotation, id: string, g: PageGeometry): PdfAnnotationObject {
-  const quads = 'quads' in a ? a.quads : undefined;
-  const rectUser: Rect =
-    a.rect.width > 0 || a.rect.height > 0 ? a.rect : (unionRect(quads ?? []) ?? a.rect);
+  const modified = a.modified === undefined ? new Date() : new Date(a.modified);
   const base = {
     id,
     pageIndex: a.pageIndex,
-    rect: userToDeviceRect(g, rectUser),
+    rect: userToDeviceRect(g, effectiveRect(a)),
     flags: flagNames(a),
-    ...(a.author === undefined ? {} : { author: a.author }),
-    ...(a.contents === undefined ? {} : { contents: a.contents }),
-    ...(a.modified === undefined ? {} : { modified: new Date(a.modified) }),
+    // Always written: an update carries the full new state, so absent means empty (an
+    // undo back to "no comment" must clear it).
+    author: a.author ?? '',
+    contents: a.contents ?? '',
+    // /M is required by our conformance rules; PDFium only writes it when given.
+    modified: Number.isNaN(modified.getTime()) ? new Date() : modified,
   };
   const opacity = a.opacity ?? 1;
   switch (a.kind) {
@@ -305,6 +460,8 @@ export function toEmbedPdf(a: NewAnnotation, id: string, g: PageGeometry): PdfAn
         type,
         opacity,
         strokeColor: color,
+        // Highlights darken the text under them instead of covering it.
+        ...(a.kind === 'highlight' ? { blendMode: PdfBlendMode.Multiply } : {}),
         segmentRects: a.quads.map((q) => userToDeviceRect(g, q)),
       } as PdfHighlightAnnoObject;
     }
@@ -366,6 +523,7 @@ export function toEmbedPdf(a: NewAnnotation, id: string, g: PageGeometry): PdfAn
         }
         const line: PdfLineAnnoObject = {
           ...common,
+          ...writeLineEndings(a),
           type: PdfAnnotationSubtype.LINE,
           linePoints: { start, end },
         };
@@ -381,6 +539,7 @@ export function toEmbedPdf(a: NewAnnotation, id: string, g: PageGeometry): PdfAn
       }
       const polyline: PdfPolylineAnnoObject = {
         ...common,
+        ...writeLineEndings(a),
         type: PdfAnnotationSubtype.POLYLINE,
         vertices,
       };
@@ -443,4 +602,100 @@ export function toEmbedPdf(a: NewAnnotation, id: string, g: PageGeometry): PdfAn
       return link;
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Updates
+// ---------------------------------------------------------------------------
+
+interface Point {
+  readonly x: number;
+  readonly y: number;
+}
+
+function samePoints(a: readonly Point[], b: readonly Point[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((p, i) => {
+      const q = b[i] as Point;
+      return Math.abs(p.x - q.x) <= 0.01 && Math.abs(p.y - q.y) <= 0.01;
+    })
+  );
+}
+
+/**
+ * For kinds whose geometry is not the rect (quads, ink paths, vertices): when an update
+ * changes only `rect`, maps the geometry from the old rect onto the new one (a move, or a
+ * resize that scales the geometry). An update that changes the geometry is taken as is.
+ */
+export function followRect(before: Annotation, after: Annotation): Annotation {
+  if (before.kind !== after.kind || sameRect(before.rect, after.rect)) return after;
+  const from = before.rect;
+  const to = after.rect;
+  const sx = from.width > 0 ? to.width / from.width : 1;
+  const sy = from.height > 0 ? to.height / from.height : 1;
+  const map = (p: Point): Point => ({
+    x: to.x + (p.x - from.x) * sx,
+    y: to.y + (p.y - from.y) * sy,
+  });
+  const mapRect = (r: Rect): Rect => {
+    const a = map({ x: r.x, y: r.y });
+    return { x: a.x, y: a.y, width: r.width * sx, height: r.height * sy };
+  };
+  switch (after.kind) {
+    case 'highlight':
+    case 'underline':
+    case 'strikeout':
+    case 'squiggly':
+    case 'redact': {
+      const old = (before as MarkupAnnotation).quads;
+      const unchanged =
+        old.length === after.quads.length &&
+        old.every((q, i) => sameRect(q, after.quads[i] as Rect));
+      return unchanged ? { ...after, quads: after.quads.map(mapRect) } : after;
+    }
+    case 'ink': {
+      const old = (before as InkAnnotation).paths;
+      const unchanged =
+        old.length === after.paths.length &&
+        old.every((p, i) => samePoints(p, after.paths[i] ?? []));
+      return unchanged ? { ...after, paths: after.paths.map((path) => path.map(map)) } : after;
+    }
+    case 'line':
+    case 'polygon':
+    case 'polyline': {
+      const old = (before as ShapeAnnotation).vertices ?? [];
+      const vertices = after.vertices ?? [];
+      return samePoints(old, vertices) ? { ...after, vertices: vertices.map(map) } : after;
+    }
+    default:
+      return after;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Content checks
+// ---------------------------------------------------------------------------
+
+/** Windows-1252 code points above 0x7F that are not Latin-1 (the 0x80-0x9F row). */
+const CP1252_EXTRAS = new Set('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ');
+
+/**
+ * Whether PDFium's FreeText appearance (a standard-14 font with WinAnsiEncoding) can show
+ * `ch`. Line breaks and tabs count as showable.
+ */
+export function isWinAnsi(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0;
+  if (ch === '\n' || ch === '\r' || ch === '\t') return true;
+  if (code >= 0x20 && code <= 0x7e) return true;
+  if (code >= 0xa0 && code <= 0xff) return true;
+  return CP1252_EXTRAS.has(ch);
+}
+
+/** PNG, JPEG or PDF by magic bytes (what EmbedPDF's stamp creation accepts). */
+export function sniffStampData(head: Uint8Array): 'png' | 'jpeg' | 'pdf' | undefined {
+  if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) return 'png';
+  if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'jpeg';
+  if (head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46) return 'pdf';
+  return undefined;
 }

@@ -10,6 +10,7 @@ import {
   getSource,
   isSourceReferenced,
   sourceReferences,
+  sourcesWithEngineEdits,
 } from '../selectors';
 import type { DocumentId, EngineEdit, PageId, SourceId } from '../types';
 import { wrapOutline } from '../outline';
@@ -220,6 +221,8 @@ describe('document lifecycle', () => {
       payload: { text: 'hi' },
     };
     const withEdit = { ...ws, engineEdits: [edit] };
+    expect(sourcesWithEngineEdits(withEdit)).toEqual(new Set([src]));
+    expect(sourcesWithEngineEdits(ws).size).toBe(0);
     expect(removeSourceIfUnreferenced(withEdit, src)).toBe(withEdit);
     // Move A's pages to B: source still referenced (from B).
     const moved = movePages(withEdit, {

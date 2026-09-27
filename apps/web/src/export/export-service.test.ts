@@ -17,7 +17,14 @@ import {
   sourceId,
   type Workspace,
 } from '@pdf-editor/document-model';
-import { PdfiumAdapter, PdfLibAssembler } from '@pdf-editor/engine';
+import {
+  applyEngineEditWithResult,
+  checkAnnotationConformance,
+  PdfiumAdapter,
+  PdfLibAssembler,
+  serializeAnnotation,
+} from '@pdf-editor/engine';
+import { PDFDocument } from '@cantoo/pdf-lib';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import brokenXrefUrl from '../../../../test/fixtures/broken-xref.pdf?url';
@@ -26,7 +33,12 @@ import ownerOnlyUrl from '../../../../test/fixtures/encrypted-owner-only-aes-256
 import pageLabelsUrl from '../../../../test/fixtures/page-labels.pdf?url';
 import rotatedUrl from '../../../../test/fixtures/rotated-pages.pdf?url';
 import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
-import { type ExportDependencies, type ExportProgress, prepareExport } from './export-service';
+import {
+  type ExportDependencies,
+  type ExportProgress,
+  needsEngineSave,
+  prepareExport,
+} from './export-service';
 
 const fetchBytes = async (url: string) => (await fetch(url)).arrayBuffer();
 const assembler = new PdfLibAssembler();
@@ -56,7 +68,11 @@ async function openInto(
   return { ws: added.workspace, doc: added.documentId };
 }
 
-function deps(ws: Workspace, overrides: Partial<ExportDependencies['engine']> = {}) {
+function deps(
+  ws: Workspace,
+  overrides: Partial<ExportDependencies['engine']> = {},
+  dirty?: ReadonlySet<SourceId>,
+): ExportDependencies {
   const engine: ExportDependencies['engine'] = {
     sourceBytes: (id) => {
       const bytes = original.get(id);
@@ -71,9 +87,15 @@ function deps(ws: Workspace, overrides: Partial<ExportDependencies['engine']> = 
       ok: true,
       value: await adapter.verify(bytes, expectation),
     }),
+    editor: () => Promise.resolve(adapter),
     ...overrides,
   };
-  return { engine, assembler: () => Promise.resolve(assembler), workspace: () => ws };
+  return {
+    engine,
+    assembler: () => Promise.resolve(assembler),
+    workspace: () => ws,
+    ...(dirty ? { dirtySources: () => dirty } : {}),
+  };
 }
 
 let merged: Workspace;
@@ -247,6 +269,95 @@ describe('prepareExport', () => {
     expect(await prepareExport(doc, {}, deps(emptied))).toMatchObject({
       ok: false,
       error: { message: 'The document has no pages to export.' },
+    });
+  });
+
+  describe('annotations', () => {
+    /** simple-text.pdf with a commented highlight and a note recorded as engine edits. */
+    async function annotated(id: string) {
+      const opened = await openInto(createWorkspace(), id, simpleUrl, `${id}.pdf`);
+      const source = sourceId(id);
+      const edits = [];
+      for (const annotation of [
+        {
+          kind: 'highlight' as const,
+          pageIndex: 0,
+          rect: { x: 72, y: 700, width: 120, height: 14 },
+          quads: [{ x: 72, y: 700, width: 120, height: 14 }],
+          contents: 'Check this',
+        },
+        {
+          kind: 'text' as const,
+          pageIndex: 0,
+          rect: { x: 400, y: 700, width: 20, height: 20 },
+          contents: 'A note',
+        },
+      ]) {
+        const { applied } = await applyEngineEditWithResult(adapter, {
+          id: `${id}-${edits.length}`,
+          source,
+          pageIndex: 0,
+          kind: 'annotation.create',
+          payload: { annotation: await serializeAnnotation(annotation) },
+        });
+        edits.push(applied);
+      }
+      return { ...opened, ws: { ...opened.ws, engineEdits: edits }, source };
+    }
+
+    it('saves edited sources through the engine and verifies counts and conformance', async () => {
+      const { ws, doc, source } = await annotated('annotated');
+      const verify = vi.fn<ExportDependencies['engine']['verify']>(async (bytes, expectation) => ({
+        ok: true,
+        value: await adapter.verify(bytes, expectation),
+      }));
+      const result = await prepareExport(doc, {}, deps(ws, { verify }));
+      if (!result.ok) throw new Error(result.error.message);
+      expect(result.value.verification).toEqual({ ok: true, problems: [] });
+      const expectation = verify.mock.calls[0]?.[1];
+      expect(expectation?.annotationCounts).toEqual({ 0: 2, 1: 0, 2: 0 });
+      expect(expectation?.checkAnnotations).toBe(true);
+      expect(expectation?.annotationIds).toHaveLength(2);
+      const report = await checkAnnotationConformance(result.value.bytes.slice(0), {
+        ids: expectation?.annotationIds ?? [],
+      });
+      expect(report).toMatchObject({ ok: true, counts: [2, 0, 0] });
+      // Highlight popup + note popup.
+      const out = await PDFDocument.load(result.value.bytes.slice(0));
+      expect(out.getPage(0).node.Annots()?.size()).toBe(4);
+
+      const noComments = await prepareExport(doc, { includeComments: false }, deps(ws));
+      if (!noComments.ok) throw new Error(noComments.error.message);
+      const bare = await PDFDocument.load(noComments.value.bytes.slice(0));
+      expect(bare.getPage(0).node.Annots()?.size()).toBe(2);
+      expect(noComments.value.verification.ok).toBe(true);
+
+      const flat = await prepareExport(doc, { flattenAnnotations: true }, deps(ws));
+      if (!flat.ok) throw new Error(flat.error.message);
+      expect(flat.value.verification).toEqual({ ok: true, problems: [] });
+      const flattened = await PDFDocument.load(flat.value.bytes.slice(0));
+      expect(flattened.getPage(0).node.Annots()?.size() ?? 0).toBe(0);
+      // The open source keeps its annotations.
+      expect(await adapter.listAnnotations(source, 0)).toHaveLength(2);
+    });
+
+    it('reads the store’s dirty sources when edits are not in the workspace yet', async () => {
+      const { ws, doc, source } = await annotated('dirty');
+      const bare = { ...ws, engineEdits: [] };
+      expect(needsEngineSave(bare, source)).toBe(false);
+      expect(needsEngineSave(bare, source, { dirty: new Set([source]) })).toBe(true);
+      expect(needsEngineSave(bare, source, { flattenAnnotations: true })).toBe(true);
+      expect(needsEngineSave(bare, source, { includeComments: false })).toBe(true);
+      const saveSource = vi.fn<ExportDependencies['engine']['saveSource']>(async (id, options) => ({
+        ok: true,
+        value: await adapter.save(id, options),
+      }));
+      const result = await prepareExport(doc, {}, deps(bare, { saveSource }, new Set([source])));
+      if (!result.ok) throw new Error(result.error.message);
+      expect(saveSource).toHaveBeenCalledWith(source, { removeSecurity: false });
+      expect(result.value.verification).toEqual({ ok: true, problems: [] });
+      const out = await PDFDocument.load(result.value.bytes.slice(0));
+      expect(out.getPage(0).node.Annots()?.size()).toBe(4);
     });
   });
 });

@@ -179,3 +179,22 @@ describe('verifying encrypted output', () => {
     expect(locked.problems.join(' ')).toContain('does not open');
   });
 });
+
+describe('notes on duplicated pages', () => {
+  test('each occurrence keeps its own note and popup, linked both ways', async () => {
+    const { checkAnnotationConformance } = await import('../src/annotations/conformance');
+    const annotated = await (
+      await fetch(new URL('../../../test/fixtures/annotations.pdf', import.meta.url))
+    ).arrayBuffer();
+    const A = sid('annotated');
+    const page = (index: number) => vpage({ kind: 'source', source: A, index });
+    const { bytes } = await assembler.assemble({
+      document: vdoc([page(1), page(1)]),
+      sources: new Map([[A, annotated]]),
+      blobs: new Map(),
+    });
+    const report = await checkAnnotationConformance(bytes);
+    expect(report.problems).toEqual([]);
+    expect(report.counts).toEqual([2, 2]);
+  });
+});

@@ -136,6 +136,25 @@ export function userToDeviceRect(g: PageGeometry, r: Rect): DeviceRect {
   };
 }
 
+/**
+ * An annotation or widget /Rect as EmbedPDF 2.15 reports it. Unlike glyph boxes and quads,
+ * `convertPageRectToDeviceRect` converts only the (left, top) corner and keeps the
+ * *unrotated* width and height, so on /Rotate 90/180/270 pages `size` is transposed
+ * relative to display space and `origin` is not the top-left corner. The user-space rect is
+ * therefore (left, top - height, width, height) with (left, top) = the converted origin.
+ * (Writes go through `setPageAnnoRect`, which converts all four corners, so
+ * `userToDeviceRect` stays correct for them.)
+ */
+export function annotationRectToUser(g: PageGeometry, r: DeviceRect): Rect {
+  const topLeft = deviceToUserPoint(g, r.origin);
+  return {
+    x: topLeft.x,
+    y: topLeft.y - r.size.height,
+    width: r.size.width,
+    height: r.size.height,
+  };
+}
+
 /** Smallest user-space rect containing all rects; undefined for an empty list. */
 export function unionRect(rects: readonly Rect[]): Rect | undefined {
   if (rects.length === 0) {

@@ -18,17 +18,24 @@ test('the outline panel shows the bookmarks and navigates Read mode', async ({ p
 
   await page.getByRole('tab', { name: 'Outline', exact: true }).click();
   const tree = page.getByRole('tree', { name: /Outline of/ });
-  // The engine does not report the authored /Count (open) state yet, so every node starts
-  // collapsed (packages/engine mapBookmark); the panel honours whatever the model says.
-  await expect(tree.getByRole('treeitem')).toHaveCount(3);
+  // The authored open state (/Count sign, read by the engine's inspector): "Chapter 2"
+  // starts expanded, "2.2 Results" collapsed.
   const chapter2 = tree.getByRole('treeitem', { name: 'Chapter 2 – Methods' });
-  await expect(chapter2).toHaveAttribute('aria-expanded', 'false');
+  await expect(chapter2).toHaveAttribute('aria-expanded', 'true');
+  await expect(tree.getByRole('treeitem')).toHaveCount(5);
+  await expect(tree.getByRole('treeitem', { name: '2.2 Results' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
 
   await tree.getByRole('treeitem', { name: 'Appendix' }).click();
   await expect(page.getByTestId('status-pages')).toHaveText('Page 6 of 6');
 
-  // Keyboard (APG tree): expand, walk into the children, activate one.
+  // Keyboard (APG tree): collapse, expand, walk into the children, activate one.
   await chapter2.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(chapter2).toHaveAttribute('aria-expanded', 'false');
+  await expect(tree.getByRole('treeitem')).toHaveCount(3);
   await page.keyboard.press('ArrowRight');
   await expect(chapter2).toHaveAttribute('aria-expanded', 'true');
   await expect(tree.getByRole('treeitem')).toHaveCount(5);

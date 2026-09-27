@@ -177,6 +177,21 @@ importers:
         specifier: 2.11.1
         version: 2.11.1(html-entities@2.6.0)
 
+  tools/qa:
+    dependencies:
+      '@cantoo/pdf-lib':
+        specifier: 2.11.1
+        version: 2.11.1(html-entities@2.6.0)
+      '@embedpdf/pdfium':
+        specifier: 2.15.1
+        version: 2.15.1
+      '@pdf-editor/document-model':
+        specifier: workspace:*
+        version: link:../../packages/document-model
+      '@pdf-editor/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
+
 packages:
 
   '@adobe/css-tools@4.5.0':

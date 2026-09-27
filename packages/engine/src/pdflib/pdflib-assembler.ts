@@ -54,9 +54,12 @@ import type {
 } from '@pdf-editor/document-model';
 
 import {
+  type AnnotationConformanceReport,
+  type AnnotationFinalizeRequest,
   type AssemblyInput,
   type AssemblyOptions,
   type AssemblyResult,
+  type EngineCallOptions,
   EngineError,
   type InspectOptions,
   type PdfAssembler,
@@ -72,7 +75,10 @@ import {
   placeOverlay,
   tileOrigins,
 } from './overlay-geometry';
+import { checkAnnotationConformance } from '../annotations/conformance';
+import { finalizeAnnotations } from '../annotations/finalize';
 import { inspectSource, readLanguage } from './inspect';
+import { nameText, namedDestinationResolver } from './named-destinations';
 import { effectiveRanges, labelForIndex, PDF_LABEL_STYLE } from './page-labels';
 
 const PRODUCER = 'pdf-editor';
@@ -95,6 +101,7 @@ const N = {
   First: PDFName.of('First'),
   Font: PDFName.of('Font'),
   IRT: PDFName.of('IRT'),
+  NM: PDFName.of('NM'),
   Kids: PDFName.of('Kids'),
   Last: PDFName.of('Last'),
   MarkInfo: PDFName.of('MarkInfo'),
@@ -265,6 +272,26 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
     options: InspectOptions = {},
   ): Promise<readonly string[] | undefined> {
     return (await this.inspect(bytes, options)).pageLabels;
+  }
+
+  /** The annotation post-pass of `PdfEditor.save()` (annotations/finalize.ts). */
+  finalizeAnnotations(
+    bytes: ArrayBuffer,
+    request: AnnotationFinalizeRequest,
+    options: EngineCallOptions = {},
+  ): Promise<ArrayBuffer> {
+    throwIfAborted(options.signal);
+    return finalizeAnnotations(bytes, request);
+  }
+
+  /** `checkAnnotationConformance` (annotations/conformance.ts). */
+  checkAnnotations(
+    bytes: ArrayBuffer,
+    options: { readonly ids?: readonly string[]; readonly password?: string } = {},
+    callOptions: EngineCallOptions = {},
+  ): Promise<AnnotationConformanceReport> {
+    throwIfAborted(callOptions.signal);
+    return checkAnnotationConformance(bytes, options);
   }
 
   async assemble(input: AssemblyInput, options: AssemblyOptions = {}): Promise<AssemblyResult> {
@@ -483,62 +510,6 @@ async function loadSource(sourceId: SourceId, bytes: ArrayBuffer): Promise<PDFDo
   }
 }
 
-/** Text of a name or string object (destination names can be either). */
-function nameText(value: PDFObject | undefined): string | undefined {
-  if (value instanceof PDFName) return value.decodeText();
-  if (value instanceof PDFString || value instanceof PDFHexString) return value.decodeText();
-  return undefined;
-}
-
-/** Cap on name-tree nodes visited (malformed or hostile trees). */
-const MAX_NAME_TREE_NODES = 10_000;
-
-/**
- * Resolves named destinations (ISO 32000-2 §12.3.2.4): PDF 1.1 catalog /Dests dictionary
- * (keys are names) and PDF 1.2+ /Names /Dests name tree (keys are strings). Values are an
- * explicit destination array or a dictionary whose /D holds one. Both lookups are tried for
- * either kind of name, as real files mix them up. Built lazily, once per source.
- */
-function namedDestinationResolver(doc: PDFDocument): (name: string) => PDFArray | undefined {
-  const { context, catalog } = doc;
-  let table: Map<string, PDFObject> | undefined;
-  const build = (): Map<string, PDFObject> => {
-    const map = new Map<string, PDFObject>();
-    const names = context.lookupMaybe(catalog.get(PDFName.of('Names')), PDFDict);
-    const root = names ? context.lookupMaybe(names.get(PDFName.of('Dests')), PDFDict) : undefined;
-    const stack = root ? [root] : [];
-    const seen = new Set<PDFDict>();
-    while (stack.length > 0 && seen.size < MAX_NAME_TREE_NODES) {
-      const node = stack.pop() as PDFDict;
-      if (seen.has(node)) continue;
-      seen.add(node);
-      const pairs = context.lookupMaybe(node.get(PDFName.of('Names')), PDFArray);
-      for (let i = 0; pairs && i + 1 < pairs.size(); i += 2) {
-        const key = nameText(context.lookup(pairs.get(i)));
-        if (key !== undefined && !map.has(key)) map.set(key, pairs.get(i + 1));
-      }
-      const kids = context.lookupMaybe(node.get(N.Kids), PDFArray);
-      for (let i = 0; kids && i < kids.size(); i++) {
-        const kid = context.lookupMaybe(kids.get(i), PDFDict);
-        if (kid) stack.push(kid);
-      }
-    }
-    // The PDF 1.1 dictionary; the name tree wins when both define a name.
-    const dests = context.lookupMaybe(catalog.get(PDFName.of('Dests')), PDFDict);
-    for (const [key, value] of dests?.entries() ?? []) {
-      if (!map.has(key.decodeText())) map.set(key.decodeText(), value);
-    }
-    return map;
-  };
-  return (name) => {
-    table ??= build();
-    const value = context.lookup(table.get(name));
-    if (value instanceof PDFArray) return value;
-    if (value instanceof PDFDict) return context.lookupMaybe(value.get(N.D), PDFArray);
-    return undefined;
-  };
-}
-
 /**
  * Mutates the private source copy so that `copyPages` does not drag unrelated objects along:
  * - annotation /P (page back-pointers) would copy the referenced page and, through widgets'
@@ -672,7 +643,8 @@ function deepCloneDirect<T extends PDFObject | undefined>(value: T): T {
  * shared. /Rotate and /CropBox come from the pristine snapshot, not from the first
  * occurrence, which may already be rotated or cropped. Widgets are dropped from the
  * duplicate: a field widget can only live on one page. Other annotations are cloned with
- * their direct objects (actions, borders, colors).
+ * their direct objects (actions, borders, colors); popup/parent and reply links are
+ * re-pointed at the clones, and /NM gets a `~<object number>` suffix to stay unique.
  */
 function duplicatePage(
   out: PDFDocument,
@@ -699,17 +671,37 @@ function duplicatePage(
   const annots = context.lookupMaybe(leaf.get(N.Annots), PDFArray);
   if (annots) {
     const cloned = context.obj([]);
+    // Popup <-> parent and reply links point at the first occurrence's annotations:
+    // re-point them at the copies, and drop links that leave the page.
+    const copies = new Map<string, PDFRef>();
+    const linked: PDFDict[] = [];
     for (let i = 0; i < annots.size(); i++) {
-      const annot = context.lookupMaybe(annots.get(i), PDFDict);
+      const raw = annots.get(i);
+      const annot = context.lookupMaybe(raw, PDFDict);
       if (!annot) continue;
       if (annot.get(N.Subtype) === PDFName.of('Widget')) {
         warnings.add('Form fields on duplicated pages were kept on the first occurrence only');
         continue;
       }
       const copy = deepCloneDirect(annot);
-      copy.delete(N.Popup);
-      copy.delete(N.IRT);
-      cloned.push(context.register(copy));
+      const ref = context.register(copy);
+      // /NM must stay unique in the document: the copy gets a derived name.
+      const nm = context.lookup(copy.get(N.NM));
+      if (nm instanceof PDFString || nm instanceof PDFHexString) {
+        copy.set(N.NM, PDFString.of(`${nm.decodeText()}~${ref.objectNumber}`));
+      }
+      if (raw instanceof PDFRef) copies.set(raw.toString(), ref);
+      linked.push(copy);
+      cloned.push(ref);
+    }
+    for (const copy of linked) {
+      for (const key of [N.Popup, N.Parent, N.IRT]) {
+        const target = copy.get(key);
+        if (target === undefined) continue;
+        const mapped = target instanceof PDFRef ? copies.get(target.toString()) : undefined;
+        if (mapped) copy.set(key, mapped);
+        else copy.delete(key);
+      }
     }
     leaf.set(N.Annots, cloned);
   }

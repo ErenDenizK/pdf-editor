@@ -8,10 +8,14 @@
  *   so the low-level module is unreachable from the adapter. TODO(M2): switch to PDFium once
  *   EmbedPDF exposes page labels (one parse instead of two).
  * - /Lang from the catalog (EmbedPDF's getMetadata omits it).
+ * - Outline facts EmbedPDF drops: the open state (/Count sign) and which /XYZ parameters
+ *   are null (PDFium reports null as 0, a valid coordinate).
+ * - The open state of note popups (EmbedPDF does not read popups).
  */
 
 import {
   PDFArray,
+  PDFBool,
   PDFDict,
   PDFDocument,
   PDFHexString,
@@ -22,7 +26,8 @@ import {
 } from '@cantoo/pdf-lib';
 import type { PageLabelStyle } from '@pdf-editor/document-model';
 
-import type { SourceInspection } from '../types';
+import type { NoteStateFact, OutlineItemFacts, SourceInspection } from '../types';
+import { nameText, namedDestinationResolver } from './named-destinations';
 import { formatNumber } from './page-labels';
 
 const STYLE_BY_NAME: Readonly<Record<string, PageLabelStyle>> = {
@@ -115,6 +120,92 @@ export function readLanguage(doc: PDFDocument): string | undefined {
   return lang === undefined || lang === '' ? undefined : lang;
 }
 
+/** Cap on outline items visited (malformed or hostile outlines). */
+const MAX_OUTLINE_ITEMS = 100_000;
+
+function xyzFacts(
+  doc: PDFDocument,
+  item: PDFDict,
+  resolve: (name: string) => PDFArray | undefined,
+): OutlineItemFacts['xyz'] {
+  const { context } = doc;
+  let destination: PDFObject | undefined = context.lookup(item.get(PDFName.of('Dest')));
+  if (!destination) {
+    const action = context.lookupMaybe(item.get(PDFName.of('A')), PDFDict);
+    if (action && context.lookup(action.get(PDFName.of('S'))) === PDFName.of('GoTo')) {
+      destination = context.lookup(action.get(PDFName.of('D')));
+    }
+  }
+  const name = nameText(destination);
+  if (name !== undefined) destination = resolve(name);
+  if (destination instanceof PDFDict) {
+    destination = context.lookup(destination.get(PDFName.of('D')));
+  }
+  if (!(destination instanceof PDFArray)) return undefined;
+  if (context.lookup(destination.get(1)) !== PDFName.of('XYZ')) return undefined;
+  const param = (index: number): number | null => {
+    const value = index < destination.size() ? context.lookup(destination.get(index)) : undefined;
+    return value instanceof PDFNumber ? value.asNumber() : null;
+  };
+  return { left: param(2), top: param(3), zoom: param(4) };
+}
+
+/**
+ * Outline items in pre-order (the order `/First` + `/Next` visits them, as PDFium does):
+ * open state from the /Count sign and /XYZ parameter presence. Undefined without outline.
+ */
+export function readOutlineFacts(doc: PDFDocument): OutlineItemFacts[] | undefined {
+  const { context } = doc;
+  const root = context.lookupMaybe(doc.catalog.get(PDFName.of('Outlines')), PDFDict);
+  if (!root) return undefined;
+  const resolve = namedDestinationResolver(doc);
+  const out: OutlineItemFacts[] = [];
+  const seen = new Set<PDFDict>();
+  const visit = (first: PDFObject | undefined, depth: number): void => {
+    let item = context.lookupMaybe(first, PDFDict);
+    while (item && !seen.has(item) && seen.size < MAX_OUTLINE_ITEMS && depth < 64) {
+      seen.add(item);
+      const count = context.lookup(item.get(PDFName.of('Count')));
+      const xyz = xyzFacts(doc, item, resolve);
+      out.push({
+        open: count instanceof PDFNumber && count.asNumber() > 0,
+        ...(xyz ? { xyz } : {}),
+      });
+      visit(item.get(PDFName.of('First')), depth + 1);
+      item = context.lookupMaybe(item.get(PDFName.of('Next')), PDFDict);
+    }
+  };
+  visit(root.get(PDFName.of('First')), 0);
+  return out;
+}
+
+function bool(value: PDFObject | undefined): boolean | undefined {
+  return value instanceof PDFBool ? value.asBoolean() : undefined;
+}
+
+/** Open state of note (/Text) annotations: their popup's /Open, else their own /Open. */
+export function readNoteStates(doc: PDFDocument): NoteStateFact[] {
+  const { context } = doc;
+  const out: NoteStateFact[] = [];
+  doc.getPages().forEach((page, pageIndex) => {
+    const annots = context.lookupMaybe(page.node.get(PDFName.of('Annots')), PDFArray);
+    for (let index = 0; annots && index < annots.size(); index++) {
+      const annot = context.lookupMaybe(annots.get(index), PDFDict);
+      if (!annot || context.lookup(annot.get(PDFName.of('Subtype'))) !== PDFName.of('Text')) {
+        continue;
+      }
+      const popup = context.lookupMaybe(annot.get(PDFName.of('Popup')), PDFDict);
+      const open =
+        bool(context.lookup(popup?.get(PDFName.of('Open')))) ??
+        bool(context.lookup(annot.get(PDFName.of('Open'))));
+      if (open === undefined) continue;
+      const nm = text(context.lookup(annot.get(PDFName.of('NM'))));
+      out.push({ pageIndex, index, open, ...(nm ? { nm } : {}) });
+    }
+  });
+  return out;
+}
+
 /**
  * Parses `bytes` (not mutated, not transferred) and reads what PDFium does not report.
  * Never throws for damaged or locked files: it returns what it could read (possibly `{}`).
@@ -133,7 +224,12 @@ export async function inspectSource(
   } catch {
     return {};
   }
-  const out: { pageLabels?: string[]; language?: string } = {};
+  const out: {
+    pageLabels?: string[];
+    language?: string;
+    outline?: OutlineItemFacts[];
+    noteStates?: NoteStateFact[];
+  } = {};
   try {
     const labels = readPageLabels(doc);
     if (labels) out.pageLabels = labels;
@@ -142,5 +238,17 @@ export async function inspectSource(
   }
   const language = readLanguage(doc);
   if (language !== undefined) out.language = language;
+  try {
+    const outline = readOutlineFacts(doc);
+    if (outline && outline.length > 0) out.outline = outline;
+  } catch {
+    // Malformed outline: the adapter falls back to PDFium's view.
+  }
+  try {
+    const notes = readNoteStates(doc);
+    if (notes.length > 0) out.noteStates = notes;
+  } catch {
+    // Malformed annotations: open states stay unknown.
+  }
   return out;
 }

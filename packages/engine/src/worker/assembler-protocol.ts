@@ -5,6 +5,8 @@
  */
 
 import type {
+  AnnotationConformanceReport,
+  AnnotationFinalizeRequest,
   AssemblyInput,
   AssemblyOptions,
   AssemblyResult,
@@ -25,6 +27,22 @@ export interface AssemblerWorkerApi {
   ): Promise<WireResult>;
   /** Reads page labels and /Lang from (transferred) bytes. Never rejects. */
   inspect(bytes: ArrayBuffer, password?: string): Promise<SourceInspection>;
+  /** Annotation post-pass of `PdfEditor.save()` on (transferred) bytes. */
+  finalizeAnnotations(
+    bytes: ArrayBuffer,
+    request: AnnotationFinalizeRequest,
+  ): Promise<{ readonly ok: true; readonly bytes: ArrayBuffer } | WireFailure>;
+  /** `checkAnnotationConformance` on (transferred) bytes. */
+  checkAnnotations(
+    bytes: ArrayBuffer,
+    options: { readonly ids?: readonly string[]; readonly password?: string },
+  ): Promise<AnnotationConformanceReport>;
+}
+
+export interface WireFailure {
+  readonly ok: false;
+  readonly code: EngineErrorCode;
+  readonly message: string;
 }
 
 /**

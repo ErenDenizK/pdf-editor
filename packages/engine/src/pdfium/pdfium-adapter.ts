@@ -32,10 +32,11 @@ import {
   type PdfLinkTarget,
   type PdfMetadataObject,
   type PdfPageObject,
-  PdfPageFlattenFlag,
+  type PdfPageSearchProgress,
   type PdfRenderPageOptions,
   type PdfWidgetAnnoObject,
   PdfZoomMode,
+  type SearchResult,
   type Task,
 } from '@embedpdf/models';
 import type {
@@ -46,8 +47,12 @@ import type {
   SourceId,
 } from '@pdf-editor/document-model';
 
+import { checkAnnotationConformance, describeProblems } from '../annotations/conformance';
+import { finalizeAnnotations } from '../annotations/finalize';
+import { namedStampAppearance } from '../annotations/stamp-appearance';
 import {
   type Annotation,
+  type AnnotationFinalizeRequest,
   EngineError,
   type EngineCallOptions,
   type EngineOutlineNode,
@@ -60,10 +65,13 @@ import {
   type PdfEditor,
   type PdfRenderer,
   type PdfVerifier,
+  type NoteStateFact,
+  type OutlineItemFacts,
   type RenderOptions,
   type RenderResult,
   type SaveOptions,
   type SearchHit,
+  type SearchOptions,
   type SourceInspection,
   type SourceInspector,
   type TextRun,
@@ -71,9 +79,20 @@ import {
   type VerificationResult,
 } from '../types';
 import { checkXrefStructure } from '../structure/xref-check';
-import { fromEmbedPdf, toEmbedPdf } from './annotation-mapping';
 import {
+  effectiveRect,
+  followRect,
+  fromEmbedPdf,
+  isWinAnsi,
+  roundOpacity,
+  STAMP_NAMES,
+  sniffStampData,
+  toEmbedPdf,
+} from './annotation-mapping';
+import {
+  annotationRectToUser,
   deviceToUserRect,
+  type PageGeometry,
   pageGeometry,
   rotationDegrees,
   unionRect,
@@ -114,9 +133,42 @@ export interface PdfiumAdapterOptions {
   readonly inspector?: SourceInspector;
 }
 
+/**
+ * Annotation facts EmbedPDF cannot hold, kept per open source until `save()` writes them
+ * (annotations/finalize.ts). Keyed by /NM.
+ */
+interface AnnotationState {
+  /** Set by any annotation create/update/delete since open. */
+  dirty: boolean;
+  /** Created or updated since open: `save()` adds /P, /M, /F Print and popups. */
+  readonly touched: Set<string>;
+  /** Note popup open state. */
+  readonly noteOpen: Map<string, boolean>;
+  /** Stamp opacity (EmbedPDF writes no /CA for stamps). */
+  readonly opacity: Map<string, number>;
+  /** Note states read by the inspector, not yet matched to an /NM (by /Annots index). */
+  pendingNotes: NoteStateFact[];
+}
+
 interface OpenEntry {
   readonly doc: PdfDocumentObject;
   readonly password?: string;
+  readonly annotations: AnnotationState;
+}
+
+function newAnnotationState(notes: readonly NoteStateFact[] = []): AnnotationState {
+  const state: AnnotationState = {
+    dirty: false,
+    touched: new Set(),
+    noteOpen: new Map(),
+    opacity: new Map(),
+    pendingNotes: [],
+  };
+  for (const note of notes) {
+    if (note.nm !== undefined) state.noteOpen.set(note.nm, note.open);
+    else state.pendingNotes.push(note);
+  }
+  return state;
 }
 
 const LOG_SOURCE = 'PdfiumAdapter';
@@ -234,7 +286,9 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     );
     this.docs.set(
       id,
-      options.password === undefined ? { doc } : { doc, password: options.password },
+      options.password === undefined
+        ? { doc, annotations: newAnnotationState() }
+        : { doc, password: options.password, annotations: newAnnotationState() },
     );
     try {
       const [metadata, bookmarks, signatures, inspected] = await Promise.all([
@@ -265,22 +319,39 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
       const labels =
         inspected.pageLabels?.length === doc.pageCount ? inspected.pageLabels : undefined;
       const mapped = mapMetadata(metadata);
+      if (inspected.noteStates) {
+        const entry = this.docs.get(id);
+        if (entry) {
+          this.docs.set(id, { ...entry, annotations: newAnnotationState(inspected.noteStates) });
+        }
+      }
       return {
         id,
         pageCount: doc.pageCount,
         pages: doc.pages.map((p, index) => {
           const label = labels?.[index];
+          const crop = p.boxes?.crop;
           return {
             size: unrotatedSize(p),
             rotation: rotationDegrees(p),
             ...(label === undefined ? {} : { label }),
+            ...(crop
+              ? {
+                  cropBox: {
+                    x: crop.left,
+                    y: crop.bottom,
+                    width: crop.right - crop.left,
+                    height: crop.top - crop.bottom,
+                  },
+                }
+              : {}),
           };
         }),
         fingerprint,
         flags,
         metadata:
           inspected.language === undefined ? mapped : { ...mapped, language: inspected.language },
-        outline: bookmarks.bookmarks.map(mapBookmark),
+        outline: mapOutline(bookmarks.bookmarks, inspected.outline),
       };
     } catch (error) {
       await this.close(id).catch(() => undefined);
@@ -301,7 +372,13 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     const inspector = this.inspector;
     if (
       !inspector ||
-      !(heuristics.pageLabelsToken || heuristics.langToken || heuristics.objectStreams)
+      !(
+        heuristics.pageLabelsToken ||
+        heuristics.langToken ||
+        heuristics.outlinesToken ||
+        heuristics.popupToken ||
+        heuristics.objectStreams
+      )
     ) {
       return Promise.resolve({});
     }
@@ -468,26 +545,40 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   async search(
     id: SourceId,
     query: string,
-    options: EngineCallOptions & {
-      readonly matchCase?: boolean;
-      readonly wholeWord?: boolean;
-    } = {},
+    options: SearchOptions = {},
   ): Promise<readonly SearchHit[]> {
     const engine = await this.engine();
     const { doc } = this.entry(id);
     const flags: MatchFlag[] = [];
     if (options.matchCase) flags.push(MatchFlag.MatchCase);
     if (options.wholeWord) flags.push(MatchFlag.MatchWholeWord);
-    const result = await this.run(engine.searchAllPages(doc, query, { flags }), options, 'search');
-    return result.results.map((hit) => {
-      const page = doc.pages[hit.pageIndex];
-      const g = page ? pageGeometry(page) : undefined;
-      return {
-        pageIndex: hit.pageIndex,
-        rects: g ? hit.rects.map((r) => deviceToUserRect(g, r)) : [],
-        context: `${hit.context.before}${hit.context.match}${hit.context.after}`,
-      };
-    });
+    const toHits = (results: readonly SearchResult[]): SearchHit[] =>
+      results.map((hit) => {
+        const page = doc.pages[hit.pageIndex];
+        const g = page ? pageGeometry(page) : undefined;
+        return {
+          pageIndex: hit.pageIndex,
+          rects: g ? hit.rects.map((r) => deviceToUserRect(g, r)) : [],
+          context: `${hit.context.before}${hit.context.match}${hit.context.after}`,
+          matchStart: hit.context.before.length,
+          matchLength: hit.context.match.length,
+        };
+      });
+    const task = engine.searchAllPages(doc, query, { flags });
+    const onProgress = options.onProgress;
+    if (onProgress) {
+      // EmbedPDF reports each page as it finishes; a throwing listener must not break the
+      // search.
+      task.onProgress((progress: PdfPageSearchProgress) => {
+        try {
+          onProgress(toHits(progress.results), progress.page);
+        } catch (error) {
+          this.logger?.warn(LOG_SOURCE, 'Search', 'search progress listener failed', error);
+        }
+      });
+    }
+    const result = await this.run(task, options, 'search');
+    return toHits(result.results);
   }
 
   // -------------------------------------------------------------------------
@@ -501,9 +592,56 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   ): Promise<PdfAnnotationObject[]> {
     const engine = await this.engine();
     const { doc, page } = this.page(id, pageIndex);
-    return this.run(engine.getPageAnnotations(doc, page), options, 'listAnnotations');
+    const raw = await this.run(engine.getPageAnnotations(doc, page), options, 'listAnnotations');
+    this.resolvePendingNotes(id, pageIndex, raw);
+    return raw;
   }
 
+  /**
+   * Note open states the inspector found by /Annots position (notes without /NM): the first
+   * listing of the page names them (EmbedPDF assigns an /NM on read). Creating appends and
+   * every other edit lists the page first, so positions are still those of the file.
+   */
+  private resolvePendingNotes(id: SourceId, pageIndex: number, raw: PdfAnnotationObject[]): void {
+    const state = this.entry(id).annotations;
+    if (!state.pendingNotes.some((n) => n.pageIndex === pageIndex)) return;
+    const rest: NoteStateFact[] = [];
+    for (const note of state.pendingNotes) {
+      if (note.pageIndex !== pageIndex) {
+        rest.push(note);
+        continue;
+      }
+      const annotation = raw[note.index];
+      if (annotation?.type === PdfAnnotationSubtype.TEXT && !state.noteOpen.has(annotation.id)) {
+        state.noteOpen.set(annotation.id, note.open);
+      }
+    }
+    state.pendingNotes = rest;
+  }
+
+  /** Adds what the adapter keeps beside EmbedPDF (note open state, stamp opacity). */
+  private decorate(id: SourceId, annotation: Annotation): Annotation {
+    const state = this.entry(id).annotations;
+    if (annotation.kind === 'text') {
+      const open = state.noteOpen.get(annotation.id);
+      return open === undefined ? annotation : { ...annotation, open };
+    }
+    if (annotation.kind === 'stamp') {
+      const opacity = state.opacity.get(annotation.id);
+      return opacity === undefined ? annotation : { ...annotation, opacity };
+    }
+    return annotation;
+  }
+
+  private mapRaw(id: SourceId, raw: PdfAnnotationObject, g: PageGeometry): Annotation | undefined {
+    const mapped = fromEmbedPdf(raw, g);
+    return mapped ? this.decorate(id, mapped) : undefined;
+  }
+
+  /**
+   * Annotations of a page in /Annots order, in user space. Widgets (form fields) and popups
+   * are not listed: popups belong to their note (`NoteAnnotation.open`).
+   */
   async listAnnotations(
     id: SourceId,
     pageIndex: number,
@@ -513,7 +651,7 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     const g = pageGeometry(this.page(id, pageIndex).page);
     const result: Annotation[] = [];
     for (const annotation of raw) {
-      const mapped = fromEmbedPdf(annotation, g);
+      const mapped = this.mapRaw(id, annotation, g);
       if (mapped) {
         result.push(mapped);
       } else {
@@ -554,9 +692,84 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     const raw = await this.rawAnnotations(id, pageIndex, options);
     const found = raw.find((a) => a.id === annotationId);
     const g = pageGeometry(this.page(id, pageIndex).page);
-    return (found ? fromEmbedPdf(found, g) : undefined) ?? fallback;
+    return (found ? this.mapRaw(id, found, g) : undefined) ?? fallback;
   }
 
+  /**
+   * What EmbedPDF needs besides the object to create a stamp: the image (PNG, JPEG) or
+   * appearance PDF bytes, or a generated text appearance for a named stamp.
+   */
+  private async stampContext(
+    annotation: Extract<NewAnnotation, { kind: 'stamp' }>,
+  ): Promise<{ data: ArrayBuffer }> {
+    if (annotation.imageBlob) {
+      const data = await annotation.imageBlob.arrayBuffer();
+      if (!sniffStampData(new Uint8Array(data, 0, Math.min(data.byteLength, 8)))) {
+        throw new EngineError(
+          'unsupported',
+          `Stamp images must be PNG, JPEG or a one-page PDF (got ${annotation.imageBlob.type || 'unknown type'})`,
+        );
+      }
+      return { data };
+    }
+    if (annotation.name && (STAMP_NAMES as readonly string[]).includes(annotation.name)) {
+      const rect = effectiveRect(annotation);
+      return {
+        data: await namedStampAppearance(
+          annotation.name,
+          rect.width,
+          rect.height,
+          annotation.color,
+        ),
+      };
+    }
+    throw new EngineError(
+      'unsupported',
+      `A stamp needs an imageBlob or one of the named stamps ${STAMP_NAMES.join(', ')}`,
+    );
+  }
+
+  /** Rejects text the standard-14 FreeText font cannot show (see the README). */
+  private checkFreeText(annotation: NewAnnotation): void {
+    if (annotation.kind !== 'free-text') return;
+    const bad = Array.from(annotation.text).filter((ch) => !isWinAnsi(ch));
+    if (bad.length > 0) {
+      throw new EngineError(
+        'unsupported',
+        `Text boxes can only use Latin-1 (WinAnsi) characters for now; cannot write ${[...new Set(bad)].join(' ')}`,
+      );
+    }
+  }
+
+  private remember(id: SourceId, annotation: NewAnnotation, nm: string): void {
+    const state = this.entry(id).annotations;
+    state.dirty = true;
+    state.touched.add(nm);
+    if (annotation.kind === 'text') {
+      state.noteOpen.set(nm, annotation.open ?? state.noteOpen.get(nm) ?? false);
+    }
+    if (annotation.kind === 'stamp') {
+      const opacity =
+        annotation.opacity === undefined ? undefined : roundOpacity(annotation.opacity);
+      if (opacity === undefined || opacity >= 1) state.opacity.delete(nm);
+      else state.opacity.set(nm, opacity);
+    }
+  }
+
+  private forget(id: SourceId, nm: string): void {
+    const state = this.entry(id).annotations;
+    state.dirty = true;
+    state.touched.delete(nm);
+    state.noteOpen.delete(nm);
+    state.opacity.delete(nm);
+  }
+
+  /**
+   * Creates an annotation. With `annotation.id` that id becomes the /NM (EmbedPDF honours a
+   * supplied id; verified by the tests), so undo and replay restore the same id; it must
+   * not exist on the page yet. Rects of quad/path/vertex kinds are derived from their
+   * geometry (see `effectiveRect`).
+   */
   async createAnnotation(
     id: SourceId,
     annotation: NewAnnotation,
@@ -564,27 +777,41 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   ): Promise<Annotation> {
     const engine = await this.engine();
     const { doc, page } = this.page(id, annotation.pageIndex);
-    const object = toEmbedPdf(annotation, '', pageGeometry(page));
-    let task: Task<string, PdfErrorReason>;
-    if (annotation.kind === 'stamp') {
-      if (!annotation.imageBlob) {
-        // TODO(M2): named (non-image) stamps need a generated appearance.
-        throw new EngineError('unsupported', 'Stamp annotations need an imageBlob');
+    this.checkFreeText(annotation);
+    const requested = annotation.id;
+    if (requested !== undefined) {
+      if (requested === '') throw new EngineError('internal', 'An annotation id cannot be empty');
+      const existing = await this.rawAnnotations(id, annotation.pageIndex, options);
+      if (existing.some((a) => a.id === requested)) {
+        throw new EngineError(
+          'internal',
+          `An annotation with id ${requested} already exists on page ${annotation.pageIndex}`,
+        );
       }
-      const data = await annotation.imageBlob.arrayBuffer();
-      task = engine.createPageAnnotation(doc, page, object, {
-        data,
-        ...(annotation.imageBlob.type === 'image/png' || annotation.imageBlob.type === 'image/jpeg'
-          ? { mimeType: annotation.imageBlob.type }
-          : {}),
-      } as never);
-    } else {
-      task = engine.createPageAnnotation(doc, page, object);
     }
+    const object = toEmbedPdf(annotation, requested ?? '', pageGeometry(page));
+    const task =
+      annotation.kind === 'stamp'
+        ? engine.createPageAnnotation(
+            doc,
+            page,
+            object,
+            (await this.stampContext(annotation)) as never,
+          )
+        : engine.createPageAnnotation(doc, page, object);
     const newId = await this.run(task, options, 'createAnnotation');
-    return this.reread(id, annotation.pageIndex, newId, { ...annotation, id: newId }, options);
+    this.remember(id, annotation, newId);
+    const { id: _requested, ...rest } = annotation;
+    return this.reread(id, annotation.pageIndex, newId, { ...rest, id: newId }, options);
   }
 
+  /**
+   * Updates an annotation to `annotation` (the full new state; its id and kind select it).
+   * For quad, path and vertex kinds the geometry is authoritative; when only `rect`
+   * changed, the geometry is moved and scaled with it (a move or resize of the box).
+   * Changes EmbedPDF cannot apply in place (fewer quads, a new stamp image or name) delete
+   * and recreate the annotation with the same /NM (it moves to the top of the z-order).
+   */
   async updateAnnotation(
     id: SourceId,
     annotation: Annotation,
@@ -592,16 +819,37 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   ): Promise<Annotation> {
     const engine = await this.engine();
     const { doc, page } = this.page(id, annotation.pageIndex);
+    const g = pageGeometry(page);
     const existing = await this.findAnnotation(id, annotation.pageIndex, annotation.id, options);
-    const next = { ...existing, ...toEmbedPdf(annotation, annotation.id, pageGeometry(page)) };
+    const before = this.mapRaw(id, existing, g);
+    if (before && before.kind !== annotation.kind) {
+      throw new EngineError(
+        'internal',
+        `Annotation ${annotation.id} is a ${before.kind}, not a ${annotation.kind}`,
+      );
+    }
+    this.checkFreeText(annotation);
+    const next = before ? followRect(before, annotation) : annotation;
+    const recreate =
+      (next.kind === 'stamp' &&
+        (next.imageBlob !== undefined ||
+          (before?.kind === 'stamp' && (next.name ?? '') !== (before.name ?? '')))) ||
+      ('quads' in next && before && 'quads' in before && next.quads.length < before.quads.length);
+    if (recreate) {
+      if (next.kind === 'stamp' && !next.imageBlob && !next.name) {
+        throw new EngineError('unsupported', 'Removing a stamp name needs a new imageBlob');
+      }
+      await this.run(engine.removePageAnnotation(doc, page, existing), options, 'updateAnnotation');
+      return this.createAnnotation(id, next, options);
+    }
+    const object = { ...existing, ...toEmbedPdf(next, annotation.id, g) };
     await this.run(
-      engine.updatePageAnnotation(doc, page, next, {
-        regenerateAppearance: true,
-      }),
+      engine.updatePageAnnotation(doc, page, object, { regenerateAppearance: true }),
       options,
       'updateAnnotation',
     );
-    return this.reread(id, annotation.pageIndex, annotation.id, annotation, options);
+    this.remember(id, next, annotation.id);
+    return this.reread(id, annotation.pageIndex, annotation.id, next, options);
   }
 
   async deleteAnnotation(
@@ -614,6 +862,26 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     const { doc, page } = this.page(id, pageIndex);
     const existing = await this.findAnnotation(id, pageIndex, annotationId, options);
     await this.run(engine.removePageAnnotation(doc, page, existing), options, 'deleteAnnotation');
+    // A note's popup stays in /Annots until `save()` drops it as an orphan.
+    this.forget(id, annotationId);
+  }
+
+  /** The annotation's appearance as a one-page PDF (e.g. to recreate a deleted stamp). */
+  async getAnnotationAppearance(
+    id: SourceId,
+    pageIndex: number,
+    annotationId: string,
+    options: EngineCallOptions = {},
+  ): Promise<Blob> {
+    const engine = await this.engine();
+    const { doc, page } = this.page(id, pageIndex);
+    const existing = await this.findAnnotation(id, pageIndex, annotationId, options);
+    const bytes = await this.run(
+      engine.exportAnnotationAppearanceAsPdf(doc, page, existing),
+      options,
+      'getAnnotationAppearance',
+    );
+    return new Blob([bytes], { type: 'application/pdf' });
   }
 
   // -------------------------------------------------------------------------
@@ -675,7 +943,7 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
         name: field.name,
         kind,
         pageIndex: page.index,
-        rect: deviceToUserRect(pageGeometry(page), widget.rect),
+        rect: annotationRectToUser(pageGeometry(page), widget.rect),
         ...(value === undefined ? {} : { value }),
         ...(options ? { options: options.map((o) => o.label) } : {}),
         readOnly: (field.flag & PDF_FORM_FIELD_FLAG.READONLY) !== 0,
@@ -756,8 +1024,11 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   }
 
   /**
-   * Full rewrite via FPDF_SaveAsCopy. Flattening happens on a scratch copy so the open source
-   * is not mutated; `removeSecurity` does mutate the open document's security state.
+   * Full rewrite via FPDF_SaveAsCopy, then the annotation post-pass (annotations/finalize.ts:
+   * /P, /M, /F Print, popups and note open state, stamp opacity) when annotations were
+   * edited, comments are excluded or annotations are flattened. Flattening happens on a
+   * scratch copy so the open source is not mutated; `removeSecurity` does mutate the open
+   * document's security state.
    */
   async save(id: SourceId, options: SaveOptions = {}): Promise<ArrayBuffer> {
     if (options.incremental) {
@@ -767,30 +1038,45 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     }
     const engine = await this.engine();
     const entry = this.entry(id);
+    const state = entry.annotations;
+    const includeComments = (options.includeComments ?? true) && !options.flattenAnnotations;
+    const finalize = state.dirty || !includeComments;
+    if (finalize && entry.doc.isEncrypted && !options.removeSecurity) {
+      // pdf-lib can read the encrypted copy but would write it unencrypted.
+      throw new EngineError(
+        'unsupported',
+        'Annotation edits in an encrypted document can only be saved with removeSecurity (the export re-encrypts the output)',
+      );
+    }
     if (options.removeSecurity && entry.doc.isEncrypted) {
       await this.run(engine.removeEncryption(entry.doc), options, 'save');
     }
-    const bytes = await this.run(engine.saveAsCopy(entry.doc), options, 'save');
+    let bytes = await this.run(engine.saveAsCopy(entry.doc), options, 'save');
+    if (finalize) {
+      const request: AnnotationFinalizeRequest = {
+        touched: [...state.touched],
+        noteOpen: Object.fromEntries(state.noteOpen),
+        opacity: Object.fromEntries(state.opacity),
+        includeComments,
+        now: new Date().toISOString(),
+      };
+      bytes = await this.finalize(bytes, request, options);
+    }
     if (!options.flattenAnnotations && !options.flattenForms) {
       return bytes;
     }
     return this.withScratch(bytes, entry.password, options, async (doc) => {
       for (const page of doc.pages) {
-        if (options.flattenAnnotations && options.flattenForms) {
-          await this.run(
-            engine.flattenPage(doc, page, { flag: PdfPageFlattenFlag.Display }),
-            options,
-            'flatten',
-          );
-          continue;
-        }
         const annotations = await this.run(
           engine.getPageAnnotations(doc, page),
           options,
           'flatten',
         );
         for (const annotation of annotations) {
-          const isWidget = annotation.type === PdfAnnotationSubtype.WIDGET;
+          const type = annotation.type;
+          // Links stay interactive; popups have no appearance and go with their parents.
+          if (type === PdfAnnotationSubtype.LINK || type === PdfAnnotationSubtype.POPUP) continue;
+          const isWidget = type === PdfAnnotationSubtype.WIDGET;
           if (isWidget ? options.flattenForms : options.flattenAnnotations) {
             await this.run(engine.flattenAnnotation(doc, page, annotation), options, 'flatten');
           }
@@ -798,6 +1084,30 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
       }
       return this.run(engine.saveAsCopy(doc), options, 'save');
     });
+  }
+
+  /** Runs the annotation post-pass in the inspector's worker when it offers one. */
+  private async finalize(
+    bytes: ArrayBuffer,
+    request: AnnotationFinalizeRequest,
+    options: EngineCallOptions,
+  ): Promise<ArrayBuffer> {
+    throwIfAborted(options.signal, 'save');
+    try {
+      const inspector = this.inspector;
+      const out = inspector?.finalizeAnnotations
+        ? await inspector.finalizeAnnotations(bytes, request, options)
+        : await finalizeAnnotations(bytes, request);
+      throwIfAborted(options.signal, 'save');
+      return out;
+    } catch (error) {
+      if (error instanceof EngineError) throw error;
+      throw new EngineError(
+        'internal',
+        `Annotation post-pass failed: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
   }
 
   private async withScratch<R>(
@@ -837,6 +1147,8 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   ): Promise<VerificationResult> {
     const scratchId = `__verify:${++this.scratchCounter}` as SourceId;
     const problems: string[] = [];
+    // `open` transfers the bytes to PDFium's worker; conformance parses its own copy.
+    const conformanceCopy = expectation.checkAnnotations ? bytes.slice(0) : undefined;
     let opened: OpenedDocument;
     try {
       opened = await this.open(
@@ -901,6 +1213,32 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
             `Form fields differ: got ${JSON.stringify(names)}, expected ${JSON.stringify(expected)}`,
           );
         }
+      }
+      if (expectation.annotationCounts) {
+        for (const [key, expected] of Object.entries(expectation.annotationCounts)) {
+          const pageIndex = Number(key);
+          if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= opened.pageCount) {
+            continue;
+          }
+          const listed = await this.listAnnotations(scratchId, pageIndex, options);
+          const actual = listed.filter((a) => a.kind !== 'link').length;
+          if (actual !== expected) {
+            problems.push(
+              `Page ${pageIndex + 1} has ${actual} annotation${actual === 1 ? '' : 's'}, expected ${expected}`,
+            );
+          }
+        }
+      }
+      if (conformanceCopy) {
+        const inspector = this.inspector;
+        const conformanceOptions = {
+          ...(expectation.annotationIds ? { ids: expectation.annotationIds } : {}),
+          ...(expectation.password === undefined ? {} : { password: expectation.password }),
+        };
+        const report = inspector?.checkAnnotations
+          ? await inspector.checkAnnotations(conformanceCopy, conformanceOptions, options)
+          : await checkAnnotationConformance(conformanceCopy, conformanceOptions);
+        problems.push(...describeProblems(report.problems));
       }
       for (const region of expectation.redactedRegions ?? []) {
         if (region.pageIndex >= opened.pageCount) continue;
@@ -1001,6 +1339,8 @@ interface ByteHeuristics {
   readonly objectStreams: boolean;
   readonly pageLabelsToken: boolean;
   readonly langToken: boolean;
+  readonly outlinesToken: boolean;
+  readonly popupToken: boolean;
 }
 
 function indexOfAscii(haystack: Uint8Array, needle: string, limit = haystack.length): number {
@@ -1031,6 +1371,8 @@ function scanBytes(bytes: Uint8Array): ByteHeuristics {
     objectStreams: indexOfAscii(bytes, '/ObjStm') !== -1,
     pageLabelsToken: indexOfAscii(bytes, '/PageLabels') !== -1,
     langToken: indexOfAscii(bytes, '/Lang') !== -1,
+    outlinesToken: indexOfAscii(bytes, '/Outlines') !== -1,
+    popupToken: indexOfAscii(bytes, '/Popup') !== -1,
   };
 }
 
@@ -1050,10 +1392,24 @@ function mapMetadata(m: PdfMetadataObject): DocumentMetadata {
   return out;
 }
 
-function mapView(zoom: PdfDestinationObject['zoom'], view: number[]): DestinationView | undefined {
+function mapView(
+  zoom: PdfDestinationObject['zoom'],
+  view: number[],
+  facts?: OutlineItemFacts['xyz'],
+): DestinationView | undefined {
   switch (zoom.mode) {
     case PdfZoomMode.XYZ: {
-      // PDFium reports absent parameters as 0; treat 0 as "keep current".
+      if (facts) {
+        // The inspector read the array itself: null means "keep current", 0 is a value.
+        return {
+          fit: 'xyz',
+          ...(facts.left === null ? {} : { left: facts.left }),
+          ...(facts.top === null ? {} : { top: facts.top }),
+          ...(facts.zoom === null || facts.zoom <= 0 ? {} : { zoom: facts.zoom }),
+        };
+      }
+      // Without the inspector: PDFium reports null parameters as 0, so 0 has to be read as
+      // "keep current" (a destination at exactly x = 0 or y = 0 loses that coordinate).
       const p = zoom.params;
       return {
         fit: 'xyz',
@@ -1082,7 +1438,10 @@ function mapView(zoom: PdfDestinationObject['zoom'], view: number[]): Destinatio
   }
 }
 
-function mapTarget(target: PdfLinkTarget | undefined): EngineOutlineNode['destination'] {
+function mapTarget(
+  target: PdfLinkTarget | undefined,
+  facts?: OutlineItemFacts,
+): EngineOutlineNode['destination'] {
   if (!target) return undefined;
   const destination =
     target.type === 'destination'
@@ -1094,7 +1453,7 @@ function mapTarget(target: PdfLinkTarget | undefined): EngineOutlineNode['destin
     if (destination.pageIndex < 0) {
       return { kind: 'unresolved', reason: 'destination page not found' };
     }
-    const view = mapView(destination.zoom, destination.view);
+    const view = mapView(destination.zoom, destination.view, facts?.xyz);
     return view
       ? { kind: 'page', pageIndex: destination.pageIndex, view }
       : { kind: 'page', pageIndex: destination.pageIndex };
@@ -1105,13 +1464,31 @@ function mapTarget(target: PdfLinkTarget | undefined): EngineOutlineNode['destin
   return { kind: 'unresolved', reason: 'unsupported action' };
 }
 
-function mapBookmark(b: PdfBookmarkObject): EngineOutlineNode {
-  const destination = mapTarget(b.target);
-  // EmbedPDF does not expose the /Count sign (open state); default to closed.
-  return {
-    title: b.title,
-    ...(destination ? { destination } : {}),
-    open: false,
-    children: (b.children ?? []).map(mapBookmark),
+function countBookmarks(nodes: readonly PdfBookmarkObject[]): number {
+  return nodes.reduce((sum, node) => sum + 1 + countBookmarks(node.children ?? []), 0);
+}
+
+/**
+ * EmbedPDF's bookmarks plus the inspector's per-item facts (pre-order): the open state
+ * (/Count sign, which EmbedPDF does not expose) and /XYZ null parameters. Facts are used
+ * only when both walks saw the same number of items; otherwise every item is closed and
+ * /XYZ zeros read as "keep current".
+ */
+function mapOutline(
+  bookmarks: readonly PdfBookmarkObject[],
+  facts: readonly OutlineItemFacts[] | undefined,
+): EngineOutlineNode[] {
+  const usable = facts?.length === countBookmarks(bookmarks) ? facts : undefined;
+  let next = 0;
+  const map = (b: PdfBookmarkObject): EngineOutlineNode => {
+    const fact = usable?.[next++];
+    const destination = mapTarget(b.target, fact);
+    return {
+      title: b.title,
+      ...(destination ? { destination } : {}),
+      open: fact?.open ?? false,
+      children: (b.children ?? []).map(map),
+    };
   };
+  return bookmarks.map(map);
 }

@@ -56,6 +56,21 @@ const api: AssemblerWorkerApi = {
   inspect(bytes: ArrayBuffer, password?: string) {
     return assembler.inspect(bytes, password === undefined ? {} : { password });
   },
+  async finalizeAnnotations(bytes, request) {
+    try {
+      const out = await assembler.finalizeAnnotations(bytes, request);
+      return transfer({ ok: true as const, bytes: out }, [out]);
+    } catch (error) {
+      return {
+        ok: false as const,
+        code: error instanceof EngineError ? error.code : 'internal',
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  },
+  checkAnnotations(bytes, options) {
+    return assembler.checkAnnotations(bytes, options);
+  },
 };
 
 expose(api);

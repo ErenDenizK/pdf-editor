@@ -8,9 +8,12 @@
 import { proxy, releaseProxy, transfer, wrap } from 'comlink';
 
 import {
+  type AnnotationConformanceReport,
+  type AnnotationFinalizeRequest,
   type AssemblyInput,
   type AssemblyOptions,
   type AssemblyResult,
+  type EngineCallOptions,
   EngineError,
   type InspectOptions,
   type PdfAssembler,
@@ -24,6 +27,16 @@ import {
 } from './assembler-protocol';
 
 export interface AssemblerProxy extends PdfAssembler, SourceInspector {
+  finalizeAnnotations(
+    bytes: ArrayBuffer,
+    request: AnnotationFinalizeRequest,
+    options?: EngineCallOptions,
+  ): Promise<ArrayBuffer>;
+  checkAnnotations(
+    bytes: ArrayBuffer,
+    options?: { readonly ids?: readonly string[]; readonly password?: string },
+    callOptions?: EngineCallOptions,
+  ): Promise<AnnotationConformanceReport>;
   /** One label per page, or undefined when the file has no /PageLabels. */
   getPageLabels(
     bytes: ArrayBuffer,
@@ -78,6 +91,22 @@ export function createAssemblerProxy(worker: Worker): AssemblerProxy {
     },
     async getPageLabels(bytes: ArrayBuffer, options: InspectOptions = {}) {
       return (await this.inspect(bytes, options)).pageLabels;
+    },
+    /** `bytes` are transferred (detached in the caller). */
+    async finalizeAnnotations(bytes, request, options = {}) {
+      if (options.signal?.aborted) {
+        throw new EngineError('aborted', 'save aborted', { cause: options.signal.reason });
+      }
+      const reply = await remote.finalizeAnnotations(transfer(bytes, [bytes]), request);
+      if (!reply.ok) throw new EngineError(reply.code, reply.message);
+      return reply.bytes;
+    },
+    /** `bytes` are transferred (detached in the caller). */
+    async checkAnnotations(bytes, options = {}, callOptions = {}) {
+      if (callOptions.signal?.aborted) {
+        throw new EngineError('aborted', 'verify aborted', { cause: callOptions.signal.reason });
+      }
+      return remote.checkAnnotations(transfer(bytes, [bytes]), options);
     },
     dispose(): void {
       remote[releaseProxy]();

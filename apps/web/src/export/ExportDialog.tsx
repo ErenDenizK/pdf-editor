@@ -1,5 +1,6 @@
 /**
- * Export dialog (ARCHITECTURE.md §4): file name and compatibility mode, then assembly and
+ * Export dialog (ARCHITECTURE.md §4): file name, compatibility mode and the annotation
+ * options (flatten, comments as popups; spec viewer-annotations.md §6), then assembly and
  * verification with progress, then the reconciliation summary — what was kept, rewritten,
  * renamed or removed — and only then the Save/Download button (a fresh click, which the
  * save picker needs as user activation). Styled as the password dialog.
@@ -76,6 +77,8 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
   const pageCount = doc?.pages.length ?? 0;
   const [fileName, setFileName] = useState(() => exportFileName(title));
   const [compatibility, setCompatibility] = useState(false);
+  const [flattenAnnotations, setFlattenAnnotations] = useState(false);
+  const [includeComments, setIncludeComments] = useState(true);
   const [step, setStep] = useState<Step>({ kind: 'form' });
   const controller = useRef<AbortController | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -96,6 +99,8 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
     setStep({ kind: 'working', progress: null });
     const result = await prepareExport(documentId, {
       compatibility,
+      flattenAnnotations,
+      includeComments,
       signal: abort.signal,
       onProgress: (progress) => {
         if (!abort.signal.aborted) setStep({ kind: 'working', progress });
@@ -187,6 +192,30 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
             <span>
               {m.export_compatibility()}
               <span className={styles.hint}>{m.export_compatibility_hint()}</span>
+            </span>
+          </label>
+          <label className={styles.check}>
+            <input
+              type="checkbox"
+              checked={flattenAnnotations}
+              onChange={(event) => setFlattenAnnotations(event.target.checked)}
+            />
+            <span>
+              {m.export_flatten_annotations()}
+              <span className={styles.hint}>{m.export_flatten_annotations_hint()}</span>
+            </span>
+          </label>
+          <label className={styles.check}>
+            <input
+              type="checkbox"
+              // Flattened annotations have no comments left to show.
+              checked={includeComments && !flattenAnnotations}
+              disabled={flattenAnnotations}
+              onChange={(event) => setIncludeComments(event.target.checked)}
+            />
+            <span>
+              {m.export_include_comments()}
+              <span className={styles.hint}>{m.export_include_comments_hint()}</span>
             </span>
           </label>
           <div className={styles.actions}>

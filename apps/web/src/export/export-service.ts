@@ -3,30 +3,41 @@
  *
  * 1. Plan (`planExport`, engine package): label ranges only when needed, outline without
  *    unresolved leaves, the verification expectation.
- * 2. Source bytes: sources with engine edits, encrypted sources (pdf-lib cannot read them
- *    without their password; security is removed) and sources PDFium repaired on open (the
- *    original bytes still carry the broken structure; ARCHITECTURE.md §5) go through
- *    `PdfEditor.save()`; the rest use the original bytes the engine service kept at open.
- *    Both removals and repairs are reported (`sourceNotes`, and a report warning), never
- *    silent (ARCHITECTURE.md §5).
- *    TODO(M2): engine edits (annotations, form values) are recorded in the model from M2
- *    on; the hook already routes such sources through `save()`.
+ * 2. Source bytes: sources with engine edits (the workspace store's `dirtySources` when it
+ *    has one, and sources with `workspace.engineEdits`), encrypted sources (pdf-lib cannot
+ *    read them without their password; security is removed) and sources PDFium repaired on
+ *    open (the original bytes still carry the broken structure; ARCHITECTURE.md §5) go
+ *    through `PdfEditor.save()`; so does every source when annotations are flattened or
+ *    comments are left out (spec viewer-annotations.md §6), because those options change
+ *    unedited sources too. The rest use the original bytes the engine service kept at
+ *    open. Removals and repairs are reported (`sourceNotes`, and a report warning), never
+ *    silent (ARCHITECTURE.md §5). Before saving, the annotations of every exported page of
+ *    an edited source are counted (`listAnnotations`) for verification.
  * 3. Assemble in the assembly worker, with progress. Image pages take their bytes from the
  *    workspace store's blobs (PNG or JPEG; WebP was re-encoded to PNG when inserted).
  * 4. Verify: re-open the output in PDFium (and pdf-lib via the inspector; with the user
  *    password when the output is encrypted) and compare page count, sizes, rotations,
- *    labels and outline. Only verified bytes are offered.
+ *    labels and outline; with edited annotations also the annotation count per page and
+ *    the annotation conformance rules for the annotations this app wrote. Only verified
+ *    bytes are offered.
  *
  * Never rejects: failures resolve to `{ ok: false }` with a message fit for the UI.
  */
-import type {
-  BlobId,
-  DocumentId,
-  SecurityPolicy,
-  SourceId,
-  Workspace,
+import {
+  type BlobId,
+  type DocumentId,
+  type SecurityPolicy,
+  type SourceId,
+  type VirtualDocument,
+  type Workspace,
 } from '@pdf-editor/document-model';
-import type { PdfAssembler, ReconciliationReport, VerificationResult } from '@pdf-editor/engine';
+import type {
+  PdfAssembler,
+  PdfEditor,
+  ReconciliationReport,
+  VerificationExpectation,
+  VerificationResult,
+} from '@pdf-editor/engine';
 
 import { getAssembler } from '../engine/assembler-client';
 import {
@@ -69,16 +80,30 @@ export interface ExportOptions {
   readonly compatibility?: boolean;
   /** Encrypt the output (overrides the document's own policy). */
   readonly security?: SecurityPolicy;
+  /**
+   * Bake annotations into the page content (spec §6, off by default). Links stay
+   * interactive; comments go with their annotations.
+   */
+  readonly flattenAnnotations?: boolean;
+  /** Write comment popups for notes and commented markup (spec §6, on by default). */
+  readonly includeComments?: boolean;
   readonly signal?: AbortSignal;
   readonly onProgress?: (progress: ExportProgress) => void;
 }
 
 export interface ExportDependencies {
-  readonly engine: Pick<EngineService, 'sourceBytes' | 'saveSource' | 'verify'>;
+  readonly engine: Pick<EngineService, 'sourceBytes' | 'saveSource' | 'verify'> &
+    /** Lists annotations for the per-page count check; without it counts are not checked. */
+    Partial<{ readonly editor: () => Promise<Pick<PdfEditor, 'listAnnotations'>> }>;
   readonly assembler: () => Promise<PdfAssembler>;
   readonly workspace: () => Workspace;
   /** Image bytes by blob id (image pages); defaults to none. */
   readonly blobs?: (id: BlobId) => ArrayBuffer | undefined;
+  /**
+   * Sources with engine edits not (or not yet) in `workspace.engineEdits`: the workspace
+   * store's `dirtySources`, when it has one.
+   */
+  readonly dirtySources?: () => ReadonlySet<SourceId> | undefined;
 }
 
 const defaultDependencies = (): ExportDependencies => ({
@@ -86,19 +111,87 @@ const defaultDependencies = (): ExportDependencies => ({
   assembler: getAssembler,
   workspace: () => useWorkspaceStore.getState().workspace,
   blobs: (id) => useWorkspaceStore.getState().blobs[id]?.bytes,
+  // Duck-typed: the store gains `dirtySources` with the annotation tools (M2).
+  dirtySources: () =>
+    (useWorkspaceStore.getState() as { readonly dirtySources?: ReadonlySet<SourceId> })
+      .dirtySources,
 });
 
 const failed = (message: string, code: 'internal' | 'aborted' = 'internal') =>
   ({ ok: false, error: { code, message } }) as const;
 
+/** What besides the source itself decides whether it goes through `PdfEditor.save()`. */
+export interface EngineSaveContext {
+  /** Sources with engine edits beyond `workspace.engineEdits` (the store's dirtySources). */
+  readonly dirty?: ReadonlySet<SourceId>;
+  readonly flattenAnnotations?: boolean;
+  readonly includeComments?: boolean;
+}
+
+/** Whether a source carries engine edits (annotations, form values). */
+export function hasEngineEdits(
+  ws: Workspace,
+  sourceId: SourceId,
+  dirty?: ReadonlySet<SourceId>,
+): boolean {
+  return dirty?.has(sourceId) === true || ws.engineEdits.some((edit) => edit.source === sourceId);
+}
+
 /** Whether a source must be serialized by PDFium instead of using its original bytes. */
-export function needsEngineSave(ws: Workspace, sourceId: SourceId): boolean {
+export function needsEngineSave(
+  ws: Workspace,
+  sourceId: SourceId,
+  context: EngineSaveContext = {},
+): boolean {
   const source = ws.sources[sourceId];
   return (
     source?.flags.encrypted === true ||
     source?.flags.repaired === true ||
-    ws.engineEdits.some((edit) => edit.source === sourceId)
+    context.flattenAnnotations === true ||
+    context.includeComments === false ||
+    hasEngineEdits(ws, sourceId, context.dirty)
   );
+}
+
+/**
+ * Expected annotations per output page (non-link, as the verifier counts them) for pages
+ * of edited sources, listed from the live engine documents before they are saved. With
+ * flattening every source page expects none. Pages from untouched sources are not listed:
+ * their bytes go through unchanged.
+ */
+async function expectedAnnotationCounts(
+  doc: VirtualDocument,
+  edited: ReadonlySet<SourceId>,
+  flatten: boolean,
+  listAnnotations: PdfEditor['listAnnotations'] | undefined,
+  signal: AbortSignal | undefined,
+): Promise<Record<number, number> | undefined> {
+  const counts: Record<number, number> = {};
+  const cache = new Map<string, number>();
+  let any = false;
+  for (const [index, page] of doc.pages.entries()) {
+    if (page.ref.kind !== 'source') continue;
+    if (flatten) {
+      counts[index] = 0;
+      any = true;
+      continue;
+    }
+    if (!listAnnotations || !edited.has(page.ref.source)) continue;
+    const key = `${page.ref.source}#${page.ref.index}`;
+    let count = cache.get(key);
+    if (count === undefined) {
+      const listed = await listAnnotations(
+        page.ref.source,
+        page.ref.index,
+        signal ? { signal } : {},
+      );
+      count = listed.filter((a) => a.kind !== 'link').length;
+      cache.set(key, count);
+    }
+    counts[index] = count;
+    any = true;
+  }
+  return any ? counts : undefined;
 }
 
 /** English report warnings for the source notes (the summary shows localized lines). */
@@ -130,8 +223,38 @@ export async function prepareExport(
   if (doc === undefined) return failed(m.export_error_closed());
   if (doc.pages.length === 0) return failed(m.export_error_no_pages());
   try {
-    const { planExport } = await import('@pdf-editor/engine');
+    const { annotationIdsOfEdits, planExport } = await import('@pdf-editor/engine');
     const plan = planExport(ws, documentId, options.security ? { security: options.security } : {});
+
+    const dirty = deps.dirtySources?.();
+    const edited = new Set(plan.sources.filter((id) => hasEngineEdits(ws, id, dirty)));
+    const flatten = options.flattenAnnotations === true;
+    const saveContext: EngineSaveContext = {
+      ...(dirty ? { dirty } : {}),
+      ...(flatten ? { flattenAnnotations: true } : {}),
+      ...(options.includeComments === false ? { includeComments: false } : {}),
+    };
+    const editor = edited.size > 0 && !flatten ? await deps.engine.editor?.() : undefined;
+    const annotationCounts = await expectedAnnotationCounts(
+      doc,
+      edited,
+      flatten,
+      editor ? (id, page, opts) => editor.listAnnotations(id, page, opts) : undefined,
+      signal,
+    );
+    const writtenIds = [
+      ...new Set(
+        [...annotationIdsOfEdits(ws.engineEdits)]
+          .filter(([source]) => edited.has(source as SourceId))
+          .flatMap(([, ids]) => [...ids]),
+      ),
+    ];
+    const expectation: VerificationExpectation = {
+      ...plan.expectation,
+      ...(annotationCounts ? { annotationCounts } : {}),
+      // Conformance covers the annotations this app wrote (sources keep their own).
+      ...(edited.size > 0 && !flatten ? { checkAnnotations: true, annotationIds: writtenIds } : {}),
+    };
 
     const sources = new Map<SourceId, ArrayBuffer>();
     const securityRemoved: string[] = [];
@@ -142,9 +265,11 @@ export async function prepareExport(
       const source = ws.sources[sourceId];
       const name = source?.name ?? m.unknown_file();
       const encrypted = source?.flags.encrypted === true;
-      const read = needsEngineSave(ws, sourceId)
+      const read = needsEngineSave(ws, sourceId, saveContext)
         ? await deps.engine.saveSource(sourceId, {
             removeSecurity: encrypted,
+            ...(flatten ? { flattenAnnotations: true } : {}),
+            ...(options.includeComments === false ? { includeComments: false } : {}),
             ...(signal ? { signal } : {}),
           })
         : await deps.engine.sourceBytes(sourceId);
@@ -189,7 +314,7 @@ export async function prepareExport(
 
     onProgress?.({ phase: 'verifying', done: 0, total: 1 });
     // The verifier's adapter transfers what it opens; keep `bytes` for the download.
-    const verified = await deps.engine.verify(bytes.slice(0), plan.expectation, signal);
+    const verified = await deps.engine.verify(bytes.slice(0), expectation, signal);
     if (!verified.ok) {
       return failed(
         m.export_error_check({ reason: verified.error.message }),
