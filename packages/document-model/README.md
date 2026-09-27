@@ -31,6 +31,34 @@ browser, in workers, in Node and in a future desktop shell.
   format (`version: 1`), rebuild every object through hand-written guards, and check
   invariants on load.
 
+## Operation semantics
+
+- **Consuming operations.** `interleave`, `mergeDocuments` and `splitDocument` move pages
+  (same ids) into new documents and remove the inputs; the first result takes the first
+  input's tab slot and becomes active. Exception: split in `ranges` mode leaves uncovered
+  pages in the original document, which keeps its tab; the parts follow it.
+- **Label attachment.** An explicit range stays with the page at its `startIndex`. Deleting
+  that page passes the anchor to the next surviving page (if ranges collide, the later one
+  wins; ranges past the end are dropped). Inserting before a range shifts it, so inserted
+  pages continue the preceding range; a range at index 0 never shifts. `reversePages`
+  leaves ranges in place.
+- **Moves shift labels like delete + insert,** also within one document: moving the first
+  body page to the end keeps the body numbered 1, 2, 3, … .
+- **Labels after reshaping.** Merge: no explicit ranges on any input → none on the result
+  (authored labels and positions flow through); otherwise each input's effective labels are
+  frozen into ranges. Interleave: restarts as plain decimal when either input had labels.
+  Split: each part keeps its label strings (covering range re-based). `needsPageLabels`
+  tells export whether `/PageLabels` is needed at all.
+- **Move order.** Moved pages keep tab order, then page order, regardless of the order of
+  `pageIds`. `target.index` is the gap the user sees before the moved pages are removed.
+- **Outlines.** Bookmarks stay in their document when their page leaves (as `unresolved`
+  with `previous`) and are restored if the page returns, including through merge.
+- **Return values.** `addSource` and `newEmptyDocument` return `{ workspace, …ids }`;
+  operations in `pages.ts` return only the `Workspace` and activate any new document, so
+  callers read the new id from `activeDocument` (first part for split).
+- **Dirty flag.** Any change to a document's pages, labels, overlays or title sets
+  `clean: false`; `markDocumentClean` resets it after export.
+
 ## Invariants
 
 `assertWorkspaceInvariants(ws)` checks tab order vs documents, unique page ownership, source

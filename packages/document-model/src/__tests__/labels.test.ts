@@ -6,6 +6,7 @@ import {
   formatRangeLabel,
   fromRoman,
   labelCandidates,
+  needsPageLabels,
   parseLabel,
   setLabelRanges,
   toAlpha,
@@ -13,7 +14,9 @@ import {
 } from '../labels';
 import { getDocument } from '../selectors';
 import type { DocumentId, PageLabelRange } from '../types';
-import { expectCode, labelsOf, open } from './fixtures';
+import { expectCode, labelsOf, must, open } from './fixtures';
+import { movePages, reversePages } from '../pages';
+import { newEmptyDocument } from '../workspace';
 
 /** Formats derived ranges back into strings; must reproduce the input exactly. */
 function render(ranges: readonly PageLabelRange[], count: number): string[] {
@@ -195,5 +198,44 @@ describe('effective labels', () => {
       { startIndex: 0, style: 'roman-lower' },
     ]);
     expect(labelsOf(next, a)).toEqual(['i', 'ii', '1']);
+  });
+});
+
+describe('needsPageLabels', () => {
+  const { ws, docs, ids } = open(['A', 3, { labels: ['iv', 'v', '1'] }], ['B', 3]);
+  const [a, b] = docs as [DocumentId, DocumentId];
+  const needs = (w: typeof ws, d: DocumentId): boolean => needsPageLabels(w, getDocument(w, d));
+
+  it('is false for plain 1…n numbering and for empty documents', () => {
+    expect(needs(ws, b)).toBe(false);
+    expect(needs(reversePages(ws, b), b)).toBe(false);
+    const empty = newEmptyDocument(ws, ids);
+    expect(needs(empty.workspace, empty.documentId)).toBe(false);
+  });
+
+  it('is false for explicit ranges that reproduce plain numbering', () => {
+    expect(
+      needs(setLabelRanges(ws, b, [{ startIndex: 0, style: 'decimal', firstNumber: 1 }]), b),
+    ).toBe(false);
+  });
+
+  it('is true for authored labels, offsets, prefixes and other styles', () => {
+    expect(needs(ws, a)).toBe(true);
+    expect(
+      needs(setLabelRanges(ws, b, [{ startIndex: 0, style: 'decimal', firstNumber: 2 }]), b),
+    ).toBe(true);
+    expect(
+      needs(setLabelRanges(ws, b, [{ startIndex: 0, style: 'decimal', prefix: 'B-' }]), b),
+    ).toBe(true);
+    expect(needs(setLabelRanges(ws, b, [{ startIndex: 2, style: 'roman-lower' }]), b)).toBe(true);
+  });
+
+  it('turns true when a page with an authored label moves in', () => {
+    const moved = movePages(ws, {
+      pageIds: [must(getDocument(ws, a).pages[0]).id],
+      target: { document: b, index: 3 },
+    });
+    expect(labelsOf(moved, b)).toEqual(['1', '2', '3', 'iv']);
+    expect(needs(moved, b)).toBe(true);
   });
 });

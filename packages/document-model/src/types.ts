@@ -81,6 +81,12 @@ export type PageRef =
   | { readonly kind: 'blank'; readonly size: Size }
   | { readonly kind: 'image'; readonly blob: BlobId; readonly size: Size };
 
+/**
+ * A page of a virtual document.
+ *
+ * TODO(M3): duplicating a page that carries form widgets needs a per-page policy (clone the
+ * fields under new names vs. share values with the original; ADR-0005). No field yet.
+ */
 export interface VirtualPage {
   readonly id: PageId;
   readonly ref: PageRef;

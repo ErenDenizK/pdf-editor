@@ -280,6 +280,15 @@ export function deriveLabelRanges(ws: Workspace, doc: VirtualDocument): PageLabe
   return deriveRangesFromLabels(effectiveLabels(ws, doc));
 }
 
+/**
+ * Whether export must write a /PageLabels tree. False when every effective label is the
+ * plain 1-based position ("1", "2", …, no prefix), which viewers show by default, and for
+ * empty documents.
+ */
+export function needsPageLabels(ws: Workspace, doc: VirtualDocument): boolean {
+  return doc.pages.some((_, index) => effectiveLabel(ws, doc, index) !== String(index + 1));
+}
+
 // ---------------------------------------------------------------------------
 // Validation and editing
 // ---------------------------------------------------------------------------
