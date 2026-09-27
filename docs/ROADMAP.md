@@ -77,6 +77,19 @@ Preview and Edge (manual matrix in `docs/qa/annotations-matrix.md`, sample file
 Structural conformance (AP, Rect, QuadPoints, /P, /NM, Print flag, opacity ExtGState,
 Multiply blend) is asserted automatically on every export.
 
+Known engine behaviours to keep in mind (from the M2 correctness review; tracked as
+follow-ups, not blockers):
+
+- EmbedPDF regenerates the page content stream on every annotation update, so an edited
+  source is exported through PDFium's re-serialization rather than byte-preserved.
+- Reading annotations assigns a `/NM` to any annotation that lacks one; edited sources
+  therefore leave with ids on annotations that had none.
+- Undoing a delete or update of an annotation that came with the file rebuilds it from our
+  mapping and regenerates its appearance; custom appearances, rich text and unmapped keys
+  are not restored. Annotations created in the app round-trip exactly.
+- Free text is limited to WinAnsi characters with the standard fonts until an embedded
+  Unicode font path exists (M3, together with overlay fonts).
+
 ## M3 — Documents as data  (→ v0.3)
 
 | Feature | Engine | Notes |
