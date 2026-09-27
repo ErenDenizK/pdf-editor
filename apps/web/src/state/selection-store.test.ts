@@ -5,9 +5,12 @@ import {
   clickSelection,
   EMPTY_SELECTION,
   extendSelection,
+  marqueeSelection,
   moveFocusIndex,
+  pruneClipboard,
   pruneSelection,
   rangeBetween,
+  sameSelection,
   selectAllOf,
   type SelectionSnapshot,
   toggleSelection,
@@ -93,5 +96,37 @@ describe('selection helpers', () => {
     expect(ids(pruned)).toEqual([a]);
     expect(pruned.anchor).toBeNull();
     expect(pruned.focused).toBeNull();
+  });
+});
+
+describe('marqueeSelection', () => {
+  const base = { selected: new Set([a]), anchor: a, focused: a };
+
+  it('replaces the selection with the hits, focusing the first', () => {
+    const next = marqueeSelection(base, [c, d], false);
+    expect([...next.selected]).toEqual([c, d]);
+    expect(next.focused).toBe(c);
+    expect(next.anchor).toBe(c);
+  });
+
+  it('adds to the selection at press time when additive (Shift / Mod)', () => {
+    expect([...marqueeSelection(base, [b], true).selected]).toEqual([a, b]);
+  });
+
+  it('keeps focus when the marquee touches nothing', () => {
+    const next = marqueeSelection(base, [], false);
+    expect(next.selected.size).toBe(0);
+    expect(next.focused).toBe(a);
+    expect(sameSelection(marqueeSelection(base, [], true).selected, base.selected)).toBe(true);
+  });
+});
+
+describe('pruneClipboard', () => {
+  it('drops pages that left the workspace and empties to null', () => {
+    const clipboard = { pageIds: [a, b], mode: 'cut' as const };
+    expect(pruneClipboard(clipboard, () => true)).toBe(clipboard);
+    expect(pruneClipboard(clipboard, (id) => id === b)).toEqual({ pageIds: [b], mode: 'cut' });
+    expect(pruneClipboard(clipboard, () => false)).toBeNull();
+    expect(pruneClipboard(null, () => true)).toBeNull();
   });
 });

@@ -40,49 +40,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.privacy {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  height: 22px;
-  margin: 0 calc(var(--space-2) * -1);
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-1);
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  transition:
-    background-color var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out);
-}
-
-@media (hover: hover) {
-  .privacy:hover {
-    background: var(--surface-hover);
-    color: var(--text-primary);
-  }
-}
-
-.privacy[data-popup-open] {
-  background: var(--surface-active);
-  color: var(--text-primary);
-}
-
-/* A small filled shield-dot: success when clean, warning otherwise. Text carries meaning. */
-.privacyMark {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--success);
-}
-
-.privacy[data-state='external'] .privacyMark {
-  background: var(--warning);
-}
-
-.privacy[data-state='external'] {
-  color: var(--warning);
-}
-
 .zoom,
 .modes {
   display: flex;

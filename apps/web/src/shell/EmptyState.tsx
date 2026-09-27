@@ -5,14 +5,15 @@
 import { commandRegistry } from '../commands/registry';
 import { currentPlatform, toAriaKeyShortcut } from '../commands/shortcuts';
 import { useCommand } from '../commands/use-commands';
+import { m } from '../i18n';
 import { Keycaps } from '../ui/Keycaps';
 import { AppGlyph } from './AppGlyph';
 import styles from './EmptyState.module.css';
 
 const HINTS = [
-  { id: 'file.open', label: 'Open files' },
-  { id: 'view.palette', label: 'Search commands' },
-  { id: 'help.shortcuts', label: 'Keyboard shortcuts' },
+  { id: 'file.open', label: m.open_files },
+  { id: 'view.palette', label: m.search_commands },
+  { id: 'help.shortcuts', label: m.keyboard_shortcuts },
 ] as const;
 
 export function EmptyState({ dragging }: { readonly dragging: boolean }) {
@@ -23,16 +24,16 @@ export function EmptyState({ dragging }: { readonly dragging: boolean }) {
           <span className={styles.glyph}>
             <AppGlyph size={24} />
           </span>
-          <h1 className={styles.title}>{dragging ? 'Release to open' : 'Drop PDFs to start'}</h1>
+          <h1 className={styles.title}>{dragging ? m.empty_title_dragging() : m.empty_title()}</h1>
           <p className={styles.body}>
-            Files open on this device and are never uploaded.
+            {m.empty_body_local()}
             <br />
-            Drop several to combine them.
+            {m.empty_body_combine()}
           </p>
         </div>
-        <ul className={styles.hints} aria-label="Get started">
+        <ul className={styles.hints} aria-label={m.empty_hints_label()}>
           {HINTS.map((hint) => (
-            <HintRow key={hint.id} id={hint.id} label={hint.label} />
+            <HintRow key={hint.id} id={hint.id} label={hint.label()} />
           ))}
         </ul>
       </div>

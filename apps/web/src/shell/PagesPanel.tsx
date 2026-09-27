@@ -23,6 +23,7 @@ import {
 
 import { currentPlatform } from '../commands/shortcuts';
 import { RENDER_PRIORITY } from '../engine/engine-service';
+import { m } from '../i18n';
 import { PageCanvas } from '../pages/PageCanvas';
 import { displaySize, fitInBox } from '../pages/page-geometry';
 import {
@@ -180,7 +181,7 @@ function PageList({
     <div
       ref={listRef}
       role="listbox"
-      aria-label={`Pages of ${doc.title}`}
+      aria-label={m.pages_list_label({ title: doc.title })}
       aria-multiselectable="true"
       tabIndex={-1}
       className={styles.pageList}
@@ -249,7 +250,11 @@ function PageOption({
       role="option"
       aria-selected={selected}
       aria-current={current ? 'page' : undefined}
-      aria-label={label === String(index + 1) ? `Page ${label}` : `Page ${index + 1} (${label})`}
+      aria-label={
+        label === String(index + 1)
+          ? m.page_option_label({ label })
+          : m.page_option_label_with_index({ position: index + 1, label })
+      }
       tabIndex={tabbable ? 0 : -1}
       data-page-id={page.id}
       className={styles.pageOption}

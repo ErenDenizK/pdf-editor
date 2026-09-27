@@ -14,11 +14,11 @@ import {
 import { type ReactNode, useEffect, useRef } from 'react';
 
 import { formatBytes } from '../files/file-filters';
+import { getLocale, m } from '../i18n';
 import { useSelectionStore } from '../state/selection-store';
 import { RIGHT_PANEL_WIDTH, useUiStore } from '../state/ui-store';
 import {
   documentSources,
-  pagesPhrase,
   useActiveDocument,
   useHasDocuments,
   useWorkspaceStore,
@@ -30,50 +30,42 @@ import styles from './RightPanel.module.css';
 
 const PANEL_ID = 'right-panel';
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' });
+const dateFormat = (value: number) =>
+  new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', timeStyle: 'short' }).format(value);
+const timeFormat = (value: number) =>
+  new Intl.DateTimeFormat(getLocale(), { timeStyle: 'short' }).format(value);
 
-/** Honesty badges: engine facts about a source and what export will do about them. */
+/**
+ * Honesty badges: engine facts about a source and what export will do about them. `label`
+ * and `explanation` are getters, so they read the active language on every access.
+ */
+function badge(
+  flag: keyof SourceFlags,
+  label: () => string,
+  explanation: () => string,
+): { readonly flag: keyof SourceFlags; readonly label: string; readonly explanation: string } {
+  return {
+    flag,
+    get label() {
+      return label();
+    },
+    get explanation() {
+      return explanation();
+    },
+  };
+}
+
 export const SOURCE_BADGES: readonly {
   readonly flag: keyof SourceFlags;
   readonly label: string;
   readonly explanation: string;
 }[] = [
-  {
-    flag: 'encrypted',
-    label: 'encrypted',
-    explanation:
-      'Encrypted: opened with its password. Exporting writes an unencrypted copy unless you set a password.',
-  },
-  {
-    flag: 'repaired',
-    label: 'repaired',
-    explanation:
-      'Repaired: the file was damaged and rebuilt on open. Exporting writes a repaired copy, never an incremental save onto the broken file.',
-  },
-  {
-    flag: 'hasAcroForm',
-    label: 'has form',
-    explanation:
-      'Has form: fields and values are kept on export; fields from different files are renamed by source when names collide.',
-  },
-  {
-    flag: 'hasXfa',
-    label: 'XFA',
-    explanation:
-      'XFA: this form uses XFA, which is not supported. Exporting keeps the regular form fields and removes the XFA data.',
-  },
-  {
-    flag: 'hasSignatures',
-    label: 'signed',
-    explanation: 'Signed: exporting will invalidate the signature unless saved incrementally.',
-  },
-  {
-    flag: 'tagged',
-    label: 'tagged',
-    explanation:
-      'Tagged: exporting keeps the accessibility structure when it can; if it cannot stay intact it is removed and you are told.',
-  },
+  badge('encrypted', m.badge_encrypted, m.badge_encrypted_explanation),
+  badge('repaired', m.badge_repaired, m.badge_repaired_explanation),
+  badge('hasAcroForm', m.badge_form, m.badge_form_explanation),
+  badge('hasXfa', m.badge_xfa, m.badge_xfa_explanation),
+  badge('hasSignatures', m.badge_signed, m.badge_signed_explanation),
+  badge('tagged', m.badge_tagged, m.badge_tagged_explanation),
 ];
 
 export function RightPanel() {
@@ -85,9 +77,14 @@ export function RightPanel() {
   if (!open || !hasDocuments) return null;
 
   return (
-    <aside id={PANEL_ID} aria-label="Inspector" className={styles.panel} style={{ width }}>
+    <aside
+      id={PANEL_ID}
+      aria-label={m.inspector_label()}
+      className={styles.panel}
+      style={{ width }}
+    >
       <ResizeHandle
-        label="Resize inspector"
+        label={m.inspector_resize()}
         controls={PANEL_ID}
         value={width}
         min={RIGHT_PANEL_WIDTH.min}
@@ -96,16 +93,19 @@ export function RightPanel() {
         onChange={setWidth}
       />
       <div className={styles.scroll}>
-        <Section title="Selection">
+        <Section id="selection" title={m.inspector_selection()}>
           <SelectionSection />
         </Section>
-        <Section title="Properties">
-          <EmptyNote title="No properties" body="Properties of the selection appear here." />
+        <Section id="properties" title={m.inspector_properties()}>
+          <EmptyNote
+            title={m.inspector_no_properties_title()}
+            body={m.inspector_no_properties_body()}
+          />
         </Section>
-        <Section title="History">
+        <Section id="history" title={m.inspector_history()}>
           <HistorySection />
         </Section>
-        <Section title="Info">
+        <Section id="info" title={m.inspector_info()}>
           <InfoSection />
         </Section>
       </div>
@@ -133,21 +133,26 @@ function SelectionSection() {
   const ws = useWorkspaceStore((s) => s.workspace);
   if (selected.size === 0) {
     return (
-      <EmptyNote title="Nothing selected" body="Select pages or annotations to act on them." />
+      <EmptyNote
+        title={m.inspector_nothing_selected_title()}
+        body={m.inspector_nothing_selected_body()}
+      />
     );
   }
   const { documents, labels } = describeSelection(ws, selected);
   const shown = labels.slice(0, 12).join(', ') + (labels.length > 12 ? ', …' : '');
   return (
     <dl className={styles.facts}>
-      <dt>Selected</dt>
+      <dt>{m.inspector_selected()}</dt>
       <dd className={styles.numeric}>
-        {pagesPhrase(selected.size)}
-        {documents > 1 ? <span className={styles.muted}> from {documents} documents</span> : null}
+        {m.pages_count({ count: selected.size })}
+        {documents > 1 ? (
+          <span className={styles.muted}>{m.inspector_from_documents({ count: documents })}</span>
+        ) : null}
       </dd>
       {labels.length > 0 ? (
         <>
-          <dt>Pages</dt>
+          <dt>{m.inspector_pages()}</dt>
           <dd className={styles.numeric} title={labels.join(', ')}>
             {shown}
           </dd>
@@ -168,11 +173,11 @@ function HistorySection() {
   }, [presentIndex, entries.length]);
   if (entries.length <= 1) {
     return (
-      <EmptyNote title="No changes yet" body="Every edit is recorded here and can be undone." />
+      <EmptyNote title={m.inspector_no_changes_title()} body={m.inspector_no_changes_body()} />
     );
   }
   return (
-    <ol ref={listRef} className={styles.history} aria-label="Undo history">
+    <ol ref={listRef} className={styles.history} aria-label={m.inspector_history_label()}>
       {entries.map((entry) => (
         <li key={`${entry.index}-${entry.at}`}>
           <button
@@ -183,7 +188,7 @@ function HistorySection() {
             onClick={() => jumpTo(entry.index)}
           >
             <span className={styles.historyLabel}>{entry.label}</span>
-            <span className={styles.historyTime}>{timeFormat.format(entry.at)}</span>
+            <span className={styles.historyTime}>{timeFormat(entry.at)}</span>
           </button>
         </li>
       ))}
@@ -195,7 +200,7 @@ function InfoSection() {
   const doc = useActiveDocument();
   const ws = useWorkspaceStore((s) => s.workspace);
   const files = useWorkspaceStore((s) => s.files);
-  if (!doc) return <EmptyNote title="No document open" />;
+  if (!doc) return <EmptyNote title={m.no_document_title()} />;
   const sources = documentSources(doc);
   const first = sources[0];
   const file = first === undefined ? undefined : files[first];
@@ -206,25 +211,25 @@ function InfoSection() {
   );
   return (
     <dl className={styles.facts}>
-      <dt>Name</dt>
+      <dt>{m.info_name()}</dt>
       <dd title={name}>{name}</dd>
       {sources.length > 1 ? (
         <>
-          <dt>Files</dt>
+          <dt>{m.info_files()}</dt>
           <dd className={styles.numeric}>{sources.length}</dd>
         </>
       ) : null}
-      <dt>Size</dt>
+      <dt>{m.info_size()}</dt>
       <dd className={styles.numeric}>{formatBytes(size)}</dd>
-      <dt>Pages</dt>
+      <dt>{m.info_pages()}</dt>
       <dd className={styles.numeric}>{doc.pages.length}</dd>
-      <dt>Modified</dt>
+      <dt>{m.info_modified()}</dt>
       <dd className={styles.numeric}>
-        {file && file.lastModified > 0 ? dateFormat.format(file.lastModified) : '—'}
+        {file && file.lastModified > 0 ? dateFormat(file.lastModified) : '—'}
       </dd>
       {badges.length > 0 ? (
         <>
-          <dt>Notes</dt>
+          <dt>{m.info_notes()}</dt>
           <dd className={styles.badges}>
             {badges.map((badge) => (
               <Tooltip key={badge.flag} label={badge.explanation} side="left">
@@ -240,8 +245,16 @@ function InfoSection() {
   );
 }
 
-function Section({ title, children }: { readonly title: string; readonly children: ReactNode }) {
-  const id = `inspector-${title.toLowerCase()}`;
+function Section({
+  id: key,
+  title,
+  children,
+}: {
+  readonly id: string;
+  readonly title: string;
+  readonly children: ReactNode;
+}) {
+  const id = `inspector-${key}`;
   return (
     <section className={styles.section} aria-labelledby={id}>
       <h2 id={id} className={styles.sectionTitle}>

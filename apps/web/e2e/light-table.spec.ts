@@ -1,0 +1,131 @@
+/**
+ * Light table end to end: real native drag and drop driven by mouse events (Playwright
+ * intercepts HTML5 drags in Chromium), tab context menu pinning, and screenshots for the
+ * design review (`CAPTURE_SCREENSHOTS=1`, written to docs/design/screenshots/).
+ */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+import { expect, type Page, test } from '@playwright/test';
+
+const fixtures = new URL('../../../test/fixtures/', import.meta.url);
+const screenshots = new URL('../../../docs/design/screenshots/', import.meta.url);
+const capture = Boolean(process.env.CAPTURE_SCREENSHOTS);
+
+/** Opens fixtures the way a user drops files on the window. */
+async function openFixtures(page: Page, names: readonly string[]): Promise<void> {
+  const files = names.map((name) => ({
+    name,
+    bytes: [...readFileSync(fileURLToPath(new URL(name, fixtures)))],
+  }));
+  // In-page code as a string: the e2e project has no DOM typings (it runs in Node).
+  const dataTransfer = await page.evaluateHandle(`(() => {
+    const transfer = new DataTransfer();
+    for (const file of ${JSON.stringify(files)}) {
+      transfer.items.add(
+        new File([new Uint8Array(file.bytes)], file.name, { type: 'application/pdf' }),
+      );
+    }
+    return transfer;
+  })()`);
+  await page.dispatchEvent('[data-testid="app-shell"]', 'drop', { dataTransfer });
+  for (const name of names) {
+    await expect(page.getByRole('tab', { name: name.replace(/\.pdf$/, '') })).toBeVisible();
+  }
+}
+
+/** Shows every open document in Arrange through the tab context menu. */
+async function showBothInArrange(page: Page, second: string): Promise<void> {
+  await page.getByRole('tab', { name: second }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Show in Arrange' }).click();
+  await expect(page.getByRole('grid')).toHaveCount(2);
+}
+
+function grid(page: Page, name: string) {
+  return page.getByRole('grid', { name });
+}
+
+test.describe('light table', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('drags a page from one document into another', async ({ page }) => {
+    await page.goto('./');
+    await openFixtures(page, ['simple-text.pdf', 'rotated-pages.pdf']);
+    await showBothInArrange(page, 'rotated-pages');
+
+    const source = grid(page, 'simple-text').getByRole('gridcell').nth(0);
+    const target = grid(page, 'rotated-pages').getByRole('gridcell').nth(1);
+    await expect(grid(page, 'rotated-pages').getByRole('gridcell')).toHaveCount(4);
+
+    await source.hover();
+    await page.mouse.down();
+    const box = await target.boundingBox();
+    if (!box) throw new Error('target cell not rendered');
+    // Right part of the second cell → the gap after it (index 2).
+    await page.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.4, { steps: 12 });
+    await expect(page.getByTestId('insertion-bar')).toBeVisible();
+    await expect(page.getByTestId('insertion-bar')).toHaveAttribute('data-index', '2');
+    await expect(page.getByTestId('contextual-bar')).toHaveCount(0);
+    await page.mouse.up();
+
+    await expect(grid(page, 'rotated-pages').getByRole('gridcell')).toHaveCount(5);
+    await expect(grid(page, 'simple-text').getByRole('gridcell')).toHaveCount(2);
+    await expect(grid(page, 'rotated-pages').getByRole('gridcell').nth(2)).toHaveAccessibleName(
+      'Page 3 of 5, from simple-text.pdf',
+    );
+    await expect(page.getByTestId('insertion-bar')).toHaveCount(0);
+
+    // One undo step brings it back.
+    await page.keyboard.press('ControlOrMeta+z');
+    await expect(grid(page, 'simple-text').getByRole('gridcell')).toHaveCount(3);
+  });
+
+  test('marquee selects across sections', async ({ page }) => {
+    await page.goto('./');
+    await openFixtures(page, ['simple-text.pdf', 'rotated-pages.pdf']);
+    await showBothInArrange(page, 'rotated-pages');
+    const last = grid(page, 'simple-text').getByRole('gridcell').nth(2);
+    const first = grid(page, 'rotated-pages').getByRole('gridcell').nth(0);
+    const from = await last.boundingBox();
+    const to = await first.boundingBox();
+    if (!from || !to) throw new Error('cells not rendered');
+    // Start in the empty space right of the last cell of the first section.
+    await page.mouse.move(from.x + from.width + 60, from.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(to.x + 10, to.y + 20, { steps: 8 });
+    await expect(page.getByTestId('marquee')).toBeVisible();
+    await page.mouse.up();
+    await expect(page.getByText(/^\d+ selected in 2 documents$/)).toBeVisible();
+  });
+
+  test('screenshots for design review', async ({ page }) => {
+    test.skip(!capture, 'Set CAPTURE_SCREENSHOTS=1 to write docs/design/screenshots/.');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('./');
+    await openFixtures(page, ['outline-named-dests.pdf', 'forms-a.pdf']);
+    await showBothInArrange(page, 'forms-a');
+    await page.waitForFunction(
+      `document.querySelectorAll('[role="gridcell"] canvas[data-state="rendered"]').length >= 8`,
+    );
+    const cells = grid(page, 'outline-named-dests').getByRole('gridcell');
+    await cells.nth(1).click();
+    await cells.nth(2).click({ modifiers: ['Shift'] });
+    await expect(page.getByTestId('contextual-bar')).toBeVisible();
+    await page.mouse.move(700, 880);
+    await page.screenshot({
+      path: fileURLToPath(new URL('m1-light-table-two-sections-1440.png', screenshots)),
+    });
+
+    const target = grid(page, 'forms-a').getByRole('gridcell').nth(0);
+    await cells.nth(1).hover();
+    await page.mouse.down();
+    const box = await target.boundingBox();
+    if (!box) throw new Error('target cell not rendered');
+    await page.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.4, { steps: 12 });
+    await expect(page.getByTestId('insertion-bar')).toBeVisible();
+    await page.screenshot({
+      path: fileURLToPath(new URL('m1-light-table-drag-1440.png', screenshots)),
+    });
+    await page.mouse.up();
+  });
+});

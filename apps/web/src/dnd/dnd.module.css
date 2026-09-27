@@ -1,0 +1,55 @@
+/*
+ * Native drag preview (light-table spec §3). The browser snapshots this element once when
+ * the drag starts, so it is static: no transitions, no custom properties that could change.
+ */
+.preview {
+  position: relative;
+  opacity: 0.9;
+  transform: scale(0.96);
+  transform-origin: top left;
+}
+
+.preview[data-still] {
+  transform: none;
+}
+
+.previewSheet,
+.previewFace {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.18);
+}
+
+.previewSheet {
+  background: #e9eaee;
+}
+
+.previewFace {
+  overflow: hidden;
+}
+
+.previewFace canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.previewBadge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: #7c8cff;
+  color: #0a0b0d;
+  font:
+    600 12px / 22px 'Inter Variable',
+    system-ui,
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}

@@ -5,6 +5,7 @@
  * Panel layout is persisted to localStorage (see `safe-storage.ts`); everything else is
  * per session.
  */
+import type { DocumentId } from '@pdf-editor/document-model';
 import { create } from 'zustand';
 
 import { readJson, writeJson } from './safe-storage';
@@ -93,6 +94,13 @@ export interface UiState extends PersistedLayout {
   /** Command ids, most recent first. In memory only. */
   recents: readonly string[];
   tool: ToolId;
+  /**
+   * Documents pinned into the light table as sections, besides the active one (spec §1).
+   * Session only; ids of closed documents are ignored by readers and pruned on unpin.
+   */
+  arrangePinned: readonly DocumentId[];
+  /** Light-table sections shown collapsed (header only). Session only. */
+  arrangeCollapsed: readonly DocumentId[];
 
   toggleLeftPanel: () => void;
   /** Opens the left panel on a view; selecting the open view again collapses it. */
@@ -117,6 +125,21 @@ export interface UiState extends PersistedLayout {
   setShortcutsOpen: (open: boolean) => void;
   pushRecent: (commandId: string) => void;
   setTool: (tool: ToolId) => void;
+  /**
+   * Pins documents into the light table. `alsoKeep` (the active document) is pinned too,
+   * so switching tabs later never drops a section the user was looking at.
+   */
+  pinToArrange: (ids: readonly DocumentId[], alsoKeep?: DocumentId) => void;
+  unpinFromArrange: (id: DocumentId) => void;
+  setArrangeCollapsed: (id: DocumentId, collapsed: boolean) => void;
+}
+
+function withIds(
+  list: readonly DocumentId[],
+  ids: readonly (DocumentId | undefined)[],
+): readonly DocumentId[] {
+  const added = ids.filter((id): id is DocumentId => id !== undefined && !list.includes(id));
+  return added.length === 0 ? list : [...list, ...new Set(added)];
 }
 
 export const useUiStore = create<UiState>()((set, get) => ({
@@ -129,6 +152,8 @@ export const useUiStore = create<UiState>()((set, get) => ({
   shortcutsOpen: false,
   recents: [],
   tool: 'select',
+  arrangePinned: [],
+  arrangeCollapsed: [],
 
   toggleLeftPanel: () => set((s) => ({ leftPanelOpen: !s.leftPanelOpen })),
   showLeftPanelView: (view) =>
@@ -167,6 +192,26 @@ export const useUiStore = create<UiState>()((set, get) => ({
   pushRecent: (id) =>
     set((s) => ({ recents: [id, ...s.recents.filter((r) => r !== id)].slice(0, MAX_RECENTS) })),
   setTool: (tool) => set({ tool }),
+  pinToArrange: (ids, alsoKeep) =>
+    set((s) => {
+      const arrangePinned = withIds(s.arrangePinned, [alsoKeep, ...ids]);
+      return arrangePinned === s.arrangePinned ? s : { arrangePinned };
+    }),
+  unpinFromArrange: (id) =>
+    set((s) =>
+      s.arrangePinned.includes(id)
+        ? { arrangePinned: s.arrangePinned.filter((pinned) => pinned !== id) }
+        : s,
+    ),
+  setArrangeCollapsed: (id, collapsed) =>
+    set((s) => {
+      if (s.arrangeCollapsed.includes(id) === collapsed) return s;
+      return {
+        arrangeCollapsed: collapsed
+          ? [...s.arrangeCollapsed, id]
+          : s.arrangeCollapsed.filter((c) => c !== id),
+      };
+    }),
 }));
 
 // Persist layout changes only; the comparison avoids a write on every zoom or keystroke.

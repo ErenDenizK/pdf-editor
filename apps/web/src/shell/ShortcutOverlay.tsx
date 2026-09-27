@@ -9,23 +9,26 @@ import { useRef } from 'react';
 import { groupCommands } from '../commands/registry';
 import { type ParsedShortcut, parseShortcut } from '../commands/shortcuts';
 import { useCommands } from '../commands/use-commands';
+import { m } from '../i18n';
 import { useUiStore } from '../state/ui-store';
 import { Keycaps } from '../ui/Keycaps';
 import styles from './ShortcutOverlay.module.css';
 
-const WIDGET_KEYS: readonly { title: string; keys: readonly ParsedShortcut[] }[] = [
-  { title: 'Move between tabs', keys: [parseShortcut('Left'), parseShortcut('Right')] },
-  { title: 'Close focused tab', keys: [parseShortcut('Delete')] },
-  { title: 'Move between tools', keys: [parseShortcut('Left'), parseShortcut('Right')] },
-  { title: 'Resize a focused panel edge', keys: [parseShortcut('Left'), parseShortcut('Right')] },
-  { title: 'Move focus between pages', keys: [parseShortcut('Left'), parseShortcut('Down')] },
+/** In-widget keys; `title` is a message function so it follows the active language. */
+const WIDGET_KEYS: readonly { title: () => string; keys: readonly ParsedShortcut[] }[] = [
+  { title: m.shortcuts_move_tabs, keys: [parseShortcut('Left'), parseShortcut('Right')] },
+  { title: m.shortcuts_close_tab, keys: [parseShortcut('Delete')] },
+  { title: m.shortcuts_move_tools, keys: [parseShortcut('Left'), parseShortcut('Right')] },
+  { title: m.shortcuts_resize_panel, keys: [parseShortcut('Left'), parseShortcut('Right')] },
+  { title: m.shortcuts_move_focus_pages, keys: [parseShortcut('Left'), parseShortcut('Down')] },
   {
-    title: 'Extend page selection',
+    title: m.shortcuts_extend_selection,
     keys: [parseShortcut('Shift+Left'), parseShortcut('Shift+Down')],
   },
-  { title: 'Toggle page selection', keys: [parseShortcut('Space')] },
-  { title: 'Move pages one row', keys: [parseShortcut('Alt+Up'), parseShortcut('Alt+Down')] },
-  { title: 'Open page in Read mode', keys: [parseShortcut('Enter')] },
+  { title: m.shortcuts_toggle_selection, keys: [parseShortcut('Space')] },
+  { title: m.shortcuts_move_row, keys: [parseShortcut('Alt+Up'), parseShortcut('Alt+Down')] },
+  { title: m.shortcuts_open_in_read, keys: [parseShortcut('Enter')] },
+  { title: m.shortcuts_outline_expand, keys: [parseShortcut('Left'), parseShortcut('Right')] },
 ];
 
 export function ShortcutOverlay() {
@@ -42,8 +45,8 @@ export function ShortcutOverlay() {
         <Dialog.Backdrop className={styles.backdrop} />
         <Dialog.Popup className={styles.popup} initialFocus={popupRef} ref={popupRef}>
           <div className={styles.header}>
-            <Dialog.Title className={styles.title}>Keyboard shortcuts</Dialog.Title>
-            <Dialog.Close className={styles.close} aria-label="Close">
+            <Dialog.Title className={styles.title}>{m.keyboard_shortcuts()}</Dialog.Title>
+            <Dialog.Close className={styles.close} aria-label={m.common_close()}>
               <X aria-hidden="true" />
             </Dialog.Close>
           </div>
@@ -72,12 +75,12 @@ export function ShortcutOverlay() {
             ))}
             <section className={styles.group} aria-labelledby="keys-widgets">
               <h3 id="keys-widgets" className={styles.groupTitle}>
-                In focus
+                {m.shortcuts_in_focus()}
               </h3>
               <dl className={styles.rows}>
                 {WIDGET_KEYS.map((row) => (
-                  <div key={row.title} className={styles.row}>
-                    <dt className={styles.rowTitle}>{row.title}</dt>
+                  <div key={row.title()} className={styles.row}>
+                    <dt className={styles.rowTitle}>{row.title()}</dt>
                     <dd className={styles.keys}>
                       {row.keys.map((shortcut, index) => (
                         <Keycaps key={index} shortcut={shortcut} />

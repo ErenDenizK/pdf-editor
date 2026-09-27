@@ -18,8 +18,10 @@ import {
 } from 'lucide-react';
 import { type KeyboardEvent, useRef, useState } from 'react';
 
+import { TOOLS } from '../commands/app-commands';
 import { commandRegistry } from '../commands/registry';
 import { useCommands } from '../commands/use-commands';
+import { m } from '../i18n';
 import { useSelectionStore } from '../state/selection-store';
 import { type ToolId, useUiStore } from '../state/ui-store';
 import { IconButton } from '../ui/IconButton';
@@ -36,9 +38,9 @@ const TOOL_ICONS: Record<ToolId, typeof Type> = {
 
 /** Page actions; `command: null` marks one that is not built yet. */
 const PAGE_ACTIONS = [
-  { key: 'rotate', label: 'Rotate pages', Icon: RotateCw, command: 'pages.rotateRight' },
-  { key: 'delete', label: 'Delete pages', Icon: Trash2, command: 'pages.delete' },
-  { key: 'extract', label: 'Extract pages', Icon: FileOutput, command: null },
+  { key: 'rotate', label: m.action_rotate_pages, Icon: RotateCw, command: 'pages.rotateRight' },
+  { key: 'delete', label: m.action_delete_pages, Icon: Trash2, command: 'pages.delete' },
+  { key: 'extract', label: m.action_extract_pages, Icon: FileOutput, command: null },
 ] as const;
 
 export function FloatingToolbar() {
@@ -75,7 +77,7 @@ export function FloatingToolbar() {
     <div
       ref={ref}
       role="toolbar"
-      aria-label="Tools"
+      aria-label={m.toolbar_label()}
       aria-orientation="horizontal"
       className={styles.toolbar}
       onKeyDown={onKeyDown}
@@ -88,7 +90,7 @@ export function FloatingToolbar() {
             key={command.id}
             size="toolbar"
             tooltipSide="top"
-            label={command.title.replace(/ tool$/, '')}
+            label={TOOLS.find((t) => t.id === id)?.title() ?? command.title}
             icon={<Icon />}
             shortcut={command.shortcuts[0]}
             aria-pressed={tool === id}
@@ -106,13 +108,19 @@ export function FloatingToolbar() {
             key={key}
             size="toolbar"
             tooltipSide="top"
-            label={label}
-            tooltip={command === null ? `${label} · Coming in M1` : undefined}
+            label={label()}
+            tooltip={
+              command === null ? m.action_coming_soon_tooltip({ label: label() }) : undefined
+            }
             icon={<Icon />}
             shortcut={registered?.shortcuts[0]}
             aria-disabled={enabled ? undefined : 'true'}
             aria-description={
-              command === null ? 'Coming in M1' : enabled ? undefined : 'Select pages first'
+              command === null
+                ? m.action_coming_soon()
+                : enabled
+                  ? undefined
+                  : m.action_select_pages_first()
             }
             tabIndex={tabIndexFor(toolCommands.length + position)}
             onClick={() => {

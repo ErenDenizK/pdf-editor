@@ -41,6 +41,7 @@ import {
 import { create } from 'zustand';
 
 import { type EngineFailure, getEngineService, type OpenedSource } from '../engine/engine-service';
+import { m } from '../i18n';
 
 /** Number of source colour tags in tokens.css (`--tag-0` … `--tag-5`). */
 export const SOURCE_TAG_COUNT = 6;
@@ -78,6 +79,17 @@ interface WorkspaceState {
   rotatePages: (pageIds: readonly PageId[], delta: number) => boolean;
   deletePages: (pageIds: readonly PageId[]) => boolean;
   duplicatePages: (pageIds: readonly PageId[]) => boolean;
+  /**
+   * Commits any model operation (or a composition of several) as one labelled history
+   * entry. The operation receives the store's id generator for new pages and documents.
+   * A label function is called after the operation ran, for labels that depend on the
+   * outcome. Returns false when the operation threw or changed nothing.
+   */
+  applyOperation: (
+    operation: (ws: Workspace, ids: IdGenerator) => Workspace,
+    label: string | (() => string),
+    options?: { readonly coalesceKey?: string },
+  ) => boolean;
   undo: () => string | undefined;
   redo: () => string | undefined;
   jumpTo: (index: number) => void;
@@ -87,7 +99,7 @@ const ids: IdGenerator = createRandomIdGenerator();
 let colorCounter = 0;
 
 export function pagesPhrase(count: number): string {
-  return `${count} ${count === 1 ? 'page' : 'pages'}`;
+  return m.pages_count({ count });
 }
 
 /** Stable key for a set of pages; used to coalesce repeated edits of one selection. */
@@ -110,7 +122,7 @@ function toSourceInput(opened: OpenedSource): SourceInput {
 }
 
 function initialHistory(): History {
-  return createHistory(createWorkspace(), 'Start', Date.now());
+  return createHistory(createWorkspace(), m.history_start(), Date.now());
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
@@ -196,14 +208,17 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
           continue;
         }
         const source = result.value;
-        const sourceIds: IdGenerator = { ...ids, source: () => source.id };
         let documentId: DocumentId | undefined;
         const colorIndex = colorCounter % SOURCE_TAG_COUNT;
-        const added = commit((ws) => {
-          const r = addSource(ws, toSourceInput(source), sourceIds);
-          documentId = r.documentId;
-          return r.workspace;
-        }, `Open ${source.name}`);
+        const added = commit(
+          (ws) => {
+            // The engine's id is the handle to the open document (and its retained bytes).
+            const r = addSource(ws, toSourceInput(source), ids, { sourceId: source.id });
+            documentId = r.documentId;
+            return r.workspace;
+          },
+          m.history_open({ name: source.name }),
+        );
         if (!added || documentId === undefined) {
           void service.close(source.id);
           skipped.push({
@@ -241,11 +256,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
       if (doc === undefined) return;
       const sources = new Set<SourceId>();
       for (const page of doc.pages) if (page.ref.kind === 'source') sources.add(page.ref.source);
-      commit((ws) => {
-        let next = closeDocumentOp(ws, id);
-        for (const source of sources) next = removeSourceIfUnreferenced(next, source);
-        return next;
-      }, `Close ${doc.title}`);
+      commit(
+        (ws) => {
+          let next = closeDocumentOp(ws, id);
+          for (const source of sources) next = removeSourceIfUnreferenced(next, source);
+          return next;
+        },
+        m.history_close({ name: doc.title }),
+      );
     },
 
     setActive: (id) => {
@@ -258,7 +276,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
       pageIds.length > 0 &&
       commit(
         (ws) => movePagesOp(ws, { pageIds, target }),
-        options.label ?? `Move ${pagesPhrase(pageIds.length)}`,
+        options.label ?? m.history_move({ count: pageIds.length }),
         options.coalesceKey,
       ),
 
@@ -266,20 +284,34 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
       pageIds.length > 0 &&
       commit(
         (ws) => rotatePagesOp(ws, pageIds, delta),
-        `Rotate ${pagesPhrase(pageIds.length)}`,
+        m.history_rotate({ count: pageIds.length }),
         `rotate:${selectionKey(pageIds)}`,
       ),
 
     deletePages: (pageIds) =>
       pageIds.length > 0 &&
-      commit((ws) => deletePagesOp(ws, pageIds), `Delete ${pagesPhrase(pageIds.length)}`),
+      commit((ws) => deletePagesOp(ws, pageIds), m.history_delete({ count: pageIds.length })),
 
     duplicatePages: (pageIds) =>
       pageIds.length > 0 &&
       commit(
         (ws) => duplicatePagesOp(ws, pageIds, ids),
-        `Duplicate ${pagesPhrase(pageIds.length)}`,
+        m.history_duplicate({ count: pageIds.length }),
       ),
+
+    applyOperation: (operation, label, options = {}) => {
+      if (typeof label === 'string') {
+        return commit((ws) => operation(ws, ids), label, options.coalesceKey);
+      }
+      let next: Workspace;
+      try {
+        next = operation(get().workspace, ids);
+      } catch (error) {
+        console.warn('Operation failed', error);
+        return false;
+      }
+      return commit(() => next, label(), options.coalesceKey);
+    },
 
     undo: () => {
       const label = get().history.present.label;

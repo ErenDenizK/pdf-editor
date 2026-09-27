@@ -1,0 +1,431 @@
+/*
+ * Light table (docs/specs/light-table.md). Geometry constants live in dnd/geometry.ts
+ * (GRID); anything here that affects layout must agree with them.
+ */
+
+.frame {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* Background file-drop outline (files open as new documents). */
+.backgroundOutline {
+  position: absolute;
+  inset: var(--space-2);
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-3);
+  pointer-events: none;
+}
+
+.dropLabel {
+  padding: 6px var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+}
+
+.table {
+  position: relative;
+  min-width: 100%;
+  outline: none;
+}
+
+/* ---------------------------------------------------------------- sections */
+
+.section {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-3);
+}
+
+.section[data-drop-outline]::after {
+  content: '';
+  position: absolute;
+  inset: 0 var(--space-3);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-3);
+  background: var(--accent-subtle);
+  pointer-events: none;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  height: 48px;
+  /* The collapse chevron hangs in the side gutter so the title lines up with the cells. */
+  padding: 0 var(--space-4) 0 0;
+  background: var(--surface-0);
+}
+
+.header::after {
+  content: '';
+  position: absolute;
+  right: var(--space-8);
+  bottom: 12px;
+  left: var(--space-8);
+  height: 1px;
+  background: var(--border-hairline);
+}
+
+.headerButton {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+}
+
+.headerButton svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.headerButton[aria-expanded='false'] svg {
+  transform: rotate(-90deg);
+}
+
+@media (hover: hover) {
+  .headerButton:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.sectionTitle {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sectionCount {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.sectionTags {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.sectionTag {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tag-color);
+}
+
+.badges {
+  display: inline-flex;
+  gap: var(--space-1);
+  flex: none;
+}
+
+.badge {
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+}
+
+.headerSpacer {
+  flex: 1;
+}
+
+.pinnedMark {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------- grid */
+
+.grid {
+  position: relative;
+  flex: none;
+  outline: none;
+}
+
+.row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  width: 100%;
+}
+
+.emptyRow {
+  display: grid;
+  place-items: center;
+  margin: 0 var(--space-8);
+  height: calc(100% - var(--space-4));
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.cell {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  min-width: 0;
+  border-radius: var(--radius-2);
+}
+
+.cell:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 4px;
+}
+
+.cell[data-dragging] {
+  opacity: 0.35;
+}
+
+.cell[data-cut] .thumbSheet {
+  opacity: 0.5;
+}
+
+.box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.thumbSheet {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--page-background);
+  box-shadow: var(--page-shadow);
+}
+
+/* Source colour tag: a thin 2px bar along the bottom of the thumbnail (spec §1). */
+.thumbSheet::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--tag-color);
+}
+
+.cell[aria-selected='true'] .thumbSheet {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* Label row and hover actions share the reserved gutter under the thumbnail. */
+.meta {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  padding-top: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.cell[aria-selected='true'] .meta {
+  color: var(--text-primary);
+}
+
+.label {
+  overflow: hidden;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outlineGlyph {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--text-tertiary);
+  stroke-width: 1.75;
+}
+
+.hoverActions {
+  position: absolute;
+  top: 6px;
+  right: 0;
+  display: flex;
+  gap: 2px;
+  visibility: hidden;
+}
+
+@media (hover: hover) {
+  .cell:hover .hoverActions {
+    visibility: visible;
+  }
+}
+
+.table[data-dragging] .hoverActions {
+  visibility: hidden;
+}
+
+.hoverAction {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-1);
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.hoverAction svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.5;
+}
+
+@media (hover: hover) {
+  .hoverAction:hover {
+    background: var(--surface-active);
+    color: var(--text-primary);
+  }
+}
+
+/* ---------------------------------------------------------------- drop feedback */
+
+.insertionBar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+  transition: transform 60ms var(--ease-out);
+}
+
+.insertionBar[data-duplicate]::before {
+  content: '+';
+  position: absolute;
+  top: -18px;
+  left: -6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--surface-0);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .insertionBar {
+    transition: none;
+  }
+}
+
+.marquee {
+  position: absolute;
+  z-index: 4;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--accent-subtle);
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- contextual bar */
+
+.contextBar {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-1);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-3);
+  background: var(--glass-solid);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .contextBar {
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+  }
+}
+
+.contextCount {
+  padding: 0 var(--space-2) 0 var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.contextDivider {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 var(--space-1);
+  background: var(--border-strong);
+}
+
+.menuKeys {
+  margin-left: auto;
+}
+
+.menuSubmenuArrow {
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  color: var(--text-tertiary);
+}

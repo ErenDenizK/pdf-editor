@@ -55,7 +55,8 @@
   padding: var(--space-1) var(--space-4) var(--space-4);
 }
 
-.panelBody[data-view='pages'] {
+.panelBody[data-view='pages'],
+.panelBody[data-view='outline'] {
   display: flex;
   flex-direction: column;
   overflow: hidden;

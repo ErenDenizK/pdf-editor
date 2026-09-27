@@ -8,6 +8,8 @@ import {
   type Workspace,
 } from '@pdf-editor/document-model';
 
+import { m } from '../i18n';
+
 /** CSS pixels per PDF point at 100% zoom (96 dpi CSS inch / 72 pt). */
 export const CSS_PX_PER_PT = 96 / 72;
 
@@ -34,5 +36,5 @@ export function fitInBox(size: Size, boxWidth: number, boxHeight: number): Size 
 
 /** Human rotation phrase for labels, e.g. ", rotated 90 degrees". */
 export function rotationPhrase(total: number): string {
-  return total === 0 ? '' : `, rotated ${total} degrees`;
+  return total === 0 ? '' : m.rotated_degrees({ degrees: total });
 }

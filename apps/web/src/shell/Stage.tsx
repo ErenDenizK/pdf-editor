@@ -5,6 +5,7 @@
  */
 import { type KeyboardEvent, useRef } from 'react';
 
+import { m } from '../i18n';
 import { ArrangeView } from '../stage/ArrangeView';
 import { ReadView } from '../stage/ReadView';
 import { useUiStore, type ViewMode } from '../state/ui-store';
@@ -25,7 +26,12 @@ export function Stage({ dragging }: { readonly dragging: boolean }) {
 
   if (!hasDocuments) {
     return (
-      <main id={STAGE_ID} className={styles.stage} aria-label="Start" aria-busy={opening > 0}>
+      <main
+        id={STAGE_ID}
+        className={styles.stage}
+        aria-label={m.stage_start_label()}
+        aria-busy={opening > 0}
+      >
         <EmptyState dragging={dragging} />
       </main>
     );
@@ -42,31 +48,35 @@ export function Stage({ dragging }: { readonly dragging: boolean }) {
       <div className={styles.header}>
         <ModeSwitch />
       </div>
-      {doc?.pages.length === 0 ? (
+      {doc?.pages.length === 0 && viewMode === 'read' ? (
         <div className={styles.emptyDocument}>
-          <EmptyNote title="No pages left" body="Undo brings deleted pages back." />
+          <EmptyNote title={m.stage_no_pages_title()} body={m.stage_no_pages_body()} />
         </div>
       ) : null}
-      {doc && doc.pages.length > 0 ? (
-        viewMode === 'read' ? (
-          <ReadView key={doc.id} doc={doc} />
-        ) : (
-          <ArrangeView key={doc.id} doc={doc} />
-        )
+      {/* Arrange is not keyed: it shows several documents (sections) and keeps its scroll. */}
+      {viewMode === 'arrange' ? <ArrangeView /> : null}
+      {doc && doc.pages.length > 0 && viewMode === 'read' ? (
+        <ReadView key={doc.id} doc={doc} />
       ) : null}
       <FloatingToolbar />
-      {dragging ? (
+      {/* In Arrange, the light table outlines its own file-drop targets. */}
+      {dragging && viewMode !== 'arrange' ? (
         <div className={styles.dropOverlay} aria-hidden="true">
-          <span className={styles.dropLabel}>Drop to open in new tabs</span>
+          <span className={styles.dropLabel}>{m.stage_drop_overlay()}</span>
         </div>
       ) : null}
     </main>
   );
 }
 
-const MODES: readonly { id: ViewMode; label: string; command: string }[] = [
-  { id: 'read', label: 'Read', command: 'mode.read' },
-  { id: 'arrange', label: 'Arrange', command: 'mode.arrange' },
+const MODES: readonly {
+  id: ViewMode;
+  label: () => string;
+  tooltip: () => string;
+  command: string;
+}[] = [
+  { id: 'read', label: m.mode_read, tooltip: m.mode_read_long, command: 'mode.read' },
+  { id: 'arrange', label: m.mode_arrange, tooltip: m.mode_arrange_long, command: 'mode.arrange' },
 ];
 
 /** Segmented control, APG radio group: arrows move and select. */
@@ -86,13 +96,13 @@ function ModeSwitch() {
   };
 
   return (
-    <div ref={ref} role="radiogroup" aria-label="View mode" className={styles.segmented}>
+    <div ref={ref} role="radiogroup" aria-label={m.view_mode_label()} className={styles.segmented}>
       {MODES.map((mode) => {
         const checked = viewMode === mode.id;
         return (
           <Tooltip
             key={mode.id}
-            label={`${mode.label} mode`}
+            label={mode.tooltip()}
             shortcut={mode.id === 'read' ? readShortcut : arrangeShortcut}
           >
             <button
@@ -105,7 +115,7 @@ function ModeSwitch() {
               onKeyDown={onKeyDown}
               onClick={() => setViewMode(mode.id)}
             >
-              {mode.label}
+              {mode.label()}
             </button>
           </Tooltip>
         );

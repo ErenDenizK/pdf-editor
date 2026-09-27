@@ -10,19 +10,21 @@ import { type SourceId, sourceReferences } from '@pdf-editor/document-model';
 
 import { commandRegistry } from '../commands/registry';
 import { formatBytes } from '../files/file-filters';
+import { m } from '../i18n';
 import { LEFT_PANEL_WIDTH, type LeftPanelView, useUiStore } from '../state/ui-store';
 import { useActiveDocument, useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
 import { ResizeHandle } from '../ui/ResizeHandle';
 import { EmptyNote } from './EmptyNote';
 import styles from './LeftRail.module.css';
+import { OutlinePanel } from './OutlinePanel';
 import { PagesPanel } from './PagesPanel';
 import { useCommandShortcut } from './use-command-shortcut';
 
-const VIEWS: readonly { id: LeftPanelView; label: string; Icon: typeof FileStack }[] = [
-  { id: 'pages', label: 'Pages', Icon: FileStack },
-  { id: 'outline', label: 'Outline', Icon: ListTree },
-  { id: 'files', label: 'Files', Icon: Files },
+const VIEWS: readonly { id: LeftPanelView; label: () => string; Icon: typeof FileStack }[] = [
+  { id: 'pages', label: m.view_pages, Icon: FileStack },
+  { id: 'outline', label: m.view_outline, Icon: ListTree },
+  { id: 'files', label: m.view_files, Icon: Files },
 ];
 
 const PANEL_ID = 'left-panel';
@@ -51,16 +53,16 @@ export function LeftRail() {
     tabs[next]?.focus();
   };
 
-  const activeLabel = VIEWS.find((v) => v.id === view)?.label ?? '';
+  const activeLabel = VIEWS.find((v) => v.id === view)?.label() ?? '';
 
   return (
-    <aside className={styles.left} aria-label="Navigator">
+    <aside className={styles.left} aria-label={m.nav_label()}>
       <div className={styles.rail}>
         <div
           ref={railRef}
           role="tablist"
           aria-orientation="vertical"
-          aria-label="Navigator views"
+          aria-label={m.nav_views_label()}
           className={styles.railTabs}
         >
           {VIEWS.map(({ id, label, Icon }) => {
@@ -70,7 +72,7 @@ export function LeftRail() {
                 key={id}
                 id={`rail-${id}`}
                 role="tab"
-                label={label}
+                label={label()}
                 icon={<Icon />}
                 tooltipSide="right"
                 shortcut={selected ? toggleShortcut : undefined}
@@ -86,7 +88,7 @@ export function LeftRail() {
         </div>
         <div className={styles.railFooter}>
           <IconButton
-            label="Keyboard shortcuts"
+            label={m.keyboard_shortcuts()}
             icon={<Keyboard />}
             tooltipSide="right"
             shortcut={shortcutsShortcut}
@@ -107,11 +109,11 @@ export function LeftRail() {
           <h2 className={styles.panelTitle}>{activeLabel}</h2>
           <div className={styles.panelBody} data-view={view}>
             {view === 'pages' ? <PagesView /> : null}
-            {view === 'outline' ? <OutlineView /> : null}
+            {view === 'outline' ? <OutlinePanel /> : null}
             {view === 'files' ? <FilesView /> : null}
           </div>
           <ResizeHandle
-            label="Resize navigator"
+            label={m.nav_resize()}
             controls={PANEL_ID}
             value={width}
             min={LEFT_PANEL_WIDTH.min}
@@ -130,29 +132,18 @@ function PagesView() {
   if (!doc) {
     return (
       <div className={styles.pagesEmpty}>
-        <EmptyNote title="No document open" body="Page thumbnails appear here." />
+        <EmptyNote title={m.no_document_title()} body={m.pages_empty_body()} />
       </div>
     );
   }
   if (doc.pages.length === 0) {
     return (
       <div className={styles.pagesEmpty}>
-        <EmptyNote title="No pages" body="This document has no pages left." />
+        <EmptyNote title={m.pages_none_title()} body={m.pages_none_body()} />
       </div>
     );
   }
   return <PagesPanel doc={doc} />;
-}
-
-function OutlineView() {
-  const doc = useActiveDocument();
-  if (!doc)
-    return (
-      <EmptyNote title="No document open" body="Bookmarks of the open document appear here." />
-    );
-  return (
-    <EmptyNote title="No outline" body="This document’s bookmarks appear here once it is parsed." />
-  );
 }
 
 /** Opened files (sources). Clicking one activates the first document showing its pages. */
@@ -162,7 +153,7 @@ function FilesView() {
   const setActive = useWorkspaceStore((s) => s.setActive);
   const sources = Object.keys(workspace.sources) as SourceId[];
   if (sources.length === 0) {
-    return <EmptyNote title="No files open" body="Every file you open stays on this device." />;
+    return <EmptyNote title={m.files_empty_title()} body={m.files_empty_body()} />;
   }
   return (
     <ul className={styles.fileList}>

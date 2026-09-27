@@ -3,10 +3,11 @@
  * on the right. Numerals are tabular so counts never jitter (DESIGN.md §3).
  */
 import { Menu } from '@base-ui/react/menu';
-import { Popover } from '@base-ui/react/popover';
 import { BookOpen, LayoutGrid, Minus, Plus } from 'lucide-react';
 
-import { useExternalRequests } from '../privacy/external-requests';
+import { formatPercent, m } from '../i18n';
+import { PrivacyIndicator } from '../privacy/PrivacyIndicator';
+import { useShownSections } from '../stage/arrange-data';
 import { useSelectionStore } from '../state/selection-store';
 import { MAX_ZOOM, MIN_ZOOM, useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
@@ -14,15 +15,10 @@ import { useActiveDocument, useHasDocuments, useWorkspaceStore } from '../state/
 import { IconButton } from '../ui/IconButton';
 import { Keycaps } from '../ui/Keycaps';
 import menuStyles from '../ui/Menu.module.css';
-import popoverStyles from '../ui/Popover.module.css';
 import styles from './StatusBar.module.css';
 import { useCommandShortcut } from './use-command-shortcut';
 
 const ZOOM_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
-
-export function plural(count: number, one: string, many = `${one}s`): string {
-  return `${count} ${count === 1 ? one : many}`;
-}
 
 /** "N selected" or "N selected in M documents" (light-table spec §2). */
 function useSelectionSummary(): string | null {
@@ -34,8 +30,24 @@ function useSelectionSummary(): string | null {
     if (workspace.documents[id]?.pages.some((p) => selected.has(p.id))) documents.add(id);
   }
   return documents.size > 1
-    ? `${selected.size} selected in ${documents.size} documents`
-    : `${selected.size} selected`;
+    ? m.status_selected_in_documents({ count: selected.size, documents: documents.size })
+    : m.status_selected({ count: selected.size });
+}
+
+/** "· N documents shown" when the light table shows more than one section (spec §6). */
+function ArrangeShown() {
+  const shown = useShownSections().length;
+  if (shown < 2) return null;
+  return (
+    <>
+      <span className={styles.dot} aria-hidden="true">
+        ·
+      </span>
+      <span className={styles.item} data-testid="status-shown">
+        {shown} documents shown
+      </span>
+    </>
+  );
 }
 
 export function StatusBar() {
@@ -47,10 +59,14 @@ export function StatusBar() {
   const selection = useSelectionSummary();
   const pageCount = doc?.pages.length ?? 0;
   let summary: string;
-  if (!doc) summary = opening > 0 ? `Opening ${plural(opening, 'file')}…` : plural(0, 'document');
-  else if (viewMode === 'read' && pageCount > 0) {
-    summary = `Page ${Math.min(currentPage, pageCount - 1) + 1} of ${pageCount}`;
-  } else summary = plural(pageCount, 'page');
+  if (!doc) {
+    summary = opening > 0 ? m.status_opening({ count: opening }) : m.documents_count({ count: 0 });
+  } else if (viewMode === 'read' && pageCount > 0) {
+    summary = m.status_page_of({
+      current: Math.min(currentPage, pageCount - 1) + 1,
+      total: pageCount,
+    });
+  } else summary = m.pages_count({ count: pageCount });
 
   return (
     <footer className={styles.bar}>
@@ -58,6 +74,7 @@ export function StatusBar() {
         <span className={styles.item} data-testid="status-pages">
           {summary}
         </span>
+        {viewMode === 'arrange' ? <ArrangeShown /> : null}
         {selection ? (
           <>
             <span className={styles.dot} aria-hidden="true">
@@ -71,7 +88,7 @@ export function StatusBar() {
             <span className={styles.dot} aria-hidden="true">
               ·
             </span>
-            <span className={styles.item}>Opening {plural(opening, 'file')}…</span>
+            <span className={styles.item}>{m.status_opening({ count: opening })}</span>
           </>
         ) : null}
         <span className={styles.dot} aria-hidden="true">
@@ -90,44 +107,6 @@ export function StatusBar() {
   );
 }
 
-function PrivacyIndicator() {
-  const { count, origins } = useExternalRequests();
-  const clean = count === 0;
-  return (
-    <Popover.Root>
-      <Popover.Trigger className={styles.privacy} data-state={clean ? 'clean' : 'external'}>
-        <span className={styles.privacyMark} aria-hidden="true" />
-        <span>Local only</span>
-        <span className={styles.dot} aria-hidden="true">
-          ·
-        </span>
-        <span className={styles.numeric}>{plural(count, 'external request')}</span>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Positioner side="top" align="start" sideOffset={8} collisionPadding={8}>
-          <Popover.Popup className={popoverStyles.popup}>
-            <Popover.Title className={popoverStyles.title}>
-              {clean ? 'Nothing has left this device' : 'This page contacted other servers'}
-            </Popover.Title>
-            <Popover.Description className={popoverStyles.body}>
-              Files are read into memory in this tab and are never uploaded. The count is measured
-              live from the browser’s resource timing: every request to an origin other than this
-              site is counted.
-            </Popover.Description>
-            {origins.length > 0 ? (
-              <ul className={popoverStyles.list}>
-                {origins.map((origin) => (
-                  <li key={origin}>{origin}</li>
-                ))}
-              </ul>
-            ) : null}
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
-  );
-}
-
 function ZoomControls() {
   const zoom = useUiStore((s) => s.zoom);
   const fitMode = useUiStore((s) => s.fitMode);
@@ -139,12 +118,12 @@ function ZoomControls() {
   const inShortcut = useCommandShortcut('zoom.in');
   const outShortcut = useCommandShortcut('zoom.out');
   const fitShortcut = useCommandShortcut('zoom.fit');
-  const percent = `${Math.round(zoom * 100)}%`;
+  const percent = formatPercent(zoom);
 
   return (
     <div className={styles.zoom}>
       <IconButton
-        label="Zoom out"
+        label={m.zoom_out()}
         icon={<Minus />}
         shortcut={outShortcut}
         tooltipSide="top"
@@ -153,7 +132,7 @@ function ZoomControls() {
         onClick={zoomOut}
       />
       <Menu.Root>
-        <Menu.Trigger className={styles.zoomValue} aria-label={`Zoom ${percent}`}>
+        <Menu.Trigger className={styles.zoomValue} aria-label={m.zoom_value_label({ percent })}>
           {percent}
         </Menu.Trigger>
         <Menu.Portal>
@@ -169,12 +148,12 @@ function ZoomControls() {
               >
                 <Menu.RadioItem className={menuStyles.item} value="fit-width" closeOnClick>
                   <span className={menuStyles.check} aria-hidden="true" />
-                  <span className={menuStyles.label}>Fit width</span>
+                  <span className={menuStyles.label}>{m.zoom_fit_width()}</span>
                   {fitShortcut ? <Keycaps shortcut={fitShortcut} tone="quiet" /> : null}
                 </Menu.RadioItem>
                 <Menu.RadioItem className={menuStyles.item} value="fit-page" closeOnClick>
                   <span className={menuStyles.check} aria-hidden="true" />
-                  <span className={menuStyles.label}>Fit page</span>
+                  <span className={menuStyles.label}>{m.zoom_fit_page()}</span>
                 </Menu.RadioItem>
                 <Menu.Separator className={menuStyles.separator} />
                 {ZOOM_PRESETS.map((preset) => (
@@ -186,7 +165,7 @@ function ZoomControls() {
                   >
                     <span className={menuStyles.check} aria-hidden="true" />
                     <span className={`${menuStyles.label} ${styles.numeric}`}>
-                      {Math.round(preset * 100)}%
+                      {formatPercent(preset)}
                     </span>
                   </Menu.RadioItem>
                 ))}
@@ -196,7 +175,7 @@ function ZoomControls() {
         </Menu.Portal>
       </Menu.Root>
       <IconButton
-        label="Zoom in"
+        label={m.zoom_in()}
         icon={<Plus />}
         shortcut={inShortcut}
         tooltipSide="top"
@@ -216,7 +195,7 @@ function ModeToggles() {
   return (
     <div className={styles.modes}>
       <IconButton
-        label="Read mode"
+        label={m.mode_read_long()}
         icon={<BookOpen />}
         shortcut={readShortcut}
         tooltipSide="top"
@@ -225,7 +204,7 @@ function ModeToggles() {
         onClick={() => setViewMode('read')}
       />
       <IconButton
-        label="Arrange mode"
+        label={m.mode_arrange_long()}
         icon={<LayoutGrid />}
         shortcut={arrangeShortcut}
         tooltipSide="top"

@@ -4,7 +4,8 @@
  * selection from an ordered page list so they are testable without React.
  *
  * Selection may span documents and survives mode switches. Pages that leave the
- * workspace (delete, undo of an open) are pruned automatically.
+ * workspace (delete, undo of an open) are pruned automatically, from the selection and
+ * from the light table's page clipboard (Mod+X / Mod+C, spec §3).
  */
 import type { PageId, Workspace } from '@pdf-editor/document-model';
 import { create } from 'zustand';
@@ -118,6 +119,29 @@ export function moveFocusIndex(
   }
 }
 
+/**
+ * Marquee selection (spec §2): the pages under the rectangle, added to `base` when the
+ * marquee is additive (Shift or Mod held at press). Focus and anchor move to the first hit
+ * so a following Shift+Click extends from where the marquee started.
+ */
+export function marqueeSelection(
+  base: SelectionSnapshot,
+  hits: readonly PageId[],
+  additive: boolean,
+): SelectionSnapshot {
+  const selected = new Set(additive ? [...base.selected, ...hits] : hits);
+  const first = hits[0];
+  if (first === undefined) return { ...base, selected };
+  return { selected, anchor: first, focused: first };
+}
+
+/** Same members, regardless of order. */
+export function sameSelection(a: ReadonlySet<PageId>, b: ReadonlySet<PageId>): boolean {
+  if (a.size !== b.size) return false;
+  for (const id of a) if (!b.has(id)) return false;
+  return true;
+}
+
 /** Drops ids for which `exists` is false; returns `state` itself when nothing changed. */
 export function pruneSelection(
   state: SelectionSnapshot,
@@ -136,18 +160,42 @@ export function pruneSelection(
   return { selected: new Set(selected), anchor, focused };
 }
 
+/**
+ * Pages cut (moved on paste) or copied (duplicated on paste) in the light table. This is
+ * an in-app clipboard of page ids, not the system clipboard: pages are model objects.
+ */
+export interface PageClipboard {
+  readonly pageIds: readonly PageId[];
+  readonly mode: 'cut' | 'copy';
+}
+
 interface SelectionState extends SelectionSnapshot {
+  readonly clipboard: PageClipboard | null;
   apply: (next: SelectionSnapshot) => void;
   clear: () => void;
   setFocused: (id: PageId | null) => void;
+  setClipboard: (clipboard: PageClipboard | null) => void;
 }
 
 export const useSelectionStore = create<SelectionState>()((set) => ({
   ...EMPTY_SELECTION,
+  clipboard: null,
   apply: (next) => set({ selected: next.selected, anchor: next.anchor, focused: next.focused }),
   clear: () => set((s) => (s.selected.size === 0 ? s : { selected: new Set(), anchor: null })),
   setFocused: (focused) => set({ focused }),
+  setClipboard: (clipboard) => set({ clipboard }),
 }));
+
+/** Drops clipboard pages that no longer exist; null when none are left. */
+export function pruneClipboard(
+  clipboard: PageClipboard | null,
+  exists: (id: PageId) => boolean,
+): PageClipboard | null {
+  if (clipboard === null) return null;
+  const pageIds = clipboard.pageIds.filter(exists);
+  if (pageIds.length === clipboard.pageIds.length) return clipboard;
+  return pageIds.length === 0 ? null : { ...clipboard, pageIds };
+}
 
 export function selectionSnapshot(): SelectionSnapshot {
   const { selected, anchor, focused } = useSelectionStore.getState();
@@ -164,7 +212,12 @@ function pageExistsIn(ws: Workspace): (id: PageId) => boolean {
 useWorkspaceStore.subscribe((state, previous) => {
   if (state.workspace === previous.workspace) return;
   const current = selectionSnapshot();
-  if (current.selected.size === 0 && current.anchor === null && current.focused === null) return;
-  const next = pruneSelection(current, pageExistsIn(state.workspace));
+  const { clipboard } = useSelectionStore.getState();
+  const empty = current.selected.size === 0 && current.anchor === null && current.focused === null;
+  if (empty && clipboard === null) return;
+  const exists = pageExistsIn(state.workspace);
+  const next = pruneSelection(current, exists);
   if (next !== current) useSelectionStore.getState().apply(next);
+  const nextClipboard = pruneClipboard(clipboard, exists);
+  if (nextClipboard !== clipboard) useSelectionStore.getState().setClipboard(nextClipboard);
 });

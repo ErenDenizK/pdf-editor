@@ -7,6 +7,7 @@
  *
  * All results are filtered to PDFs by type or extension (`file-filters.ts`).
  */
+import { m } from '../i18n';
 import {
   collectFromEntries,
   collectFromHandles,
@@ -49,7 +50,9 @@ export async function pickPdfFiles(): Promise<File[]> {
       const handles = await picker.call(window, {
         multiple: true,
         id: 'pdf-editor-open',
-        types: [{ description: 'PDF documents', accept: { 'application/pdf': ['.pdf'] } }],
+        types: [
+          { description: m.file_picker_description(), accept: { 'application/pdf': ['.pdf'] } },
+        ],
       });
       // TODO(save): keep the handles so "Save" can write back in place on Chromium.
       const files = await Promise.all(handles.map((handle) => handle.getFile()));
@@ -108,8 +111,20 @@ interface CapturedItem {
  * as the drop handler returns.
  */
 export async function filesFromDataTransfer(dataTransfer: DataTransfer): Promise<File[]> {
-  const items = Array.from(dataTransfer.items ?? []).filter((item) => item.kind === 'file');
-  if (items.length === 0) return filterPdfFiles(dataTransfer.files ?? []);
+  return filesFromItems(Array.from(dataTransfer.items ?? []), dataTransfer.files ?? []);
+}
+
+/**
+ * Same as `filesFromDataTransfer`, from an item list captured during a drop (e.g. the
+ * `items` a drag-and-drop library hands its drop handler). Call it synchronously inside the
+ * drop handler.
+ */
+export async function filesFromItems(
+  allItems: readonly DataTransferItem[],
+  fallback: Iterable<File> | ArrayLike<File> = [],
+): Promise<File[]> {
+  const items = allItems.filter((item) => item.kind === 'file');
+  if (items.length === 0) return filterPdfFiles(Array.from(fallback));
 
   const captured: CapturedItem[] = items.map((item) => {
     const withHandle = item as DataTransferItem & DataTransferItemWithHandle;

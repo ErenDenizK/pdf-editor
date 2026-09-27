@@ -8,12 +8,14 @@
  * Delete (announced through `aria-keyshortcuts`) or the "Close tab" command.
  */
 import type { DocumentId } from '@pdf-editor/document-model';
-import { PanelRight, Plus, Search, X } from 'lucide-react';
+import { Download, PanelRight, Plus, Search, X } from 'lucide-react';
 import { type KeyboardEvent, useEffect } from 'react';
 
 import { openFilesFromPicker } from '../commands/app-commands';
 import { commandRegistry } from '../commands/registry';
 import { currentPlatform, toAriaKeyShortcut } from '../commands/shortcuts';
+import { m } from '../i18n';
+import { TabArrangeMenu } from '../stage/TabArrangeMenu';
 import { useUiStore } from '../state/ui-store';
 import { useTabItems, useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
@@ -39,6 +41,7 @@ export function TabBar() {
   const openShortcut = useCommandShortcut('file.open');
   const paletteShortcut = useCommandShortcut('view.palette');
   const rightShortcut = useCommandShortcut('view.toggleRightPanel');
+  const exportShortcut = useCommandShortcut('file.export');
 
   // Keep the active tab visible when the strip overflows.
   useEffect(() => {
@@ -55,7 +58,7 @@ export function TabBar() {
   const closeTab = (id: DocumentId, name: string, refocus: boolean) => {
     const index = documents.findIndex((d) => d.id === id);
     closeDocument(id);
-    announce(`Closed ${name}`);
+    announce(m.announce_closed({ name }));
     if (!refocus) return;
     const next = documents[index + 1] ?? documents[index - 1];
     if (next) focusTab(next.id);
@@ -90,49 +93,51 @@ export function TabBar() {
 
       <div className={styles.tabsRegion}>
         {documents.length > 0 ? (
-          <div role="tablist" aria-label="Open documents" className={styles.tablist}>
+          <div role="tablist" aria-label={m.tabs_label()} className={styles.tablist}>
             {documents.map((doc) => {
               const selected = doc.id === activeTabId;
               return (
-                <div key={doc.id} className={styles.tabWrap} data-selected={selected || undefined}>
-                  <button
-                    type="button"
-                    role="tab"
-                    id={tabDomId(doc.id)}
-                    aria-selected={selected}
-                    aria-controls={STAGE_ID}
-                    aria-keyshortcuts="Delete"
-                    tabIndex={selected ? 0 : -1}
-                    className={styles.tab}
-                    onKeyDown={onKeyDown}
-                    onClick={() => setActiveTab(doc.id)}
-                    onMouseDown={(event) => {
-                      // Middle click closes, as in browsers.
-                      if (event.button === 1) {
-                        event.preventDefault();
-                        closeTab(doc.id, doc.title, false);
-                      }
-                    }}
-                    title={doc.title}
-                  >
-                    <span className={styles.tag} data-tag={doc.colorIndex} aria-hidden="true" />
-                    <span className={styles.name}>{doc.title}</span>
-                  </button>
-                  <span
-                    aria-hidden="true"
-                    className={styles.close}
-                    onClick={() => closeTab(doc.id, doc.title, false)}
-                  >
-                    <X />
-                  </span>
-                </div>
+                <TabArrangeMenu key={doc.id} documentId={doc.id} title={doc.title}>
+                  <div className={styles.tabWrap} data-selected={selected || undefined}>
+                    <button
+                      type="button"
+                      role="tab"
+                      id={tabDomId(doc.id)}
+                      aria-selected={selected}
+                      aria-controls={STAGE_ID}
+                      aria-keyshortcuts="Delete"
+                      tabIndex={selected ? 0 : -1}
+                      className={styles.tab}
+                      onKeyDown={onKeyDown}
+                      onClick={() => setActiveTab(doc.id)}
+                      onMouseDown={(event) => {
+                        // Middle click closes, as in browsers.
+                        if (event.button === 1) {
+                          event.preventDefault();
+                          closeTab(doc.id, doc.title, false);
+                        }
+                      }}
+                      title={doc.title}
+                    >
+                      <span className={styles.tag} data-tag={doc.colorIndex} aria-hidden="true" />
+                      <span className={styles.name}>{doc.title}</span>
+                    </button>
+                    <span
+                      aria-hidden="true"
+                      className={styles.close}
+                      onClick={() => closeTab(doc.id, doc.title, false)}
+                    >
+                      <X />
+                    </span>
+                  </div>
+                </TabArrangeMenu>
               );
             })}
           </div>
         ) : null}
         <IconButton
           id="open-files-button"
-          label="Open files"
+          label={m.open_files()}
           icon={<Plus />}
           shortcut={openShortcut}
           onClick={() => void openFilesFromPicker()}
@@ -150,12 +155,21 @@ export function TabBar() {
           onClick={() => void commandRegistry.execute('view.palette')}
         >
           <Search aria-hidden="true" />
-          <span className={styles.searchLabel}>Search commands…</span>
+          <span className={styles.searchLabel}>{m.search_commands_placeholder()}</span>
           {paletteShortcut ? <Keycaps shortcut={paletteShortcut} /> : null}
         </button>
         {documents.length > 0 ? (
           <IconButton
-            label={rightPanelOpen ? 'Hide right panel' : 'Show right panel'}
+            label="Export document"
+            icon={<Download />}
+            shortcut={exportShortcut}
+            aria-haspopup="dialog"
+            onClick={() => void commandRegistry.execute('file.export')}
+          />
+        ) : null}
+        {documents.length > 0 ? (
+          <IconButton
+            label={rightPanelOpen ? m.right_panel_hide() : m.right_panel_show()}
             icon={<PanelRight />}
             shortcut={rightShortcut}
             aria-pressed={rightPanelOpen}

@@ -19,6 +19,7 @@ import { fuzzyFilter } from '../commands/fuzzy';
 import { type Command, commandRegistry, groupCommands } from '../commands/registry';
 import { parseShortcut } from '../commands/shortcuts';
 import { useCommands } from '../commands/use-commands';
+import { m } from '../i18n';
 import { useUiStore } from '../state/ui-store';
 import { Keycaps } from '../ui/Keycaps';
 import styles from './CommandPalette.module.css';
@@ -34,6 +35,7 @@ interface Section {
   readonly rows: Row[];
 }
 
+/** Internal id of the recents section; its heading is translated when rendered. */
 const RECENT_GROUP = 'Recent';
 
 /** Builds the visible sections: recents first when the query is empty, else by relevance. */
@@ -202,7 +204,7 @@ function PalettePopup({ onClose }: { readonly onClose: () => void }) {
 
   return (
     <Dialog.Popup className={styles.popup} initialFocus={inputRef}>
-      <Dialog.Title className="visually-hidden">Command palette</Dialog.Title>
+      <Dialog.Title className="visually-hidden">{m.palette_title()}</Dialog.Title>
       <div className={styles.searchRow}>
         <Search className={styles.searchIcon} aria-hidden="true" />
         <input
@@ -210,12 +212,12 @@ function PalettePopup({ onClose }: { readonly onClose: () => void }) {
           className={styles.input}
           type="text"
           role="combobox"
-          aria-label="Search commands"
+          aria-label={m.search_commands()}
           aria-expanded="true"
           aria-controls={listboxId}
           aria-autocomplete="list"
           aria-activedescendant={activeOptionId}
-          placeholder="Search commands…"
+          placeholder={m.search_commands_placeholder()}
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
@@ -228,10 +230,15 @@ function PalettePopup({ onClose }: { readonly onClose: () => void }) {
         />
       </div>
 
-      <div id={listboxId} role="listbox" aria-label="Commands" className={styles.list}>
+      <div
+        id={listboxId}
+        role="listbox"
+        aria-label={m.palette_commands_label()}
+        className={styles.list}
+      >
         {rows.length === 0 ? (
           <p className={styles.empty} role="presentation">
-            No commands match “{query.trim()}”
+            {m.palette_no_match({ query: query.trim() })}
           </p>
         ) : null}
         {sections.map((section) => {
@@ -244,7 +251,7 @@ function PalettePopup({ onClose }: { readonly onClose: () => void }) {
               className={styles.group}
             >
               <div id={headingId} role="presentation" className={styles.groupLabel}>
-                {section.group}
+                {section.group === RECENT_GROUP ? m.palette_recent() : section.group}
               </div>
               {section.rows.map((row) => {
                 const shortcut = row.command.shortcuts[0];
@@ -291,15 +298,15 @@ function PalettePopup({ onClose }: { readonly onClose: () => void }) {
           {FOOTER_KEYS.navigate.map((key) => (
             <Keycaps key={key.key} shortcut={key} />
           ))}
-          Navigate
+          {m.palette_navigate()}
         </span>
         <span className={styles.footerItem}>
           <Keycaps shortcut={FOOTER_KEYS.run} />
-          Run
+          {m.palette_run()}
         </span>
         <span className={styles.footerItem}>
           <Keycaps shortcut={FOOTER_KEYS.close} />
-          Close
+          {m.common_close()}
         </span>
       </div>
     </Dialog.Popup>

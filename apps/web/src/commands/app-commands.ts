@@ -13,10 +13,13 @@ import { canRedo, canUndo, getActiveDocument, type PageId } from '@pdf-editor/do
 
 import type { EngineFailure } from '../engine/engine-service';
 import { pickPdfFiles } from '../files/open-files';
+import { m } from '../i18n';
+import { registerLanguageCommands } from '../i18n/language-commands';
 import { announce } from '../shell/announcer';
 import { selectAllOf, useSelectionStore } from '../state/selection-store';
 import { ARRANGE_SIZES, type ToolId, useUiStore } from '../state/ui-store';
-import { pagesPhrase, useWorkspaceStore } from '../state/workspace-store';
+import { useWorkspaceStore } from '../state/workspace-store';
+import { registerExportCommands } from './export-commands';
 import { type CommandRegistry, commandRegistry } from './registry';
 import { currentPlatform } from './shortcuts';
 
@@ -31,20 +34,20 @@ function failureReason(error: EngineFailure): string {
     case 'password-cancelled':
     case 'password-required':
     case 'password-incorrect':
-      return 'no password';
+      return m.failure_no_password();
     case 'unsupported-encryption':
-      return 'unsupported encryption';
+      return m.failure_unsupported_encryption();
     case 'corrupt':
-      return 'the file is damaged';
+      return m.failure_corrupt();
     case 'read-failed':
-      return 'the file could not be read';
+      return m.failure_read_failed();
     case 'unsupported':
-      return 'unsupported file';
+      return m.failure_unsupported();
     case 'out-of-memory':
-      return 'not enough memory';
+      return m.failure_out_of_memory();
     case 'aborted':
     case 'internal':
-      return 'the engine failed';
+      return m.failure_engine();
   }
 }
 
@@ -53,9 +56,11 @@ export async function openDocuments(files: readonly File[]): Promise<void> {
   if (files.length === 0) return;
   const { opened, skipped } = await model().openFiles(files);
   const parts: string[] = [];
-  if (opened.length === 1) parts.push(`Opened ${opened[0]?.name ?? 'file'}`);
-  else if (opened.length > 1) parts.push(`Opened ${opened.length} files`);
-  for (const skip of skipped) parts.push(`Skipped ${skip.name}: ${failureReason(skip.error)}`);
+  if (opened.length === 1) parts.push(m.announce_opened({ name: opened[0]?.name ?? '' }));
+  else if (opened.length > 1) parts.push(m.announce_opened_many({ count: opened.length }));
+  for (const skip of skipped) {
+    parts.push(m.announce_skipped({ name: skip.name, reason: failureReason(skip.error) }));
+  }
   if (parts.length > 0) announce(parts.join('. '));
 }
 
@@ -90,7 +95,8 @@ const hasTargets = () => targetPages().length > 0;
 function rotate(delta: 90 | -90): void {
   const pages = targetPages();
   if (model().rotatePages(pages, delta)) {
-    announce(`Rotated ${pagesPhrase(pages.length)} ${delta > 0 ? 'right' : 'left'}`);
+    const count = pages.length;
+    announce(delta > 0 ? m.announce_rotated_right({ count }) : m.announce_rotated_left({ count }));
   }
 }
 
@@ -119,12 +125,12 @@ function deleteTargets(): void {
       anchor: null,
       focused: nextFocus,
     });
-    announce(`Deleted ${pagesPhrase(pages.length)}. Undo with ${undoHint()}`);
+    announce(m.announce_deleted({ count: pages.length, shortcut: undoHint() }));
   }
 }
 
 function undoHint(): string {
-  return currentPlatform === 'mac' ? 'Command Z' : 'Control Z';
+  return currentPlatform === 'mac' ? m.undo_hint_mac() : m.undo_hint_other();
 }
 
 /**
@@ -153,31 +159,35 @@ export function moveSelectionBy(delta: number): boolean {
   if (!moved) return false;
   const after = getActiveDocument(model().workspace);
   const position = (after?.pages.findIndex((p) => p.id === ids[0]) ?? 0) + 1;
-  announce(`Moved ${pagesPhrase(ids.length)} to position ${position} in ${doc.title}`);
+  announce(m.announce_moved({ count: ids.length, position, title: doc.title }));
   return true;
 }
 
 export function arrangeSizeMessage(): string {
   const size = ARRANGE_SIZES[ui().arrangeSize] ?? ARRANGE_SIZES[1];
-  return `Thumbnail size ${size.label}`;
+  return m.announce_thumbnail_size({ size: size.label });
 }
 
-export const TOOLS: readonly { id: ToolId; title: string; shortcut: string }[] = [
-  { id: 'select', title: 'Select', shortcut: 'V' },
-  { id: 'highlight', title: 'Highlight', shortcut: 'H' },
-  { id: 'ink', title: 'Ink', shortcut: 'P' },
-  { id: 'text', title: 'Text', shortcut: 'T' },
-  { id: 'shapes', title: 'Shapes', shortcut: 'U' },
-  { id: 'note', title: 'Note', shortcut: 'N' },
+/** Tools; `title` is a message function so it follows the active language. */
+export const TOOLS: readonly { id: ToolId; title: () => string; shortcut: string }[] = [
+  { id: 'select', title: m.tool_select, shortcut: 'V' },
+  { id: 'highlight', title: m.tool_highlight, shortcut: 'H' },
+  { id: 'ink', title: m.tool_ink, shortcut: 'P' },
+  { id: 'text', title: m.tool_text, shortcut: 'T' },
+  { id: 'shapes', title: m.tool_shapes, shortcut: 'U' },
+  { id: 'note', title: m.tool_note, shortcut: 'N' },
 ];
 
-/** Registers all shell commands; returns a disposer (safe under StrictMode re-runs). */
+/**
+ * Registers all shell commands; returns a disposer (safe under StrictMode re-runs). Titles
+ * and groups are read in the active language, so a language switch re-registers them.
+ */
 export function registerAppCommands(registry: CommandRegistry = commandRegistry): () => void {
   const disposers = [
     registry.register({
       id: 'file.open',
-      title: 'Open files…',
-      group: 'File',
+      title: m.cmd_open_files(),
+      group: m.group_file(),
       shortcut: 'Mod+O',
       keywords: ['add', 'import', 'pdf', 'load'],
       allowInInputs: true,
@@ -185,23 +195,23 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     }),
     registry.register({
       id: 'tab.close',
-      title: 'Close tab',
-      group: 'File',
+      title: m.cmd_close_tab(),
+      group: m.group_file(),
       shortcut: 'Mod+W',
       keywords: ['document', 'close'],
-      note: 'Browsers usually keep this key; press Delete on a focused tab instead.',
+      note: m.cmd_close_tab_note(),
       when: () => activeDocument() !== undefined,
       run: () => {
         const doc = activeDocument();
         if (!doc) return;
         model().closeDocument(doc.id);
-        announce(`Closed ${doc.title}`);
+        announce(m.announce_closed({ name: doc.title }));
       },
     }),
     registry.register({
       id: 'view.palette',
-      title: 'Command palette',
-      group: 'General',
+      title: m.cmd_palette(),
+      group: m.group_general(),
       shortcut: 'Mod+K',
       allowInInputs: true,
       hiddenInPalette: true,
@@ -209,16 +219,16 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     }),
     registry.register({
       id: 'help.shortcuts',
-      title: 'Keyboard shortcuts',
-      group: 'General',
+      title: m.cmd_shortcuts(),
+      group: m.group_general(),
       shortcut: '?',
       keywords: ['help', 'keys', 'keymap', 'hotkeys'],
       run: () => ui().setShortcutsOpen(!ui().shortcutsOpen),
     }),
     registry.register({
       id: 'selection.clear',
-      title: 'Clear tool and selection',
-      group: 'General',
+      title: m.cmd_clear_selection(),
+      group: m.group_general(),
       shortcut: 'Escape',
       hiddenInPalette: true,
       when: () => ui().tool !== 'select' || selection().selected.size > 0,
@@ -229,32 +239,32 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     }),
     registry.register({
       id: 'edit.undo',
-      title: 'Undo',
-      group: 'Edit',
+      title: m.cmd_undo(),
+      group: m.group_edit(),
       shortcut: 'Mod+Z',
       keywords: ['revert', 'back'],
       when: () => canUndo(model().history),
       run: () => {
         const label = model().undo();
-        if (label) announce(`Undid ${label}`);
+        if (label) announce(m.announce_undid({ label }));
       },
     }),
     registry.register({
       id: 'edit.redo',
-      title: 'Redo',
-      group: 'Edit',
+      title: m.cmd_redo(),
+      group: m.group_edit(),
       shortcut: ['Mod+Shift+Z', 'Mod+Y'],
       keywords: ['again', 'forward'],
       when: () => canRedo(model().history),
       run: () => {
         const label = model().redo();
-        if (label) announce(`Redid ${label}`);
+        if (label) announce(m.announce_redid({ label }));
       },
     }),
     registry.register({
       id: 'pages.selectAll',
-      title: 'Select all pages',
-      group: 'Pages',
+      title: m.cmd_select_all(),
+      group: m.group_pages(),
       shortcut: 'Mod+A',
       keywords: ['selection', 'everything'],
       when: () => (activeDocument()?.pages.length ?? 0) > 0,
@@ -263,13 +273,13 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
         if (!doc) return;
         const order = doc.pages.map((p) => p.id);
         selection().apply(selectAllOf(order, selection().focused));
-        announce(`Selected ${pagesPhrase(order.length)}`);
+        announce(m.announce_selected({ count: order.length }));
       },
     }),
     registry.register({
       id: 'pages.rotateRight',
-      title: 'Rotate pages right',
-      group: 'Pages',
+      title: m.cmd_rotate_right(),
+      group: m.group_pages(),
       shortcut: 'R',
       keywords: ['clockwise', 'turn', '90'],
       when: hasTargets,
@@ -277,8 +287,8 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     }),
     registry.register({
       id: 'pages.rotateLeft',
-      title: 'Rotate pages left',
-      group: 'Pages',
+      title: m.cmd_rotate_left(),
+      group: m.group_pages(),
       shortcut: 'Shift+R',
       keywords: ['counterclockwise', 'anticlockwise', 'turn', '90'],
       when: hasTargets,
@@ -286,8 +296,8 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     }),
     registry.register({
       id: 'pages.delete',
-      title: 'Delete pages',
-      group: 'Pages',
+      title: m.cmd_delete_pages(),
+      group: m.group_pages(),
       shortcut: ['Delete', 'Backspace'],
       keywords: ['remove'],
       when: hasTargets,
@@ -295,21 +305,21 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     }),
     registry.register({
       id: 'pages.duplicate',
-      title: 'Duplicate pages',
-      group: 'Pages',
+      title: m.cmd_duplicate_pages(),
+      group: m.group_pages(),
       shortcut: 'Mod+D',
       keywords: ['copy', 'clone'],
-      note: 'Some browsers keep Mod+D for bookmarks outside the light table.',
+      note: m.cmd_duplicate_pages_note(),
       when: hasTargets,
       run: () => {
         const pages = targetPages();
-        if (model().duplicatePages(pages)) announce(`Duplicated ${pagesPhrase(pages.length)}`);
+        if (model().duplicatePages(pages)) announce(m.announce_duplicated({ count: pages.length }));
       },
     }),
     registry.register({
       id: 'pages.moveBackward',
-      title: 'Move pages back one slot',
-      group: 'Pages',
+      title: m.cmd_move_backward(),
+      group: m.group_pages(),
       shortcut: 'Alt+Left',
       keywords: ['reorder', 'earlier', 'left'],
       when: hasTargets,
@@ -319,8 +329,8 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     }),
     registry.register({
       id: 'pages.moveForward',
-      title: 'Move pages forward one slot',
-      group: 'Pages',
+      title: m.cmd_move_forward(),
+      group: m.group_pages(),
       shortcut: 'Alt+Right',
       keywords: ['reorder', 'later', 'right'],
       when: hasTargets,
@@ -330,16 +340,16 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     }),
     registry.register({
       id: 'view.toggleLeftPanel',
-      title: 'Toggle left panel',
-      group: 'View',
+      title: m.cmd_toggle_left_panel(),
+      group: m.group_view(),
       shortcut: 'Mod+B',
       keywords: ['sidebar', 'pages', 'outline', 'files'],
       run: () => ui().toggleLeftPanel(),
     }),
     registry.register({
       id: 'view.toggleRightPanel',
-      title: 'Toggle right panel',
-      group: 'View',
+      title: m.cmd_toggle_right_panel(),
+      group: m.group_view(),
       shortcut: 'Mod+Alt+B',
       keywords: ['inspector', 'properties', 'history', 'info'],
       run: () => ui().toggleRightPanel(),
@@ -347,78 +357,80 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     ...(['pages', 'outline', 'files'] as const).map((view) =>
       registry.register({
         id: `view.show.${view}`,
-        title: `Show ${view}`,
-        group: 'View',
+        title: { pages: m.cmd_show_pages, outline: m.cmd_show_outline, files: m.cmd_show_files }[
+          view
+        ](),
+        group: m.group_view(),
         keywords: ['panel', 'sidebar'],
         run: () => useUiStore.setState({ leftPanelOpen: true, leftPanelView: view }),
       }),
     ),
     registry.register({
       id: 'mode.read',
-      title: 'Switch to Read',
-      group: 'View',
+      title: m.cmd_mode_read(),
+      group: m.group_view(),
       shortcut: '1',
       keywords: ['mode', 'viewer', 'continuous'],
       run: () => {
         ui().setViewMode('read');
-        announce('Read mode');
+        announce(m.mode_read_long());
       },
     }),
     registry.register({
       id: 'mode.arrange',
-      title: 'Switch to Arrange',
-      group: 'View',
+      title: m.cmd_mode_arrange(),
+      group: m.group_view(),
       shortcut: '2',
       keywords: ['mode', 'light table', 'grid', 'organize', 'reorder'],
       run: () => {
         ui().setViewMode('arrange');
-        announce('Arrange mode');
+        announce(m.mode_arrange_long());
       },
     }),
     registry.register({
       id: 'zoom.in',
-      title: 'Zoom in',
-      group: 'Zoom',
+      title: m.cmd_zoom_in(),
+      group: m.group_zoom(),
       shortcut: 'Mod+=',
       keywords: ['magnify', 'bigger'],
       run: () => ui().zoomIn(),
     }),
     registry.register({
       id: 'zoom.out',
-      title: 'Zoom out',
-      group: 'Zoom',
+      title: m.cmd_zoom_out(),
+      group: m.group_zoom(),
       shortcut: 'Mod+-',
       keywords: ['smaller'],
       run: () => ui().zoomOut(),
     }),
     registry.register({
       id: 'zoom.fit',
-      title: 'Zoom to fit width',
-      group: 'Zoom',
+      title: m.cmd_zoom_fit(),
+      group: m.group_zoom(),
       shortcut: 'Mod+0',
       keywords: ['reset', 'fit'],
       run: () => ui().zoomFit(),
     }),
     registry.register({
       id: 'zoom.fitPage',
-      title: 'Zoom to fit page',
-      group: 'Zoom',
+      title: m.cmd_zoom_fit_page(),
+      group: m.group_zoom(),
       keywords: ['whole', 'fit', 'page'],
       run: () => ui().zoomFitPage(),
     }),
     registry.register({
       id: 'zoom.actual',
-      title: 'Actual size',
-      group: 'Zoom',
+      title: m.cmd_zoom_actual(),
+      group: m.group_zoom(),
       keywords: ['100%', 'reset', 'real'],
       run: () => ui().zoomActual(),
     }),
     registry.register({
       id: 'arrange.larger',
-      title: 'Larger thumbnails',
-      group: 'Zoom',
+      title: m.cmd_thumbnails_larger(),
+      group: m.group_zoom(),
       keywords: ['light table', 'cell size', 'bigger'],
-      note: 'Mod+Scroll in Arrange mode',
+      note: m.cmd_thumbnails_note(),
       when: () => ui().arrangeSize < ARRANGE_SIZES.length - 1,
       run: () => {
         if (ui().stepArrangeSize(1)) announce(arrangeSizeMessage());
@@ -426,10 +438,10 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     }),
     registry.register({
       id: 'arrange.smaller',
-      title: 'Smaller thumbnails',
-      group: 'Zoom',
+      title: m.cmd_thumbnails_smaller(),
+      group: m.group_zoom(),
       keywords: ['light table', 'cell size'],
-      note: 'Mod+Scroll in Arrange mode',
+      note: m.cmd_thumbnails_note(),
       when: () => ui().arrangeSize > 0,
       run: () => {
         if (ui().stepArrangeSize(-1)) announce(arrangeSizeMessage());
@@ -438,14 +450,16 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     ...TOOLS.map((tool) =>
       registry.register({
         id: `tool.${tool.id}`,
-        title: `${tool.title} tool`,
-        group: 'Tools',
+        title: m.cmd_tool({ tool: tool.title() }),
+        group: m.group_tools(),
         shortcut: tool.shortcut,
         keywords: ['tool', 'annotate'],
         when: hasDocument,
         run: () => ui().setTool(tool.id),
       }),
     ),
+    registerLanguageCommands(registry),
+    registerExportCommands(registry),
   ];
   return () => {
     for (const dispose of disposers) dispose();
