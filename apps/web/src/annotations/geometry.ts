@@ -118,6 +118,76 @@ export function geometryRect(a: Annotation): Rect {
   }
 }
 
+/**
+ * Where the renderer draws a note (/Text) icon, as a user-space rect. Our notes carry
+ * NoRotate: on a page with an intrinsic /Rotate, PDFium keeps the /Rect's upper-left
+ * corner (x1, y2) fixed and draws the icon upright from there, `width` × `height` in
+ * display space extending right and down. The app's own view rotation is not countered:
+ * the renderer turns the icon with the page, so the frame's view part applies as usual.
+ * Pure translation of `rect` for a given /Rotate, so moving the /Rect by a delta moves the
+ * icon by the same delta.
+ */
+export function noteIconRect(frame: PageFrame, rect: Rect): Rect {
+  const { x, y, width: w, height: h } = rect;
+  switch (frame.intrinsicRotation ?? 0) {
+    case 90:
+      // Display right is user +y, display down is user +x.
+      return { x, y: y + h, width: h, height: w };
+    case 180:
+      // Display right is user -x, display down is user +y.
+      return { x: x - w, y: y + h, width: w, height: h };
+    case 270:
+      // Display right is user -y, display down is user -x.
+      return { x: x - h, y: y + h - w, width: h, height: w };
+    default:
+      return rect;
+  }
+}
+
+/** The inverse of `noteIconRect`: the /Rect whose icon is drawn over `icon` (user space). */
+export function noteRectForIcon(frame: PageFrame, icon: Rect): Rect {
+  const { x, y, width: w, height: h } = icon;
+  switch (frame.intrinsicRotation ?? 0) {
+    case 90:
+      return { x, y: y - w, width: h, height: w };
+    case 180:
+      return { x: x + w, y: y - h, width: w, height: h };
+    case 270:
+      return { x: x + w, y: y + h - w, width: h, height: w };
+    default:
+      return icon;
+  }
+}
+
+/**
+ * The user-space rect an annotation occupies on screen: what its hit target, selection,
+ * handles and anchored popovers use. Notes are where their icon is drawn (`noteIconRect`);
+ * everything else is its geometry.
+ */
+export function displayRect(frame: PageFrame, a: Annotation): Rect {
+  return a.kind === 'text' ? noteIconRect(frame, a.rect) : geometryRect(a);
+}
+
+/**
+ * Moves an annotation so that what is drawn follows a pointer drag from CSS point `from`
+ * to `to`. A note's /Rect is recovered from its dragged icon box (`noteRectForIcon`).
+ */
+export function dragAnnotation(
+  frame: PageFrame,
+  a: Annotation,
+  from: Point,
+  to: Point,
+): Annotation {
+  if (a.kind === 'text') {
+    const icon = rectToCss(frame, noteIconRect(frame, a.rect));
+    const moved = { ...icon, left: icon.left + to.x - from.x, top: icon.top + to.y - from.y };
+    return { ...a, rect: roundRect(noteRectForIcon(frame, cssBoxToUser(frame, moved))) };
+  }
+  const p0 = cssPointToUser(frame, from);
+  const p1 = cssPointToUser(frame, to);
+  return translateAnnotation(a, p1.x - p0.x, p1.y - p0.y);
+}
+
 /** The annotation with its geometry mapped by an affine user-space map `f`. */
 function mapGeometry(a: Annotation, f: (p: Point) => Point, rect: Rect): Annotation {
   switch (a.kind) {

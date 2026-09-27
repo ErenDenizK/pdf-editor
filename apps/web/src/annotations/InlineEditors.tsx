@@ -9,7 +9,7 @@ import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from
 import { m } from '../i18n';
 import { createAnnotations, updateAnnotations } from './actions';
 import { type InlineEditor, useAnnotationStore } from './annotation-store';
-import { type PageFrame, rectToCss, roundRect } from './geometry';
+import { noteIconRect, type PageFrame, rectToCss, roundRect } from './geometry';
 import styles from './AnnotationLayer.module.css';
 
 export function InlineEditorView({
@@ -159,7 +159,9 @@ function NoteEditor({
   );
   const [text, setText] = useState(editor.text);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const box = rectToCss(frame, editor.rect);
+  // A note's popup hangs off its drawn icon; other annotations' comments off their rect.
+  const iconic = editor.id === undefined || existing?.kind === 'text';
+  const box = rectToCss(frame, iconic ? noteIconRect(frame, editor.rect) : editor.rect);
 
   useEffect(() => {
     ref.current?.focus();

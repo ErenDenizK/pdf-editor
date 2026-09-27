@@ -8,7 +8,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 
 import { m } from '../i18n';
 import type { PageTarget } from './annotation-store';
-import { geometryRect, type PageFrame, rectToCss } from './geometry';
+import { displayRect, type PageFrame, rectToCss } from './geometry';
 import { annotationName, capitalize } from './labels';
 import styles from './AnnotationLayer.module.css';
 import { StyleControls } from './StyleControls';
@@ -44,7 +44,7 @@ export function AnnotationBar({
   let left = Number.POSITIVE_INFINITY;
   let right = Number.NEGATIVE_INFINITY;
   for (const a of annotations) {
-    const box = rectToCss(frame, geometryRect(a));
+    const box = rectToCss(frame, displayRect(frame, a));
     top = Math.min(top, box.top);
     bottom = Math.max(bottom, box.top + box.height);
     left = Math.min(left, box.left);

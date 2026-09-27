@@ -31,6 +31,34 @@ async function drag(
   await page.mouse.up();
 }
 
+/**
+ * Share of note-yellow pixels (the default #FFEB3B) in a region of the screen: decoded in
+ * the page, so the test needs no image library.
+ */
+async function yellowShare(
+  page: Page,
+  clip: { x: number; y: number; width: number; height: number },
+): Promise<number> {
+  const png = await page.screenshot({ clip });
+  return page.evaluate(async (base64) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext('2d');
+    if (!context) return 0;
+    context.drawImage(image, 0, 0);
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let yellow = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if ((data[i] ?? 0) > 200 && (data[i + 1] ?? 0) > 190 && (data[i + 2] ?? 255) < 140) yellow++;
+    }
+    return yellow / (data.length / 4);
+  }, png.toString('base64'));
+}
+
 function historyRow(page: Page, label: string | RegExp) {
   return page.getByRole('list', { name: /history/i }).getByRole('button', { name: label });
 }
@@ -132,6 +160,43 @@ test.describe('annotations', () => {
     await expect(layer(page).locator('[data-annotation-kind="stamp"]')).toHaveCount(0);
     await page.keyboard.press('ControlOrMeta+z');
     await expect(layer(page).locator('[data-annotation-kind="stamp"]')).toHaveCount(1);
+  });
+
+  test('a note on a /Rotate 90 page is selectable where its icon is drawn', async ({
+    browserName,
+    page,
+  }) => {
+    test.skip(browserName !== 'chromium', 'Covered in Chromium');
+    await page.goto('./');
+    await openFixtures(page, ['rotated-pages.pdf']);
+    await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
+      timeout: 20_000,
+    });
+    // Page 2 carries /Rotate 90: PDFium draws the NoRotate icon upright from the /Rect's
+    // upper-left corner, one icon width right of the /Rect's own footprint.
+    await layer(page, 1).scrollIntoViewIfNeeded();
+    await page.locator('body').press('n');
+    await drag(page, 1, [0.5, 0.4], [0.5, 0.4]);
+    await page.getByRole('dialog', { name: 'New note' }).getByRole('textbox').fill('Rotated');
+    await page.getByRole('button', { name: 'Save' }).click();
+    const note = layer(page, 1).locator('[data-annotation-kind="text"]');
+    await expect(note).toHaveCount(1, { timeout: 10_000 });
+    await page.locator('body').press('Escape');
+    await page.locator('body').press('Escape');
+    await page.mouse.move(0, 0);
+
+    const box = await note.boundingBox();
+    if (!box) throw new Error('note hit target not rendered');
+    // The icon is mostly yellow (black lines, white below the bubble): the hit target
+    // covers it once the page has re-rendered with the note.
+    await expect.poll(() => yellowShare(page, box), { timeout: 10_000 }).toBeGreaterThan(0.3);
+    // Nothing yellow where the plain /Rect would have put the box (left of the icon).
+    expect(await yellowShare(page, { ...box, x: box.x - box.width })).toBeLessThan(0.02);
+
+    // Clicking the drawn icon selects the note.
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 3);
+    await expect(page.getByTestId('annotation-bar')).toBeVisible();
+    await expect(layer(page, 1).locator('[data-selected-annotation]')).toHaveCount(1);
   });
 
   test('screenshots for design review', async ({ browserName, page }) => {

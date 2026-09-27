@@ -1,9 +1,13 @@
 /*
  * Annotation layer: sits over the page bitmap (page-overlays positions it at inset 0).
  * With the Select tool it only catches pointers on annotations; with a drawing tool it
- * catches the whole page and sits above the text layer.
+ * catches the whole page. Either way it sits above the text layer, whatever the overlay
+ * registration order: the text layer takes the whole page while text is selectable, so
+ * hit targets, handles and the bar under it could not be clicked. Form widgets (z 2)
+ * stay on top.
  */
 .layer {
+  z-index: 1;
   pointer-events: none;
   touch-action: none;
 }

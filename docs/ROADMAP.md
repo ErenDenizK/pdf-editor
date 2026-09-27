@@ -89,6 +89,14 @@ follow-ups, not blockers):
   are not restored. Annotations created in the app round-trip exactly.
 - Free text is limited to WinAnsi characters with the standard fonts until an embedded
   Unicode font path exists (M3, together with overlay fonts).
+- Note icons (NoRotate) keep their orientation on pages with an intrinsic /Rotate, as
+  ISO 32000 §12.5.6.4 requires (some PDFium-based viewers turn them with the page): the
+  icon hangs upright from the /Rect's upper-left corner, so the annotation layer places a
+  note's hit target and selection on the drawn icon rather than on its /Rect. The renderer
+  does apply the app's own view rotation to them, so a note on a page rotated in the app
+  looks turned until export, where the rotation becomes /Rotate and conformant viewers
+  show it upright.
+- NoZoom is ignored by the renderer: note icons scale with the zoom.
 
 ## M3 — Documents as data  (→ v0.3) — **done 2026-09-27**
 

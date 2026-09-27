@@ -20,6 +20,12 @@ export interface PageFrame {
   readonly originY: number;
   /** Total clockwise rotation applied on screen. */
   readonly rotation: Rotation;
+  /**
+   * The part of `rotation` that is the page's own /Rotate (the rest is the app's view
+   * rotation, VirtualPage.rotation). Only annotations drawn upright against /Rotate
+   * (NoRotate note icons) need the split; undefined reads as 0.
+   */
+  readonly intrinsicRotation?: Rotation;
   /** CSS pixels per point. */
   readonly scale: number;
 }

@@ -6,7 +6,8 @@
  * (drag rectangles, ink strokes, markup quads), in-place editors and the contextual bar.
  * All of it is in CSS pixels of the displayed page; geometry is converted to and from
  * unrotated user space through the viewer's page frame, so rotated pages need no special
- * case here.
+ * case here. The one exception is a note, which occupies its upright icon rather than its
+ * /Rect on /Rotate pages: `displayRect` and `dragAnnotation` (geometry.ts) handle it.
  *
  * With the Select tool the layer lets pointer events through (to the text layer) except
  * on annotations; with a drawing tool it captures the whole page.
@@ -31,13 +32,14 @@ import {
   canResize,
   cssBoxToUser,
   cssPointToUser,
+  displayRect,
+  dragAnnotation,
   geometryRect,
   isTextMarkup,
   type PageFrame,
   rectToCss,
   resizeAnnotation,
   roundRect,
-  translateAnnotation,
   userToCss,
 } from './geometry';
 import { InlineEditorView } from './InlineEditors';
@@ -305,10 +307,9 @@ export function AnnotationLayer(props: PageOverlayProps) {
         if (g?.type !== 'move') return;
         const a0 = cssPointToUser(frame, g.start);
         const a1 = cssPointToUser(frame, p);
-        const dx = a1.x - a0.x;
-        const dy = a1.y - a0.y;
-        if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return;
-        void updateAnnotations(target, g.ids, (x) => translateAnnotation(x, dx, dy), {
+        if (Math.abs(a1.x - a0.x) < 0.01 && Math.abs(a1.y - a0.y) < 0.01) return;
+        // Notes move by their drawn icon, which is not their /Rect on /Rotate pages.
+        void updateAnnotations(target, g.ids, (x) => dragAnnotation(frame, x, g.start, p), {
           action: 'move',
           coalesceKey: `move:${[...g.ids].sort().join(',')}`,
         });
@@ -487,7 +488,7 @@ function HitTarget({
       </g>
     );
   }
-  const b = rectToCss(frame, a.rect);
+  const b = rectToCss(frame, displayRect(frame, a));
   return (
     <rect
       {...common}
@@ -589,13 +590,11 @@ function SelectionOutline({
 }) {
   let shown: Annotation = a;
   if (gesture?.type === 'move' && gesture.ids.includes(a.id)) {
-    const p0 = cssPointToUser(frame, gesture.start);
-    const p1 = cssPointToUser(frame, gesture.current);
-    shown = translateAnnotation(a, p1.x - p0.x, p1.y - p0.y);
+    shown = dragAnnotation(frame, a, gesture.start, gesture.current);
   } else if (gesture?.type === 'resize' && gesture.id === a.id) {
     shown = resized(a, gesture, frame) ?? a;
   }
-  const box = rectToCss(frame, geometryRect(shown));
+  const box = rectToCss(frame, displayRect(frame, shown));
   const locked = a.flags?.locked === true;
   const showHandles = single && !locked && gesture === null;
   const isLine = a.kind === 'line' && a.vertices?.length === 2;
@@ -722,7 +721,7 @@ function GhostShape({
       />
     );
   }
-  const b = rectToCss(frame, a.rect);
+  const b = rectToCss(frame, displayRect(frame, a));
   return <rect className={styles.ghost} x={b.left} y={b.top} width={b.width} height={b.height} />;
 }
 
