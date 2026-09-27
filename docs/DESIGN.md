@@ -139,3 +139,20 @@ Rules:
 Working name: **pdf-editor** (repository name). A product name, wordmark and icon are
 open items (see `DISCUSSION.md`). Brand should be a single glyph at small size, no
 gradient, works in the tab bar at 16px.
+
+## 7. Refinement pass (after M4)
+
+Owner feedback after M3 (2026-09-27): the restraint is right, but the surfaces should read
+as more translucent, and a few effects look wrong rather than quiet. The pass is scheduled
+between M4 and M5 and covers:
+
+- Translucency: floating surfaces (toolbars, menus, popovers, the contextual annotation
+  bar) get a real frosted treatment (`backdrop-filter` with a tinted, low-alpha surface
+  colour) over the stage, with an opaque fallback where the filter is unsupported or
+  `prefers-reduced-transparency` is set. Panels docked to the frame stay opaque.
+- Effect audit: every transition, shadow, focus ring, hover state and animation is listed
+  with a screenshot and kept, toned down or removed. Candidates for removal are anything
+  that draws attention to the chrome instead of the document. The owner reviews the list
+  before changes land.
+- Consistency: one radius scale, one border alpha, one motion curve; tokens updated in §3.
+- Nothing structural: layout (§2) and interaction principles (§4) do not change.

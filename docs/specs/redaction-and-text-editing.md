@@ -105,3 +105,57 @@ redaction, page resize with annotation transforms, form field creation, outline 
 ## 4. Out of scope
 
 OCR (M5), paragraph reflow (M6), redaction of audio/video/3D content.
+
+## 5. Implementation plan
+
+Started 2026-09-27. Two spikes run first because both features depend on engine
+capabilities that EmbedPDF 2.15.1 only partly exposes:
+
+- `docs/research/05-text-editing-spike.md`: whether a PDFium engine hosted in our own
+  worker (direct `PdfiumEngine` + the raw wrapped module from `@embedpdf/pdfium`) gives us
+  `FPDFText_GetTextObject` / `FPDFText_SetText` / `FPDFText_SetCharcodes` /
+  `FPDFPage_GenerateContent` reliably enough for tiers 1 and 2, and what
+  `GenerateContent` costs.
+- `docs/research/06-redaction-spike.md`: which leak channels EmbedPDF's
+  `redactTextInRects` / `applyRedaction` actually close, and what the pdf-lib post-pass
+  and the forensic self-check must cover.
+
+Their conclusions become ADR-0011 (engine hosting for M4) before implementation starts.
+
+### 5.1 Workstreams and ownership
+
+| # | Workstream | Owns | Depends on |
+|---|---|---|---|
+| E1 | Engine hosting: own PDFium worker, raw-module access, `PdfTextEditor` and `PdfRedactor` interfaces in `types.ts` | `packages/engine/src/pdfium/host/**`, `worker/**`, `types.ts` (additive) | spike 05 |
+| E2 | Redaction pipeline: marks as `/Redact` annotations, apply (engine + pdf-lib scrub), forced full rewrite, forensic self-check, export summary data | `packages/engine/src/redaction/**`, `export-plan.ts` (additive), `pdflib/inspect.ts` (additive) | E1, spike 06, fixtures |
+| E3 | Text editing engine: run location and editability report, tier 2 with read-back, tier 1 with glyph removal and bundled-font typesetting, inverse edits | `packages/engine/src/text-edit/**`, `fonts/**` (Noto Sans addition) | E1, spike 05, fixtures |
+| F | Fixture corpus additions for §1.3 and §2.4 | `test/fixtures/**` | — |
+| U1 | Redact tool, Redactions panel, pattern helpers, search integration, apply flow with honesty states | `apps/web/src/redaction/**`, `viewer/tool-store.ts` (additive), `shell/panels` (new panel), `messages/*.json` (new keys) | E2 API shape (can start on the mark side first) |
+| U2 | Edit-text tool and inline editor with the honesty badge, overflow handling | `apps/web/src/text-edit/**`, `viewer/tool-store.ts` (additive), `messages/*.json` | E3 API shape |
+| U3 | §3 items: image objects, crop and discard, page resize with annotation transforms, form field creation, outline editor | `apps/web/src/document/**`, `stage/**`, model ops as needed | E1 for image objects; rest independent |
+| R | Independent correctness review of E2/E3/U1/U2, with the forensic corpus | read-only, findings as issues | all |
+
+Rules as in earlier milestones: one agent per workstream, no edits outside the owned
+paths, the lead integrates and commits, every finding of R is fixed with a regression
+test before the milestone closes.
+
+### 5.2 Order
+
+1. Spikes 05 and 06, fixtures F (parallel; done before any product code).
+2. ADR-0011; E1.
+3. E2 and E3 in parallel with the mark-side of U1 (marks, panel, helpers) and the
+   editability side of U2 (hover, run detection, badge).
+4. Apply flows (U1 apply, U2 commit) once E2/E3 land; U3 in parallel.
+5. R, fixes, docs, ROADMAP status, changeset (`minor`).
+
+### 5.3 Acceptance (in addition to §1.3 and §2.4)
+
+- Every fixture in F passes the forensic self-check after redaction, and the self-check
+  catches a deliberately broken redaction (a test that skips the scrub must fail).
+- A tier 2 edit that changes glyph widths or drops a character is detected by read-back
+  and falls back to tier 1; the fallback is visible in the history label and the export
+  summary.
+- Export of a document with applied redactions never takes the incremental or
+  byte-preserving path; the output has no `/Prev` and no unreferenced objects.
+- e2e: mark by selection, by area and by pattern; apply; export; re-open the export in the
+  app and search for the redacted string (must find nothing).

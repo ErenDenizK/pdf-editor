@@ -24,6 +24,17 @@ The owner delegated all open items to the project lead. Resolutions, recorded in
 | 12. Analytics | Never, including opt-in; the privacy indicator is a guarantee |
 | New: delivery targets | Web first; desktop edition only on defined triggers (ADR-0007) |
 
+## Settled on 2026-09-27 (owner review after M3)
+
+| Item | Resolution |
+|---|---|
+| 13. Cross-viewer annotation matrix | Manual testing in Acrobat/Preview/Edge is too laborious for one person; replaced by an automated matrix (our PDFium build + pdf.js, headless, in CI) with an optional five-minute manual spot check. See `docs/qa/annotations-matrix.md`. |
+| 14. Note icons on rotated pages | Keep the spec behaviour (NoRotate: icon upright on `/Rotate` pages). The owner saw another viewer turn the icon; that viewer is the non-conformant one. Our overlay hit box is corrected to match the drawn icon. |
+| 15. Rendering sharpness | Final page bitmaps render at the exact device scale (1:1 device pixels) instead of the nearest quarter-octave bucket; buckets stay for previews and thumbnails. |
+| 16. M4 | Approved as specified (`docs/specs/redaction-and-text-editing.md`); started 2026-09-27 with two engine spikes (raw PDFium access for text editing, EmbedPDF redaction coverage). |
+| 17. Design refinement pass | Owner direction: simplicity is right, but surfaces should be more translucent and a few effects look wrong. Scheduled as a dedicated pass after M4 (before M5), with a review of every effect against `docs/DESIGN.md`. |
+| 18. Product name | No hurry; decided last, before the v1.0 tag at the earliest. |
+
 ## Open
 
 ### 9. Product name
