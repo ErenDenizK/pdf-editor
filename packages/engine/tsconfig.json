@@ -4,5 +4,10 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
     "types": []
   },
-  "include": ["src"]
+  "include": ["src", "test"],
+  "references": [
+    {
+      "path": "./tsconfig.node.json"
+    }
+  ]
 }

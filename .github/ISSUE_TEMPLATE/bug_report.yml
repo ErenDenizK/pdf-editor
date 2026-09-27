@@ -1,0 +1,62 @@
+name: Bug report
+description: Something does not work as documented or expected.
+title: 'bug: '
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please do **not** attach PDFs that contain personal or
+        confidential data. For security issues, follow `SECURITY.md` instead of filing here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a PDF with ...
+        2. Drag page 3 to ...
+        3. Export ...
+    validations:
+      required: true
+  - type: textarea
+    id: pdf
+    attributes:
+      label: Sample PDF
+      description: >-
+        Attach a minimal, redistributable PDF that reproduces the problem, or describe it
+        (producer, page count, forms, encryption, outlines).
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Shown in the app's About dialog, or the deployed commit.
+  - type: dropdown
+    id: browsers
+    attributes:
+      label: Browser
+      multiple: true
+      options:
+        - Chrome / Edge / other Chromium
+        - Firefox
+        - Safari
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and browser version
+      placeholder: macOS 26.1, Safari 26.1
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output
+      description: Errors from the browser developer console, if any.
+      render: text

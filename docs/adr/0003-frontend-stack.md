@@ -36,6 +36,12 @@ outside contributors. See `docs/research/03-platform-constraints.md` §5–7.
 - No generic component-library look; every control is ours, which costs design time and is
   the point.
 - Biome formats, ESLint lints; never two formatters.
+- React Compiler is **on**. `@vitejs/plugin-react` 6 no longer bundles Babel, so the
+  compiler runs through `@rolldown/plugin-babel` with the plugin's `reactCompilerPreset()`
+  (`babel-plugin-react-compiler` 1.0, `@babel/core` 8); verified with Vite 8 and React 19.3
+  in both the production build and Vitest browser mode. The experimental Rust port
+  (`oxc-transform-react`) is not used until it is stable. `eslint-plugin-react-hooks` 7
+  enforces the compiler's rules.
 
 ## Alternatives considered
 

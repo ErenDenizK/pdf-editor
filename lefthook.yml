@@ -1,0 +1,19 @@
+# Git hooks, installed by `pnpm install` (see the `prepare` script in package.json).
+# Docs: https://lefthook.dev/configuration/
+# In an emergency, skip them with `LEFTHOOK=0 git commit ...`; CI runs the same checks.
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: format
+      glob: '*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,json,jsonc,css}'
+      run: pnpm exec biome format --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+      stage_fixed: true
+    - name: lint
+      glob: '*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}'
+      run: pnpm exec eslint --max-warnings=0 --no-warn-ignored {staged_files}
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: pnpm exec commitlint --edit {1}

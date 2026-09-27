@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a capability or an improvement.
+title: 'feat: '
+labels: [enhancement, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check `docs/VISION.md` (principles and non-goals) and `docs/ROADMAP.md`
+        first. Open-ended ideas are better started in Discussions.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should the editor do? Describe the interaction, not only the outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you use now, or how other tools handle it.
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Principles
+      options:
+        - label: This works fully offline and uploads nothing.
+          required: true

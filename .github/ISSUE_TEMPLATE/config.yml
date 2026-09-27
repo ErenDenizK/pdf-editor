@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/ErenDenizK/pdf-editor/discussions
+    about: Ask questions and discuss ideas in GitHub Discussions.
+  - name: Security vulnerability
+    url: https://github.com/ErenDenizK/pdf-editor/security/advisories/new
+    about: Report vulnerabilities privately; see SECURITY.md.

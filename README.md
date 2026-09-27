@@ -40,7 +40,20 @@ assembly · qpdf WASM for repair and structure · tesseract.js for OCR · Vite 8
 · React 19 · Zustand · TanStack Virtual · pragmatic-drag-and-drop · Comlink · Vitest ·
 Playwright. Everything runs in Web Workers; nothing is fetched from a CDN.
 
+## Development
+
+Requires Node.js 22 (see `.nvmrc`) and pnpm via Corepack.
+
+```sh
+corepack enable    # once per machine; provides the pnpm version pinned in package.json
+pnpm install       # dependencies and Git hooks
+pnpm dev           # web app at http://localhost:5173
+pnpm run ci        # format check, lint, typecheck, tests, build
+```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow and repository layout.
+
 ## License
 
-To be decided (Apache-2.0 proposed, see [ADR-0001](docs/adr/0001-license.md)). Until a
-`LICENSE` file exists, all rights are reserved by the repository owner.
+[Apache-2.0](LICENSE). Bundled third-party components are listed in [`NOTICE`](NOTICE).
+See [ADR-0001](docs/adr/0001-license.md) for the reasoning.

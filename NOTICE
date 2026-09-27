@@ -1,0 +1,37 @@
+pdf-editor
+Copyright 2026 pdf-editor contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+It is a free, open-source PDF editor that runs entirely in the browser.
+
+Third-party components
+======================
+
+This product includes or bundles the following third-party software. Each component
+remains under its own license; the full license texts ship with the respective packages
+and are reproduced in the application's "About and licenses" view.
+
+- PDFium
+  Copyright 2014 PDFium Authors (The Chromium Authors).
+  License: BSD-3-Clause; portions under Apache-2.0.
+  Bundled as WebAssembly through @embedpdf/pdfium.
+
+- EmbedPDF (@embedpdf/pdfium, @embedpdf/engines, @embedpdf/models)
+  Copyright (c) 2024 CloudPDF, Ji Chang.
+  License: MIT.
+
+- @cantoo/pdf-lib, a maintained fork of pdf-lib
+  Copyright (c) 2019 Andrew Dillon (pdf-lib), and the @cantoo/pdf-lib contributors.
+  License: MIT.
+
+- Comlink
+  Copyright Google LLC.
+  License: Apache-2.0.
+
+- React and React DOM
+  Copyright (c) Meta Platforms, Inc. and affiliates.
+  License: MIT.
+
+- Fonts
+  TODO(ui): list each bundled font family with its copyright holder and license
+  (for example SIL Open Font License 1.1).
