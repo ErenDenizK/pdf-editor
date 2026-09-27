@@ -126,6 +126,33 @@ must not be extractable after a Tier 1 edit, the new text must be extractable, g
 boxes must lie within the original line box, and undo must restore the original bytes
 of the content stream segment.
 
+### 2.5 Decisions after the spike (`docs/research/05-text-editing-spike.md`, ADR-0011)
+
+- **Mechanism.** Both tiers split the text object around the selected characters and
+  keep the untouched glyphs in place (drift under 1e-4 pt). Whole-object
+  `FPDFText_SetText` is never used: it drops kerning and accepts missing glyphs silently.
+- **Tier 2 verification.** Every non-space character needs a glyph path in the original
+  font before the edit; after it, a fresh text page must read back the exact replacement
+  with widths from the font. Any miss falls back to tier 1 and the history label says so.
+  Tier 2 is allowed for non-embedded standard-14 fonts within WinAnsi (verified the same
+  way; honesty state "same font, not embedded").
+- **Tier 1 font.** A fontkit subset of the bundled face (Inter, JetBrains Mono, Noto Serif,
+  Noto Sans) loaded with `FPDFText_LoadCidType2Font` (about 2 KB per edit). The export
+  post-pass renames the font from `/Untitled` to a tagged subset name.
+- **Not editable in M4:** Type3 fonts, text drawn as paths, invisible (render mode 3) text
+  such as OCR layers, vertical writing. **Forms:** tier 1 only; the replacement is written
+  at page level, and the honesty state says "moved out of form".
+- **Fit.** Default keeps the font size and lets the new text use free space up to the
+  next glyph on the line; beyond that the editor offers shrink to fit (floor 75%, not
+  90%) or overflow with a warning. Width is measured with the real font metrics.
+- **Undo** is reopen + replay of the edit list (no API restores a content stream);
+  `text.edit` is recorded as a non-invertible `EngineEdit` and replay re-checks the run's
+  text before applying.
+- **Export** garbage-collects sources with text edits (ADR-0011 §5) and repairs tagged
+  content: split runs get fresh MCIDs registered under the original structure element.
+- **Cache.** After every raw edit the page is regenerated and dropped from the executor's
+  cache; reads after an edit always use a fresh text page.
+
 ## 3. Also in M4
 
 Image objects (move, resize, replace, extract), crop with "crop and discard content" via
