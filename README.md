@@ -3,8 +3,10 @@
 > A free, open-source PDF editor that runs entirely in your browser. Nothing is uploaded.
 > One workspace, not forty tools.
 
-**Status: M1 complete (v0.1 candidate); M2 (viewer, search, annotations) implemented, awaiting
-the cross-viewer QA matrix; M3 next.** Open many PDFs,
+**Status: M1–M3 implemented (v1.0 candidate).** Light table, viewer with search and
+annotations, forms, page numbers and watermarks, metadata, passwords, compression, image
+export and repair are in place; the M3 correctness review and the cross-viewer annotation
+matrix are the remaining gates. Open many PDFs,
 arrange their pages on the light table (drag-and-drop, split, merge, interleave, rotate,
 images as pages), and export a verified file whose bookmarks, links, labels and form fields
 are reconciled. English and Turkish UI, offline PWA, no network after load. CI runs on

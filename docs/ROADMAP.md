@@ -90,22 +90,25 @@ follow-ups, not blockers):
 - Free text is limited to WinAnsi characters with the standard fonts until an embedded
   Unicode font path exists (M3, together with overlay fonts).
 
-## M3 — Documents as data  (→ v0.3)
+## M3 — Documents as data  (→ v0.3) — **implemented 2026-09-27, review in progress**
 
-| Feature | Engine | Notes |
-|---|---|---|
-| Fill AcroForms; flatten; detect and warn about XFA | P + L | |
-| Page numbers, headers/footers, Bates numbering | L | respects /Rotate and /CropBox |
-| Watermark (text/image, opacity, tiling, behind/over) | L | Form XObject reused per page |
-| Metadata view/edit/strip (Info + XMP + attachments + JS) | L | full rewrite, new /ID |
-| Open encrypted; remove password; set user/owner password and permissions (AES-256) | P + L (Q fallback) | |
-| Compress: lossless pass (object streams, dedupe, unused resources) | L + Q | reports actual delta |
-| Compress: image downsample + JPEG re-encode with presets | own + P | skips SMask/CCITT/JBIG2 |
-| PDF → images (PNG/JPEG at DPI) | P | |
-| Repair broken files with notice | P + Q | |
-| qpdf built from source in CI behind `PdfPlumber` | Q | ADR-0008 |
+| Feature | Engine | Notes | Status |
+|---|---|---|---|
+| Fill AcroForms; flatten; detect and warn about XFA | P + L | inline editors for every field type, Tab order across pages, forms panel, pdf-lib flatten pass (PDFium cannot flatten checkboxes) | done (EmbedPDF cannot clear radio groups or empty non-editable dropdowns; option export values not exposed) |
+| Page numbers, headers/footers, Bates numbering | L | embedded Inter / JetBrains Mono / Noto Serif subsets, shared placement function, live preview, mirroring, page ranges | done (furniture is per page: pages inserted later need re-apply) |
+| Watermark (text/image, opacity, tiling, behind/over) | L | Form XObject reused per page | done (removable /Watermark annotation mode skipped) |
+| Metadata view/edit/strip (Info + XMP + attachments + JS) | L | custom keys, BCP-47 language, strip checklist, unreachable objects removed, fresh /ID | done |
+| Open encrypted; remove password; set user/owner password and permissions (AES-256) | P + L (Q fallback) | restricted-source badge with permission bits and handler, strength meter, random owner password when omitted | done (qpdf fallback for exotic filters not wired) |
+| Compress: lossless pass (object streams, dedupe, unused resources) | L + Q | qpdf built from source, reproducible, CI-verified | done |
+| Compress: image downsample + JPEG re-encode with presets | own + P | analysis table, estimate, presets, compare view; skips alpha/CCITT/JBIG2/JPX and at-target images | done (Gray/CMYK re-encoded as RGB; no font subsetting) |
+| PDF → images (PNG/JPEG at DPI) | P | plus WebP, tiling, ZIP, clipboard | done |
+| Repair broken files with notice | P + Q | "Save repaired copy" through qpdf with verification; diagnostics panel | done (no e2e yet) |
+| qpdf built from source in CI behind `PdfPlumber` | Q | ADR-0008 amended: Emscripten 6, zlib and libjpeg-turbo in-tree | done |
 
 Exit: v1.0 success criteria met → **v1.0.0**, merge `develop` into `main`, tag.
+Status: functionality complete; the independent correctness review of M3 and the M2
+cross-viewer annotation matrix (needs a person with Acrobat, Preview and Edge) are the
+remaining gates before v1.0.
 
 ## M4 — Editing content  (→ v1.x)
 
