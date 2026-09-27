@@ -17,6 +17,14 @@
  * engine, decode images, ask the user something) and then commit one model operation as a
  * single history entry: dropping a PDF onto a section is one undo step, not "open" plus
  * "insert".
+ *
+ * Work in progress: a source opened or a blob stored by an operation that has not
+ * committed yet is in no history entry, so garbage collection (run by every commit,
+ * including other operations' commits) would drop it. The operation that creates it owns
+ * a `ProtectionLease`; `loadSources` and `addBlob` protect each id they create under the
+ * caller's lease the moment it exists, and only that lease's `release()` lifts it. The
+ * protections are reference counts, so one operation finishing never unprotects what
+ * another one is still preparing.
  */
 import {
   addSource,
@@ -77,6 +85,18 @@ export interface StoredBlob {
   readonly name: string;
 }
 
+/**
+ * Garbage-collection protection held by one operation for the sources and blobs it created
+ * but has not committed yet (see the module comment). `openFiles` and `applyComposed`
+ * create one per run and release it after their commit (or when they give up).
+ */
+export interface ProtectionLease {
+  /** True once released; ids created under a released lease are not protected. */
+  readonly released: boolean;
+  /** Lifts every protection this lease holds (idempotent). */
+  release(): void;
+}
+
 /** Files opened by the engine but not yet added to the model (see `loadSources`). */
 export interface LoadedSources {
   readonly loaded: readonly { readonly file: File; readonly source: OpenedSource }[];
@@ -96,12 +116,16 @@ interface WorkspaceState {
   openFiles: (files: readonly File[]) => Promise<OpenFilesReport>;
   /**
    * Opens files in the engine and registers their file facts, without touching the model
-   * or history. Add them with `addLoadedSource` inside an operation (usually from
-   * `applyComposed`); sources never added are closed at the next garbage collection.
+   * or history. Each opened source is protected under `lease` as soon as it is registered;
+   * add it with `addLoadedSource` inside an operation (usually the `applyComposed` that
+   * owns the lease). Sources never added are closed once the lease is released.
    */
-  loadSources: (files: readonly File[]) => Promise<LoadedSources>;
-  /** Stores image bytes for image pages; returns the id the model references. */
-  addBlob: (blob: StoredBlob) => BlobId;
+  loadSources: (files: readonly File[], lease: ProtectionLease) => Promise<LoadedSources>;
+  /**
+   * Stores image bytes for image pages and returns the id the model references. The blob
+   * is protected under `lease` until it is released; by then it must be in history.
+   */
+  addBlob: (blob: StoredBlob, lease: ProtectionLease) => BlobId;
   closeDocument: (id: DocumentId) => void;
   setActive: (id: DocumentId) => void;
   movePages: (
@@ -126,12 +150,13 @@ interface WorkspaceState {
   /**
    * `applyOperation` with an async prelude: awaits `prelude` (open files, decode images,
    * ask the user), then commits `operation` with the prelude's result as one history
-   * entry. A prelude that resolves to `undefined` cancels. Sources loaded by the prelude
-   * are protected from garbage collection until the commit. Resolves to whether a change
-   * was committed.
+   * entry. A prelude that resolves to `undefined` cancels. The prelude receives the
+   * operation's lease: pass it to `loadSources` and `addBlob` so what the prelude creates
+   * survives other operations' commits until this one has committed. Resolves to whether
+   * a change was committed.
    */
   applyComposed: <P>(
-    prelude: () => Promise<P | undefined>,
+    prelude: (lease: ProtectionLease) => Promise<P | undefined>,
     operation: (ws: Workspace, ids: IdGenerator, prelude: P) => Workspace,
     label: string | ((prelude: P) => string),
   ) => Promise<boolean>;
@@ -142,6 +167,53 @@ interface WorkspaceState {
 
 const ids: IdGenerator = createRandomIdGenerator();
 let colorCounter = 0;
+
+/**
+ * Sources and blobs protected by running operations, with the number of leases holding
+ * each. Garbage collection keeps every id in here.
+ */
+const protections = new Map<SourceId | BlobId, number>();
+
+function protect(id: SourceId | BlobId): void {
+  protections.set(id, (protections.get(id) ?? 0) + 1);
+}
+
+function unprotect(id: SourceId | BlobId): void {
+  const count = protections.get(id);
+  if (count === undefined) return;
+  if (count <= 1) protections.delete(id);
+  else protections.set(id, count - 1);
+}
+
+class Lease implements ProtectionLease {
+  private readonly held: (SourceId | BlobId)[] = [];
+  private done = false;
+
+  get released(): boolean {
+    return this.done;
+  }
+
+  /** Protects `id` for this lease's owner; false when the lease was already released. */
+  hold(id: SourceId | BlobId): boolean {
+    if (this.done) return false;
+    protect(id);
+    this.held.push(id);
+    return true;
+  }
+
+  release(): void {
+    if (this.done) return;
+    this.done = true;
+    for (const id of this.held) unprotect(id);
+    this.held.length = 0;
+  }
+}
+
+/** Only leases made by this store can hold ids. */
+function asLease(lease: ProtectionLease): Lease {
+  if (!(lease instanceof Lease)) throw new Error('Not a workspace store lease');
+  return lease;
+}
 
 export function pagesPhrase(count: number): string {
   return m.pages_count({ count });
@@ -256,10 +328,6 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
     return next ?? documentColors;
   };
 
-  /** Sources opened by a running composed operation's prelude; never collected. */
-  const pendingSources = new Set<SourceId>();
-  const pendingBlobs = new Set<BlobId>();
-
   /** Replaces the present snapshot without an undo step (tab activation). */
   const replacePresent = (next: Workspace): void => {
     const { history, workspace } = get();
@@ -281,7 +349,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
   const collectGarbage = (): void => {
     const { history, files, blobs } = get();
     const entries = [...history.past, history.present, ...history.future];
-    const live = new Set<string>(pendingSources);
+    const live = new Set<string>(protections.keys());
     for (const entry of entries) {
       for (const id of Object.keys(entry.workspace.sources)) live.add(id);
     }
@@ -295,7 +363,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
     }
     const blobIds = Object.keys(blobs) as BlobId[];
     if (blobIds.length === 0) return;
-    const liveBlobs = new Set<BlobId>(pendingBlobs);
+    const liveBlobs = new Set<string>(protections.keys());
     const seen = new Set<VirtualDocument>();
     for (const entry of entries) {
       for (const doc of Object.values(entry.workspace.documents)) {
@@ -306,13 +374,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
     }
     if (blobIds.every((id) => liveBlobs.has(id))) return;
     set({
-      blobs: Object.fromEntries(
-        Object.entries(blobs).filter(([id]) => liveBlobs.has(id as BlobId)),
-      ),
+      blobs: Object.fromEntries(Object.entries(blobs).filter(([id]) => liveBlobs.has(id))),
     });
   };
 
-  const loadSources = async (files: readonly File[]): Promise<LoadedSources> => {
+  const loadSources = async (
+    files: readonly File[],
+    protection: ProtectionLease,
+  ): Promise<LoadedSources> => {
+    const lease = asLease(protection);
     if (files.length === 0) return { loaded: [], skipped: [] };
     const service = getEngineService();
     set((s) => ({ opening: s.opening + files.length }));
@@ -328,9 +398,9 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
         continue;
       }
       const source = result.value;
-      // Not in any history entry yet: protect it from garbage collection until the
-      // caller (openFiles, applyComposed) has committed or given up.
-      pendingSources.add(source.id);
+      // Not in any history entry yet: protect it from garbage collection for the owner
+      // of the lease (openFiles, applyComposed) until it has committed or given up.
+      const held = lease.hold(source.id);
       const colorIndex = colorCounter % SOURCE_TAG_COUNT;
       colorCounter += 1;
       set((s) => ({
@@ -345,8 +415,37 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
         },
       }));
       loaded.push({ file, source });
+      // The owner already gave up (its prelude failed while this file was opening).
+      if (!held) collectGarbage();
     }
     return { loaded, skipped };
+  };
+
+  /** Commits each loaded source as its own tab ("Open x.pdf"), in the given order. */
+  const commitOpened = (
+    loaded: LoadedSources['loaded'],
+    opened: { name: string; documentId: DocumentId }[],
+    skipped: { name: string; error: EngineFailure }[],
+  ): void => {
+    for (const { file, source } of loaded) {
+      let documentId: DocumentId | undefined;
+      const added = commit(
+        (ws) => {
+          const r = addLoadedSource(ws, source, ids);
+          documentId = r.documentId;
+          return r.workspace;
+        },
+        m.history_open({ name: source.name }),
+      );
+      if (!added || documentId === undefined) {
+        skipped.push({
+          name: file.name,
+          error: { code: 'internal', message: 'The document model rejected the file' },
+        });
+        continue;
+      }
+      opened.push({ name: source.name, documentId });
+    }
   };
 
   return {
@@ -359,30 +458,17 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
 
     openFiles: async (files) => {
       if (files.length === 0) return { opened: [], skipped: [] };
-      const { loaded, skipped: failed } = await loadSources(files);
+      const lease = new Lease();
       const opened: { name: string; documentId: DocumentId }[] = [];
-      const skipped = [...failed];
-      for (const { file, source } of loaded) {
-        let documentId: DocumentId | undefined;
-        const added = commit(
-          (ws) => {
-            const r = addLoadedSource(ws, source, ids);
-            documentId = r.documentId;
-            return r.workspace;
-          },
-          m.history_open({ name: source.name }),
-        );
-        if (!added || documentId === undefined) {
-          skipped.push({
-            name: file.name,
-            error: { code: 'internal', message: 'The document model rejected the file' },
-          });
-          continue;
-        }
-        opened.push({ name: source.name, documentId });
+      const skipped: { name: string; error: EngineFailure }[] = [];
+      try {
+        const result = await loadSources(files, lease);
+        skipped.push(...result.skipped);
+        commitOpened(result.loaded, opened, skipped);
+      } finally {
+        lease.release();
+        collectGarbage();
       }
-      for (const { source } of loaded) pendingSources.delete(source.id);
-      collectGarbage();
       // Activate the first new document, as dropping several files reads left to right.
       const first = opened[0];
       if (first !== undefined && get().workspace.documents[first.documentId] !== undefined) {
@@ -393,9 +479,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
 
     loadSources,
 
-    addBlob: (blob) => {
+    addBlob: (blob, protection) => {
+      const lease = asLease(protection);
       const id = ids.blob();
       set((s) => ({ blobs: { ...s.blobs, [id]: blob } }));
+      // Protected from the moment it exists: other operations commit (and collect) while
+      // the owner's prelude is still running.
+      if (!lease.hold(id)) collectGarbage();
       return id;
     },
 
@@ -462,29 +552,17 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
     },
 
     applyComposed: async (prelude, operation, label) => {
-      const before = new Set(Object.keys(get().files) as SourceId[]);
-      const beforeBlobs = new Set(Object.keys(get().blobs) as BlobId[]);
-      // What the prelude adds must survive a garbage collection run by another commit
-      // while it awaits; protection is lifted after this operation's own commit.
-      const added = () => ({
-        sources: (Object.keys(get().files) as SourceId[]).filter((id) => !before.has(id)),
-        blobs: (Object.keys(get().blobs) as BlobId[]).filter((id) => !beforeBlobs.has(id)),
-      });
-      const protect = () => {
-        const { sources, blobs } = added();
-        for (const id of sources) pendingSources.add(id);
-        for (const id of blobs) pendingBlobs.add(id);
-      };
-      let result: Awaited<ReturnType<typeof prelude>>;
+      // Whatever the prelude creates is protected under this lease, and only this lease:
+      // other operations finishing meanwhile never lift it (see the module comment).
+      const lease = new Lease();
       try {
-        result = await prelude();
-        protect();
-      } catch (error) {
-        console.warn('Operation prelude failed', error);
-        protect();
-        result = undefined;
-      }
-      try {
+        let result: Awaited<ReturnType<typeof prelude>>;
+        try {
+          result = await prelude(lease);
+        } catch (error) {
+          console.warn('Operation prelude failed', error);
+          result = undefined;
+        }
         if (result === undefined) return false;
         const value = result;
         let next: Workspace;
@@ -496,9 +574,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
         }
         return commit(() => next, typeof label === 'string' ? label : label(value));
       } finally {
-        const { sources, blobs } = added();
-        for (const id of sources) pendingSources.delete(id);
-        for (const id of blobs) pendingBlobs.delete(id);
+        lease.release();
         collectGarbage();
       }
     },
@@ -521,6 +597,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
 /** Resets to an empty workspace (tests). Open engine sources are closed. */
 export function resetWorkspace(): void {
   const { files } = useWorkspaceStore.getState();
+  protections.clear();
   for (const id of Object.keys(files) as SourceId[]) void getEngineService().close(id);
   useWorkspaceStore.setState({
     history: initialHistory(),

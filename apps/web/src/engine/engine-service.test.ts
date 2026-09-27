@@ -298,6 +298,35 @@ describe('EngineService queue', () => {
     expect(service.peek(SRC, 0, 0, 1)).toBeUndefined();
     expect(closed).toEqual([SRC]);
   });
+
+  it('does not cache a render that completes after its source was closed', async () => {
+    // The adapter finishes the render without noticing the abort (it was already done).
+    let finish: (() => void) | undefined;
+    const bitmap = fakeBitmap(10, 10);
+    const { renderer, closed } = mockRenderer();
+    const late: RendererLike = {
+      ...renderer,
+      renderPage: () =>
+        new Promise((resolve) => {
+          finish = () => {
+            resolve({ bitmap: bitmap as unknown as ImageBitmap, width: 10, height: 10 });
+          };
+        }),
+    };
+    const service = new EngineService({ createRenderer: () => late, timings: false });
+    const result = service.renderPage(request(0, 1));
+    await flush();
+    expect(finish).toBeDefined();
+    await service.close(SRC);
+    expect(closed).toEqual([SRC]);
+    expect(await result).toMatchObject({ ok: false, error: { code: 'aborted' } });
+    finish?.();
+    await flush();
+    expect(service.peek(SRC, 0, 0, 1)).toBeUndefined();
+    expect(service.cacheStats.entries).toBe(0);
+    expect(bitmap.closed).toBe(true);
+    expect(service.pendingJobs).toBe(0);
+  });
 });
 
 describe('EngineService open', () => {

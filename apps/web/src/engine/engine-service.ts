@@ -154,6 +154,8 @@ interface Job {
   readonly subscribers: Set<Subscriber>;
   readonly seq: number;
   running: boolean;
+  /** Set by `close`: the source went away, so a late result must not be cached. */
+  sourceClosed: boolean;
 }
 
 export type PasswordPrompt = (request: {
@@ -291,7 +293,9 @@ export class EngineService {
   async close(sourceId: SourceId): Promise<EngineResult<void>> {
     const prefix = `${sourceId}:`;
     for (const job of [...this.jobs.values()]) {
-      if (job.key.startsWith(prefix)) this.cancel(job, 'Source closed');
+      if (!job.key.startsWith(prefix)) continue;
+      job.sourceClosed = true;
+      this.cancel(job, 'Source closed');
     }
     this.cache.removeSource(sourceId);
     this.retained.delete(sourceId);
@@ -411,6 +415,7 @@ export class EngineService {
           subscribers: new Set(),
           seq: this.seq++,
           running: false,
+          sourceClosed: false,
         };
         this.jobs.set(key, job);
       }
@@ -487,10 +492,17 @@ export class EngineService {
         height: rendered.height,
         bucket,
       };
-      // Cache even when nobody waits any more: scrolling back is common.
-      this.cache.set(job.page, entry);
-      this.measure(`render ${job.key}`, started);
-      result = ok(entry);
+      if (job.sourceClosed) {
+        // The source was closed while PDFium rendered (the adapter finished before it saw
+        // the abort): nothing may be cached for it, or the bitmap would outlive it.
+        rendered.bitmap.close();
+        result = fail('aborted', 'Source closed');
+      } else {
+        // Cache even when nobody waits any more: scrolling back is common.
+        this.cache.set(job.page, entry);
+        this.measure(`render ${job.key}`, started);
+        result = ok(entry);
+      }
     } catch (error) {
       result = { ok: false, error: toFailure(error) };
     }

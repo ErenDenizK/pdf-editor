@@ -7,14 +7,21 @@
  * and paste, "Move to…" and tests.
  */
 import {
+  appendOutline,
   closeDocument,
+  countNodes,
+  type DocumentId,
   duplicatePages,
   findPageLocation,
+  type IdGenerator,
   movePages,
+  newEmptyDocument,
   type PageId,
   type PageTarget,
+  restrictOutline,
   setActiveDocument,
   type Workspace,
+  wrapOutline,
 } from '@pdf-editor/document-model';
 
 import { partitionFiles } from '../files/open-files';
@@ -22,6 +29,7 @@ import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import {
   fromPhrase,
+  imagesDocumentTitle,
   insertPreparedImages,
   type PreparedImages,
   prepareImagePages,
@@ -155,7 +163,11 @@ export function transferPages(transfer: PageTransfer): TransferResult | undefine
  * OS files dropped on a section: PDFs (all their pages) and images (one page each) are
  * inserted at `target` in drop order, as one history entry ("Insert 4 pages from x.pdf").
  * The files are opened by the engine (and images decoded) in the operation's prelude, so
- * nothing reaches history until the whole insertion commits.
+ * nothing reaches history until the whole insertion commits. A dropped PDF's bookmarks come
+ * along, under a node named after the file at the end of the section's outline.
+ *
+ * When the section is closed while the files are still opening, they open as new tabs
+ * instead (PDFs one tab each, images one document), again as one history entry.
  */
 export async function insertFilesAt(files: readonly File[], target: PageTarget): Promise<PageId[]> {
   if (files.length === 0) return [];
@@ -165,12 +177,16 @@ export async function insertFilesAt(files: readonly File[], target: PageTarget):
   let loadedSources: LoadedSources = { loaded: [], skipped: [] };
   let prepared: PreparedImages | undefined;
   let insertedFrom: string[] = [];
+  let bookmarks = 0;
+  let asTabs = false;
   let index = target.index;
   const committed = await store.applyComposed(
-    async () => {
+    async (lease) => {
       const [loaded, preparedImages] = await Promise.all([
-        store.loadSources(pdfs),
-        images.length > 0 ? prepareImagePages(images) : Promise.resolve({ images: [], failed: [] }),
+        store.loadSources(pdfs, lease),
+        images.length > 0
+          ? prepareImagePages(images, lease)
+          : Promise.resolve({ images: [], failed: [] }),
       ]);
       loadedSources = loaded;
       prepared = preparedImages;
@@ -181,38 +197,62 @@ export async function insertFilesAt(files: readonly File[], target: PageTarget):
     },
     (ws, ids, { loaded, images: prepared }) => {
       const targetDoc = ws.documents[target.document];
-      // The section went away while the files were opening: nothing to insert into.
-      if (targetDoc === undefined) return ws;
+      insertedFrom = files
+        .filter(
+          (file) =>
+            loaded.loaded.some((l) => l.file === file) ||
+            prepared.images.some((i) => i.file === file),
+        )
+        .map((file) => file.name);
+      if (targetDoc === undefined) {
+        // The section went away while the files were opening: open them as tabs rather
+        // than letting them vanish.
+        asTabs = true;
+        const opened = openAsTabs(ws, ids, loaded, prepared.images);
+        placed = opened.documents.flatMap(
+          (id) => opened.workspace.documents[id]?.pages.map((p) => p.id) ?? [],
+        );
+        return opened.workspace;
+      }
       index = Math.min(target.index, targetDoc.pages.length);
       let next = ws;
       let at = index;
-      const names: string[] = [];
       for (const file of files) {
         const source = loaded.loaded.find((l) => l.file === file)?.source;
         if (source !== undefined) {
           const added = addLoadedSource(next, source, ids);
-          const pageIds = added.workspace.documents[added.documentId]?.pages.map((p) => p.id) ?? [];
+          const opened = added.workspace.documents[added.documentId];
+          const pageIds = opened?.pages.map((p) => p.id) ?? [];
           next = movePages(added.workspace, {
             pageIds,
             target: { document: targetDoc.id, index: at },
           });
           next = closeDocument(next, added.documentId);
+          // The file's bookmarks target the pages just inserted: keep them.
+          const carried = restrictOutline(opened?.outline ?? [], new Set(pageIds), true);
+          const first = pageIds[0];
+          if (carried.length > 0 && first !== undefined) {
+            next = appendOutline(next, targetDoc.id, [
+              wrapOutline(source.name, carried, { destination: { kind: 'page', page: first } }),
+            ]);
+            bookmarks += countNodes(carried);
+          }
           at += pageIds.length;
-          names.push(source.name);
           continue;
         }
         const image = prepared.images.find((i) => i.file === file);
         if (image !== undefined) {
           next = insertPreparedImages(next, ids, targetDoc.id, at, [image]);
           at += 1;
-          names.push(file.name);
         }
       }
-      insertedFrom = names;
       placed = next.documents[targetDoc.id]?.pages.slice(index, at).map((p) => p.id) ?? [];
       return setActiveDocument(next, targetDoc.id);
     },
-    () => m.history_insert_pages({ count: placed.length, from: fromPhrase(insertedFrom) }),
+    () =>
+      asTabs
+        ? m.history_open({ name: fromPhrase(insertedFrom) })
+        : m.history_insert_pages({ count: placed.length, from: fromPhrase(insertedFrom) }),
   );
   const skippedNames = [...loadedSources.skipped.map((s) => s.name), ...(prepared?.failed ?? [])];
   const skippedNote =
@@ -221,26 +261,70 @@ export async function insertFilesAt(files: readonly File[], target: PageTarget):
     if (skippedNote) announce(skippedNote);
     return [];
   }
+  if (asTabs) {
+    announce(
+      [m.announce_opened_instead({ from: fromPhrase(insertedFrom) }), skippedNote]
+        .filter(Boolean)
+        .join('. '),
+    );
+    return placed;
+  }
   useSelectionStore.getState().apply({
     selected: new Set(placed),
     anchor: placed[0] ?? null,
     focused: placed[0] ?? null,
   });
   const title = model().workspace.documents[target.document]?.title ?? '';
+  const inserted = {
+    pages: pagesPhrase(placed.length),
+    from: fromPhrase(insertedFrom),
+    position: index + 1,
+    title,
+  };
   announce(
     [
-      m.announce_inserted_pages({
-        pages: pagesPhrase(placed.length),
-        from: fromPhrase(insertedFrom),
-        position: index + 1,
-        title,
-      }),
+      bookmarks > 0
+        ? m.announce_inserted_pages_bookmarks({
+            ...inserted,
+            bookmarks: m.bookmarks_count({ count: bookmarks }),
+          })
+        : m.announce_inserted_pages(inserted),
       skippedNote,
     ]
       .filter(Boolean)
       .join('. '),
   );
   return placed;
+}
+
+/**
+ * Opens loaded sources as tabs (in drop order) and images as one document after them, the
+ * first new tab active. For files whose target section is gone.
+ */
+function openAsTabs(
+  ws: Workspace,
+  ids: IdGenerator,
+  loaded: LoadedSources,
+  images: PreparedImages['images'],
+): { readonly workspace: Workspace; readonly documents: readonly DocumentId[] } {
+  let next = ws;
+  const documents: DocumentId[] = [];
+  for (const { source } of loaded.loaded) {
+    const added = addLoadedSource(next, source, ids);
+    next = added.workspace;
+    documents.push(added.documentId);
+  }
+  if (images.length > 0) {
+    const title = imagesDocumentTitle(images.map((i) => i.file));
+    const made = newEmptyDocument(next, ids, { title });
+    next = insertPreparedImages(made.workspace, ids, made.documentId, 0, images);
+    documents.push(made.documentId);
+  }
+  const first = documents[0];
+  return {
+    workspace: first === undefined ? next : setActiveDocument(next, first),
+    documents,
+  };
 }
 
 /** Shows a document as a light-table section (tab drop, "Show in Arrange"). */

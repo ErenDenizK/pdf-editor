@@ -36,7 +36,12 @@ import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { useSelectionStore } from '../state/selection-store';
 import { useUiStore } from '../state/ui-store';
-import { pagesPhrase, type StoredBlob, useWorkspaceStore } from '../state/workspace-store';
+import {
+  pagesPhrase,
+  type ProtectionLease,
+  type StoredBlob,
+  useWorkspaceStore,
+} from '../state/workspace-store';
 import { askImageSizing } from './operation-dialogs-store';
 import { type TitleProblem, validateTitle } from './operation-plans';
 
@@ -308,11 +313,12 @@ export interface PreparedImages {
 /**
  * Decodes image files, asks "Fit to A4 width" vs "Original size" when that matters (several
  * images, or one larger than A4), and stores the bytes as blobs. Resolves to undefined when
- * the user cancels the question. Call it as (part of) an `applyComposed` prelude so the
- * blobs are protected until the insertion commits.
+ * the user cancels the question. Call it as (part of) an `applyComposed` prelude with that
+ * operation's lease: the blobs are protected under it until the insertion commits.
  */
 export async function prepareImagePages(
   files: readonly File[],
+  lease: ProtectionLease,
   sizing?: ImageSizing,
 ): Promise<PreparedImages | undefined> {
   const decoded = await Promise.all(
@@ -343,7 +349,7 @@ export async function prepareImagePages(
   const sizingChoice = choice;
   const images = ok.map(({ file, blob }) => ({
     file,
-    blob: store.addBlob(blob),
+    blob: store.addBlob(blob, lease),
     size: imagePageSize(blob.width, blob.height, sizingChoice),
   }));
   return { images, failed };
@@ -388,8 +394,8 @@ export async function insertImagesInto(
   let failed: readonly string[] = [];
   let at = 0;
   const committed = await model().applyComposed(
-    async () => {
-      const prepared = await prepareImagePages(files);
+    async (lease) => {
+      const prepared = await prepareImagePages(files, lease);
       failed = prepared?.failed ?? [];
       return prepared !== undefined && prepared.images.length > 0 ? prepared : undefined;
     },
@@ -435,19 +441,22 @@ export async function insertImagesInto(
   return placed;
 }
 
+/** Title of a document made of images: the first image's name ("scan-1.png" → "scan-1"). */
+export function imagesDocumentTitle(files: readonly File[]): string {
+  return documentTitleFromName((files[0]?.name ?? '').replace(/\.(png|jpe?g|webp)$/i, '.pdf'));
+}
+
 /** Images opened on their own (picker, drop on the tab bar): one new document. */
 export async function openImagesAsDocument(
   files: readonly File[],
 ): Promise<DocumentId | undefined> {
   if (files.length === 0) return undefined;
-  const title = documentTitleFromName(
-    (files[0]?.name ?? '').replace(/\.(png|jpe?g|webp)$/i, '.pdf'),
-  );
+  const title = imagesDocumentTitle(files);
   let created: DocumentId | undefined;
   let failed: readonly string[] = [];
   const committed = await model().applyComposed(
-    async () => {
-      const prepared = await prepareImagePages(files);
+    async (lease) => {
+      const prepared = await prepareImagePages(files, lease);
       failed = prepared?.failed ?? [];
       return prepared !== undefined && prepared.images.length > 0 ? prepared : undefined;
     },
