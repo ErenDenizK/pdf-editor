@@ -5,18 +5,42 @@
  * Drop: `getAsFileSystemHandle` (Chromium) -> `webkitGetAsEntry` (recursive folder walk,
  * all engines) -> `getAsFile`. Safari has no handle API, so folder drops use entries.
  *
- * All results are filtered to PDFs by type or extension (`file-filters.ts`).
+ * Results are filtered by type or extension (`file-filters.ts`, `images.ts`): PDFs by
+ * default; drops and the Open picker also take PNG, JPEG and WebP images (image pages).
  */
 import { m } from '../i18n';
 import {
   collectFromEntries,
   collectFromHandles,
   type EntryLike,
-  filterPdfFiles,
   type HandleLike,
+  isPdfFile,
+  type NamedFile,
 } from './file-filters';
+import { IMAGE_ACCEPT, isImageFile } from './images';
 
 export const PDF_ACCEPT = 'application/pdf,.pdf';
+
+/** PDFs and the image types that can become pages. */
+export function isOpenableFile(file: NamedFile): boolean {
+  return isPdfFile(file) || isImageFile(file);
+}
+
+/** Splits files into PDFs and images, keeping their order within each group. */
+export function partitionFiles<T extends NamedFile>(
+  files: readonly T[],
+): { readonly pdfs: T[]; readonly images: T[] } {
+  return {
+    pdfs: files.filter(isPdfFile),
+    images: files.filter((file) => !isPdfFile(file) && isImageFile(file)),
+  };
+}
+
+const IMAGE_PICKER_TYPES = {
+  'image/png': ['.png'],
+  'image/jpeg': ['.jpg', '.jpeg'],
+  'image/webp': ['.webp'],
+};
 
 interface OpenFilePickerOptions {
   multiple?: boolean;
@@ -44,39 +68,68 @@ function isAbort(error: unknown): boolean {
  * Must be called from a user gesture (click or keydown) for the picker to open.
  */
 export async function pickPdfFiles(): Promise<File[]> {
+  return pickFiles('pdf');
+}
+
+/**
+ * Asks for files of a kind: 'pdf', 'images' (PNG, JPEG, WebP) or 'openable' (both).
+ * Resolves to an empty array when the user cancels. Needs a user gesture.
+ */
+export async function pickFiles(kind: 'pdf' | 'images' | 'openable'): Promise<File[]> {
+  const accept = kind === 'pdf' ? isPdfFile : kind === 'images' ? isImageFile : isOpenableFile;
   const picker = (window as Window & WindowWithPicker).showOpenFilePicker;
   if (picker) {
     try {
+      const types =
+        kind === 'pdf'
+          ? { 'application/pdf': ['.pdf'] }
+          : kind === 'images'
+            ? IMAGE_PICKER_TYPES
+            : { 'application/pdf': ['.pdf'], ...IMAGE_PICKER_TYPES };
       const handles = await picker.call(window, {
         multiple: true,
-        id: 'pdf-editor-open',
+        id: kind === 'images' ? 'pdf-editor-images' : 'pdf-editor-open',
         types: [
-          { description: m.file_picker_description(), accept: { 'application/pdf': ['.pdf'] } },
+          {
+            description:
+              kind === 'pdf'
+                ? m.file_picker_description()
+                : kind === 'images'
+                  ? m.file_picker_images()
+                  : m.file_picker_openable(),
+            accept: types,
+          },
         ],
       });
       // TODO(save): keep the handles so "Save" can write back in place on Chromium.
       const files = await Promise.all(handles.map((handle) => handle.getFile()));
-      return filterPdfFiles(files);
+      return files.filter(accept);
     } catch (error) {
       if (isAbort(error)) return [];
       // SecurityError (no activation, cross-origin frame) and friends: use the input.
     }
   }
-  return pickWithInput();
+  const inputAccept =
+    kind === 'pdf'
+      ? PDF_ACCEPT
+      : kind === 'images'
+        ? IMAGE_ACCEPT
+        : `${PDF_ACCEPT},${IMAGE_ACCEPT}`;
+  return pickWithInput(inputAccept, accept);
 }
 
-function pickWithInput(): Promise<File[]> {
+function pickWithInput(acceptList: string, accept: (file: NamedFile) => boolean): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
-    input.accept = PDF_ACCEPT;
+    input.accept = acceptList;
     input.hidden = true;
     const finish = (files: File[]) => {
       input.remove();
       resolve(files);
     };
-    input.addEventListener('change', () => finish(filterPdfFiles(input.files ?? [])), {
+    input.addEventListener('change', () => finish(Array.from(input.files ?? []).filter(accept)), {
       once: true,
     });
     input.addEventListener('cancel', () => finish([]), { once: true });
@@ -110,8 +163,11 @@ interface CapturedItem {
  * synchronously before the first `await`: the browser invalidates the item list as soon
  * as the drop handler returns.
  */
-export async function filesFromDataTransfer(dataTransfer: DataTransfer): Promise<File[]> {
-  return filesFromItems(Array.from(dataTransfer.items ?? []), dataTransfer.files ?? []);
+export async function filesFromDataTransfer(
+  dataTransfer: DataTransfer,
+  accept: (file: NamedFile) => boolean = isPdfFile,
+): Promise<File[]> {
+  return filesFromItems(Array.from(dataTransfer.items ?? []), dataTransfer.files ?? [], accept);
 }
 
 /**
@@ -122,9 +178,10 @@ export async function filesFromDataTransfer(dataTransfer: DataTransfer): Promise
 export async function filesFromItems(
   allItems: readonly DataTransferItem[],
   fallback: Iterable<File> | ArrayLike<File> = [],
+  accept: (file: NamedFile) => boolean = isPdfFile,
 ): Promise<File[]> {
   const items = allItems.filter((item) => item.kind === 'file');
-  if (items.length === 0) return filterPdfFiles(Array.from(fallback));
+  if (items.length === 0) return Array.from(fallback).filter(accept);
 
   const captured: CapturedItem[] = items.map((item) => {
     const withHandle = item as DataTransferItem & DataTransferItemWithHandle;
@@ -139,11 +196,11 @@ export async function filesFromItems(
   for (const item of captured) {
     const handle = item.handle ? await item.handle.catch(() => null) : null;
     if (handle) {
-      results.push(...(await collectFromHandles([handle])));
+      results.push(...(await collectFromHandles([handle], { accept })));
     } else if (item.entry) {
-      results.push(...(await collectFromEntries([item.entry])));
-    } else if (item.file) {
-      results.push(...filterPdfFiles([item.file]));
+      results.push(...(await collectFromEntries([item.entry], { accept })));
+    } else if (item.file && accept(item.file)) {
+      results.push(item.file);
     }
   }
   return results;

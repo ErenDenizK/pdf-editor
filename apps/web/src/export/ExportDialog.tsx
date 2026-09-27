@@ -10,9 +10,11 @@ import { X } from 'lucide-react';
 import { type RefObject, type SyntheticEvent, useEffect, useRef, useState } from 'react';
 
 import { formatBytes } from '../files/file-filters';
+import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import overlay from '../shell/ShortcutOverlay.module.css';
 import { pagesPhrase, useWorkspaceStore } from '../state/workspace-store';
+import { useRetained } from '../ui/use-retained';
 import { deliverPdf, supportsSavePicker } from './deliver';
 import styles from './ExportDialog.module.css';
 import { closeExportDialog, useExportDialogStore } from './export-store';
@@ -28,27 +30,35 @@ type Step =
 
 export function ExportDialog() {
   const documentId = useExportDialogStore((s) => s.documentId);
+  // Keep the popup mounted while it animates closed (see useRetained).
+  const [shownId, release] = useRetained(documentId);
   return (
     <Dialog.Root
       open={documentId !== null}
       onOpenChange={(open) => {
         if (!open) closeExportDialog();
       }}
+      onOpenChangeComplete={(open) => {
+        if (!open) release();
+      }}
     >
       <Dialog.Portal>
         <Dialog.Backdrop className={overlay.backdrop} />
-        {documentId !== null ? <ExportFlow key={documentId} documentId={documentId} /> : null}
+        {shownId !== null ? <ExportFlow key={shownId} documentId={shownId} /> : null}
       </Dialog.Portal>
     </Dialog.Root>
   );
 }
 
 function progressText(progress: ExportProgress | null, pageCount: number): string {
-  if (progress === null || progress.phase === 'reading') return 'Reading source files…';
+  if (progress === null || progress.phase === 'reading') return m.export_progress_reading();
   if (progress.phase === 'assembling') {
-    return `Assembling page ${Math.min(progress.done, progress.total)} of ${progress.total}…`;
+    return m.export_progress_assembling({
+      done: Math.min(progress.done, progress.total),
+      total: progress.total,
+    });
   }
-  return `Checking the output (${pagesPhrase(pageCount)})…`;
+  return m.export_progress_verifying({ pages: pagesPhrase(pageCount) });
 }
 
 function progressValue(progress: ExportProgress | null): number {
@@ -62,7 +72,7 @@ function progressValue(progress: ExportProgress | null): number {
 
 function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
   const doc = useWorkspaceStore((s) => s.workspace.documents[documentId]);
-  const title = doc?.title ?? 'document';
+  const title = doc?.title ?? m.export_default_name();
   const pageCount = doc?.pages.length ?? 0;
   const [fileName, setFileName] = useState(() => exportFileName(title));
   const [compatibility, setCompatibility] = useState(false);
@@ -98,12 +108,12 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
     } else if (!result.value.verification.ok) {
       setStep({
         kind: 'failed',
-        message: 'The exported file did not pass verification, so it is not offered for download.',
+        message: m.export_failed_verification(),
         problems: result.value.verification.problems,
       });
     } else {
       setStep({ kind: 'review', prepared: result.value });
-      announce('Export ready to save');
+      announce(m.announce_export_ready());
     }
   };
 
@@ -111,7 +121,7 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
     controller.current?.abort();
     controller.current = null;
     setStep({ kind: 'form' });
-    announce('Export cancelled');
+    announce(m.announce_export_cancelled());
   };
 
   const save = async (prepared: PreparedExport) => {
@@ -120,11 +130,13 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
       const outcome = await deliverPdf(prepared.bytes, name);
       if (outcome === 'cancelled') return;
       closeExportDialog();
-      announce(outcome === 'saved' ? `Saved ${name}` : `Downloaded ${name}`);
+      announce(outcome === 'saved' ? m.announce_saved({ name }) : m.announce_downloaded({ name }));
     } catch (error) {
       setStep({
         kind: 'failed',
-        message: `Could not save the file: ${error instanceof Error ? error.message : String(error)}`,
+        message: m.export_save_failed({
+          reason: error instanceof Error ? error.message : String(error),
+        }),
         problems: [],
       });
     }
@@ -141,8 +153,8 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
       data-testid="export-dialog"
     >
       <div className={overlay.header}>
-        <Dialog.Title className={overlay.title}>Export document</Dialog.Title>
-        <Dialog.Close className={overlay.close} aria-label="Close">
+        <Dialog.Title className={overlay.title}>{m.export_document()}</Dialog.Title>
+        <Dialog.Close className={overlay.close} aria-label={m.common_close()}>
           <X aria-hidden="true" />
         </Dialog.Close>
       </div>
@@ -150,11 +162,13 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
       {step.kind === 'form' ? (
         <form className={styles.body} onSubmit={(event) => void start(event)}>
           <Dialog.Description className={styles.description}>
-            {pagesPhrase(pageCount)} from {sourceCount === 1 ? '1 file' : `${sourceCount} files`}.
-            The file is built and checked on this device; nothing is uploaded.
+            {m.export_description({
+              pages: pagesPhrase(pageCount),
+              files: m.files_count({ count: sourceCount }),
+            })}
           </Dialog.Description>
           <label className={styles.field}>
-            <span className={styles.label}>File name</span>
+            <span className={styles.label}>{m.export_file_name()}</span>
             <input
               ref={nameRef}
               className={styles.input}
@@ -171,14 +185,14 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
               onChange={(event) => setCompatibility(event.target.checked)}
             />
             <span>
-              Compatibility mode (PDF 1.4, no object streams)
-              <span className={styles.hint}>For old readers and printers. Larger file.</span>
+              {m.export_compatibility()}
+              <span className={styles.hint}>{m.export_compatibility_hint()}</span>
             </span>
           </label>
           <div className={styles.actions}>
-            <Dialog.Close className={styles.secondary}>Cancel</Dialog.Close>
+            <Dialog.Close className={styles.secondary}>{m.common_cancel()}</Dialog.Close>
             <button type="submit" className={styles.primary} disabled={pageCount === 0}>
-              Export
+              {m.export_start()}
             </button>
           </div>
         </form>
@@ -193,11 +207,11 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
             className={styles.progress}
             max={100}
             value={progressValue(step.progress)}
-            aria-label="Export progress"
+            aria-label={m.export_progress_label()}
           />
           <div className={styles.actions}>
             <button type="button" className={styles.secondary} onClick={cancel}>
-              Cancel
+              {m.common_cancel()}
             </button>
           </div>
         </div>
@@ -226,14 +240,14 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
             </ul>
           ) : null}
           <div className={styles.actions}>
-            <Dialog.Close className={styles.secondary}>Close</Dialog.Close>
+            <Dialog.Close className={styles.secondary}>{m.common_close()}</Dialog.Close>
             <button
               ref={primaryRef}
               type="button"
               className={styles.primary}
               onClick={() => setStep({ kind: 'form' })}
             >
-              Back
+              {m.common_back()}
             </button>
           </div>
         </div>
@@ -266,17 +280,16 @@ function ReviewStep({
         </span>
       </p>
       <p className={styles.verified} data-testid="export-verified">
-        Verified: re-opened in a fresh engine; page count, sizes, rotation, labels and bookmarks
-        match ({seconds} s).
+        {m.export_verified({ seconds })}
       </p>
       {items.length > 0 ? (
-        <ul className={styles.summary} aria-label="What changed on export">
+        <ul className={styles.summary} aria-label={m.export_summary_label()}>
           {items.map((item) => (
             <li key={item.id} data-tone={item.tone}>
               {item.text}
               {item.details && item.details.length > 0 ? (
                 <details className={styles.details}>
-                  <summary>Show {item.details.length}</summary>
+                  <summary>{m.export_show_details({ count: item.details.length })}</summary>
                   <ul>
                     {item.details.map((line) => (
                       <li key={line}>{line}</li>
@@ -288,14 +301,14 @@ function ReviewStep({
           ))}
         </ul>
       ) : (
-        <p className={styles.description}>Nothing had to be changed or removed.</p>
+        <p className={styles.description}>{m.export_nothing_changed()}</p>
       )}
       <div className={styles.actions}>
         <button type="button" className={styles.secondary} onClick={onBack}>
-          Back
+          {m.common_back()}
         </button>
         <button ref={primaryRef} type="button" className={styles.primary} onClick={onSave}>
-          {supportsSavePicker() ? 'Save…' : 'Download'}
+          {supportsSavePicker() ? m.export_save() : m.export_download()}
         </button>
       </div>
     </div>

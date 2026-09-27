@@ -58,11 +58,24 @@ function saveData(): boolean {
   return connection?.saveData === true;
 }
 
-/** Fetches the engine wasm through the service worker so it lands in the runtime cache. */
+/** Resolves once a service worker controls this page (after `clientsClaim` on first visit). */
+function whenControlled(): Promise<void> {
+  if (navigator.serviceWorker.controller !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true });
+  });
+}
+
+/**
+ * Fetches the engine wasm through the service worker so it lands in the runtime cache.
+ * "Offline ready" can fire before the new worker has claimed the page; a fetch made then
+ * bypasses the worker and caches nothing, so wait for control first.
+ */
 function warmEngineCache(): void {
   if (saveData()) return;
   const run = () => {
-    fetch(wasmUrl, { credentials: 'same-origin' })
+    void whenControlled()
+      .then(() => fetch(wasmUrl, { credentials: 'same-origin' }))
       .then((response) => response.arrayBuffer())
       .catch(() => {
         // Offline or evicted: the engine fetches it on first use instead.

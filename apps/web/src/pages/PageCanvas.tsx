@@ -10,16 +10,69 @@
  * - Unmounting or changing page/scale aborts the request (after the replacement request
  *   has joined the same job, so a priority change never restarts a running render).
  *
+ * Image pages (`blobId`) are drawn from the stored image bytes instead, fitted and centred
+ * on the page like the assembler places them, with the page rotation applied.
+ *
  * The canvas exposes `data-state`: placeholder | preview | rendered | error.
  */
-import type { Rotation, SourceId } from '@pdf-editor/document-model';
+import type { BlobId, Rotation, SourceId } from '@pdf-editor/document-model';
 import { useEffect, useRef } from 'react';
 
 import { type CachedBitmap, chooseBucket, getEngineService } from '../engine/engine-service';
+import { useWorkspaceStore } from '../state/workspace-store';
 import styles from './PageCanvas.module.css';
+
+/** Decoded image blobs, shared by every canvas that shows the same image page. */
+const imageBitmaps = new Map<BlobId, Promise<ImageBitmap>>();
+
+function imageBitmap(blobId: BlobId): Promise<ImageBitmap> | undefined {
+  const cached = imageBitmaps.get(blobId);
+  if (cached) return cached;
+  const stored = useWorkspaceStore.getState().blobs[blobId];
+  if (!stored) return undefined;
+  const decoded = createImageBitmap(new Blob([stored.bytes], { type: stored.type }));
+  decoded.catch(() => imageBitmaps.delete(blobId));
+  imageBitmaps.set(blobId, decoded);
+  return decoded;
+}
+
+/** Draws an image page: white sheet, image fitted and centred, then the page rotation. */
+function drawImagePage(
+  canvas: HTMLCanvasElement,
+  bitmap: ImageBitmap,
+  rotation: Rotation,
+  widthPt: number,
+  heightPt: number,
+  cssWidth: number,
+): void {
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(cssWidth * dpr));
+  const height = Math.max(1, Math.round((width * heightPt) / Math.max(1, widthPt)));
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+  context.fillStyle = '#fff';
+  context.fillRect(0, 0, width, height);
+  const quarter = rotation === 90 || rotation === 270;
+  // The unrotated page, in canvas pixels.
+  const pageW = quarter ? height : width;
+  const pageH = quarter ? width : height;
+  const scale = Math.min(pageW / bitmap.width, pageH / bitmap.height);
+  const drawW = bitmap.width * scale;
+  const drawH = bitmap.height * scale;
+  context.save();
+  context.translate(width / 2, height / 2);
+  context.rotate((rotation * Math.PI) / 180);
+  context.drawImage(bitmap, -drawW / 2, -drawH / 2, drawW, drawH);
+  context.restore();
+  canvas.dataset.state = 'rendered';
+}
 
 export interface PageCanvasProps {
   readonly sourceId: SourceId | undefined;
+  /** Image pages: the stored image to draw instead of an engine bitmap. */
+  readonly blobId?: BlobId | undefined;
   readonly index: number;
   /** Rotation on top of the intrinsic /Rotate (VirtualPage.rotation). */
   readonly rotation: Rotation;
@@ -53,6 +106,7 @@ function draw(canvas: HTMLCanvasElement, entry: CachedBitmap, state: DrawState):
 
 export function PageCanvas({
   sourceId,
+  blobId,
   index,
   rotation,
   widthPt,
@@ -66,6 +120,24 @@ export function PageCanvas({
   const shownRef = useRef<string>('');
   const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
   const bucket = chooseBucket((cssWidth * dpr) / Math.max(1, widthPt), widthPt, heightPt);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas || blobId === undefined) return;
+    let cancelled = false;
+    shownRef.current = `blob:${blobId}`;
+    void imageBitmap(blobId)?.then(
+      (bitmap) => {
+        if (!cancelled) drawImagePage(canvas, bitmap, rotation, widthPt, heightPt, cssWidth);
+      },
+      () => {
+        if (!cancelled) canvas.dataset.state = 'error';
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [blobId, rotation, widthPt, heightPt, cssWidth]);
 
   useEffect(() => {
     const canvas = ref.current;

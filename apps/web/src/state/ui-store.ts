@@ -101,6 +101,8 @@ export interface UiState extends PersistedLayout {
   arrangePinned: readonly DocumentId[];
   /** Light-table sections shown collapsed (header only). Session only. */
   arrangeCollapsed: readonly DocumentId[];
+  /** A document title being edited in place: in its tab or its light-table section. */
+  renaming: { readonly documentId: DocumentId; readonly surface: 'tab' | 'section' } | null;
 
   toggleLeftPanel: () => void;
   /** Opens the left panel on a view; selecting the open view again collapses it. */
@@ -132,6 +134,7 @@ export interface UiState extends PersistedLayout {
   pinToArrange: (ids: readonly DocumentId[], alsoKeep?: DocumentId) => void;
   unpinFromArrange: (id: DocumentId) => void;
   setArrangeCollapsed: (id: DocumentId, collapsed: boolean) => void;
+  setRenaming: (renaming: UiState['renaming']) => void;
 }
 
 function withIds(
@@ -154,6 +157,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
   tool: 'select',
   arrangePinned: [],
   arrangeCollapsed: [],
+  renaming: null,
 
   toggleLeftPanel: () => set((s) => ({ leftPanelOpen: !s.leftPanelOpen })),
   showLeftPanelView: (view) =>
@@ -203,6 +207,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
         ? { arrangePinned: s.arrangePinned.filter((pinned) => pinned !== id) }
         : s,
     ),
+  setRenaming: (renaming) => set({ renaming }),
   setArrangeCollapsed: (id, collapsed) =>
     set((s) => {
       if (s.arrangeCollapsed.includes(id) === collapsed) return s;

@@ -521,23 +521,55 @@ function splitParts(doc: VirtualDocument, spec: SplitSpec): (readonly [number, n
   }
 }
 
+/** Number of parts `splitDocument` would create; throws like it for invalid specs. */
+export function splitPartSizes(
+  ws: Workspace,
+  documentId: DocumentId,
+  spec: SplitSpec,
+): readonly number[] {
+  const doc = requireDocument(ws, documentId);
+  if (doc.pages.length === 0) {
+    throw new DocumentModelError('invalid-argument', 'Cannot split an empty document');
+  }
+  return splitParts(doc, spec).map(([start, end]) => end - start);
+}
+
+export interface SplitOptions {
+  /**
+   * Titles for the parts, in order (e.g. localized "Report (1 of 3)", or bookmark titles).
+   * Missing or blank entries fall back to "<title> (k of n)".
+   */
+  readonly titles?: readonly string[];
+}
+
 /**
- * Splits a document into new documents titled "<title> (k of n)". Each part keeps the
- * outline nodes that land in it and its label strings. With 'ranges', pages outside all
- * ranges stay in the original document (which then keeps its tab, parts follow it);
- * otherwise the original is replaced by the parts. The first part becomes active.
+ * Splits a document into new documents titled "<title> (k of n)" (or `options.titles`).
+ * Each part keeps the outline nodes that land in it and its label strings. With 'ranges',
+ * pages outside all ranges stay in the original document (which then keeps its tab, parts
+ * follow it); otherwise the original is replaced by the parts. The first part becomes
+ * active.
  */
 export function splitDocument(
   ws: Workspace,
   documentId: DocumentId,
   spec: SplitSpec,
   ids: IdGenerator,
+  options: SplitOptions = {},
 ): Workspace {
   const doc = requireDocument(ws, documentId);
   if (doc.pages.length === 0) {
     throw new DocumentModelError('invalid-argument', 'Cannot split an empty document');
   }
+  if (options.titles !== undefined && !isArrayValue(options.titles)) {
+    throw new DocumentModelError('invalid-argument', 'Split titles must be an array');
+  }
   const parts = splitParts(doc, spec);
+  const titleOf = (k: number): string => {
+    const custom = options.titles?.[k];
+    return typeof custom === 'string' && custom.trim().length > 0
+      ? custom.trim()
+      : `${doc.title} (${k + 1} of ${parts.length})`;
+  };
   const covered = new Set<number>();
   for (const [start, end] of parts) for (let i = start; i < end; i++) covered.add(i);
   const hasLeftovers = covered.size < doc.pages.length;
@@ -549,7 +581,7 @@ export function splitDocument(
     return {
       ...doc,
       id: ids.document(),
-      title: `${doc.title} (${k + 1} of ${parts.length})`,
+      title: titleOf(k),
       pages,
       labels: sliceLabels(doc.labels, start, end),
       outline: pruneOutline(outline, pageSet),

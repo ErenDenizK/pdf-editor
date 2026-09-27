@@ -31,22 +31,31 @@ on the repository and a merge to `main` (owner action).
 
 The mandatory feature: merge many PDFs with drag-and-drop reordering.
 
-| Feature | Engine | Notes |
-|---|---|---|
-| Open many files (picker, drop, folder drop) | own | three-tier input path |
-| Tabs per document; light table view of any set of documents | own | |
-| Thumbnail grid, virtualized, adjustable size | P | cached bitmaps |
-| Select (click, shift, marquee), drag between documents, insertion indicator | own | pragmatic-dnd |
-| Reorder, delete, duplicate, rotate, reverse, interleave (odd/even, duplex) | own | virtual model |
-| Split: by ranges, every N, by outline, extract selection to new tab | own | |
-| Insert blank page, insert images as pages (JPEG/PNG/WebP) | L | |
-| Export with outline/link/label/AcroForm reconciliation | L + own | the correctness core |
-| Verification pass before download | P | |
-| Undo/redo with history panel | own | |
-| Command palette, shortcuts, `?` overlay | own | |
-| Privacy indicator, offline PWA | own | |
+Status as of 2026-09-27 (legend: **done**, **partial** with what is missing).
 
-Exit: the five-file merge scenario in `VISION.md` passes with golden-file tests.
+| Feature | Engine | Notes | Status |
+|---|---|---|---|
+| Open many files (picker, drop, folder drop) | own | three-tier input path; PNG/JPEG/WebP accepted too | done |
+| Tabs per document; light table view of any set of documents | own | pin via tab menu, tab drag, "Show all" | done |
+| Thumbnail grid, virtualized, adjustable size | P | cached bitmaps; image pages drawn from their blobs | done |
+| Select (click, shift, marquee), drag between documents, insertion indicator | own | pragmatic-dnd; keyboard alternative (cut/paste, Alt+Arrows) | done |
+| Reorder, delete, duplicate, rotate, reverse, interleave (odd/even, duplex) | own | virtual model; Interleave dialog previews the first 6 pages | done |
+| Split: by ranges, every N, by outline, extract selection to new tab | own | Split dialog (every N, typed ranges with inline errors, top-level bookmarks, before selected pages); "Move / Copy to new document" | partial: only top-level bookmarks cut (no deeper outline level); split titles by bookmark only in outline mode |
+| Merge: into another document, all open documents | own | section/tab menu "Merge into…" (submenu of documents); "Merge all open documents" with reorderable order and title | done |
+| Rename documents | own | in place in tab or section header (double-click, F2, menus), validated | done |
+| Insert blank page, insert images as pages (JPEG/PNG/WebP) | L | blank size follows the preceding page; images at 72 dpi, "Fit to A4 width" or "Original size"; WebP re-encoded to PNG, JPEG passed through; a drop onto a section is one undo step | partial: EXIF orientation of JPEGs is not applied in the PDF; no GIF/HEIC |
+| Export with outline/link/label/AcroForm reconciliation | L + own | the correctness core; image pages get their blobs | done (engine warnings in the summary are English only) |
+| Verification pass before download | P | | done |
+| Undo/redo with history panel | own | every section operation is one labelled history entry | done |
+| Command palette, shortcuts, `?` overlay | own | section operations in the "Documents" group; F2 renames | done |
+| Privacy indicator, offline PWA | own | | done |
+| English and Turkish UI | own | Paraglide catalogs; palette groups re-register on language change | done |
+| Form-widget warning badge on duplicated pages (spec §5) | own | needs the per-page form policy (M3) | not started |
+
+Exit: the five-file merge scenario in `VISION.md` passes with golden-file tests
+(`packages/engine/test/merge-golden.test.ts`, six corpus files) — met. The UI flow (drop,
+Merge all, export, page count checked with pdf-lib) is covered by
+`apps/web/e2e/light-table.spec.ts`.
 
 ## M2 — Viewer and annotations  (→ v0.2)
 

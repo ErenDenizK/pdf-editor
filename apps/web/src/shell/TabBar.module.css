@@ -205,3 +205,14 @@
     width: auto;
   }
 }
+
+.tabWrap[data-renaming] {
+  gap: var(--space-2);
+  padding: 0 var(--space-1) 0 var(--space-3);
+  border-color: var(--border-hairline);
+  background: var(--surface-2);
+}
+
+.tabEditor {
+  font-size: var(--text-md);
+}

@@ -1,0 +1,43 @@
+/* In-place title field for tabs and light-table section headers. */
+.wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-1);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.input:focus-visible {
+  outline: none;
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.error {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  max-width: 280px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-1);
+  background: var(--surface-3);
+  color: var(--danger);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  white-space: normal;
+}

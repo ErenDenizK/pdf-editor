@@ -19,6 +19,7 @@ import {
 import { targetPages } from '../commands/app-commands';
 import { currentPlatform } from '../commands/shortcuts';
 import { inDocumentOrder, transferPages } from '../dnd/drop';
+import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { type PageClipboard, useSelectionStore } from '../state/selection-store';
 import { useUiStore } from '../state/ui-store';
@@ -162,7 +163,7 @@ export function cutPages(): boolean {
   const pageIds = targetPages();
   if (pageIds.length === 0) return false;
   selection().setClipboard({ pageIds, mode: 'cut' });
-  announce(`Cut ${pagesPhrase(pageIds.length)}. Paste after a page with ${modName()} V`);
+  announce(m.announce_cut({ pages: pagesPhrase(pageIds.length), mod: modName() }));
   return true;
 }
 
@@ -170,7 +171,7 @@ export function copyPages(): boolean {
   const pageIds = targetPages();
   if (pageIds.length === 0) return false;
   selection().setClipboard({ pageIds, mode: 'copy' });
-  announce(`Copied ${pagesPhrase(pageIds.length)}`);
+  announce(m.announce_copied({ pages: pagesPhrase(pageIds.length) }));
   return true;
 }
 
@@ -229,9 +230,10 @@ export function movePagesToDocument(documentId: DocumentId): boolean {
 }
 
 /**
- * "Extract to new document": moves the target pages (from one or several documents) into
- * a new document placed after the first one's tab. The model's `splitDocument` only splits
- * one document into contiguous parts, so extraction is `newEmptyDocument` + `movePages`.
+ * "Move to new document" (spec §4 "Extract"): moves the target pages (from one or several
+ * documents) into a new document placed after the first one's tab. The model's
+ * `splitDocument` only splits one document into contiguous parts, so this is
+ * `newEmptyDocument` + `movePages`. "Copy to new document" is in `section-operations.ts`.
  */
 export function extractPages(): boolean {
   const ws = model().workspace;
@@ -242,7 +244,7 @@ export function extractPages(): boolean {
   if (source === undefined) return false;
   const previousActive = ws.activeDocument;
   let created: DocumentId | undefined;
-  const title = `${source.title} (extract)`;
+  const title = m.extract_document_title({ title: source.title });
   const committed = model().applyOperation(
     (current, ids) => {
       const { workspace, documentId } = newEmptyDocument(current, ids, {
@@ -252,12 +254,12 @@ export function extractPages(): boolean {
       created = documentId;
       return movePages(workspace, { pageIds, target: { document: documentId, index: 0 } });
     },
-    `Extract ${pagesPhrase(pageIds.length)}`,
+    m.history_move_to_new({ pages: pagesPhrase(pageIds.length) }),
   );
   if (!committed || created === undefined) return false;
   useUiStore.getState().pinToArrange([created], previousActive);
   select(pageIds);
-  announce(`Extracted ${pagesPhrase(pageIds.length)} to ${title}`);
+  announce(m.announce_moved_to_new({ pages: pagesPhrase(pageIds.length), title }));
   return true;
 }
 
@@ -272,13 +274,13 @@ export function insertBlankAfter(): boolean {
   const target = { document: location.document, index: location.index + 1 };
   const committed = model().applyOperation(
     (current, ids) => insertBlankPage(current, target, ids),
-    'Insert blank page',
+    m.history_insert_blank(),
   );
   if (!committed) return false;
   const inserted = model().workspace.documents[target.document]?.pages[target.index]?.id;
   if (inserted !== undefined) select([inserted]);
   const title = model().workspace.documents[target.document]?.title ?? '';
-  announce(`Inserted a blank page at position ${target.index + 1} in ${title}`);
+  announce(m.announce_inserted_blank({ position: target.index + 1, title }));
   return true;
 }
 
@@ -287,9 +289,9 @@ export function reverseSelectedPages(): boolean {
   if (pageIds.length < 2) return false;
   const committed = model().applyOperation(
     (ws) => reverseOrder(ws, pageIds),
-    `Reverse order of ${pagesPhrase(pageIds.length)}`,
+    m.history_reverse_order({ pages: pagesPhrase(pageIds.length) }),
   );
-  if (committed) announce(`Reversed the order of ${pagesPhrase(pageIds.length)}`);
+  if (committed) announce(m.announce_reversed_order({ pages: pagesPhrase(pageIds.length) }));
   return committed;
 }
 
@@ -301,8 +303,8 @@ export function selectFromSource(pageId: PageId, documents: readonly DocumentId[
   if (page?.ref.kind !== 'source') return false;
   const ids = pagesFromSource(ws, documents, page.ref.source);
   select(ids, pageId);
-  const name = ws.sources[page.ref.source]?.name ?? 'this file';
-  announce(`Selected ${pagesPhrase(ids.length)} from ${name}`);
+  const name = ws.sources[page.ref.source]?.name ?? m.unknown_file();
+  announce(m.announce_selected_from({ pages: pagesPhrase(ids.length), name }));
   return true;
 }
 
@@ -311,10 +313,14 @@ export function selectParity(documentId: DocumentId, parity: 'odd' | 'even'): bo
   if (doc === undefined) return false;
   const ids = parityPages(doc, parity);
   select(ids);
-  announce(`Selected ${pagesPhrase(ids.length)}, ${parity} positions in ${doc.title}`);
+  announce(
+    parity === 'odd'
+      ? m.announce_selected_odd({ pages: pagesPhrase(ids.length), title: doc.title })
+      : m.announce_selected_even({ pages: pagesPhrase(ids.length), title: doc.title }),
+  );
   return true;
 }
 
 function modName(): string {
-  return currentPlatform === 'mac' ? 'Command' : 'Control';
+  return currentPlatform === 'mac' ? m.key_command() : m.key_control();
 }

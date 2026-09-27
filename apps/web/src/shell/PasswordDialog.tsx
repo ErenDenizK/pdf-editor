@@ -9,21 +9,27 @@ import { type SyntheticEvent, useRef, useState } from 'react';
 
 import { answerPassword, type PasswordRequest, usePasswordStore } from '../state/password-store';
 import { m } from '../i18n';
+import { useRetained } from '../ui/use-retained';
 import overlay from './ShortcutOverlay.module.css';
 import styles from './PasswordDialog.module.css';
 
 export function PasswordDialog() {
   const request = usePasswordStore((s) => s.queue[0]);
+  // Keep the popup mounted while it animates closed (see useRetained).
+  const [shown, release] = useRetained(request ?? null);
   return (
     <Dialog.Root
       open={request !== undefined}
       onOpenChange={(open) => {
         if (!open && request) answerPassword(request.id, null);
       }}
+      onOpenChangeComplete={(open) => {
+        if (!open) release();
+      }}
     >
       <Dialog.Portal>
         <Dialog.Backdrop className={overlay.backdrop} />
-        {request ? <PasswordForm key={request.id} request={request} /> : null}
+        {shown ? <PasswordForm key={shown.id} request={shown} /> : null}
       </Dialog.Portal>
     </Dialog.Root>
   );

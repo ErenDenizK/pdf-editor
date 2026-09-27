@@ -70,3 +70,30 @@
   margin: var(--space-1) calc(var(--space-1) * -1);
   background: var(--border-hairline);
 }
+
+/* Why a disabled item is unavailable ("Needs another open document"). */
+.hint {
+  flex: none;
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.submenuArrow {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+}
+
+/* Source colour tag before a document name in menus. */
+.tag {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tag-color, var(--text-tertiary));
+}

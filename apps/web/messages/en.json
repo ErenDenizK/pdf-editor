@@ -54,7 +54,7 @@
   "mode_arrange": "Arrange",
   "mode_read_long": "Read mode",
   "mode_arrange_long": "Arrange mode",
-  "drop_no_pdfs": "No PDF files found in the drop",
+  "drop_no_pdfs": "No PDF or image files found in the drop",
   "nav_label": "Navigator",
   "nav_views_label": "Navigator views",
   "nav_resize": "Resize navigator",
@@ -367,5 +367,373 @@
   "cmd_thumbnails_smaller": "Smaller thumbnails",
   "cmd_thumbnails_note": "Mod+Scroll in Arrange mode",
   "cmd_tool": "{tool} tool",
-  "file_picker_description": "PDF documents"
+  "file_picker_description": "PDF documents",
+  "common_back": "Back",
+  "unknown_file": "unknown file",
+  "key_command": "Command",
+  "key_control": "Control",
+  "group_documents": "Documents",
+  "file_picker_images": "Images (PNG, JPEG, WebP)",
+  "file_picker_openable": "PDF documents and images",
+  "hint_needs_other_document": "Needs another open document",
+  "hint_needs_two_pages": "Needs at least 2 pages",
+  "action_rotate_left": "Rotate left",
+  "action_rotate_right": "Rotate right",
+  "action_delete": "Delete",
+  "action_duplicate": "Duplicate",
+  "action_move_to_new_document": "Move to new document",
+  "action_copy_to_new_document": "Copy to new document",
+  "action_insert_blank_after": "Insert blank page after",
+  "action_move_to": "Move to…",
+  "action_properties": "Properties",
+  "action_cut": "Cut",
+  "action_copy": "Copy",
+  "action_paste_after": "Paste after",
+  "action_paste_duplicate": "Paste as duplicate",
+  "action_select_from_source": "Select all from this source",
+  "context_bar_label": "Actions for {pages}",
+  "cell_label": "Page {position} of {count}",
+  "cell_label_with_label": "Page {position} ({label}) of {count}",
+  "cell_from": ", from {name}",
+  "cell_bookmarked": ", bookmarked",
+  "announce_deleted_page": "Deleted {label}",
+  "arrange_show": "Show in Arrange",
+  "arrange_keep": "Keep in Arrange",
+  "arrange_remove": "Remove from Arrange",
+  "arrange_drop_background": "Drop to open as new documents",
+  "section_empty": "No pages. Drop pages, PDFs or images here.",
+  "section_expand": "Expand",
+  "section_collapse": "Collapse",
+  "section_expand_label": "Expand {title}",
+  "section_collapse_label": "Collapse {title}",
+  "announce_section_expanded": "Expanded {title}",
+  "announce_section_collapsed": "Collapsed {title}",
+  "section_pages_from": "Pages from {name}",
+  "section_pinned": "Pinned",
+  "section_pinned_tooltip": "Shown in Arrange even when another tab is active",
+  "section_actions_label": "{title} actions",
+  "section_not_available": "Not available yet",
+  "section_reverse": "Reverse pages",
+  "section_interleave": "Interleave with…",
+  "section_split": "Split…",
+  "section_merge": "Merge into…",
+  "section_insert_images": "Insert images…",
+  "section_rename": "Rename…",
+  "section_close": "Close document",
+  "announce_removed_from_arrange": "{title} removed from Arrange",
+  "announce_showing_in_arrange": "Showing {title} in Arrange",
+  "announce_showing_all": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Showing {count} document in Arrange",
+        "countPlural=*": "Showing {count} documents in Arrange"
+      }
+    }
+  ],
+  "announce_selected_in": "Selected {pages} in {title}",
+  "announce_selected_from": "Selected {pages} from {name}",
+  "announce_selected_odd": "Selected {pages}, odd positions in {title}",
+  "announce_selected_even": "Selected {pages}, even positions in {title}",
+  "announce_cut": "Cut {pages}. Paste after a page with {mod} V",
+  "announce_copied": "Copied {pages}",
+  "extract_document_title": "{title} (extract)",
+  "copy_document_title": "{title} (copy)",
+  "history_move_to_new": "Move {pages} to new document",
+  "history_copy_to_new": "Copy {pages} to new document",
+  "announce_moved_to_new": "Moved {pages} to {title}",
+  "announce_copied_to_new": "Copied {pages} to {title}",
+  "history_insert_blank": "Insert blank page",
+  "announce_inserted_blank": "Inserted a blank page at position {position} in {title}",
+  "history_reverse_order": "Reverse order of {pages}",
+  "announce_reversed_order": "Reversed the order of {pages}",
+  "history_reverse": "Reverse {title}",
+  "announce_reversed_document": "Reversed the pages of {title}",
+  "history_duplicate_to": "Duplicate {pages} to {title}",
+  "history_duplicate_pages": "Duplicate {pages}",
+  "history_move_to": "Move {pages} to {title}",
+  "history_move_to_position": "Move {pages} to position {position}",
+  "announce_duplicated_to": "Duplicated {pages} to position {position} in {title}",
+  "announce_moved_to": "Moved {pages} to position {position} in {title}",
+  "history_insert_pages": [
+    {
+      "declarations": ["input count", "input from", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Insert {count} page from {from}",
+        "countPlural=*": "Insert {count} pages from {from}"
+      }
+    }
+  ],
+  "announce_inserted_pages": "Inserted {pages} from {from} at position {position} in {title}",
+  "announce_skipped_files": "Skipped {names}",
+  "announce_images_failed": "Could not read as images: {names}",
+  "cmd_cut_pages": "Cut pages",
+  "cmd_cut_pages_note": "Arrange mode. Paste after the focused page with Mod+V, also in another document.",
+  "cmd_copy_pages": "Copy pages",
+  "cmd_arrange_only_note": "Arrange mode.",
+  "cmd_paste_pages": "Paste pages after the focused page",
+  "cmd_paste_pages_note": "Arrange mode. Cut pages move; copied pages are duplicated.",
+  "cmd_paste_duplicates": "Paste pages as duplicates",
+  "cmd_move_to_new_document": "Move pages to new document",
+  "cmd_copy_to_new_document": "Copy pages to new document",
+  "cmd_insert_blank": "Insert blank page after",
+  "cmd_move_row_start": "Move pages to start of row",
+  "cmd_move_row_end": "Move pages to end of row",
+  "cmd_move_document_start": "Move pages to start of document",
+  "cmd_move_document_end": "Move pages to end of document",
+  "cmd_reverse_selection": "Reverse selection order",
+  "cmd_select_odd": "Select odd pages",
+  "cmd_select_even": "Select even pages",
+  "cmd_keep_in_arrange": "Keep document in Arrange",
+  "cmd_show_all_in_arrange": "Show all documents in Arrange",
+  "cmd_reverse_document": "Reverse pages of document",
+  "cmd_split_document": "Split document…",
+  "cmd_merge_into": "Merge document into…",
+  "cmd_merge_all": "Merge all open documents…",
+  "cmd_interleave": "Interleave with another document…",
+  "cmd_rename_document": "Rename document",
+  "cmd_rename_document_note": "Or double-click a tab or section title.",
+  "cmd_insert_images": "Insert images as pages…",
+  "cmd_export": "Export document…",
+  "split_title": "Split {title}",
+  "split_description": "{pages}. The parts open as new tabs; undo puts the document back together.",
+  "split_mode_label": "How to split",
+  "split_mode_every": "Every {n} pages",
+  "split_every_input_label": "Pages per document",
+  "split_mode_ranges": "Page ranges",
+  "split_ranges_input_label": "Page ranges, for example 1-3, 5, 8-10",
+  "split_ranges_placeholder": "1-3, 5, 8-10",
+  "split_ranges_hint": "Each range becomes a document. Pages outside the ranges stay in {title}.",
+  "split_mode_outline": "At top-level bookmarks",
+  "split_outline_hint": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} bookmark starts a document; parts are named after it.",
+        "countPlural=*": "{count} bookmarks start documents; parts are named after them."
+      }
+    }
+  ],
+  "split_outline_none": "This document has no bookmarks.",
+  "split_outline_single": "The bookmarks all point at the first page, so there is nothing to split.",
+  "split_mode_selection": "Before each selected page",
+  "split_selection_hint": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} selected page starts a new document.",
+        "countPlural=*": "{count} selected pages start new documents."
+      }
+    }
+  ],
+  "split_selection_none": "Select the pages that should start a new document (not the first page).",
+  "split_preview": [
+    {
+      "declarations": ["input count", "input sizes", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Creates {count} document: {sizes} pages",
+        "countPlural=*": "Creates {count} documents: {sizes} pages"
+      }
+    }
+  ],
+  "split_preview_remaining": "{pages} stay in {title}.",
+  "split_single_part": "This would create only one document. Use a smaller number.",
+  "split_invalid_every": "Enter a whole number of pages, 1 or more.",
+  "split_fix_ranges": "Fix the ranges above to see the result.",
+  "split_confirm": "Split",
+  "split_part_title": "{title} ({index} of {count})",
+  "history_split": "Split {title} into {count}",
+  "announce_split": [
+    {
+      "declarations": ["input count", "input title", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Split {title} into {count} document",
+        "countPlural=*": "Split {title} into {count} documents"
+      }
+    }
+  ],
+  "range_error_empty": "Type page numbers or ranges, for example 1-3, 5, 8-10.",
+  "range_error_syntax": "“{token}” is not a page number or range.",
+  "range_error_zero": "“{token}”: pages are numbered from 1.",
+  "range_error_reversed": "“{token}”: the range runs backwards.",
+  "range_error_out_of_bounds": "“{token}”: the document has {count} pages.",
+  "range_error_overlap": "“{first}” and “{second}” overlap.",
+  "merge_confirm": "Merge",
+  "merge_into_title": "Merge {title} into…",
+  "merge_into_description": "The pages of {title} are appended to the document you choose.",
+  "merge_into_target": "Append to",
+  "merge_into_preview": "{title} will have {pages}.",
+  "history_merge_into": "Merge {source} into {target}",
+  "announce_merged_into": "Appended {pages} from {source} to {target}",
+  "merge_all_title": "Merge all open documents",
+  "merge_all_description": "Pages are joined in this order. Use the arrows to change it.",
+  "merge_all_order_label": "Merge order",
+  "merge_all_name_label": "Title of the merged document",
+  "merge_all_preview": [
+    {
+      "declarations": ["input count", "input pages", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Creates one document from {count} document with {pages}.",
+        "countPlural=*": "Creates one document from {count} documents with {pages}."
+      }
+    }
+  ],
+  "merge_move_up": "Move {title} up",
+  "merge_move_down": "Move {title} down",
+  "history_merge_all": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Merge {count} document",
+        "countPlural=*": "Merge {count} documents"
+      }
+    }
+  ],
+  "announce_merged_all": [
+    {
+      "declarations": ["input count", "input title", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Merged {count} document into {title}",
+        "countPlural=*": "Merged {count} documents into {title}"
+      }
+    }
+  ],
+  "interleave_title": "Interleave {title} with…",
+  "interleave_second_label": "Second document",
+  "interleave_mode_label": "Order",
+  "interleave_mode_alternate": "Alternate",
+  "interleave_mode_alternate_hint": "Page 1 of each, then page 2 of each, and so on.",
+  "interleave_mode_duplex": "Duplex scan",
+  "interleave_mode_duplex_hint": "The second document is reversed, as when the back sides were scanned from the flipped stack.",
+  "interleave_preview_label": "Resulting page order",
+  "interleave_slot_label": "{title}, page {page}",
+  "interleave_more": "+{count} more",
+  "interleave_preview": "Creates {title} with {pages}.",
+  "interleave_confirm": "Interleave",
+  "history_interleave": "Interleave {a} with {b}",
+  "announce_interleaved": "Interleaved {a} with {b}: {pages}",
+  "rename_label": "Document title",
+  "title_error_empty": "The title cannot be empty.",
+  "title_error_too_long": "Use at most {max} characters.",
+  "title_error_control": "The title contains invisible control characters.",
+  "history_rename": "Rename to {title}",
+  "announce_renamed": "Renamed to {title}",
+  "image_size_title": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Insert {count} image",
+        "countPlural=*": "Insert {count} images"
+      }
+    }
+  ],
+  "image_size_description": "Each image becomes a page at 72 dpi: one pixel is one point.",
+  "image_size_label": "Page size",
+  "image_size_fit": "Fit to A4 width",
+  "image_size_fit_hint": "Wider images are scaled down to A4 width, aspect ratio kept. Largest page: {width} × {height} cm.",
+  "image_size_original": "Original size",
+  "image_size_original_hint": "Pages match the images exactly. Largest page: {width} × {height} cm.",
+  "image_size_confirm": "Insert",
+  "export_document": "Export document",
+  "export_default_name": "document",
+  "export_progress_reading": "Reading source files…",
+  "export_progress_assembling": "Assembling page {done} of {total}…",
+  "export_progress_verifying": "Checking the output ({pages})…",
+  "export_progress_label": "Export progress",
+  "export_failed_verification": "The exported file did not pass verification, so it is not offered for download.",
+  "export_save_failed": "Could not save the file: {reason}",
+  "export_description": "{pages} from {files}. The file is built and checked on this device; nothing is uploaded.",
+  "export_file_name": "File name",
+  "export_compatibility": "Compatibility mode (PDF 1.4, no object streams)",
+  "export_compatibility_hint": "For old readers and printers. Larger file.",
+  "export_start": "Export",
+  "export_verified": "Verified: re-opened in a fresh engine; page count, sizes, rotation, labels and bookmarks match ({seconds} s).",
+  "export_summary_label": "What changed on export",
+  "export_show_details": "Show {count}",
+  "export_nothing_changed": "Nothing had to be changed or removed.",
+  "export_save": "Save…",
+  "export_download": "Download",
+  "announce_export_ready": "Export ready to save",
+  "announce_export_cancelled": "Export cancelled",
+  "announce_saved": "Saved {name}",
+  "announce_downloaded": "Downloaded {name}",
+  "export_error_closed": "The document is no longer open.",
+  "export_error_no_pages": "The document has no pages to export.",
+  "export_error_cancelled": "Export cancelled.",
+  "export_error_read": "Could not read {name}: {reason}",
+  "export_error_check": "The output could not be checked: {reason}",
+  "export_error_image_missing": "An image page lost its image data; undo or delete that page and try again.",
+  "summary_bookmarks_dropped": "Bookmarks: {kept} kept, {dropped} dropped because their pages are not in this document.",
+  "summary_bookmarks_kept": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Bookmarks: all {count} bookmark kept.",
+        "countPlural=*": "Bookmarks: all {count} bookmarks kept."
+      }
+    }
+  ],
+  "summary_links": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Links: {count} link to pages rewritten.",
+        "countPlural=*": "Links: {count} links to pages rewritten."
+      }
+    }
+  ],
+  "summary_links_dropped": [
+    {
+      "declarations": ["input count", "input dropped", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Links: {count} link to pages rewritten, {dropped} removed because their target page is not in this document.",
+        "countPlural=*": "Links: {count} links to pages rewritten, {dropped} removed because their target page is not in this document."
+      }
+    }
+  ],
+  "summary_fields_renamed": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Form fields: {count} field renamed so fields from different files stay separate.",
+        "countPlural=*": "Form fields: {count} fields renamed so fields from different files stay separate."
+      }
+    }
+  ],
+  "summary_fields_unified": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Form fields: {count} field with the same name joined; they share the first file’s value.",
+        "countPlural=*": "Form fields: {count} fields with the same name joined; they share the first file’s value."
+      }
+    }
+  ],
+  "summary_tags_removed": "Accessibility tags removed: they could not stay intact, so the output is not tagged.",
+  "summary_xfa_removed": "XFA form data removed; the regular form fields are kept.",
+  "status_documents_shown": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} document shown",
+        "countPlural=*": "{count} documents shown"
+      }
+    }
+  ]
 }

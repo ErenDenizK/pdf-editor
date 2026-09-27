@@ -8,13 +8,14 @@
  *    removed); the rest use the original bytes the engine service kept at open.
  *    TODO(M2): engine edits (annotations, form values) are recorded in the model from M2
  *    on; the hook already routes such sources through `save()`.
- * 3. Assemble in the assembly worker, with progress.
+ * 3. Assemble in the assembly worker, with progress. Image pages take their bytes from the
+ *    workspace store's blobs (PNG or JPEG; WebP was re-encoded to PNG when inserted).
  * 4. Verify: re-open the output in PDFium (and pdf-lib via the inspector) and compare page
  *    count, sizes, rotations, labels and outline. Only verified bytes are offered.
  *
  * Never rejects: failures resolve to `{ ok: false }` with a message fit for the UI.
  */
-import type { DocumentId, SourceId, Workspace } from '@pdf-editor/document-model';
+import type { BlobId, DocumentId, SourceId, Workspace } from '@pdf-editor/document-model';
 import type { PdfAssembler, ReconciliationReport, VerificationResult } from '@pdf-editor/engine';
 
 import { getAssembler } from '../engine/assembler-client';
@@ -24,7 +25,8 @@ import {
   getEngineService,
   toFailure,
 } from '../engine/engine-service';
-import { useWorkspaceStore } from '../state/workspace-store';
+import { m } from '../i18n';
+import { blobsOfDocument, useWorkspaceStore } from '../state/workspace-store';
 
 export type ExportPhase = 'reading' | 'assembling' | 'verifying';
 
@@ -53,12 +55,15 @@ export interface ExportDependencies {
   readonly engine: Pick<EngineService, 'sourceBytes' | 'saveSource' | 'verify'>;
   readonly assembler: () => Promise<PdfAssembler>;
   readonly workspace: () => Workspace;
+  /** Image bytes by blob id (image pages); defaults to none. */
+  readonly blobs?: (id: BlobId) => ArrayBuffer | undefined;
 }
 
 const defaultDependencies = (): ExportDependencies => ({
   engine: getEngineService(),
   assembler: getAssembler,
   workspace: () => useWorkspaceStore.getState().workspace,
+  blobs: (id) => useWorkspaceStore.getState().blobs[id]?.bytes,
 });
 
 const failed = (message: string, code: 'internal' | 'aborted' = 'internal') =>
@@ -81,15 +86,15 @@ export async function prepareExport(
   const { signal, onProgress } = options;
   const ws = deps.workspace();
   const doc = ws.documents[documentId];
-  if (doc === undefined) return failed('The document is no longer open.');
-  if (doc.pages.length === 0) return failed('The document has no pages to export.');
+  if (doc === undefined) return failed(m.export_error_closed());
+  if (doc.pages.length === 0) return failed(m.export_error_no_pages());
   try {
     const { planExport } = await import('@pdf-editor/engine');
     const plan = planExport(ws, documentId);
 
     const sources = new Map<SourceId, ArrayBuffer>();
     for (const [index, sourceId] of plan.sources.entries()) {
-      if (signal?.aborted) return failed('Export cancelled.', 'aborted');
+      if (signal?.aborted) return failed(m.export_error_cancelled(), 'aborted');
       onProgress?.({ phase: 'reading', done: index, total: plan.sources.length });
       const read = needsEngineSave(ws, sourceId)
         ? await deps.engine.saveSource(sourceId, {
@@ -98,10 +103,21 @@ export async function prepareExport(
           })
         : await deps.engine.sourceBytes(sourceId);
       if (!read.ok) {
-        const name = ws.sources[sourceId]?.name ?? 'a source file';
-        return failed(`Could not read ${name}: ${read.error.message}`, codeOf(read.error.code));
+        const name = ws.sources[sourceId]?.name ?? m.unknown_file();
+        return failed(
+          m.export_error_read({ name, reason: read.error.message }),
+          codeOf(read.error.code),
+        );
       }
       sources.set(sourceId, read.value);
+    }
+
+    const blobs = new Map<string, ArrayBuffer>();
+    for (const blobId of blobsOfDocument(doc)) {
+      const bytes = deps.blobs?.(blobId);
+      if (bytes === undefined) return failed(m.export_error_image_missing());
+      // The worker may take ownership; keep the stored bytes for later exports.
+      blobs.set(blobId, bytes.slice(0));
     }
 
     const assembler = await deps.assembler();
@@ -111,7 +127,7 @@ export async function prepareExport(
       {
         document: plan.document,
         sources,
-        blobs: new Map(),
+        blobs,
         sourceNames: plan.sourceNames,
       },
       {
@@ -126,7 +142,7 @@ export async function prepareExport(
     const verified = await deps.engine.verify(bytes.slice(0), plan.expectation, signal);
     if (!verified.ok) {
       return failed(
-        `The output could not be checked: ${verified.error.message}`,
+        m.export_error_check({ reason: verified.error.message }),
         codeOf(verified.error.code),
       );
     }
@@ -145,7 +161,7 @@ export async function prepareExport(
   } catch (error) {
     const failure = toFailure(error);
     return failed(
-      failure.code === 'aborted' ? 'Export cancelled.' : failure.message,
+      failure.code === 'aborted' ? m.export_error_cancelled() : failure.message,
       codeOf(failure.code),
     );
   }

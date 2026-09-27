@@ -2,7 +2,7 @@
  * Title bar with document tabs (APG Tabs pattern, automatic activation).
  *
  * Keyboard: Left/Right move between tabs and activate them, Home/End jump to the ends,
- * Delete closes the focused tab. Only the active tab is in the Tab order. The close "×"
+ * Delete closes the focused tab, F2 (or a double click) renames it in place. Only the active tab is in the Tab order. The close "×"
  * is a pointer affordance and is hidden from assistive tech because it would otherwise
  * be an interactive element nested in a tab; keyboard and screen-reader users close with
  * Delete (announced through `aria-keyshortcuts`) or the "Close tab" command.
@@ -15,6 +15,8 @@ import { openFilesFromPicker } from '../commands/app-commands';
 import { commandRegistry } from '../commands/registry';
 import { currentPlatform, toAriaKeyShortcut } from '../commands/shortcuts';
 import { m } from '../i18n';
+import { InlineTitleEditor } from '../stage/InlineTitleEditor';
+import { startRename } from '../stage/section-operations';
 import { TabArrangeMenu } from '../stage/TabArrangeMenu';
 import { useUiStore } from '../state/ui-store';
 import { useTabItems, useWorkspaceStore } from '../state/workspace-store';
@@ -37,6 +39,9 @@ export function TabBar() {
   const setActiveTab = useWorkspaceStore((s) => s.setActive);
   const closeDocument = useWorkspaceStore((s) => s.closeDocument);
   const rightPanelOpen = useUiStore((s) => s.rightPanelOpen);
+  const renamingTab = useUiStore((s) =>
+    s.renaming?.surface === 'tab' ? s.renaming.documentId : null,
+  );
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const openShortcut = useCommandShortcut('file.open');
   const paletteShortcut = useCommandShortcut('view.palette');
@@ -73,7 +78,12 @@ export function TabBar() {
     else if (event.key === 'ArrowLeft') target = (index - 1 + documents.length) % documents.length;
     else if (event.key === 'Home') target = 0;
     else if (event.key === 'End') target = documents.length - 1;
-    else if (event.key === 'Delete') {
+    else if (event.key === 'F2') {
+      event.preventDefault();
+      const current = documents[index];
+      if (current) startRename(current.id, 'tab');
+      return;
+    } else if (event.key === 'Delete') {
       event.preventDefault();
       const current = documents[index];
       if (current) closeTab(current.id, current.title, true);
@@ -96,6 +106,28 @@ export function TabBar() {
           <div role="tablist" aria-label={m.tabs_label()} className={styles.tablist}>
             {documents.map((doc) => {
               const selected = doc.id === activeTabId;
+              if (doc.id === renamingTab) {
+                return (
+                  <div
+                    key={doc.id}
+                    className={styles.tabWrap}
+                    data-selected={selected || undefined}
+                    data-renaming=""
+                  >
+                    <span className={styles.tag} data-tag={doc.colorIndex} aria-hidden="true" />
+                    <InlineTitleEditor
+                      documentId={doc.id}
+                      title={doc.title}
+                      className={styles.tabEditor}
+                      onDone={() => {
+                        requestAnimationFrame(() =>
+                          document.getElementById(tabDomId(doc.id))?.focus(),
+                        );
+                      }}
+                    />
+                  </div>
+                );
+              }
               return (
                 <TabArrangeMenu key={doc.id} documentId={doc.id} title={doc.title}>
                   <div className={styles.tabWrap} data-selected={selected || undefined}>
@@ -105,11 +137,12 @@ export function TabBar() {
                       id={tabDomId(doc.id)}
                       aria-selected={selected}
                       aria-controls={STAGE_ID}
-                      aria-keyshortcuts="Delete"
+                      aria-keyshortcuts="Delete F2"
                       tabIndex={selected ? 0 : -1}
                       className={styles.tab}
                       onKeyDown={onKeyDown}
                       onClick={() => setActiveTab(doc.id)}
+                      onDoubleClick={() => startRename(doc.id, 'tab')}
                       onMouseDown={(event) => {
                         // Middle click closes, as in browsers.
                         if (event.button === 1) {
@@ -160,7 +193,7 @@ export function TabBar() {
         </button>
         {documents.length > 0 ? (
           <IconButton
-            label="Export document"
+            label={m.export_document()}
             icon={<Download />}
             shortcut={exportShortcut}
             aria-haspopup="dialog"

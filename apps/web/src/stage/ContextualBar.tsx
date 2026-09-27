@@ -1,7 +1,7 @@
 /**
  * Contextual floating bar above the selection (spec §4): rotate, delete, duplicate,
- * extract, insert blank, move to another document, properties. Hidden while dragging or
- * drawing a marquee. Positioned from table geometry (not the DOM), so it works when the
+ * move to a new document ("Extract"), insert blank, move to another document,
+ * properties. Hidden while dragging or drawing a marquee. Positioned from table geometry (not the DOM), so it works when the
  * selected cells are virtualized away: it then sticks to the top of the viewport.
  *
  * One Tab stop; arrows move between buttons (DESIGN.md §5 roving tabindex).
@@ -23,6 +23,7 @@ import { type KeyboardEvent, type ReactElement, useRef, useState } from 'react';
 import { commandRegistry } from '../commands/registry';
 import { useDragSession } from '../dnd/drag-store';
 import { type ArrangeLayout, cellRect, GRID, type GridMetrics } from '../dnd/geometry';
+import { m } from '../i18n';
 import { useCommandShortcut } from '../shell/use-command-shortcut';
 import { useSelectionStore } from '../state/selection-store';
 import { useUiStore } from '../state/ui-store';
@@ -137,7 +138,7 @@ export function ContextualBar({
       key: 'rotate-left',
       element: (tabIndex) => (
         <IconButton
-          label="Rotate left"
+          label={m.action_rotate_left()}
           icon={<RotateCcw />}
           shortcut={rotateLeft}
           tabIndex={tabIndex}
@@ -149,7 +150,7 @@ export function ContextualBar({
       key: 'rotate-right',
       element: (tabIndex) => (
         <IconButton
-          label="Rotate right"
+          label={m.action_rotate_right()}
           icon={<RotateCw />}
           shortcut={rotateRight}
           tabIndex={tabIndex}
@@ -161,7 +162,7 @@ export function ContextualBar({
       key: 'delete',
       element: (tabIndex) => (
         <IconButton
-          label="Delete"
+          label={m.action_delete()}
           icon={<Trash2 />}
           shortcut={deleteKey}
           tabIndex={tabIndex}
@@ -173,7 +174,7 @@ export function ContextualBar({
       key: 'duplicate',
       element: (tabIndex) => (
         <IconButton
-          label="Duplicate"
+          label={m.action_duplicate()}
           icon={<Copy />}
           shortcut={duplicateKey}
           tabIndex={tabIndex}
@@ -185,7 +186,7 @@ export function ContextualBar({
       key: 'extract',
       element: (tabIndex) => (
         <IconButton
-          label="Extract to new document"
+          label={m.action_move_to_new_document()}
           icon={<FileOutput />}
           shortcut={extractKey}
           tabIndex={tabIndex}
@@ -197,7 +198,7 @@ export function ContextualBar({
       key: 'blank',
       element: (tabIndex) => (
         <IconButton
-          label="Insert blank page after"
+          label={m.action_insert_blank_after()}
           icon={<FilePlus2 />}
           tabIndex={tabIndex}
           onClick={run('pages.insertBlank')}
@@ -208,11 +209,11 @@ export function ContextualBar({
       key: 'move',
       element: (tabIndex) => (
         <Menu.Root>
-          <Tooltip label="Move to…">
+          <Tooltip label={m.action_move_to()}>
             <Menu.Trigger
               className={iconButtonStyles.button}
               data-size="chrome"
-              aria-label="Move to…"
+              aria-label={m.action_move_to()}
               tabIndex={tabIndex}
             >
               <FolderInput />
@@ -241,7 +242,7 @@ export function ContextualBar({
       key: 'properties',
       element: (tabIndex) => (
         <IconButton
-          label="Properties"
+          label={m.action_properties()}
           icon={<PanelRight />}
           tabIndex={tabIndex}
           onClick={() => useUiStore.setState({ rightPanelOpen: true })}
@@ -269,7 +270,7 @@ export function ContextualBar({
     <div
       ref={ref}
       role="toolbar"
-      aria-label={`Actions for ${pagesPhrase(selected.size)}`}
+      aria-label={m.context_bar_label({ pages: pagesPhrase(selected.size) })}
       className={styles.contextBar}
       data-testid="contextual-bar"
       data-context-bar=""
@@ -277,7 +278,7 @@ export function ContextualBar({
       onKeyDown={onKeyDown}
     >
       <span className={styles.contextCount} aria-hidden="true">
-        {selected.size} selected
+        {m.status_selected({ count: selected.size })}
       </span>
       <span className={styles.contextDivider} aria-hidden="true" />
       {buttons.map((button, i) => (

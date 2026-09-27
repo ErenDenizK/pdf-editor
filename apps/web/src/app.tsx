@@ -8,6 +8,7 @@ import { LocaleBoundary } from './i18n/LocaleBoundary';
 import { UpdateToast } from './pwa/UpdateToast';
 import { AppShell } from './shell/AppShell';
 import { registerArrangeCommands } from './stage/arrange-commands';
+import { OperationDialogs } from './stage/OperationDialogs';
 import { requestPassword } from './state/password-store';
 
 /**
@@ -29,6 +30,7 @@ export function App() {
     <LocaleBoundary>
       <AppShell />
       <ExportDialog />
+      <OperationDialogs />
       <UpdateToast />
     </LocaleBoundary>
   );

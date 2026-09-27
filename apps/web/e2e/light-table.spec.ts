@@ -1,11 +1,14 @@
 /**
  * Light table end to end: real native drag and drop driven by mouse events (Playwright
- * intercepts HTML5 drags in Chromium), tab context menu pinning, and screenshots for the
- * design review (`CAPTURE_SCREENSHOTS=1`, written to docs/design/screenshots/).
+ * intercepts HTML5 drags in Chromium), tab context menu pinning, merging every open
+ * document and exporting the result, and screenshots for the design review
+ * (`CAPTURE_SCREENSHOTS=1`, written to docs/design/screenshots/).
  */
 import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
+import { PDFDocument } from '@cantoo/pdf-lib';
 import { expect, type Page, test } from '@playwright/test';
 
 const fixtures = new URL('../../../test/fixtures/', import.meta.url);
@@ -39,6 +42,13 @@ async function showBothInArrange(page: Page, second: string): Promise<void> {
   await page.getByRole('tab', { name: second }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Show in Arrange' }).click();
   await expect(page.getByRole('grid')).toHaveCount(2);
+}
+
+/** Waits until at least `count` light-table thumbnails have rendered. */
+async function rendered(page: Page, count: number): Promise<void> {
+  await expect(
+    page.locator('[role="gridcell"] canvas[data-state="rendered"]').nth(count - 1),
+  ).toBeAttached({ timeout: 20_000 });
 }
 
 function grid(page: Page, name: string) {
@@ -98,15 +108,52 @@ test.describe('light table', () => {
     await expect(page.getByText(/^\d+ selected in 2 documents$/)).toBeVisible();
   });
 
+  test('merges all open documents and exports the combined file', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Download flow is verified on Chromium');
+    // Force the <a download> path: Playwright cannot drive the native save picker.
+    await page.addInitScript({
+      content:
+        "Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });",
+    });
+    await page.goto('./?lang=en');
+    await openFixtures(page, ['simple-text.pdf', 'rotated-pages.pdf']);
+
+    await page.keyboard.press('ControlOrMeta+k');
+    await page.getByRole('combobox', { name: 'Search commands' }).fill('merge all');
+    await page.keyboard.press('Enter');
+    const dialog = page.getByTestId('merge-all-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId('merge-row')).toHaveCount(2);
+    await expect(dialog.getByRole('status')).toHaveText(
+      'Creates one document from 2 documents with 7 pages.',
+    );
+    await dialog.getByRole('button', { name: 'Merge', exact: true }).click();
+    await expect(dialog).toBeHidden();
+
+    const tabs = page.getByRole('tablist', { name: 'Open documents' }).getByRole('tab');
+    await expect(tabs).toHaveCount(1);
+    await expect(tabs.first()).toHaveAccessibleName('simple-text');
+
+    await page.getByRole('button', { name: 'Export document' }).click();
+    const exportDialog = page.getByTestId('export-dialog');
+    await exportDialog.getByRole('button', { name: 'Export', exact: true }).click();
+    await expect(exportDialog.getByTestId('export-verified')).toBeVisible({ timeout: 30_000 });
+    const downloadPromise = page.waitForEvent('download');
+    await exportDialog.getByRole('button', { name: 'Download' }).click();
+    const download = await downloadPromise;
+    const pdf = await PDFDocument.load(await readFile(await download.path()), {
+      updateMetadata: false,
+    });
+    expect(pdf.getPageCount()).toBe(7);
+  });
+
   test('screenshots for design review', async ({ page }) => {
     test.skip(!capture, 'Set CAPTURE_SCREENSHOTS=1 to write docs/design/screenshots/.');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('./');
     await openFixtures(page, ['outline-named-dests.pdf', 'forms-a.pdf']);
     await showBothInArrange(page, 'forms-a');
-    await page.waitForFunction(
-      `document.querySelectorAll('[role="gridcell"] canvas[data-state="rendered"]').length >= 8`,
-    );
+    await rendered(page, 8);
     const cells = grid(page, 'outline-named-dests').getByRole('gridcell');
     await cells.nth(1).click();
     await cells.nth(2).click({ modifiers: ['Shift'] });
@@ -127,5 +174,73 @@ test.describe('light table', () => {
       path: fileURLToPath(new URL('m1-light-table-drag-1440.png', screenshots)),
     });
     await page.mouse.up();
+  });
+
+  test('screenshots of the operation dialogs (English and Turkish)', async ({ page }) => {
+    test.skip(!capture, 'Set CAPTURE_SCREENSHOTS=1 to write docs/design/screenshots/.');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('./?lang=en');
+    await openFixtures(page, ['outline-named-dests.pdf', 'forms-a.pdf', 'simple-text.pdf']);
+    await showBothInArrange(page, 'forms-a');
+    await page.getByRole('tab', { name: 'outline-named-dests' }).click();
+    await page.keyboard.press('2');
+    await rendered(page, 6);
+
+    await page.getByRole('button', { name: 'outline-named-dests actions' }).click();
+    await page.getByRole('menuitem', { name: 'Split…' }).click();
+    const split = page.getByTestId('split-dialog');
+    await split.getByRole('radio', { name: /Page ranges/ }).click();
+    await split.getByTestId('split-ranges').fill('1-2, 4-9');
+    await expect(split.getByTestId('split-range-errors')).toBeVisible();
+    await page.screenshot({
+      path: fileURLToPath(new URL('m1-split-dialog-errors-1440.png', screenshots)),
+    });
+    await split.getByTestId('split-ranges').fill('1-2, 4-5');
+    await expect(split.getByTestId('split-preview')).toContainText('Creates 2 documents');
+    await page.screenshot({
+      path: fileURLToPath(new URL('m1-split-dialog-1440.png', screenshots)),
+    });
+    await page.keyboard.press('Escape');
+
+    await page.keyboard.press('ControlOrMeta+k');
+    await page.getByRole('combobox', { name: 'Search commands' }).fill('merge all');
+    await page.keyboard.press('Enter');
+    const merge = page.getByTestId('merge-all-dialog');
+    await merge.getByRole('button', { name: 'Move simple-text up' }).click();
+    await page.screenshot({
+      path: fileURLToPath(new URL('m1-merge-dialog-1440.png', screenshots)),
+    });
+    await page.keyboard.press('Escape');
+
+    await page.getByRole('button', { name: 'outline-named-dests actions' }).click();
+    await page.getByRole('menuitem', { name: 'Interleave with…' }).click();
+    const interleave = page.getByTestId('interleave-dialog');
+    await interleave.getByRole('radio', { name: /Duplex scan/ }).click();
+    await page.screenshot({
+      path: fileURLToPath(new URL('m1-interleave-dialog-1440.png', screenshots)),
+    });
+    await page.keyboard.press('Escape');
+
+    // Turkish: the light table with its section menu open, then the split dialog.
+    await page.goto('./?lang=tr');
+    await openFixtures(page, ['outline-named-dests.pdf', 'forms-a.pdf']);
+    await page.getByRole('tab', { name: 'forms-a' }).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Düzenleme’de göster' }).click();
+    await expect(page.getByRole('grid')).toHaveCount(2);
+    await rendered(page, 8);
+    await page.getByRole('button', { name: 'outline-named-dests işlemleri' }).click();
+    await page.getByRole('menuitem', { name: /Başka belgeye ekle/ }).hover();
+    await expect(page.getByRole('menuitem', { name: 'forms-a' })).toBeVisible();
+    await page.screenshot({
+      path: fileURLToPath(new URL('m1-light-table-tr-1440.png', screenshots)),
+    });
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'outline-named-dests işlemleri' }).click();
+    await page.getByRole('menuitem', { name: 'Böl…' }).click();
+    await expect(page.getByTestId('split-dialog')).toBeVisible();
+    await page.screenshot({
+      path: fileURLToPath(new URL('m1-split-dialog-tr-1440.png', screenshots)),
+    });
   });
 });

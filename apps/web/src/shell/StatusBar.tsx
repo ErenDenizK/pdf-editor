@@ -44,7 +44,7 @@ function ArrangeShown() {
         ·
       </span>
       <span className={styles.item} data-testid="status-shown">
-        {shown} documents shown
+        {m.status_documents_shown({ count: shown })}
       </span>
     </>
   );

@@ -176,7 +176,7 @@ describe('light table', () => {
     });
   }, 30_000);
 
-  it('inserts OS files dropped on a section at the gap, as one more undo step', async () => {
+  it('inserts OS files dropped on a section at the gap, as one undo step', async () => {
     const { rotated } = await openTwo();
     const file = await fixture(simpleUrl, 'dropped.pdf');
     const target = within(grid('rotated-pages')).getAllByRole('gridcell')[0]!;
@@ -189,6 +189,7 @@ describe('light table', () => {
       target.dispatchEvent(
         new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer, ...at }),
       );
+    const past = useWorkspaceStore.getState().history.past.length;
     fire('dragenter');
     fire('dragover');
     await waitFor(() => {
@@ -208,5 +209,12 @@ describe('light table', () => {
     expect(useWorkspaceStore.getState().history.present.label).toBe(
       'Insert 3 pages from dropped.pdf',
     );
+    // Opening the file and inserting its pages is a single undo step.
+    expect(useWorkspaceStore.getState().history.past.length).toBe(past + 1);
+    await userEvent.keyboard(`{${mod}>}z{/${mod}}`);
+    await waitFor(() => {
+      expect(useWorkspaceStore.getState().workspace.documents[rotated]?.pages).toHaveLength(4);
+    });
+    expect(useWorkspaceStore.getState().workspace.documentOrder).toHaveLength(2);
   }, 30_000);
 });

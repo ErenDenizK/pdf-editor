@@ -9,10 +9,18 @@
  * history.
  *
  * Engine lifetime: a source stays open in the PDFium worker while any history entry
- * references it (undo can bring it back); it is closed once history no longer does.
+ * references it (undo can bring it back); it is closed once history no longer does. Image
+ * blobs (image pages) follow the same rule: the model references them by `BlobId`, the
+ * bytes live here, and they are released once no history entry references them.
+ *
+ * Composed operations (`applyComposed`) run an async prelude first (open files in the
+ * engine, decode images, ask the user something) and then commit one model operation as a
+ * single history entry: dropping a PDF onto a section is one undo step, not "open" plus
+ * "insert".
  */
 import {
   addSource,
+  type BlobId,
   closeDocument as closeDocumentOp,
   createHistory,
   createRandomIdGenerator,
@@ -59,16 +67,41 @@ export interface OpenFilesReport {
   readonly skipped: readonly { readonly name: string; readonly error: EngineFailure }[];
 }
 
+/** Image bytes referenced by image pages. PNG or JPEG only (what the assembler embeds). */
+export interface StoredBlob {
+  readonly bytes: ArrayBuffer;
+  readonly type: 'image/png' | 'image/jpeg';
+  /** Pixel size of the image. */
+  readonly width: number;
+  readonly height: number;
+  readonly name: string;
+}
+
+/** Files opened by the engine but not yet added to the model (see `loadSources`). */
+export interface LoadedSources {
+  readonly loaded: readonly { readonly file: File; readonly source: OpenedSource }[];
+  readonly skipped: readonly { readonly name: string; readonly error: EngineFailure }[];
+}
+
 interface WorkspaceState {
   readonly history: History;
   /** Always `history.present.workspace`. */
   readonly workspace: Workspace;
   readonly files: Readonly<Record<SourceId, SourceFileInfo>>;
   readonly documentColors: Readonly<Record<DocumentId, number>>;
+  readonly blobs: Readonly<Record<BlobId, StoredBlob>>;
   /** Files being read or opened by the engine right now. */
   readonly opening: number;
 
   openFiles: (files: readonly File[]) => Promise<OpenFilesReport>;
+  /**
+   * Opens files in the engine and registers their file facts, without touching the model
+   * or history. Add them with `addLoadedSource` inside an operation (usually from
+   * `applyComposed`); sources never added are closed at the next garbage collection.
+   */
+  loadSources: (files: readonly File[]) => Promise<LoadedSources>;
+  /** Stores image bytes for image pages; returns the id the model references. */
+  addBlob: (blob: StoredBlob) => BlobId;
   closeDocument: (id: DocumentId) => void;
   setActive: (id: DocumentId) => void;
   movePages: (
@@ -90,6 +123,18 @@ interface WorkspaceState {
     label: string | (() => string),
     options?: { readonly coalesceKey?: string },
   ) => boolean;
+  /**
+   * `applyOperation` with an async prelude: awaits `prelude` (open files, decode images,
+   * ask the user), then commits `operation` with the prelude's result as one history
+   * entry. A prelude that resolves to `undefined` cancels. Sources loaded by the prelude
+   * are protected from garbage collection until the commit. Resolves to whether a change
+   * was committed.
+   */
+  applyComposed: <P>(
+    prelude: () => Promise<P | undefined>,
+    operation: (ws: Workspace, ids: IdGenerator, prelude: P) => Workspace,
+    label: string | ((prelude: P) => string),
+  ) => Promise<boolean>;
   undo: () => string | undefined;
   redo: () => string | undefined;
   jumpTo: (index: number) => void;
@@ -125,6 +170,42 @@ function initialHistory(): History {
   return createHistory(createWorkspace(), m.history_start(), Date.now());
 }
 
+/**
+ * Adds a loaded source to the model (inside an operation). Returns the new workspace and
+ * the document that shows the source's pages.
+ */
+export function addLoadedSource(
+  ws: Workspace,
+  source: OpenedSource,
+  idGenerator: IdGenerator,
+): { readonly workspace: Workspace; readonly documentId: DocumentId } {
+  // The engine's id is the handle to the open document (and its retained bytes).
+  const r = addSource(ws, toSourceInput(source), idGenerator, { sourceId: source.id });
+  return { workspace: r.workspace, documentId: r.documentId };
+}
+
+const blobCache = new WeakMap<VirtualDocument, readonly BlobId[]>();
+
+/** Blob ids referenced by a document's image pages and image overlays (memoized). */
+function documentBlobs(doc: VirtualDocument): readonly BlobId[] {
+  let found = blobCache.get(doc);
+  if (found === undefined) {
+    const set = new Set<BlobId>();
+    for (const page of doc.pages) {
+      if (page.ref.kind === 'image') set.add(page.ref.blob);
+      for (const overlay of page.overlays) if (overlay.kind === 'image') set.add(overlay.blob);
+    }
+    found = [...set];
+    blobCache.set(doc, found);
+  }
+  return found;
+}
+
+/** Blob ids a document needs at export. */
+export function blobsOfDocument(doc: VirtualDocument): readonly BlobId[] {
+  return documentBlobs(doc);
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
   /** Applies a model operation; model misuse is reported, never thrown into the UI. */
   const commit = (
@@ -147,10 +228,37 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
       label,
       coalesceKey === undefined ? {} : { coalesceKey },
     );
-    set({ history: pushed, workspace: pushed.present.workspace });
+    set({
+      history: pushed,
+      workspace: pushed.present.workspace,
+      documentColors: colorsFor(pushed.present.workspace),
+    });
     collectGarbage();
     return true;
   };
+
+  /**
+   * Documents created by operations (split parts, merges, extracts) take the colour of
+   * their first source, so a tab keeps the colour of the file its pages came from.
+   */
+  const colorsFor = (ws: Workspace): Readonly<Record<DocumentId, number>> => {
+    const { documentColors, files } = get();
+    let next: Record<DocumentId, number> | undefined;
+    for (const id of ws.documentOrder) {
+      if (documentColors[id] !== undefined) continue;
+      const doc = ws.documents[id];
+      if (doc === undefined) continue;
+      const first = documentSources(doc)[0];
+      const colorIndex = first === undefined ? undefined : (files[first]?.colorIndex ?? undefined);
+      next ??= { ...documentColors };
+      next[id] = colorIndex ?? colorCounter++ % SOURCE_TAG_COUNT;
+    }
+    return next ?? documentColors;
+  };
+
+  /** Sources opened by a running composed operation's prelude; never collected. */
+  const pendingSources = new Set<SourceId>();
+  const pendingBlobs = new Set<BlobId>();
 
   /** Replaces the present snapshot without an undo step (tab activation). */
   const replacePresent = (next: Workspace): void => {
@@ -169,20 +277,76 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
     return true;
   };
 
-  /** Closes engine sources that no history entry references any more. */
+  /** Closes engine sources (and drops blobs) that no history entry references any more. */
   const collectGarbage = (): void => {
-    const { history, files } = get();
-    const live = new Set<string>();
-    for (const entry of [...history.past, history.present, ...history.future]) {
+    const { history, files, blobs } = get();
+    const entries = [...history.past, history.present, ...history.future];
+    const live = new Set<string>(pendingSources);
+    for (const entry of entries) {
       for (const id of Object.keys(entry.workspace.sources)) live.add(id);
     }
     const dead = (Object.keys(files) as SourceId[]).filter((id) => !live.has(id));
-    if (dead.length === 0) return;
-    for (const id of dead) void getEngineService().close(id);
-    const deadSet = new Set<string>(dead);
+    if (dead.length > 0) {
+      for (const id of dead) void getEngineService().close(id);
+      const deadSet = new Set<string>(dead);
+      set({
+        files: Object.fromEntries(Object.entries(files).filter(([id]) => !deadSet.has(id))),
+      });
+    }
+    const blobIds = Object.keys(blobs) as BlobId[];
+    if (blobIds.length === 0) return;
+    const liveBlobs = new Set<BlobId>(pendingBlobs);
+    const seen = new Set<VirtualDocument>();
+    for (const entry of entries) {
+      for (const doc of Object.values(entry.workspace.documents)) {
+        if (seen.has(doc)) continue;
+        seen.add(doc);
+        for (const id of documentBlobs(doc)) liveBlobs.add(id);
+      }
+    }
+    if (blobIds.every((id) => liveBlobs.has(id))) return;
     set({
-      files: Object.fromEntries(Object.entries(files).filter(([id]) => !deadSet.has(id))),
+      blobs: Object.fromEntries(
+        Object.entries(blobs).filter(([id]) => liveBlobs.has(id as BlobId)),
+      ),
     });
+  };
+
+  const loadSources = async (files: readonly File[]): Promise<LoadedSources> => {
+    if (files.length === 0) return { loaded: [], skipped: [] };
+    const service = getEngineService();
+    set((s) => ({ opening: s.opening + files.length }));
+    // Open in parallel; report in the order the files were given.
+    const pending = files.map((file) => ({ file, result: service.open(file) }));
+    const loaded: { file: File; source: OpenedSource }[] = [];
+    const skipped: { name: string; error: EngineFailure }[] = [];
+    for (const { file, result: promise } of pending) {
+      const result = await promise;
+      set((s) => ({ opening: Math.max(0, s.opening - 1) }));
+      if (!result.ok) {
+        skipped.push({ name: file.name, error: result.error });
+        continue;
+      }
+      const source = result.value;
+      // Not in any history entry yet: protect it from garbage collection until the
+      // caller (openFiles, applyComposed) has committed or given up.
+      pendingSources.add(source.id);
+      const colorIndex = colorCounter % SOURCE_TAG_COUNT;
+      colorCounter += 1;
+      set((s) => ({
+        files: {
+          ...s.files,
+          [source.id]: {
+            name: source.name,
+            size: source.byteLength,
+            lastModified: source.lastModified,
+            colorIndex,
+          },
+        },
+      }));
+      loaded.push({ file, source });
+    }
+    return { loaded, skipped };
   };
 
   return {
@@ -190,65 +354,49 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
     workspace: createWorkspace(),
     files: {},
     documentColors: {},
+    blobs: {},
     opening: 0,
 
     openFiles: async (files) => {
       if (files.length === 0) return { opened: [], skipped: [] };
-      const service = getEngineService();
-      set((s) => ({ opening: s.opening + files.length }));
-      // Open in parallel; add to the workspace in the order the files were given.
-      const pending = files.map((file) => ({ file, result: service.open(file) }));
+      const { loaded, skipped: failed } = await loadSources(files);
       const opened: { name: string; documentId: DocumentId }[] = [];
-      const skipped: { name: string; error: EngineFailure }[] = [];
-      for (const { file, result: promise } of pending) {
-        const result = await promise;
-        set((s) => ({ opening: Math.max(0, s.opening - 1) }));
-        if (!result.ok) {
-          skipped.push({ name: file.name, error: result.error });
-          continue;
-        }
-        const source = result.value;
+      const skipped = [...failed];
+      for (const { file, source } of loaded) {
         let documentId: DocumentId | undefined;
-        const colorIndex = colorCounter % SOURCE_TAG_COUNT;
         const added = commit(
           (ws) => {
-            // The engine's id is the handle to the open document (and its retained bytes).
-            const r = addSource(ws, toSourceInput(source), ids, { sourceId: source.id });
+            const r = addLoadedSource(ws, source, ids);
             documentId = r.documentId;
             return r.workspace;
           },
           m.history_open({ name: source.name }),
         );
         if (!added || documentId === undefined) {
-          void service.close(source.id);
           skipped.push({
             name: file.name,
             error: { code: 'internal', message: 'The document model rejected the file' },
           });
           continue;
         }
-        colorCounter += 1;
-        const docId = documentId;
-        set((s) => ({
-          files: {
-            ...s.files,
-            [source.id]: {
-              name: source.name,
-              size: source.byteLength,
-              lastModified: source.lastModified,
-              colorIndex,
-            },
-          },
-          documentColors: { ...s.documentColors, [docId]: colorIndex },
-        }));
-        opened.push({ name: source.name, documentId: docId });
+        opened.push({ name: source.name, documentId });
       }
+      for (const { source } of loaded) pendingSources.delete(source.id);
+      collectGarbage();
       // Activate the first new document, as dropping several files reads left to right.
       const first = opened[0];
       if (first !== undefined && get().workspace.documents[first.documentId] !== undefined) {
         replacePresent(setActiveDocument(get().workspace, first.documentId));
       }
       return { opened, skipped };
+    },
+
+    loadSources,
+
+    addBlob: (blob) => {
+      const id = ids.blob();
+      set((s) => ({ blobs: { ...s.blobs, [id]: blob } }));
+      return id;
     },
 
     closeDocument: (id) => {
@@ -313,6 +461,48 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
       return commit(() => next, label(), options.coalesceKey);
     },
 
+    applyComposed: async (prelude, operation, label) => {
+      const before = new Set(Object.keys(get().files) as SourceId[]);
+      const beforeBlobs = new Set(Object.keys(get().blobs) as BlobId[]);
+      // What the prelude adds must survive a garbage collection run by another commit
+      // while it awaits; protection is lifted after this operation's own commit.
+      const added = () => ({
+        sources: (Object.keys(get().files) as SourceId[]).filter((id) => !before.has(id)),
+        blobs: (Object.keys(get().blobs) as BlobId[]).filter((id) => !beforeBlobs.has(id)),
+      });
+      const protect = () => {
+        const { sources, blobs } = added();
+        for (const id of sources) pendingSources.add(id);
+        for (const id of blobs) pendingBlobs.add(id);
+      };
+      let result: Awaited<ReturnType<typeof prelude>>;
+      try {
+        result = await prelude();
+        protect();
+      } catch (error) {
+        console.warn('Operation prelude failed', error);
+        protect();
+        result = undefined;
+      }
+      try {
+        if (result === undefined) return false;
+        const value = result;
+        let next: Workspace;
+        try {
+          next = operation(get().workspace, ids, value);
+        } catch (error) {
+          console.warn('Operation failed', error);
+          return false;
+        }
+        return commit(() => next, typeof label === 'string' ? label : label(value));
+      } finally {
+        const { sources, blobs } = added();
+        for (const id of sources) pendingSources.delete(id);
+        for (const id of blobs) pendingBlobs.delete(id);
+        collectGarbage();
+      }
+    },
+
     undo: () => {
       const label = get().history.present.label;
       return moveHistory(undoOp(get().history)) ? label : undefined;
@@ -337,6 +527,7 @@ export function resetWorkspace(): void {
     workspace: createWorkspace(),
     files: {},
     documentColors: {},
+    blobs: {},
     opening: 0,
   });
 }

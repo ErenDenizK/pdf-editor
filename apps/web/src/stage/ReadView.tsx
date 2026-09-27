@@ -15,6 +15,7 @@ import {
 import { type RefObject, useEffect, useLayoutEffect, useRef } from 'react';
 
 import { RENDER_PRIORITY } from '../engine/engine-service';
+import { m } from '../i18n';
 import { PageCanvas } from '../pages/PageCanvas';
 import { CSS_PX_PER_PT, displaySize, rotationPhrase } from '../pages/page-geometry';
 import { useSelectionStore } from '../state/selection-store';
@@ -215,12 +216,13 @@ function PageColumn({
           >
             <div
               role="img"
-              aria-label={`Page ${item.index + 1} of ${pages.length}${rotationPhrase(total)}`}
+              aria-label={`${m.cell_label({ position: item.index + 1, count: pages.length })}${rotationPhrase(total)}`}
               className={styles.page}
               style={{ width, height }}
             >
               <PageCanvas
                 sourceId={page.ref.kind === 'source' ? page.ref.source : undefined}
+                blobId={page.ref.kind === 'image' ? page.ref.blob : undefined}
                 index={page.ref.kind === 'source' ? page.ref.index : 0}
                 rotation={page.rotation}
                 widthPt={size.width}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { setLabelRanges } from '../labels';
-import { interleave, mergeDocuments, movePages, splitDocument } from '../pages';
+import { interleave, mergeDocuments, movePages, splitDocument, splitPartSizes } from '../pages';
 import { documentsInOrder, getDocument } from '../selectors';
 import type { DocumentId } from '../types';
 import type { SourceOutlineNode } from '../workspace';
@@ -144,6 +144,34 @@ describe('splitDocument', () => {
     // The original keeps non-page nodes and marks extracted targets unresolved.
     expect(outlineTitles(next, a)).toContain('Website');
     expect(outlineTitles(next, a)).toContain('Chapter 1 (unresolved)');
+  });
+
+  it('uses caller titles for the parts, falling back for blank or missing ones', () => {
+    const next = check(
+      splitDocument(ws, a, { mode: 'every', n: 2 }, ids, { titles: ['Kapak', '  ', 'Ek '] }),
+    );
+    expect(documentsInOrder(next).map((d) => d.title)).toEqual(['Kapak', 'A (2 of 3)', 'Ek', 'Z']);
+    expectCode(
+      () => splitDocument(ws, a, { mode: 'every', n: 2 }, ids, { titles: 'x' as never }),
+      'invalid-argument',
+    );
+  });
+
+  it('reports part sizes without changing the workspace', () => {
+    expect(splitPartSizes(ws, a, { mode: 'every', n: 4 })).toEqual([4, 2]);
+    expect(
+      splitPartSizes(ws, a, {
+        mode: 'ranges',
+        ranges: [
+          [0, 0],
+          [2, 4],
+        ],
+      }),
+    ).toEqual([1, 3]);
+    expect(splitPartSizes(ws, a, { mode: 'at-pages', pageIds: [must(pageIds(ws, a)[5])] })).toEqual(
+      [5, 1],
+    );
+    expectCode(() => splitPartSizes(ws, a, { mode: 'every', n: 6 }), 'invalid-argument');
   });
 
   it('preserves label strings in each part', () => {

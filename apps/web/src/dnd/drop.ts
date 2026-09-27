@@ -17,10 +17,23 @@ import {
   type Workspace,
 } from '@pdf-editor/document-model';
 
+import { partitionFiles } from '../files/open-files';
+import { m } from '../i18n';
 import { announce } from '../shell/announcer';
+import {
+  fromPhrase,
+  insertPreparedImages,
+  type PreparedImages,
+  prepareImagePages,
+} from '../stage/section-operations';
 import { useSelectionStore } from '../state/selection-store';
 import { useUiStore } from '../state/ui-store';
-import { pagesPhrase, useWorkspaceStore } from '../state/workspace-store';
+import {
+  addLoadedSource,
+  type LoadedSources,
+  pagesPhrase,
+  useWorkspaceStore,
+} from '../state/workspace-store';
 
 const model = () => useWorkspaceStore.getState();
 
@@ -88,20 +101,17 @@ export function planTransfer(
   const title = targetDoc.title;
   const label = transfer.duplicate
     ? crossDocument
-      ? `Duplicate ${count} to ${title}`
-      : `Duplicate ${count}`
+      ? m.history_duplicate_to({ pages: count, title })
+      : m.history_duplicate_pages({ pages: count })
     : crossDocument
-      ? `Move ${count} to ${title}`
-      : `Move ${count} to position ${position}`;
-  const verb = transfer.duplicate ? 'Duplicated' : 'Moved';
+      ? m.history_move_to({ pages: count, title })
+      : m.history_move_to_position({ pages: count, position });
+  const announcement = transfer.duplicate
+    ? m.announce_duplicated_to({ pages: count, position, title })
+    : m.announce_moved_to({ pages: count, position, title });
   return {
     workspace: next,
-    result: {
-      pageIds: placed,
-      position,
-      label,
-      announcement: `${verb} ${count} to position ${position} in ${title}`,
-    },
+    result: { pageIds: placed, position, label, announcement },
   };
 }
 
@@ -120,7 +130,7 @@ export function transferPages(transfer: PageTransfer): TransferResult | undefine
       result = plan.result;
       return setActiveDocument(plan.workspace, transfer.target.document);
     },
-    () => result?.label ?? 'Move pages',
+    () => result?.label ?? m.history_move({ count: transfer.pageIds.length }),
     transfer.coalesceKey === undefined ? {} : { coalesceKey: transfer.coalesceKey },
   );
   if (!committed || result === undefined) return undefined;
@@ -141,41 +151,96 @@ export function transferPages(transfer: PageTransfer): TransferResult | undefine
   return result;
 }
 
-/** Opens files and inserts all their pages at `target` (OS files dropped on a section). */
+/**
+ * OS files dropped on a section: PDFs (all their pages) and images (one page each) are
+ * inserted at `target` in drop order, as one history entry ("Insert 4 pages from x.pdf").
+ * The files are opened by the engine (and images decoded) in the operation's prelude, so
+ * nothing reaches history until the whole insertion commits.
+ */
 export async function insertFilesAt(files: readonly File[], target: PageTarget): Promise<PageId[]> {
   if (files.length === 0) return [];
   const store = model();
-  const { opened, skipped } = await store.openFiles(files);
-  const before = model().workspace;
-  const openedDocs = opened.map((o) => o.documentId).filter((id) => before.documents[id]);
-  const pageIds = openedDocs.flatMap((id) => before.documents[id]?.pages.map((p) => p.id) ?? []);
+  const { pdfs, images } = partitionFiles(files);
+  let placed: PageId[] = [];
+  let loadedSources: LoadedSources = { loaded: [], skipped: [] };
+  let prepared: PreparedImages | undefined;
+  let insertedFrom: string[] = [];
+  let index = target.index;
+  const committed = await store.applyComposed(
+    async () => {
+      const [loaded, preparedImages] = await Promise.all([
+        store.loadSources(pdfs),
+        images.length > 0 ? prepareImagePages(images) : Promise.resolve({ images: [], failed: [] }),
+      ]);
+      loadedSources = loaded;
+      prepared = preparedImages;
+      if (preparedImages === undefined) return undefined; // the size question was cancelled
+      return loaded.loaded.length + preparedImages.images.length > 0
+        ? { loaded, images: preparedImages }
+        : undefined;
+    },
+    (ws, ids, { loaded, images: prepared }) => {
+      const targetDoc = ws.documents[target.document];
+      // The section went away while the files were opening: nothing to insert into.
+      if (targetDoc === undefined) return ws;
+      index = Math.min(target.index, targetDoc.pages.length);
+      let next = ws;
+      let at = index;
+      const names: string[] = [];
+      for (const file of files) {
+        const source = loaded.loaded.find((l) => l.file === file)?.source;
+        if (source !== undefined) {
+          const added = addLoadedSource(next, source, ids);
+          const pageIds = added.workspace.documents[added.documentId]?.pages.map((p) => p.id) ?? [];
+          next = movePages(added.workspace, {
+            pageIds,
+            target: { document: targetDoc.id, index: at },
+          });
+          next = closeDocument(next, added.documentId);
+          at += pageIds.length;
+          names.push(source.name);
+          continue;
+        }
+        const image = prepared.images.find((i) => i.file === file);
+        if (image !== undefined) {
+          next = insertPreparedImages(next, ids, targetDoc.id, at, [image]);
+          at += 1;
+          names.push(file.name);
+        }
+      }
+      insertedFrom = names;
+      placed = next.documents[targetDoc.id]?.pages.slice(index, at).map((p) => p.id) ?? [];
+      return setActiveDocument(next, targetDoc.id);
+    },
+    () => m.history_insert_pages({ count: placed.length, from: fromPhrase(insertedFrom) }),
+  );
+  const skippedNames = [...loadedSources.skipped.map((s) => s.name), ...(prepared?.failed ?? [])];
   const skippedNote =
-    skipped.length > 0 ? `. Skipped ${skipped.map((s) => s.name).join(', ')}` : '';
-  const targetDoc = before.documents[target.document];
-  if (targetDoc === undefined || pageIds.length === 0) {
-    // The section went away while the files were opening: they stay as new documents.
-    if (opened.length > 0) announce(`Opened ${opened.length} files${skippedNote}`);
-    else if (skipped.length > 0) announce(`Skipped ${skipped.map((s) => s.name).join(', ')}`);
+    skippedNames.length > 0 ? m.announce_skipped_files({ names: skippedNames.join(', ') }) : '';
+  if (!committed) {
+    if (skippedNote) announce(skippedNote);
     return [];
   }
-  const index = Math.min(target.index, targetDoc.pages.length);
-  const from = opened.length === 1 ? (opened[0]?.name ?? 'file') : `${opened.length} files`;
-  const label = `Insert ${pagesPhrase(pageIds.length)} from ${from}`;
-  const committed = model().applyOperation((ws) => {
-    let next = movePages(ws, { pageIds, target: { document: targetDoc.id, index } });
-    for (const id of openedDocs) next = closeDocument(next, id);
-    return setActiveDocument(next, targetDoc.id);
-  }, label);
-  if (!committed) return [];
   useSelectionStore.getState().apply({
-    selected: new Set(pageIds),
-    anchor: pageIds[0] ?? null,
-    focused: pageIds[0] ?? null,
+    selected: new Set(placed),
+    anchor: placed[0] ?? null,
+    focused: placed[0] ?? null,
   });
+  const title = model().workspace.documents[target.document]?.title ?? '';
   announce(
-    `Inserted ${pagesPhrase(pageIds.length)} from ${from} at position ${index + 1} in ${targetDoc.title}${skippedNote}`,
+    [
+      m.announce_inserted_pages({
+        pages: pagesPhrase(placed.length),
+        from: fromPhrase(insertedFrom),
+        position: index + 1,
+        title,
+      }),
+      skippedNote,
+    ]
+      .filter(Boolean)
+      .join('. '),
   );
-  return pageIds;
+  return placed;
 }
 
 /** Shows a document as a light-table section (tab drop, "Show in Arrange"). */
@@ -185,5 +250,5 @@ export function showInArrange(documentId: PageTarget['document']): void {
   if (doc === undefined) return;
   useUiStore.getState().pinToArrange([documentId], ws.activeDocument);
   useUiStore.getState().setArrangeCollapsed(documentId, false);
-  announce(`Showing ${doc.title} in Arrange`);
+  announce(m.announce_showing_in_arrange({ title: doc.title }));
 }

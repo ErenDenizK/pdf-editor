@@ -8,7 +8,7 @@
  * keyboard users have R / Shift+R and Delete, so the actions are hidden from assistive
  * tech and never focusable.
  */
-import type { DocumentId, PageId, Rotation, SourceId } from '@pdf-editor/document-model';
+import type { BlobId, DocumentId, PageId, Rotation, SourceId } from '@pdf-editor/document-model';
 import { Bookmark, RotateCw, Trash2 } from 'lucide-react';
 import {
   memo,
@@ -22,11 +22,12 @@ import {
 import { useDragSession } from '../dnd/drag-store';
 import { attachPageDrag } from '../dnd/page-drag';
 import { RENDER_PRIORITY } from '../engine/engine-service';
+import { m } from '../i18n';
 import { PageCanvas } from '../pages/PageCanvas';
 import { rotationPhrase } from '../pages/page-geometry';
 import { announce } from '../shell/announcer';
 import { useSelectionStore } from '../state/selection-store';
-import { pagesPhrase, useWorkspaceStore } from '../state/workspace-store';
+import { useWorkspaceStore } from '../state/workspace-store';
 import styles from './ArrangeView.module.css';
 
 export interface PageCellProps {
@@ -38,6 +39,8 @@ export interface PageCellProps {
   readonly label: string;
   readonly sourceId: SourceId | undefined;
   readonly sourceIndex: number;
+  /** Image pages: the blob the page shows. */
+  readonly blobId?: BlobId | undefined;
   readonly sourceName: string | undefined;
   readonly colorIndex: number;
   /** VirtualPage.rotation (on top of the intrinsic /Rotate). */
@@ -91,6 +94,7 @@ function PageCellInner({
   label,
   sourceId,
   sourceIndex,
+  blobId,
   sourceName,
   colorIndex,
   rotation,
@@ -120,16 +124,27 @@ function PageCellInner({
   }, [pageId]);
 
   const position = String(index + 1);
-  const labelText = label === position ? `Page ${position}` : `Page ${position} (${label})`;
-  const name = `${labelText} of ${count}${sourceName ? `, from ${sourceName}` : ''}${rotationPhrase(totalRotation)}${outlined ? ', bookmarked' : ''}`;
+  const labelText =
+    label === position
+      ? m.page_option_label({ label: position })
+      : m.page_option_label_with_index({ position, label });
+  const name = `${
+    label === position
+      ? m.cell_label({ position, count })
+      : m.cell_label_with_label({ position, label, count })
+  }${sourceName ? m.cell_from({ name: sourceName }) : ''}${rotationPhrase(totalRotation)}${
+    outlined ? m.cell_bookmarked() : ''
+  }`;
 
   const rotate = () => {
     if (useWorkspaceStore.getState().rotatePages([pageId], 90)) {
-      announce(`Rotated ${pagesPhrase(1)} right`);
+      announce(m.announce_rotated_right({ count: 1 }));
     }
   };
   const remove = () => {
-    if (useWorkspaceStore.getState().deletePages([pageId])) announce(`Deleted ${labelText}`);
+    if (useWorkspaceStore.getState().deletePages([pageId])) {
+      announce(m.announce_deleted_page({ label: labelText }));
+    }
   };
 
   return (
@@ -157,6 +172,7 @@ function PageCellInner({
         >
           <PageCanvas
             sourceId={sourceId}
+            blobId={blobId}
             index={sourceIndex}
             rotation={rotation}
             widthPt={widthPt}
@@ -173,7 +189,7 @@ function PageCellInner({
           <span
             className={styles.hoverAction}
             aria-hidden="true"
-            title="Rotate right"
+            title={m.action_rotate_right()}
             onClick={(event) => {
               event.stopPropagation();
               rotate();
@@ -184,7 +200,7 @@ function PageCellInner({
           <span
             className={styles.hoverAction}
             aria-hidden="true"
-            title="Delete"
+            title={m.action_delete()}
             onClick={(event) => {
               event.stopPropagation();
               remove();

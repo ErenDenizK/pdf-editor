@@ -264,6 +264,7 @@ function PageOption({
         <div className={styles.pageSheet} style={{ width: box.width, height: box.height }}>
           <PageCanvas
             sourceId={page.ref.kind === 'source' ? page.ref.source : undefined}
+            blobId={page.ref.kind === 'image' ? page.ref.blob : undefined}
             index={page.ref.kind === 'source' ? page.ref.index : 0}
             rotation={page.rotation}
             widthPt={size.width}

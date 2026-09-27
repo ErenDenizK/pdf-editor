@@ -12,10 +12,11 @@
 import { canRedo, canUndo, getActiveDocument, type PageId } from '@pdf-editor/document-model';
 
 import type { EngineFailure } from '../engine/engine-service';
-import { pickPdfFiles } from '../files/open-files';
+import { partitionFiles, pickFiles } from '../files/open-files';
 import { m } from '../i18n';
 import { registerLanguageCommands } from '../i18n/language-commands';
 import { announce } from '../shell/announcer';
+import { openImagesAsDocument } from '../stage/section-operations';
 import { selectAllOf, useSelectionStore } from '../state/selection-store';
 import { ARRANGE_SIZES, type ToolId, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
@@ -51,10 +52,16 @@ function failureReason(error: EngineFailure): string {
   }
 }
 
-/** Opens files as tabs (in the given order) and announces the outcome. */
+/**
+ * Opens files as tabs (in the given order) and announces the outcome. PDFs open one tab
+ * each; images (PNG, JPEG, WebP) become the pages of one new document.
+ */
 export async function openDocuments(files: readonly File[]): Promise<void> {
   if (files.length === 0) return;
-  const { opened, skipped } = await model().openFiles(files);
+  const { pdfs, images } = partitionFiles(files);
+  if (images.length > 0) await openImagesAsDocument(images);
+  if (pdfs.length === 0) return;
+  const { opened, skipped } = await model().openFiles(pdfs);
   const parts: string[] = [];
   if (opened.length === 1) parts.push(m.announce_opened({ name: opened[0]?.name ?? '' }));
   else if (opened.length > 1) parts.push(m.announce_opened_many({ count: opened.length }));
@@ -64,8 +71,9 @@ export async function openDocuments(files: readonly File[]): Promise<void> {
   if (parts.length > 0) announce(parts.join('. '));
 }
 
+/** "Open files…" and the tab bar's "+": PDFs and images (images become one document). */
 export async function openFilesFromPicker(): Promise<void> {
-  const files = await pickPdfFiles();
+  const files = await pickFiles('openable');
   await openDocuments(files);
 }
 

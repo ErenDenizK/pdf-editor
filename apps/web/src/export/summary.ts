@@ -1,8 +1,11 @@
 /**
  * The reconciliation summary shown before download: what the export kept, changed or
- * removed, in plain sentences (VISION.md principle 5, "honest UI").
+ * removed, in plain sentences (VISION.md principle 5, "honest UI"). Engine warnings not
+ * covered by a dedicated line are shown as the engine wrote them (English).
  */
 import type { ReconciliationReport } from '@pdf-editor/engine';
+
+import { m } from '../i18n';
 
 export interface SummaryItem {
   readonly id: string;
@@ -12,8 +15,6 @@ export interface SummaryItem {
   /** Optional detail lines (e.g. renamed fields). */
   readonly details?: readonly string[];
 }
-
-const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 /** Engine warnings already expressed by a dedicated summary line. */
 const COVERED = [
@@ -31,8 +32,8 @@ export function summarizeReport(report: ReconciliationReport): SummaryItem[] {
       tone: dropped > 0 ? 'changed' : 'kept',
       text:
         dropped > 0
-          ? `Bookmarks: ${kept} kept, ${dropped} dropped because their pages are not in this document.`
-          : `Bookmarks: all ${plural(kept, 'bookmark', 'bookmarks')} kept.`,
+          ? m.summary_bookmarks_dropped({ kept, dropped })
+          : m.summary_bookmarks_kept({ count: kept }),
     });
   }
   if (report.linksRewritten > 0 || report.linksDropped > 0) {
@@ -40,17 +41,19 @@ export function summarizeReport(report: ReconciliationReport): SummaryItem[] {
       id: 'links',
       tone: report.linksDropped > 0 ? 'changed' : 'kept',
       text:
-        `Links: ${plural(report.linksRewritten, 'link', 'links')} to pages rewritten` +
-        (report.linksDropped > 0
-          ? `, ${report.linksDropped} removed because their target page is not in this document.`
-          : '.'),
+        report.linksDropped > 0
+          ? m.summary_links_dropped({
+              count: report.linksRewritten,
+              dropped: report.linksDropped,
+            })
+          : m.summary_links({ count: report.linksRewritten }),
     });
   }
   if (report.formFieldsRenamed.length > 0) {
     items.push({
       id: 'renamed',
       tone: 'changed',
-      text: `Form fields: ${plural(report.formFieldsRenamed.length, 'field', 'fields')} renamed so fields from different files stay separate.`,
+      text: m.summary_fields_renamed({ count: report.formFieldsRenamed.length }),
       details: report.formFieldsRenamed.map((r) => `${r.from} → ${r.to}`),
     });
   }
@@ -58,7 +61,7 @@ export function summarizeReport(report: ReconciliationReport): SummaryItem[] {
     items.push({
       id: 'unified',
       tone: 'changed',
-      text: `Form fields: ${plural(report.formFieldsUnified.length, 'field', 'fields')} with the same name joined; they share the first file’s value.`,
+      text: m.summary_fields_unified({ count: report.formFieldsUnified.length }),
       details: report.formFieldsUnified,
     });
   }
@@ -66,14 +69,14 @@ export function summarizeReport(report: ReconciliationReport): SummaryItem[] {
     items.push({
       id: 'tags',
       tone: 'changed',
-      text: 'Accessibility tags removed: they could not stay intact, so the output is not tagged.',
+      text: m.summary_tags_removed(),
     });
   }
   if (report.xfaRemoved) {
     items.push({
       id: 'xfa',
       tone: 'changed',
-      text: 'XFA form data removed; the regular form fields are kept.',
+      text: m.summary_xfa_removed(),
     });
   }
   report.warnings

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { userEvent } from 'vitest/browser';
 
 import { App } from '../app';
+import { commandRegistry } from '../commands/registry';
 import { currentPlatform } from '../commands/shortcuts';
 import { useUiStore } from '../state/ui-store';
 import { resetWorkspace } from '../state/workspace-store';
@@ -87,5 +88,34 @@ describe('Language command', () => {
     expect(await screen.findByRole('combobox', { name: 'Komut ara' })).toBeVisible();
     expect(screen.getByRole('option', { name: /Sol paneli aç\/kapat/ })).toBeInTheDocument();
     await userEvent.keyboard('{Escape}');
+  });
+});
+
+describe('command groups', () => {
+  it('registers every palette group through messages, once per language', async () => {
+    resetWorkspace();
+    render(<App />);
+    const groups = () => [...new Set(commandRegistry.list().map((c) => c.group))].sort();
+    expect(groups()).toEqual(
+      ['Documents', 'Edit', 'File', 'General', 'Language', 'Pages', 'Tools', 'View', 'Zoom'].sort(),
+    );
+    setLocale('tr');
+    await waitFor(() => {
+      expect(groups()).toEqual(
+        [
+          'Araçlar',
+          'Belgeler',
+          'Dil',
+          'Dosya',
+          'Düzen',
+          'Genel',
+          'Görünüm',
+          'Sayfalar',
+          'Yakınlaştırma',
+        ].sort(),
+      );
+    });
+    expect(commandRegistry.get('section.split')?.title).toBe('Belgeyi böl…');
+    expect(commandRegistry.get('pages.cut')?.group).toBe('Sayfalar');
   });
 });

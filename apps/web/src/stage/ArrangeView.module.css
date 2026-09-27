@@ -172,10 +172,18 @@
 
 .pinnedMark {
   flex: none;
+  border-radius: var(--radius-1);
   color: var(--text-tertiary);
   font-size: var(--text-xs);
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
+  cursor: default;
+}
+
+.titleEditor {
+  flex: 0 1 320px;
+  font-size: var(--text-md);
+  font-weight: 600;
 }
 
 /* ---------------------------------------------------------------- grid */

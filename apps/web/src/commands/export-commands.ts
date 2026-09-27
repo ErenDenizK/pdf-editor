@@ -2,7 +2,6 @@
  * Export commands. "Export document…" (Mod+S) opens the export dialog for the active tab;
  * Mod+S also stops the browser's "Save page as". Registered from `app-commands.ts`.
  *
- * TODO(i18n): titles are English until message keys are added to the catalog.
  * TODO(M2): "Export selection to new document".
  */
 import { getActiveDocument } from '@pdf-editor/document-model';
@@ -17,7 +16,7 @@ const activeDocument = () => getActiveDocument(useWorkspaceStore.getState().work
 export function registerExportCommands(registry: CommandRegistry): () => void {
   return registry.register({
     id: 'file.export',
-    title: 'Export document…',
+    title: m.cmd_export(),
     group: m.group_file(),
     shortcut: 'Mod+S',
     keywords: ['save', 'download', 'pdf', 'merge', 'write'],

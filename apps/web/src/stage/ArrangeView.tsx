@@ -63,7 +63,8 @@ import {
   rowItemIndex,
 } from '../dnd/geometry';
 import { isPageDrag, isTabDrag } from '../dnd/page-drag';
-import { filesFromItems } from '../files/open-files';
+import { filesFromItems, isOpenableFile } from '../files/open-files';
+import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import {
   clickSelection,
@@ -147,7 +148,7 @@ export function ArrangeView() {
       </div>
       {backgroundTarget ? (
         <div className={styles.backgroundOutline} aria-hidden="true">
-          <span className={styles.dropLabel}>Drop to open as new documents</span>
+          <span className={styles.dropLabel}>{m.arrange_drop_background()}</span>
         </div>
       ) : null}
     </div>
@@ -410,10 +411,10 @@ function LightTable({
           const index = insertionIndex(highlight);
           if (index === undefined) return;
           // Must run synchronously: the item list dies when the drop handler returns.
-          const pending = filesFromItems(source.items);
+          const pending = filesFromItems(source.items, [], isOpenableFile);
           void pending.then((found) => {
             if (found.length === 0) {
-              announce('No PDF files found in the drop');
+              announce(m.drop_no_pdfs());
               return;
             }
             void insertFilesAt(found, { document: highlight.section, index });
@@ -707,7 +708,7 @@ function LightTable({
       return;
     }
     const count = useSelectionStore.getState().selected.size;
-    announce(`${count} selected`);
+    announce(m.status_selected({ count }));
   };
 
   // ------------------------------------------------------------------ render

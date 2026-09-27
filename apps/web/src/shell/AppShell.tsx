@@ -11,7 +11,7 @@ import { type DragEvent, useRef, useState } from 'react';
 
 import { openDocuments } from '../commands/app-commands';
 import { useShortcuts } from '../commands/use-shortcuts';
-import { dragHasFiles, filesFromDataTransfer } from '../files/open-files';
+import { dragHasFiles, filesFromDataTransfer, isOpenableFile } from '../files/open-files';
 import { m } from '../i18n';
 import { TooltipProvider } from '../ui/Tooltip';
 import { announce } from './announcer';
@@ -56,7 +56,7 @@ export function AppShell() {
     // Light-table sections insert dropped files at the drop point themselves.
     if (event.target instanceof Element && event.target.closest('[data-file-drop-zone]')) return;
     // filesFromDataTransfer reads the items synchronously, before its first await.
-    void filesFromDataTransfer(event.dataTransfer).then((files) => {
+    void filesFromDataTransfer(event.dataTransfer, isOpenableFile).then((files) => {
       if (files.length === 0) {
         announce(m.drop_no_pdfs());
         return;

@@ -21,36 +21,38 @@ import {
 } from '@pdf-editor/document-model';
 import { Menu } from '@base-ui/react/menu';
 import { ChevronDown, MoreHorizontal } from 'lucide-react';
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef } from 'react';
 
-import { useCommands } from '../commands/use-commands';
 import { useDropHighlight } from '../dnd/drag-store';
 import { type GridMetrics, GRID, gapBar, type SectionLayout } from '../dnd/geometry';
 import { isPageDrag, isTabDrag } from '../dnd/page-drag';
+import { m } from '../i18n';
 import { displaySize, fitInBox } from '../pages/page-geometry';
 import { announce } from '../shell/announcer';
 import { SOURCE_BADGES } from '../shell/RightPanel';
 import { selectAllOf, useSelectionStore } from '../state/selection-store';
 import { useUiStore } from '../state/ui-store';
-import { documentSources, pagesPhrase, type SourceFileInfo } from '../state/workspace-store';
+import {
+  documentSources,
+  pagesPhrase,
+  type SourceFileInfo,
+  useWorkspaceStore,
+} from '../state/workspace-store';
 import menuStyles from '../ui/Menu.module.css';
 import { Tooltip } from '../ui/Tooltip';
 import { selectParity } from './arrange-actions';
 import type { ShownSection } from './arrange-data';
 import { outlineTargets } from './arrange-data';
 import styles from './ArrangeView.module.css';
+import { InlineTitleEditor } from './InlineTitleEditor';
 import { PageCell } from './PageCell';
-import {
-  isSectionCommandEnabled,
-  runSectionCommand,
-  sectionMenuItems,
-  subscribeSectionMenu,
-} from './section-menu';
+import { SectionMenuEntries } from './SectionMenuEntries';
+import { startRename } from './section-operations';
 
 /** DOM attribute that tells the shell's window-wide file drop to leave a drop alone. */
 export const FILE_DROP_ZONE_ATTRIBUTE = 'data-file-drop-zone';
 
-export function sectionDomId(documentId: DocumentId, part: 'title' | 'grid'): string {
+export function sectionDomId(documentId: DocumentId, part: 'title' | 'grid' | 'menu'): string {
   return `arrange-${part}-${documentId}`;
 }
 
@@ -80,6 +82,7 @@ export function ArrangeSection({
   tabbableId,
 }: ArrangeSectionProps) {
   const ref = useRef<HTMLElement>(null);
+  const blobs = useWorkspaceStore((s) => s.blobs);
   const { doc } = section;
   const documentId = doc.id;
   const outlined = useDropHighlight((s) => {
@@ -138,7 +141,7 @@ export function ArrangeSection({
           {pages.length === 0 ? (
             <div role="row" aria-rowindex={1} className={styles.row} style={{ height: '100%' }}>
               <div role="gridcell" aria-colindex={1} className={styles.emptyRow}>
-                No pages. Drop pages or PDF files here.
+                {m.section_empty()}
               </div>
             </div>
           ) : (
@@ -176,9 +179,14 @@ export function ArrangeSection({
                         label={safeLabel(ws, doc, index)}
                         sourceId={ref.kind === 'source' ? ref.source : undefined}
                         sourceIndex={ref.kind === 'source' ? ref.index : 0}
+                        blobId={ref.kind === 'image' ? ref.blob : undefined}
                         sourceName={
                           file?.name ??
-                          (ref.kind === 'source' ? ws.sources[ref.source]?.name : undefined)
+                          (ref.kind === 'source'
+                            ? ws.sources[ref.source]?.name
+                            : ref.kind === 'image'
+                              ? blobs[ref.blob]?.name
+                              : undefined)
                         }
                         colorIndex={file?.colorIndex ?? 0}
                         rotation={page.rotation}
@@ -258,13 +266,20 @@ function SectionHeader({
 }) {
   const { doc, collapsed } = section;
   const setCollapsed = useUiStore((s) => s.setArrangeCollapsed);
+  const renaming = useUiStore(
+    (s) => s.renaming?.documentId === doc.id && s.renaming.surface === 'section',
+  );
   const sources = documentSources(doc);
   const badges = SOURCE_BADGES.filter((badge) =>
     sources.some((id) => ws.sources[id]?.flags[badge.flag] === true),
   );
   const toggle = () => {
     setCollapsed(doc.id, !collapsed);
-    announce(`${collapsed ? 'Expanded' : 'Collapsed'} ${doc.title}`);
+    announce(
+      collapsed
+        ? m.announce_section_expanded({ title: doc.title })
+        : m.announce_section_collapsed({ title: doc.title }),
+    );
   };
 
   return (
@@ -274,18 +289,40 @@ function SectionHeader({
         className={styles.headerButton}
         aria-expanded={!collapsed}
         aria-controls={collapsed ? undefined : sectionDomId(doc.id, 'grid')}
-        aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${doc.title}`}
+        aria-label={
+          collapsed
+            ? m.section_expand_label({ title: doc.title })
+            : m.section_collapse_label({ title: doc.title })
+        }
         onClick={toggle}
       >
         <ChevronDown aria-hidden="true" />
       </button>
-      <h2 id={sectionDomId(doc.id, 'title')} className={styles.sectionTitle} title={doc.title}>
-        {doc.title}
-      </h2>
+      {renaming ? (
+        <InlineTitleEditor
+          documentId={doc.id}
+          title={doc.title}
+          className={styles.titleEditor}
+          onDone={() => {
+            requestAnimationFrame(() =>
+              document.getElementById(sectionDomId(doc.id, 'menu'))?.focus(),
+            );
+          }}
+        />
+      ) : (
+        <h2
+          id={sectionDomId(doc.id, 'title')}
+          className={styles.sectionTitle}
+          title={doc.title}
+          onDoubleClick={() => startRename(doc.id, 'section')}
+        >
+          {doc.title}
+        </h2>
+      )}
       <span className={styles.sectionTags}>
         {sources.map((id) => {
           const file = files[id];
-          const name = file?.name ?? ws.sources[id]?.name ?? 'Unknown file';
+          const name = file?.name ?? ws.sources[id]?.name ?? m.unknown_file();
           return (
             <span
               key={id}
@@ -293,7 +330,7 @@ function SectionHeader({
               data-tag={file?.colorIndex ?? 0}
               title={name}
               role="img"
-              aria-label={`Pages from ${name}`}
+              aria-label={m.section_pages_from({ name })}
             />
           );
         })}
@@ -311,7 +348,13 @@ function SectionHeader({
         </span>
       ) : null}
       <span className={styles.headerSpacer} />
-      {section.pinned ? <span className={styles.pinnedMark}>Kept</span> : null}
+      {section.pinned ? (
+        <Tooltip label={m.section_pinned_tooltip()}>
+          <span className={styles.pinnedMark} data-testid="section-pinned">
+            {m.section_pinned()}
+          </span>
+        </Tooltip>
+      ) : null}
       <SectionMenu section={section} />
     </header>
   );
@@ -319,9 +362,6 @@ function SectionHeader({
 
 function SectionMenu({ section }: { readonly section: ShownSection }) {
   const { doc, collapsed, pinned } = section;
-  const items = useSyncExternalStore(subscribeSectionMenu, sectionMenuItems);
-  // Re-render when commands register, so extension items enable themselves.
-  useCommands();
   const ui = useUiStore.getState;
   const apply = useSelectionStore((s) => s.apply);
   const focused = useSelectionStore((s) => s.focused);
@@ -329,7 +369,7 @@ function SectionMenu({ section }: { readonly section: ShownSection }) {
   const builtIn: { key: string; label: string; run: () => void; disabled?: boolean }[] = [
     {
       key: 'pin',
-      label: pinned ? 'Remove from Arrange' : 'Keep in Arrange',
+      label: pinned ? m.arrange_remove() : m.arrange_keep(),
       run: () => {
         if (pinned) ui().unpinFromArrange(doc.id);
         else ui().pinToArrange([doc.id]);
@@ -337,12 +377,12 @@ function SectionMenu({ section }: { readonly section: ShownSection }) {
     },
     {
       key: 'collapse',
-      label: collapsed ? 'Expand' : 'Collapse',
+      label: collapsed ? m.section_expand() : m.section_collapse(),
       run: () => ui().setArrangeCollapsed(doc.id, !collapsed),
     },
     {
       key: 'select-all',
-      label: 'Select all pages',
+      label: m.cmd_select_all(),
       disabled: doc.pages.length === 0,
       run: () => {
         apply(
@@ -351,18 +391,20 @@ function SectionMenu({ section }: { readonly section: ShownSection }) {
             focused,
           ),
         );
-        announce(`Selected ${pagesPhrase(doc.pages.length)} in ${doc.title}`);
+        announce(
+          m.announce_selected_in({ pages: pagesPhrase(doc.pages.length), title: doc.title }),
+        );
       },
     },
     {
       key: 'odd',
-      label: 'Select odd pages',
+      label: m.cmd_select_odd(),
       disabled: doc.pages.length === 0,
       run: () => selectParity(doc.id, 'odd'),
     },
     {
       key: 'even',
-      label: 'Select even pages',
+      label: m.cmd_select_even(),
       disabled: doc.pages.length < 2,
       run: () => selectParity(doc.id, 'even'),
     },
@@ -370,12 +412,16 @@ function SectionMenu({ section }: { readonly section: ShownSection }) {
 
   return (
     <Menu.Root>
-      <Menu.Trigger className={styles.headerButton} aria-label={`${doc.title} actions`}>
+      <Menu.Trigger
+        id={sectionDomId(doc.id, 'menu')}
+        className={styles.headerButton}
+        aria-label={m.section_actions_label({ title: doc.title })}
+      >
         <MoreHorizontal aria-hidden="true" />
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner side="bottom" align="end" sideOffset={4} collisionPadding={8}>
-          <Menu.Popup className={menuStyles.popup}>
+          <Menu.Popup className={menuStyles.popup} data-testid="section-menu">
             {builtIn.map((item) => (
               <Menu.Item
                 key={item.key}
@@ -386,27 +432,7 @@ function SectionMenu({ section }: { readonly section: ShownSection }) {
                 <span className={menuStyles.label}>{item.label}</span>
               </Menu.Item>
             ))}
-            {(['pages', 'document'] as const).map((group) => (
-              <Menu.Group key={group}>
-                <Menu.Separator className={menuStyles.separator} />
-                {items
-                  .filter((item) => item.group === group)
-                  .map((item) => {
-                    const enabled = isSectionCommandEnabled(item.command, doc.id);
-                    return (
-                      <Menu.Item
-                        key={item.command}
-                        className={menuStyles.item}
-                        disabled={!enabled}
-                        title={enabled ? undefined : 'Not available yet'}
-                        onClick={() => void runSectionCommand(item.command, doc.id)}
-                      >
-                        <span className={menuStyles.label}>{item.label}</span>
-                      </Menu.Item>
-                    );
-                  })}
-              </Menu.Group>
-            ))}
+            <SectionMenuEntries documentId={doc.id} />
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>

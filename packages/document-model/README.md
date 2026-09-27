@@ -56,6 +56,10 @@ browser, in workers, in Node and in a future desktop shell.
 - **Return values.** `addSource` and `newEmptyDocument` return `{ workspace, …ids }`;
   operations in `pages.ts` return only the `Workspace` and activate any new document, so
   callers read the new id from `activeDocument` (first part for split).
+- **Split titles and previews.** Parts are titled "<title> (k of n)" unless
+  `splitDocument(…, { titles })` names them (localized titles, bookmark titles; blank
+  entries fall back). `splitPartSizes` returns the part sizes a spec would produce, with
+  the same validation, without changing anything.
 - **Dirty flag.** Any change to a document's pages, labels, overlays or title sets
   `clean: false`; `markDocumentClean` resets it after export.
 

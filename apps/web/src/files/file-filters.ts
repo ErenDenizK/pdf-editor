@@ -60,9 +60,11 @@ export interface DirectoryHandleLike extends HandleLike {
 }
 
 export interface WalkOptions {
-  /** Stop after this many PDFs; guards against dropping a home directory. */
+  /** Stop after this many files; guards against dropping a home directory. */
   readonly maxFiles?: number;
   readonly maxDepth?: number;
+  /** Which files to keep; PDFs by default. */
+  readonly accept?: (file: NamedFile) => boolean;
 }
 
 const DEFAULT_MAX_FILES = 500;
@@ -101,12 +103,13 @@ export async function collectFromEntries(
 ): Promise<File[]> {
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
   const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
+  const accept = options.accept ?? isPdfFile;
   const out: File[] = [];
   const visit = async (entry: EntryLike, depth: number): Promise<void> => {
     if (out.length >= maxFiles || isHiddenName(entry.name)) return;
     if (isFileEntry(entry)) {
       const file = await readFileEntry(entry).catch(() => null);
-      if (file && isPdfFile(file)) out.push(file);
+      if (file && accept(file)) out.push(file);
     } else if (isDirectoryEntry(entry) && depth < maxDepth) {
       const children = await readAllEntries(entry).catch(() => []);
       children.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
@@ -124,12 +127,13 @@ export async function collectFromHandles(
 ): Promise<File[]> {
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
   const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
+  const accept = options.accept ?? isPdfFile;
   const out: File[] = [];
   const visit = async (handle: HandleLike, depth: number): Promise<void> => {
     if (out.length >= maxFiles || isHiddenName(handle.name)) return;
     if (handle.kind === 'file') {
       const file = await (handle as FileHandleLike).getFile().catch(() => null);
-      if (file && isPdfFile(file)) out.push(file);
+      if (file && accept(file)) out.push(file);
     } else if (depth < maxDepth) {
       const children: HandleLike[] = [];
       try {

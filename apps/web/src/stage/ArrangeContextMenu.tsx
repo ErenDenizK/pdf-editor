@@ -1,7 +1,7 @@
 /**
- * Light-table context menu (spec §4): mirrors the contextual bar, adds the clipboard
- * (cut / copy / paste) and selection helpers: select all from this source, odd / even
- * pages, reverse selection order.
+ * Light-table context menu (spec §4): mirrors the contextual bar, adds "Copy to new
+ * document", the clipboard (cut / copy / paste) and selection helpers: select all from this
+ * source, odd / even pages, reverse selection order.
  *
  * Right-clicking an unselected page selects it first (the table does that before the menu
  * opens), so every item acts on the selection.
@@ -13,6 +13,7 @@ import type { ReactNode } from 'react';
 
 import { commandRegistry } from '../commands/registry';
 import { useCommand } from '../commands/use-commands';
+import { m } from '../i18n';
 import { useSelectionStore } from '../state/selection-store';
 import { useUiStore } from '../state/ui-store';
 import { useTabItems, useWorkspaceStore } from '../state/workspace-store';
@@ -95,15 +96,16 @@ function MenuItems({
 
   return (
     <>
-      <CommandItem command="pages.rotateLeft" label="Rotate left" />
-      <CommandItem command="pages.rotateRight" label="Rotate right" />
-      <CommandItem command="pages.delete" label="Delete" />
-      <CommandItem command="pages.duplicate" label="Duplicate" />
-      <CommandItem command="pages.extract" label="Extract to new document" />
-      <CommandItem command="pages.insertBlank" label="Insert blank page after" />
+      <CommandItem command="pages.rotateLeft" label={m.action_rotate_left()} />
+      <CommandItem command="pages.rotateRight" label={m.action_rotate_right()} />
+      <CommandItem command="pages.delete" label={m.action_delete()} />
+      <CommandItem command="pages.duplicate" label={m.action_duplicate()} />
+      <CommandItem command="pages.extract" label={m.action_move_to_new_document()} />
+      <CommandItem command="pages.copyToNew" label={m.action_copy_to_new_document()} />
+      <CommandItem command="pages.insertBlank" label={m.action_insert_blank_after()} />
       <ContextMenu.SubmenuRoot>
         <ContextMenu.SubmenuTrigger className={menuStyles.item} disabled={!hasSelection}>
-          <span className={menuStyles.label}>Move to…</span>
+          <span className={menuStyles.label}>{m.action_move_to()}</span>
           <ChevronRight className={styles.menuSubmenuArrow} aria-hidden="true" />
         </ContextMenu.SubmenuTrigger>
         <ContextMenu.Portal>
@@ -124,36 +126,36 @@ function MenuItems({
         </ContextMenu.Portal>
       </ContextMenu.SubmenuRoot>
       <Separator />
-      <CommandItem command="pages.cut" label="Cut" />
-      <CommandItem command="pages.copy" label="Copy" />
-      <CommandItem command="pages.paste" label="Paste after" />
-      <CommandItem command="pages.pasteDuplicate" label="Paste as duplicate" />
+      <CommandItem command="pages.cut" label={m.action_cut()} />
+      <CommandItem command="pages.copy" label={m.action_copy()} />
+      <CommandItem command="pages.paste" label={m.action_paste_after()} />
+      <CommandItem command="pages.pasteDuplicate" label={m.action_paste_duplicate()} />
       <Separator />
       <ActionItem
-        label="Select all from this source"
+        label={m.action_select_from_source()}
         disabled={page?.ref.kind !== 'source'}
         onClick={() => {
           if (pageId !== null) selectFromSource(pageId, sectionIds);
         }}
       />
       <ActionItem
-        label="Select odd pages"
+        label={m.cmd_select_odd()}
         disabled={sectionDoc === undefined}
         onClick={() => {
           if (sectionDoc !== undefined) selectParity(sectionDoc, 'odd');
         }}
       />
       <ActionItem
-        label="Select even pages"
+        label={m.cmd_select_even()}
         disabled={sectionDoc === undefined}
         onClick={() => {
           if (sectionDoc !== undefined) selectParity(sectionDoc, 'even');
         }}
       />
-      <CommandItem command="pages.reverseSelection" label="Reverse selection order" />
+      <CommandItem command="pages.reverseSelection" label={m.cmd_reverse_selection()} />
       <Separator />
       <ActionItem
-        label="Properties"
+        label={m.action_properties()}
         onClick={() => useUiStore.setState({ rightPanelOpen: true })}
       />
     </>
