@@ -2,11 +2,13 @@
   "name": "@pdf-editor/qa-tool",
   "version": "0.0.0",
   "private": true,
-  "description": "Manual cross-viewer QA helpers: builds docs/qa/samples/annotations-sample.pdf with the app's own PDFium adapter.",
+  "description": "Cross-viewer QA for annotations: builds docs/qa/samples/annotations-sample.pdf with the app's own PDFium adapter and checks it automatically with PDFium and pdf.js (docs/qa/annotations-matrix.md).",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "sample": "vitest run --config vitest.config.ts",
+    "sample": "vitest run --config vitest.config.ts make-annotation-sample",
+    "matrix": "vitest run --config vitest.config.ts annotation-matrix",
+    "matrix:fresh": "pnpm run sample && pnpm run matrix",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
@@ -14,5 +16,8 @@
     "@embedpdf/pdfium": "2.15.1",
     "@pdf-editor/document-model": "workspace:*",
     "@pdf-editor/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "pdfjs-dist": "6.3.289"
   }
 }

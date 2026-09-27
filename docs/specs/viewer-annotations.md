@@ -79,6 +79,8 @@ popups" (on). Verification adds an annotation count check per page against the m
 A manual matrix in `docs/qa/annotations-matrix.md` records for each kind: renders in Acrobat
 Reader, Chrome (PDFium), Firefox (pdf.js), Preview (macOS), Edge. M2 exits only when every
 kind renders in all five and the note text is visible in each viewer's comment UI.
+The PDFium and pdf.js columns are automated (`pnpm --filter @pdf-editor/qa-tool matrix`);
+Acrobat, Preview and Edge get an optional manual spot check.
 
 ## 8. Performance and limits
 

@@ -4,7 +4,12 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": []
   },
-  "include": ["make-annotation-sample.ts", "env.d.ts"],
+  "include": [
+    "annotation-sample-plan.ts",
+    "make-annotation-sample.ts",
+    "annotation-matrix.ts",
+    "env.d.ts"
+  ],
   "references": [
     {
       "path": "./tsconfig.node.json"
