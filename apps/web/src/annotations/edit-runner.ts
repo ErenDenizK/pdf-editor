@@ -3,9 +3,12 @@
  * workspace history (spec §5).
  *
  * Edits are the engine's `EngineEdit` records (packages/engine/src/edits): JSON payloads
- * (stamp images inline as base64) applied by `applyEngineEditWithResult`, which also
- * computes each edit's inverse (delete for a create, create-with-the-same-/NM for a
- * delete, the previous annotation for an update).
+ * applied by `applyEngineEditWithResult`, which also computes each edit's inverse (delete
+ * for a create, create-with-the-same-/NM for a delete, the previous annotation for an
+ * update). Stamp images, which the engine inlines as base64, are kept once per content in
+ * the workspace store (`editBlobs`) and the log refers to them as
+ * `annotation.image = { blob, type }`; they are inlined again on the way to the engine.
+ * The engine package is imported lazily (its own chunk), like the export pipeline does.
  *
  * The workspace history is a stack of model snapshots and `Workspace.engineEdits` lists
  * the content edits of each snapshot, but the PDFium document has exactly one state. This
@@ -23,9 +26,11 @@
  * translated on their way to the engine, so the log and the UI keep the original id.
  */
 import type { EngineEdit, SourceId, Workspace } from '@pdf-editor/document-model';
-import { type Annotation, applyEngineEditWithResult, type PdfEditor } from '@pdf-editor/engine';
+import type { Annotation, PdfEditor } from '@pdf-editor/engine';
 
 import { getEngineService } from '../engine/engine-service';
+import { announce } from '../shell/announcer';
+import { m } from '../i18n';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { type RectFix, rotatedRectFix } from './engine-quirks';
 
@@ -95,6 +100,14 @@ export class AnnotationIdMap {
     return this.toEngine.size;
   }
 
+  /** Drops the ids of one source. */
+  forgetSource(source: SourceId): void {
+    const prefix = `${source}\u0000`;
+    for (const map of [this.toEngine, this.toOriginal]) {
+      for (const key of [...map.keys()]) if (key.startsWith(prefix)) map.delete(key);
+    }
+  }
+
   clear(): void {
     this.toEngine.clear();
     this.toOriginal.clear();
@@ -151,30 +164,103 @@ export async function readAnnotations(
   return list.map((a) => toUi(source, a, fix));
 }
 
+// ---------------------------------------------------------------------------
+// Stamp images: inline base64 (engine) <-> content-addressed blobs (log)
+// ---------------------------------------------------------------------------
+
+interface InlineImage {
+  readonly type: string;
+  readonly base64?: string;
+  readonly blob?: string;
+}
+
+function payloadImage(edit: EngineEdit): InlineImage | undefined {
+  const payload = edit.payload as { annotation?: { image?: InlineImage } } | null | undefined;
+  return payload?.annotation?.image;
+}
+
+function withImage(edit: EngineEdit, image: InlineImage): EngineEdit {
+  const payload = edit.payload as { annotation: Record<string, unknown> };
+  return { ...edit, payload: { ...payload, annotation: { ...payload.annotation, image } } };
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+/** Blobs this runner stored during the running action (re-stored after its commit). */
+let storedDuringAction: Map<string, Blob> | undefined;
+
+/** Replaces inline base64 images by content-addressed blob references (edit and inverse). */
+async function dehydrate(edit: EngineEdit): Promise<EngineEdit> {
+  const inverse = edit.inverse ? await dehydrate(edit.inverse) : undefined;
+  let out: EngineEdit =
+    inverse === edit.inverse ? edit : { ...edit, ...(inverse ? { inverse } : {}) };
+  const image = payloadImage(edit);
+  if (image?.base64 !== undefined) {
+    const bytes = Uint8Array.from(atob(image.base64), (c) => c.charCodeAt(0));
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    const id = `edit-${Array.from(digest.subarray(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')}`;
+    const blob = new Blob([bytes], { type: image.type });
+    useWorkspaceStore.getState().putEditBlob(id, blob);
+    storedDuringAction?.set(id, blob);
+    out = withImage(out, { type: image.type, blob: id });
+  }
+  return out;
+}
+
+/** Inlines blob-referenced images again for the engine (edit and inverse). */
+async function hydrate(edit: EngineEdit): Promise<EngineEdit> {
+  const inverse = edit.inverse ? await hydrate(edit.inverse) : undefined;
+  let out: EngineEdit =
+    inverse === edit.inverse ? edit : { ...edit, ...(inverse ? { inverse } : {}) };
+  const image = payloadImage(edit);
+  if (image?.blob !== undefined) {
+    const blob = useWorkspaceStore.getState().editBlobs[image.blob];
+    if (!blob) throw new Error(`Image ${image.blob} of edit ${edit.id} is no longer stored`);
+    const base64 = toBase64(new Uint8Array(await blob.arrayBuffer()));
+    out = withImage(out, { type: image.type, base64 });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Executing edits
+// ---------------------------------------------------------------------------
+
 /** Result of executing an edit: the edit to record (with its inverse) and the annotation. */
 export interface ExecutedEdit {
   readonly recorded: EngineEdit;
   readonly annotation?: Annotation;
 }
 
+/** Edits executed by the running action (reverted if it fails or is dropped). */
+let executedDuringAction: EngineEdit[] | undefined;
+
 /**
  * Executes one annotation edit through the engine. Returns the edit as applied (ids as
  * the log uses them) with its inverse, and the annotation as it now is (creates, updates).
  */
 export async function executeEdit(ctx: EngineContext, edit: EngineEdit): Promise<ExecutedEdit> {
+  const { applyEngineEditWithResult } = await import('@pdf-editor/engine');
   const source = edit.source;
   const toEngine = (id: string) => annotationIds.engineId(source, id);
-  const result = await applyEngineEditWithResult(ctx.editor, mapIds(edit, toEngine));
+  const result = await applyEngineEditWithResult(ctx.editor, mapIds(await hydrate(edit), toEngine));
   const wanted = editAnnotationId(edit);
   if (edit.kind === 'annotation.create' && result.annotation) {
     // A create without an id takes the engine's; one with an id keeps it (or is mapped).
     annotationIds.set(source, wanted ?? result.annotation.id, result.annotation.id);
   }
   const toOriginal = (id: string) => annotationIds.originalId(source, id);
-  const recorded: EngineEdit = {
+  const recorded = await dehydrate({
     ...mapIds(result.applied, toOriginal),
     inverse: mapIds(result.inverse, toOriginal),
-  };
+  });
+  executedDuringAction?.push(recorded);
   return {
     recorded,
     ...(result.annotation ? { annotation: toUi(source, result.annotation, ctx.fix) } : {}),
@@ -238,21 +324,37 @@ function annotationEdits(ws: Workspace): Map<SourceId, EngineEdit[]> {
   return bySource;
 }
 
-async function runLogged(ctx: EngineContext, edit: EngineEdit | undefined, touched: EngineEdit[]) {
-  if (!edit) return;
-  touched.push(edit);
+/** Runs `edit` through the engine; false (after a warning) when the engine refused it. */
+async function tryEdit(ctx: EngineContext, edit: EngineEdit | undefined): Promise<boolean> {
+  if (!edit) return false;
   try {
     await executeEdit(ctx, edit);
+    return true;
   } catch (error) {
     console.warn(`Replaying ${edit.kind} ${edit.id} failed`, error);
+    return false;
   }
 }
 
-/** Brings the engine to the workspace's edits (see the module comment). */
+/** Keeps the store's `dirtySources` equal to the sources the engine holds edits for. */
+function syncDirtySources(): void {
+  const dirty = new Set<SourceId>();
+  for (const [source, edits] of applied) if (edits.length > 0) dirty.add(source);
+  const current = useWorkspaceStore.getState().dirtySources;
+  if (current.size === dirty.size && [...dirty].every((id) => current.has(id))) return;
+  useWorkspaceStore.setState({ dirtySources: dirty });
+}
+
+/**
+ * Brings the engine to the workspace's edits (see the module comment). When the engine
+ * refuses a step, `applied` records exactly what it did apply and the user is told; the
+ * next action or history move tries again.
+ */
 async function reconcileNow(ctx: EngineContext): Promise<void> {
   const ws = useWorkspaceStore.getState().workspace;
   const target = annotationEdits(ws);
   const touched: EngineEdit[] = [];
+  let failed = false;
   for (const source of new Set([...applied.keys(), ...target.keys()])) {
     // A source out of the workspace (its document closed) keeps its engine state: undo
     // may bring it back, and then nothing needs replaying.
@@ -267,15 +369,26 @@ async function reconcileNow(ctx: EngineContext): Promise<void> {
     ) {
       common += 1;
     }
-    for (let i = current.length - 1; i >= common; i--) {
-      const edit = current[i];
-      if (edit && !edit.inverse) console.warn(`Edit ${edit.id} has no inverse`);
-      await runLogged(ctx, edit?.inverse, touched);
+    let state: readonly EngineEdit[] = current;
+    let ok = true;
+    for (let i = current.length - 1; i >= common && ok; i--) {
+      const edit = current[i] as EngineEdit;
+      touched.push(edit);
+      ok = await tryEdit(ctx, edit.inverse);
+      if (ok) state = current.slice(0, i);
     }
-    for (let i = common; i < wanted.length; i++) await runLogged(ctx, wanted[i], touched);
-    applied.set(source, wanted);
+    for (let i = common; i < wanted.length && ok; i++) {
+      const edit = wanted[i] as EngineEdit;
+      touched.push(edit);
+      ok = await tryEdit(ctx, edit);
+      if (ok) state = wanted.slice(0, i + 1);
+    }
+    if (!ok) failed = true;
+    applied.set(source, state);
   }
+  syncDirtySources();
   pagesChanged(touched);
+  if (failed) announce(m.annot_replay_failed());
 }
 
 let reconcileQueued = false;
@@ -319,11 +432,26 @@ export function mergeUpdates(previous: EngineEdit, next: EngineEdit): EngineEdit
   return { ...next, inverse: previous.inverse };
 }
 
+/** Identity of the history position (not of the present snapshot, which tab changes replace). */
+function historyPosition(): string {
+  const { history } = useWorkspaceStore.getState();
+  return `${history.past.length}:${history.future.length}:${history.present.at}:${history.present.label}`;
+}
+
+/** Undoes executed edits (newest first) and reports the pages they touched. */
+async function revert(ctx: EngineContext, edits: readonly EngineEdit[]): Promise<void> {
+  for (const edit of [...edits].reverse()) await tryEdit(ctx, edit.inverse);
+  pagesChanged(edits);
+}
+
 /**
  * Runs a user action in the queue: the engine first catches up with the history, then
  * `action` executes its edits through the engine and returns them; they are committed as
- * one history entry. If the commit fails, the edits are reverted in the engine. Resolves
- * to the action's value, or undefined when nothing was committed.
+ * one history entry. The edits are reverted in the engine, and nothing is committed, when
+ * the action throws (the error is passed on), when the commit fails, or when the history
+ * moved while the action ran (e.g. Mod+Z during a drag): committing then would land on
+ * the wrong history. Resolves to the action's value, or undefined when nothing was
+ * committed.
  */
 export function runAction<T>(
   action: (ctx: EngineContext) => Promise<ActionResult<T> | undefined>,
@@ -331,8 +459,34 @@ export function runAction<T>(
   return enqueue(async () => {
     const ctx = await engineContext();
     await reconcileNow(ctx);
-    const result = await action(ctx);
-    if (!result || result.edits.length === 0) return undefined;
+    const position = historyPosition();
+    const executed: EngineEdit[] = [];
+    const stored = new Map<string, Blob>();
+    executedDuringAction = executed;
+    storedDuringAction = stored;
+    let result: ActionResult<T> | undefined;
+    try {
+      result = await action(ctx);
+    } catch (error) {
+      executedDuringAction = undefined;
+      storedDuringAction = undefined;
+      await revert(ctx, executed);
+      announce(m.annot_action_failed());
+      throw error;
+    } finally {
+      executedDuringAction = undefined;
+      storedDuringAction = undefined;
+    }
+    if (!result || result.edits.length === 0) {
+      if (executed.length > 0) await revert(ctx, executed);
+      return undefined;
+    }
+    if (historyPosition() !== position) {
+      await revert(ctx, executed);
+      return undefined;
+    }
+    // Blobs stored meanwhile may have been collected by another operation's commit.
+    for (const [id, blob] of stored) useWorkspaceStore.getState().putEditBlob(id, blob);
     let mergedFrom: EngineEdit | undefined;
     committing = true;
     let ok: boolean;
@@ -349,9 +503,7 @@ export function runAction<T>(
       committing = false;
     }
     if (!ok) {
-      const touched: EngineEdit[] = [];
-      for (const edit of [...result.edits].reverse()) await runLogged(ctx, edit.inverse, touched);
-      pagesChanged(touched);
+      await revert(ctx, executed);
       return undefined;
     }
     // Record what the engine now has. A merged update replaces the edit it merged with
@@ -365,11 +517,22 @@ export function runAction<T>(
           : [...list, edit];
       applied.set(edit.source, final);
     }
+    syncDirtySources();
     pagesChanged(result.edits);
-    // The history may have moved while the engine worked (undo during a drag).
     const ws = useWorkspaceStore.getState().workspace;
     if (!sameAsApplied(ws)) void scheduleReconcile();
     return result.value;
+  });
+}
+
+/**
+ * Runs `task` with the engine in step with the workspace and no annotation edit able to
+ * run meanwhile: export reads annotation counts and saves sources inside it.
+ */
+export function runExclusive<T>(task: () => Promise<T>): Promise<T> {
+  return enqueue(async () => {
+    await reconcileNow(await engineContext());
+    return task();
   });
 }
 
@@ -394,6 +557,20 @@ useWorkspaceStore.subscribe((state, previous) => {
   if (committing || state.workspace.engineEdits === previous.workspace.engineEdits) return;
   if (!sameAsApplied(state.workspace)) void scheduleReconcile();
 });
+
+/** Forgets a closed source: its edit state and id map (the engine document is gone). */
+function forgetSource(source: SourceId): void {
+  applied.delete(source);
+  annotationIds.forgetSource(source);
+  syncDirtySources();
+}
+
+getEngineService().onSourceClosed(forgetSource);
+
+/** Ids of the edits the engine holds for a source (diagnostics and tests). */
+export function appliedEditIds(source: SourceId): string[] {
+  return (applied.get(source) ?? []).map((edit) => edit.id);
+}
 
 /** Tests: forget everything the engine was told (after `resetWorkspace`). */
 export function resetEditRunner(): void {

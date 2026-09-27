@@ -120,6 +120,14 @@ interface WorkspaceState {
    * through the engine (`needsEngineSave`) rather than reuse the original bytes.
    */
   readonly dirtySources: ReadonlySet<SourceId>;
+  /**
+   * Binary parts of engine edits (stamp appearances), stored once by content id instead of
+   * inline in every edit payload and inverse. Kept while any history entry's edits refer to
+   * them (`engineEditBlobIds`).
+   */
+  readonly editBlobs: Readonly<Record<string, Blob>>;
+  /** Stores an edit blob under its content id (idempotent). */
+  putEditBlob: (id: string, blob: Blob) => void;
 
   openFiles: (files: readonly File[]) => Promise<OpenFilesReport>;
   /**
@@ -383,9 +391,34 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
     if (dead.length > 0) {
       for (const id of dead) void getEngineService().close(id);
       const deadSet = new Set<string>(dead);
+      const dirty = get().dirtySources;
       set({
         files: Object.fromEntries(Object.entries(files).filter(([id]) => !deadSet.has(id))),
+        ...(dead.some((id) => dirty.has(id))
+          ? { dirtySources: new Set([...dirty].filter((id) => !deadSet.has(id))) }
+          : {}),
       });
+    }
+    const { editBlobs } = get();
+    const editBlobIds = Object.keys(editBlobs);
+    if (editBlobIds.length > 0) {
+      const referenced = new Set<string>();
+      const seenEdits = new Set<Workspace['engineEdits']>();
+      for (const entry of entries) {
+        const edits = entry.workspace.engineEdits;
+        if (seenEdits.has(edits)) continue;
+        seenEdits.add(edits);
+        for (const edit of edits) for (const id of engineEditBlobIds(edit)) referenced.add(id);
+      }
+      if (!editBlobIds.every((id) => referenced.has(id) || protections.has(id as BlobId))) {
+        set({
+          editBlobs: Object.fromEntries(
+            Object.entries(editBlobs).filter(
+              ([id]) => referenced.has(id) || protections.has(id as BlobId),
+            ),
+          ),
+        });
+      }
     }
     const blobIds = Object.keys(blobs) as BlobId[];
     if (blobIds.length === 0) return;
@@ -482,6 +515,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
     blobs: {},
     opening: 0,
     dirtySources: new Set(),
+    editBlobs: {},
+
+    putEditBlob: (id, blob) => {
+      if (get().editBlobs[id] !== undefined) return;
+      set((s) => ({ editBlobs: { ...s.editBlobs, [id]: blob } }));
+    },
 
     openFiles: async (files) => {
       if (files.length === 0) return { opened: [], skipped: [] };
@@ -669,7 +708,22 @@ export function resetWorkspace(): void {
     blobs: {},
     opening: 0,
     dirtySources: new Set(),
+    editBlobs: {},
   });
+}
+
+/**
+ * Edit blob ids an engine edit (and its inverse) refers to: `payload.annotation.image.blob`
+ * (annotations/edit-runner.ts stores stamp images this way).
+ */
+export function engineEditBlobIds(edit: EngineEdit): string[] {
+  const ids: string[] = [];
+  for (let e: EngineEdit | undefined = edit; e; e = e.inverse) {
+    const payload = e.payload as { annotation?: { image?: { blob?: unknown } } } | null;
+    const id = payload?.annotation?.image?.blob;
+    if (typeof id === 'string') ids.push(id);
+  }
+  return ids;
 }
 
 // ---------------------------------------------------------------------------

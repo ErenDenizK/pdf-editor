@@ -9,7 +9,7 @@
  * beyond. Selectable only while the Select tool is active.
  */
 import type { TextRun } from '@pdf-editor/engine';
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, Fragment, useEffect, useRef, useState } from 'react';
 
 import { getEngineService } from '../engine/engine-service';
 import type { PageOverlayProps } from '../stage/page-overlays';
@@ -18,6 +18,7 @@ import { pageFrame } from './page-frame';
 import {
   layoutTextLines,
   selectionCopyText,
+  separatorAfter,
   TEXT_LAYER_ATTR,
   TEXT_ROW_ATTR,
   type TextLine,
@@ -121,11 +122,17 @@ export function TextLayer(props: PageOverlayProps) {
       data-testid="text-layer"
       ref={layerRef}
     >
-      {lines.map((line, i) => (
-        <span key={i} {...{ [TEXT_ROW_ATTR]: line.row }} style={lineStyle(line)}>
-          {line.text}
-        </span>
-      ))}
+      {lines.map((line, i) => {
+        const separator = separatorAfter(lines, i);
+        return (
+          <Fragment key={i}>
+            <span {...{ [TEXT_ROW_ATTR]: line.row }} style={lineStyle(line)}>
+              {line.text}
+            </span>
+            {separator === '' ? null : <span className={styles.separator}>{separator}</span>}
+          </Fragment>
+        );
+      })}
       <div className={styles.end} aria-hidden="true" />
     </div>
   );

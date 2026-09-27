@@ -39,6 +39,7 @@ import type {
   VerificationResult,
 } from '@pdf-editor/engine';
 
+import { runExclusive } from '../annotations/edit-runner';
 import { getAssembler } from '../engine/assembler-client';
 import {
   type EngineResult,
@@ -104,6 +105,13 @@ export interface ExportDependencies {
    * store's `dirtySources`, when it has one.
    */
   readonly dirtySources?: () => ReadonlySet<SourceId> | undefined;
+  /**
+   * Runs the export once queued engine edits (annotations) have finished and the engine
+   * matches the workspace, with no edit able to run until it is done, so the model read,
+   * the annotation counts and the saved sources agree (annotations/edit-runner.ts
+   * `runExclusive`). Without it the export runs at once.
+   */
+  readonly exclusive?: <T>(task: () => Promise<T>) => Promise<T>;
 }
 
 const defaultDependencies = (): ExportDependencies => ({
@@ -115,6 +123,7 @@ const defaultDependencies = (): ExportDependencies => ({
   dirtySources: () =>
     (useWorkspaceStore.getState() as { readonly dirtySources?: ReadonlySet<SourceId> })
       .dirtySources,
+  exclusive: runExclusive,
 });
 
 const failed = (message: string, code: 'internal' | 'aborted' = 'internal') =>
@@ -215,6 +224,19 @@ export async function prepareExport(
   documentId: DocumentId,
   options: ExportOptions = {},
   deps: ExportDependencies = defaultDependencies(),
+): Promise<EngineResult<PreparedExport>> {
+  if (!deps.exclusive) return prepareExportNow(documentId, options, deps);
+  try {
+    return await deps.exclusive(() => prepareExportNow(documentId, options, deps));
+  } catch (error) {
+    return failed(toFailure(error).message);
+  }
+}
+
+async function prepareExportNow(
+  documentId: DocumentId,
+  options: ExportOptions,
+  deps: ExportDependencies,
 ): Promise<EngineResult<PreparedExport>> {
   const started = performance.now();
   const { signal, onProgress } = options;

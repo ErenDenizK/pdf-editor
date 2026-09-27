@@ -53,6 +53,14 @@ export function pageLinks(sourceId: SourceId, index: number): Promise<readonly L
   return pending;
 }
 
+/** Forgets the cached links of a source (call when it closes; its ids are never reused). */
+export function clearLinksForSource(sourceId: SourceId): void {
+  const prefix = `${sourceId}:`;
+  for (const key of [...links.keys()]) {
+    if (key.startsWith(prefix)) links.delete(key);
+  }
+}
+
 export function LinkLayer(props: PageOverlayProps) {
   const { sourceId, sourceIndex, pageIndex } = props;
   const near = useViewStore((s) => distanceFromView(pageIndex, s.visibleRange) <= 1);

@@ -45,6 +45,11 @@ interface SearchState extends SearchOptions {
   readonly hits: readonly DocumentHit[];
   /** Index into `hits`, or -1. */
   readonly current: number;
+  /**
+   * The user moved to `current` (Enter, F3, a click). Until then the current hit follows the
+   * reader's page as results stream in; afterwards it stays on the chosen match.
+   */
+  readonly currentChosen: boolean;
   readonly documentId: DocumentId | null;
   /** Milliseconds from start to the first hit and to completion (diagnostics, tests). */
   readonly timing: { readonly first?: number; readonly total?: number };
@@ -59,6 +64,7 @@ const INITIAL: SearchState = {
   status: 'idle',
   hits: [],
   current: -1,
+  currentChosen: false,
   documentId: null,
   timing: {},
   focusSerial: 0,
@@ -196,6 +202,30 @@ export function splitContext(
   };
 }
 
+/** Whether two hits are the same match: same page and source, same rectangles. */
+export function isSameHit(a: DocumentHit, b: DocumentHit): boolean {
+  if (a.pageIndex !== b.pageIndex || a.sourceId !== b.sourceId) return false;
+  if (a.rects.length !== b.rects.length) return false;
+  return a.rects.every((r, i) => {
+    const o = b.rects[i];
+    return (
+      o !== undefined &&
+      Math.abs(r.x - o.x) < 0.01 &&
+      Math.abs(r.y - o.y) < 0.01 &&
+      Math.abs(r.width - o.width) < 0.01 &&
+      Math.abs(r.height - o.height) < 0.01
+    );
+  });
+}
+
+/** Index of `hit` in `hits`: by `seq` when it still names the same match, else by identity. */
+export function findSameHit(hits: readonly DocumentHit[], hit: DocumentHit): number {
+  const bySeq = hits.findIndex((h) => h.seq === hit.seq);
+  const candidate = hits[bySeq];
+  if (candidate && isSameHit(candidate, hit)) return bySeq;
+  return hits.findIndex((h) => isSameHit(h, hit));
+}
+
 /** Union of a hit's rects (to scroll it into view). */
 export function hitBounds(hit: DocumentHit): Rect | undefined {
   if (hit.rects.length === 0) return undefined;
@@ -253,6 +283,7 @@ export async function runSearch(doc: VirtualDocument | undefined, startPage = 0)
     status: 'searching',
     hits: [],
     current: -1,
+    currentChosen: false,
     documentId: doc.id,
     timing: {},
   });
@@ -271,8 +302,8 @@ export async function runSearch(doc: VirtualDocument | undefined, startPage = 0)
         ? { first: performance.now() - started }
         : state.timing;
     // Keep the current hit stable while results stream in; pick one once hits exist.
-    const previous = state.hits[state.current];
-    let current = previous ? collected.findIndex((h) => h.seq === previous.seq) : -1;
+    const previous = state.currentChosen ? state.hits[state.current] : undefined;
+    let current = previous ? findSameHit(collected, previous) : -1;
     if (current < 0) current = firstHitFrom(collected, startPage);
     useSearchStore.setState({ hits: collected, current, timing });
   };
@@ -281,6 +312,8 @@ export async function runSearch(doc: VirtualDocument | undefined, startPage = 0)
     if (own.signal.aborted) return;
     const streamed: DocumentHit[] = [];
     const base = collected;
+    // Streamed and final hits of this source get the same `seq`s (same engine order).
+    const firstSeq = seq;
     const result = await getEngineService().search(
       sourceId,
       needle,
@@ -306,8 +339,8 @@ export async function runSearch(doc: VirtualDocument | undefined, startPage = 0)
       continue;
     }
     // The complete list is authoritative (a streaming engine may have sent partials).
-    const mapped = mapHits(doc, pages, sourceId, result.value, seq);
-    seq += mapped.length;
+    const mapped = mapHits(doc, pages, sourceId, result.value, firstSeq);
+    seq = firstSeq + mapped.length;
     publish([...base, ...mapped]);
   }
   if (own.signal.aborted) return;
@@ -330,14 +363,14 @@ export function setSearchOptions(options: Partial<SearchOptions>): void {
 export function stepSearch(direction: 1 | -1): DocumentHit | undefined {
   const { hits, current } = useSearchStore.getState();
   const next = stepHit(current, hits.length, direction);
-  useSearchStore.setState({ current: next });
+  useSearchStore.setState({ current: next, currentChosen: next >= 0 });
   return hits[next];
 }
 
 export function selectHit(index: number): DocumentHit | undefined {
   const { hits } = useSearchStore.getState();
   if (index < 0 || index >= hits.length) return undefined;
-  useSearchStore.setState({ current: index });
+  useSearchStore.setState({ current: index, currentChosen: true });
   return hits[index];
 }
 

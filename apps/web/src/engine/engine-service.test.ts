@@ -408,3 +408,70 @@ describe('EngineService open', () => {
     );
   });
 });
+
+describe('EngineService invalidatePage', () => {
+  it('resolves requesters of a queued job it discards, and drops a running one’s result', async () => {
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const renderPage = vi.fn(async (_id: SourceId, index: number) => {
+      if (index === 0) await gate;
+      return { bitmap: { width: 1, height: 1, close: vi.fn() } as never, width: 1, height: 1 };
+    });
+    const service = new EngineService({
+      createRenderer: () => ({
+        open: vi.fn(),
+        close: vi.fn(() => Promise.resolve()),
+        getPageText: vi.fn(() => Promise.resolve([])),
+        renderPage,
+      }),
+      concurrency: 1,
+      timings: false,
+    });
+    const s = sourceId('s');
+    const running = service.renderPage({
+      sourceId: s,
+      index: 0,
+      rotation: 0,
+      bucket: 1,
+      priority: 3,
+    });
+    await vi.waitFor(() => expect(renderPage).toHaveBeenCalledTimes(1));
+    const queued = service.renderPage({
+      sourceId: s,
+      index: 1,
+      rotation: 0,
+      bucket: 1,
+      priority: 3,
+    });
+    service.invalidatePage(s, 1);
+    service.invalidatePage(s, 0);
+    expect(await queued).toMatchObject({ ok: false, error: { code: 'aborted' } });
+    releaseFirst();
+    expect(await running).toMatchObject({ ok: false, error: { code: 'aborted' } });
+    expect(service.pendingJobs).toBe(0);
+    expect(service.peek(s, 0, 0, 1)).toBeUndefined();
+    expect(service.pageRevision(s, 1)).toBe(1);
+  });
+
+  it('forgets page revisions and tells listeners when a source closes', async () => {
+    const service = new EngineService({
+      createRenderer: () => ({
+        open: vi.fn(),
+        close: vi.fn(() => Promise.resolve()),
+        getPageText: vi.fn(() => Promise.resolve([])),
+        renderPage: vi.fn(),
+      }),
+      timings: false,
+    });
+    const s = sourceId('s');
+    const closed: SourceId[] = [];
+    service.onSourceClosed((id) => closed.push(id));
+    service.invalidatePage(s, 2);
+    expect(service.pageRevision(s, 2)).toBe(1);
+    await service.close(s);
+    expect(service.pageRevision(s, 2)).toBe(0);
+    expect(closed).toEqual([s]);
+  });
+});

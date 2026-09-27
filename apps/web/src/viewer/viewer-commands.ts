@@ -14,6 +14,7 @@ import { useUiStore } from '../state/ui-store';
 import { READ_LAYOUTS, type ReadLayout, useViewStore } from '../state/view-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { openGoToPage } from './GoToPageDialog';
+import { goToPageIndex, nextPage, previousPage } from './navigation';
 import { readController } from './read-controller';
 import { openSearchPanel, searchStep, useSearchStore } from './search';
 
@@ -22,22 +23,6 @@ const hasPages = () => (activeDocument()?.pages.length ?? 0) > 0;
 const reading = () => useUiStore.getState().viewMode === 'read' && hasPages();
 /** Read mode is shown and focus is on the pages (or nowhere). */
 const readingWithFocus = () => reading() && (readController()?.ownsFocus() ?? false);
-
-/** Scrolls to page `index` of the active document (clamped). */
-export function goToPageIndex(index: number): void {
-  const doc = activeDocument();
-  if (!doc || doc.pages.length === 0) return;
-  const page = doc.pages[Math.min(doc.pages.length - 1, Math.max(0, index))];
-  if (page) useViewStore.getState().scrollToPage(page.id);
-}
-
-/** Next / previous page (or spread, in two-up). */
-export function stepPage(direction: 1 | -1): void {
-  const { currentPage, layout } = useViewStore.getState();
-  const step = layout === 'two-up' ? 2 : 1;
-  const base = layout === 'two-up' ? currentPage - (currentPage % 2) : currentPage;
-  goToPageIndex(base + direction * step);
-}
 
 export function layoutTitle(layout: ReadLayout): string {
   switch (layout) {
@@ -106,7 +91,9 @@ export function registerViewerCommands(registry: CommandRegistry): () => void {
       shortcut: '[',
       keywords: ['back', 'page up'],
       when: reading,
-      run: () => stepPage(-1),
+      run: () => {
+        previousPage();
+      },
     }),
     registry.register({
       id: 'nav.nextPage',
@@ -115,7 +102,9 @@ export function registerViewerCommands(registry: CommandRegistry): () => void {
       shortcut: ']',
       keywords: ['forward', 'page down'],
       when: reading,
-      run: () => stepPage(1),
+      run: () => {
+        nextPage();
+      },
     }),
     registry.register({
       id: 'nav.screenDown',
@@ -142,7 +131,9 @@ export function registerViewerCommands(registry: CommandRegistry): () => void {
       shortcut: 'Home',
       keywords: ['start', 'beginning', 'top'],
       when: readingWithFocus,
-      run: () => goToPageIndex(0),
+      run: () => {
+        goToPageIndex(0);
+      },
     }),
     registry.register({
       id: 'nav.lastPage',
@@ -151,7 +142,9 @@ export function registerViewerCommands(registry: CommandRegistry): () => void {
       shortcut: 'End',
       keywords: ['bottom'],
       when: readingWithFocus,
-      run: () => goToPageIndex(Number.MAX_SAFE_INTEGER),
+      run: () => {
+        goToPageIndex(Number.MAX_SAFE_INTEGER);
+      },
     }),
     ...READ_LAYOUTS.map((layout) =>
       registry.register({

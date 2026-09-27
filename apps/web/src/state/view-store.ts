@@ -28,10 +28,17 @@ interface ViewState {
   readonly layout: ReadLayout;
   /** A request for the stage to bring a page into view; `serial` makes repeats distinct. */
   readonly scrollRequest: ScrollRequest | null;
+  /**
+   * Page index a programmatic scroll is heading to, until it settles or the user scrolls.
+   * Relative navigation (`[` `]`, PageUp / PageDown, Space) steps from here rather than
+   * from `currentPage`, which lags behind a scroll in flight.
+   */
+  readonly navTarget: number | null;
   setCurrentPage: (index: number) => void;
   setVisibleRange: (first: number, last: number) => void;
   setLayout: (layout: ReadLayout) => void;
   scrollToPage: (pageId: PageId, options?: { readonly reveal?: Rect }) => void;
+  setNavTarget: (index: number | null) => void;
 }
 
 export const useViewStore = create<ViewState>()((set) => ({
@@ -39,6 +46,7 @@ export const useViewStore = create<ViewState>()((set) => ({
   visibleRange: { first: 0, last: 0 },
   layout: 'continuous',
   scrollRequest: null,
+  navTarget: null,
   setCurrentPage: (currentPage) =>
     set((s) => (s.currentPage === currentPage ? s : { currentPage })),
   setVisibleRange: (first, last) =>
@@ -56,6 +64,7 @@ export const useViewStore = create<ViewState>()((set) => ({
         ...(options?.reveal === undefined ? {} : { reveal: options.reveal }),
       },
     })),
+  setNavTarget: (navTarget) => set((s) => (s.navTarget === navTarget ? s : { navTarget })),
 }));
 
 /** Pages from the viewport: 0 inside the visible range, else the distance to its nearest end. */

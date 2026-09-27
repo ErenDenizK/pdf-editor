@@ -625,5 +625,7 @@
   "signature_type_label": "İmzada kullanılacak ad",
   "signature_image_hint": "İmzanızın PNG veya JPEG görselini seçin; tercihen saydam arka planlı.",
   "signature_choose_image": "Görsel seç…",
-  "signature_use": "İmzayı kullan"
+  "signature_use": "İmzayı kullan",
+  "annot_action_failed": "Açıklama değişikliği uygulanamadı; hiçbir şey değişmedi",
+  "annot_replay_failed": "Bazı açıklama değişiklikleri belgede geri alınamadı veya yinelenemedi"
 }

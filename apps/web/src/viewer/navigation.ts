@@ -1,10 +1,73 @@
 /**
- * Page navigation helpers: go-to input parsing (numbers and page labels) and the
- * remembered reading position per document fingerprint.
+ * Page navigation helpers: relative and absolute page moves (composing while a scroll is in
+ * flight), go-to input parsing (numbers and page labels) and the remembered reading
+ * position per document fingerprint.
  */
-import { effectiveLabel, type VirtualDocument, type Workspace } from '@pdf-editor/document-model';
+import {
+  effectiveLabel,
+  getActiveDocument,
+  type VirtualDocument,
+  type Workspace,
+} from '@pdf-editor/document-model';
 
 import { readJson, writeJson } from '../state/safe-storage';
+import { useViewStore } from '../state/view-store';
+import { useWorkspaceStore } from '../state/workspace-store';
+
+// ---------------------------------------------------------------------------
+// Moving between pages
+// ---------------------------------------------------------------------------
+
+const activeDocument = () => getActiveDocument(useWorkspaceStore.getState().workspace);
+
+/**
+ * The page relative moves start from: where a programmatic scroll in flight is heading
+ * (`navTarget`, cleared by ReadView when the scroll settles or the user scrolls), else the
+ * page in view. Two quick presses of `[` therefore compose even before the first scroll has
+ * produced a scroll event (Firefox, WebKit).
+ */
+export function navigationBase(): number {
+  const { navTarget, currentPage } = useViewStore.getState();
+  return navTarget ?? currentPage;
+}
+
+/**
+ * Scrolls to page `index` (clamped) and records it as the navigation target. Returns the
+ * index targeted, or undefined without pages.
+ */
+export function goToPageIndex(
+  index: number,
+  doc: VirtualDocument | undefined = activeDocument(),
+): number | undefined {
+  if (!doc || doc.pages.length === 0) return undefined;
+  const target = Math.min(doc.pages.length - 1, Math.max(0, Math.trunc(index)));
+  const page = doc.pages[target];
+  if (!page) return undefined;
+  const view = useViewStore.getState();
+  view.setNavTarget(target);
+  view.scrollToPage(page.id);
+  return target;
+}
+
+/** Next (+1) or previous (-1) page, or spread in two-up, from `navigationBase()`. */
+export function stepPage(
+  direction: 1 | -1,
+  doc: VirtualDocument | undefined = activeDocument(),
+): number | undefined {
+  const { layout } = useViewStore.getState();
+  const base = navigationBase();
+  const step = layout === 'two-up' ? 2 : 1;
+  const start = layout === 'two-up' ? base - (base % 2) : base;
+  return goToPageIndex(start + direction * step, doc);
+}
+
+export function previousPage(doc?: VirtualDocument): number | undefined {
+  return stepPage(-1, doc);
+}
+
+export function nextPage(doc?: VirtualDocument): number | undefined {
+  return stepPage(1, doc);
+}
 
 // ---------------------------------------------------------------------------
 // Go to page

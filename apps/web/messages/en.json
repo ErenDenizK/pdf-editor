@@ -943,5 +943,7 @@
   "signature_type_label": "Name to sign with",
   "signature_image_hint": "Choose a PNG or JPEG of your signature, ideally on a transparent background.",
   "signature_choose_image": "Choose image…",
-  "signature_use": "Use signature"
+  "signature_use": "Use signature",
+  "annot_action_failed": "The annotation change could not be applied; nothing was changed",
+  "annot_replay_failed": "Some annotation changes could not be undone or redone in the document"
 }

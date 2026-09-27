@@ -40,6 +40,25 @@
   color: transparent;
 }
 
+/*
+ * Real whitespace between runs (a space) and lines (a newline) so word and line selection
+ * stop at run boundaries in every engine. Zero-sized and clipped: never shifts layout,
+ * never paints a selection.
+ */
+.layer > .separator {
+  z-index: 0;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  cursor: default;
+}
+
+.layer > .separator::selection {
+  background: transparent;
+}
+
 /* Catches the pointer between lines while a selection is dragged (see TextLayer.tsx). */
 .end {
   position: absolute;

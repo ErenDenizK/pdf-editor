@@ -56,6 +56,8 @@ const GAP = 16;
 const ZOOM_RENDER_DELAY_MS = 160;
 /** Wheel delta (pixels) that doubles or halves the zoom with Mod+wheel / pinch. */
 const WHEEL_ZOOM_DOUBLING = 300;
+/** A programmatic scroll has settled after this long without scroll events. */
+const NAV_SETTLE_MS = 180;
 /** Remember the reading position after it has settled for this long. */
 const REMEMBER_DELAY_MS = 600;
 
@@ -291,6 +293,15 @@ function PageColumn({
     return found;
   };
 
+  // Pending navigation target: cleared once the programmatic scroll goes quiet.
+  const settleTimer = useRef(0);
+  const armSettle = () => {
+    window.clearTimeout(settleTimer.current);
+    settleTimer.current = window.setTimeout(() => {
+      useViewStore.getState().setNavTarget(null);
+    }, NAV_SETTLE_MS);
+  };
+
   // Keep the anchored point in place across zoom changes.
   const anchor = useRef<Anchor | null>(null);
   const pointerAnchor = useRef<Anchor | null>(null);
@@ -348,6 +359,8 @@ function PageColumn({
     };
     const onScroll = () => {
       if (frame === 0) frame = requestAnimationFrame(update);
+      // A programmatic scroll is still moving: wait for it to go quiet.
+      if (useViewStore.getState().navTarget !== null) armSettle();
     };
     update();
     el.addEventListener('scroll', onScroll, { passive: true });
@@ -356,6 +369,37 @@ function PageColumn({
       if (frame !== 0) cancelAnimationFrame(frame);
     };
   });
+
+  // The user scrolling by hand abandons a pending navigation target (see view-store).
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const abandon = () => {
+      window.clearTimeout(settleTimer.current);
+      useViewStore.getState().setNavTarget(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Only keys that scroll natively; `[` `]` PageUp PageDown Space Home End are commands.
+      if (event.key.startsWith('Arrow')) abandon();
+    };
+    el.addEventListener('wheel', abandon, { passive: true });
+    el.addEventListener('touchstart', abandon, { passive: true });
+    el.addEventListener('pointerdown', abandon);
+    el.addEventListener('keydown', onKeyDown);
+    return () => {
+      el.removeEventListener('wheel', abandon);
+      el.removeEventListener('touchstart', abandon);
+      el.removeEventListener('pointerdown', abandon);
+      el.removeEventListener('keydown', onKeyDown);
+    };
+  });
+  useEffect(
+    () => () => {
+      window.clearTimeout(settleTimer.current);
+      useViewStore.getState().setNavTarget(null);
+    },
+    [],
+  );
 
   // Zoom under the pointer: Mod+wheel and trackpad pinch (ctrlKey wheel), touch pinch,
   // Safari gesture events.
@@ -500,7 +544,11 @@ function PageColumn({
     if (!scrollRequest || scrollRequest.serial === handledRequest.current) return;
     handledRequest.current = scrollRequest.serial;
     const index = pages.findIndex((p) => p.id === scrollRequest.pageId);
-    if (index >= 0) showPage(index, scrollRequest.reveal);
+    if (index < 0) return;
+    showPage(index, scrollRequest.reveal);
+    // Relative moves step from here until the scroll settles (navigation.ts).
+    useViewStore.getState().setNavTarget(index);
+    armSettle();
   });
 
   // A layout switch keeps the current page in view.
@@ -541,22 +589,33 @@ function PageColumn({
         const el = viewportRef.current;
         if (!el) return;
         const step = Math.max(40, el.clientHeight - 48);
+        const view = useViewStore.getState();
+        const pending = view.navTarget;
         if (readLayout === 'single') {
           const atEnd =
             direction > 0
               ? el.scrollTop + el.clientHeight >= el.scrollHeight - 2
               : el.scrollTop <= 1;
-          const current = useViewStore.getState().currentPage;
+          const current = pending ?? view.currentPage;
           const target = current + direction;
           if (atEnd && target >= 0 && target < pages.length) {
             setCurrentPage(target);
+            view.setNavTarget(target);
+            armSettle();
             pendingReveal.current = { index: target, reveal: undefined };
             requestAnimationFrame(() => {
               if (direction < 0) el.scrollTop = el.scrollHeight;
             });
             return;
           }
+        } else if (pending !== null) {
+          // A programmatic scroll is in flight: land on its target first, then move a screen.
+          const r = layout.rowOf[pending] ?? -1;
+          const start = r >= 0 ? virtualizer.getOffsetForIndex(r, 'start')?.[0] : undefined;
+          if (start !== undefined) el.scrollTop = start;
         }
+        window.clearTimeout(settleTimer.current);
+        view.setNavTarget(null);
         el.scrollBy({ top: direction * step });
       },
       ownsFocus: () => {

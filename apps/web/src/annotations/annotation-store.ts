@@ -10,6 +10,7 @@ import type { PageId, Rect, SourceId } from '@pdf-editor/document-model';
 import type { Annotation } from '@pdf-editor/engine';
 import { create } from 'zustand';
 
+import { getEngineService } from '../engine/engine-service';
 import { readJson, writeJson } from '../state/safe-storage';
 import { onPagesChanged, readAnnotations } from './edit-runner';
 
@@ -240,6 +241,25 @@ export function resetAnnotationStore(): void {
     signatureDialogOpen: false,
   });
 }
+
+// A closed source's pages go (and the selection or editor on them).
+getEngineService().onSourceClosed((source) => {
+  const prefix = `${source}:`;
+  for (const key of [...loads.keys()]) if (key.startsWith(prefix)) loads.delete(key);
+  useAnnotationStore.setState((s) => {
+    const keys = Object.keys(s.pages).filter((key) => key.startsWith(prefix));
+    const selectionGone = s.selection?.source === source;
+    const editorGone = s.editor?.target.source === source;
+    if (keys.length === 0 && !selectionGone && !editorGone) return s;
+    const gone = new Set(keys);
+    const pages = Object.fromEntries(Object.entries(s.pages).filter(([key]) => !gone.has(key)));
+    return {
+      pages,
+      ...(selectionGone ? { selection: null } : {}),
+      ...(editorGone ? { editor: null } : {}),
+    };
+  });
+});
 
 // Pages touched by engine edits (created, undone, redone) reload when they are cached.
 onPagesChanged((pages) => {

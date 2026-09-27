@@ -7,6 +7,10 @@ import { getEngineService } from '../engine/engine-service';
 const cache = new Map<string, Promise<readonly TextRun[]>>();
 const MAX_PAGES = 64;
 
+getEngineService().onSourceClosed((source) => {
+  for (const key of [...cache.keys()]) if (key.startsWith(`${source}:`)) cache.delete(key);
+});
+
 export function pageText(source: SourceId, pageIndex: number): Promise<readonly TextRun[]> {
   const key = `${source}:${pageIndex}`;
   let runs = cache.get(key);

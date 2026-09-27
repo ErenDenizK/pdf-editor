@@ -5,7 +5,7 @@
  */
 import type { PageId, SourceId, VirtualDocument, VirtualPage } from '@pdf-editor/document-model';
 import type { SearchHit } from '@pdf-editor/engine';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import manyPagesUrl from '../../../../test/fixtures/many-pages.pdf?url';
 import { getEngineService } from '../engine/engine-service';
@@ -22,6 +22,8 @@ import {
   splitContext,
   stepHit,
   clearSearch,
+  findSameHit,
+  stepSearch,
   useSearchStore,
 } from './search';
 
@@ -112,6 +114,57 @@ describe('mapping and ordering', () => {
       match: '',
       after: '',
     });
+  });
+});
+
+describe('the current hit while results stream', () => {
+  it('stays on the hit the user stepped to when the final list arrives', async () => {
+    const d = doc([page('p0', A, 0), page('p1', A, 1), page('p2', A, 2)]);
+    const all = [hit(0, 'first'), hit(1, 'second'), hit(2, 'third')];
+    let finish: (() => void) | undefined;
+    let streamed: (() => void) | undefined;
+    const streamedOnce = new Promise<void>((resolve) => {
+      streamed = resolve;
+    });
+    const spy = vi
+      .spyOn(getEngineService(), 'search')
+      .mockImplementation(async (_source, _query, _options, _signal, onHits) => {
+        onHits?.(all.slice(0, 2));
+        streamed?.();
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return { ok: true, value: all };
+      });
+    try {
+      setSearchOptions({ matchCase: false, wholeWord: false });
+      setSearchQuery('x');
+      const running = runSearch(d, 0);
+      await streamedOnce;
+      expect(useSearchStore.getState().hits).toHaveLength(2);
+      expect(useSearchStore.getState().current).toBe(0);
+      stepSearch(1);
+      expect(useSearchStore.getState().current).toBe(1);
+      finish?.();
+      await running;
+      const { hits, current, status } = useSearchStore.getState();
+      expect(status).toBe('done');
+      expect(hits).toHaveLength(3);
+      expect(current).toBe(1);
+      expect(hits[current]?.context).toBe('second');
+    } finally {
+      spy.mockRestore();
+      clearSearch();
+    }
+  });
+
+  it('finds the same match by page and rects when seq numbers differ', () => {
+    const d = doc([page('p0', A, 0), page('p1', A, 1)]);
+    const pages = sourcePageMap(d);
+    const before = mapHits(d, pages, A, [hit(1, 'b')], 0)[0]!;
+    const after = mapHits(d, pages, A, [hit(0, 'a'), hit(1, 'b')], 10);
+    expect(findSameHit(after, before)).toBe(1);
+    expect(findSameHit(after, { ...before, pageIndex: 5 })).toBe(-1);
   });
 });
 

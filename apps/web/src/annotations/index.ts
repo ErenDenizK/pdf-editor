@@ -4,9 +4,11 @@
  * pointer presses outside annotation chrome deselect, and switching documents or modes
  * resets the tool.
  */
+import { getEngineService } from '../engine/engine-service';
 import { registerPageOverlay } from '../stage/page-overlays';
 import { useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
+import { clearLinksForSource } from '../viewer/LinkLayer';
 import { useToolStore } from '../viewer/tool-store';
 import { AnnotationLayer } from './AnnotationLayer';
 import { useAnnotationStore } from './annotation-store';
@@ -21,6 +23,9 @@ export {
 export { ANNOTATION_TOOLS, type ToolDefinition } from './tools';
 
 registerPageOverlay(AnnotationLayer);
+
+// The viewer's link cache is per source page too; drop it with the source.
+getEngineService().onSourceClosed(clearLinksForSource);
 
 /** Elements whose presses keep the annotation selection (chrome that edits it). */
 const KEEP_SELECTOR =

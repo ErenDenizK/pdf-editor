@@ -1,6 +1,65 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import type { PageId, SourceId, VirtualDocument } from '@pdf-editor/document-model';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { hasCustomLabels, parseGoTo, recallPosition, rememberPosition } from './navigation';
+import { useViewStore } from '../state/view-store';
+import {
+  goToPageIndex,
+  hasCustomLabels,
+  navigationBase,
+  nextPage,
+  parseGoTo,
+  previousPage,
+  recallPosition,
+  rememberPosition,
+} from './navigation';
+
+function sixPages(): VirtualDocument {
+  const pages = Array.from({ length: 6 }, (_, i) => ({
+    id: `p${i}` as PageId,
+    ref: { kind: 'source' as const, source: 's' as SourceId, index: i },
+    rotation: 0 as const,
+    overlays: [],
+  }));
+  return { id: 'd', title: 'D', pages, outline: [], labels: [] } as unknown as VirtualDocument;
+}
+
+describe('relative navigation while a scroll is in flight', () => {
+  const doc = sixPages();
+  beforeEach(() => {
+    // Reading page 4; nothing in flight.
+    useViewStore.setState({ currentPage: 3, navTarget: null, layout: 'continuous' });
+  });
+  afterEach(() => {
+    useViewStore.setState({ currentPage: 0, navTarget: null, layout: 'continuous' });
+  });
+
+  it('two immediate previous-page moves from page 4 target page 2', () => {
+    expect(previousPage(doc)).toBe(2);
+    // The scroll has not reported yet: currentPage still reads page 4.
+    expect(useViewStore.getState().currentPage).toBe(3);
+    expect(previousPage(doc)).toBe(1);
+    expect(useViewStore.getState().navTarget).toBe(1);
+    expect(useViewStore.getState().scrollRequest?.pageId).toBe('p1');
+  });
+
+  it('steps from the page in view once the target has settled', () => {
+    nextPage(doc);
+    expect(navigationBase()).toBe(4);
+    // ReadView clears the target when the scroll goes quiet or the user scrolls.
+    useViewStore.setState({ navTarget: null, currentPage: 2 });
+    expect(nextPage(doc)).toBe(3);
+  });
+
+  it('clamps at the ends and moves by spreads in two-up', () => {
+    goToPageIndex(Number.MAX_SAFE_INTEGER, doc);
+    expect(nextPage(doc)).toBe(5);
+    useViewStore.setState({ navTarget: null, currentPage: 3, layout: 'two-up' });
+    expect(previousPage(doc)).toBe(0);
+    expect(previousPage(doc)).toBe(0);
+    expect(nextPage(doc)).toBe(2);
+    expect(nextPage(doc)).toBe(4);
+  });
+});
 
 // page-labels.pdf: i, ii, iii, 1, 2, 3, A-1, A-2
 const LABELS = ['i', 'ii', 'iii', '1', '2', '3', 'A-1', 'A-2'];

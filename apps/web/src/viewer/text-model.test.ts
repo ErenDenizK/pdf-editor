@@ -7,6 +7,7 @@ import {
   layoutTextLines,
   selectedPieces,
   selectionCopyText,
+  separatorAfter,
   TEXT_LAYER_ATTR,
   TEXT_ROW_ATTR,
 } from './text-model';
@@ -45,6 +46,20 @@ describe('assignRows', () => {
   });
 });
 
+describe('separatorAfter', () => {
+  const lines = [
+    { row: 0, text: 'PAGE 1 OF outline-named-dests' },
+    { row: 1, text: 'Chapter 1:' },
+    { row: 1, text: 'Introduction' },
+    { row: 1, text: 'trailing ' },
+    { row: 1, text: 'last' },
+  ];
+
+  it('puts a newline between rows, a space within a row, nothing at the end', () => {
+    expect(lines.map((_, i) => separatorAfter(lines, i))).toEqual(['\n', ' ', ' ', '', '']);
+  });
+});
+
 describe('assembleCopyText', () => {
   it('joins a row with spaces, rows with newlines and pages with a blank line', () => {
     expect(
@@ -77,17 +92,25 @@ describe('selection → clipboard text', () => {
     window.getSelection()?.removeAllRanges();
   });
 
+  /** Text layers as TextLayer renders them: lines with separator spans between. */
   function layers(pages: readonly (readonly [number, string][])[]): HTMLElement {
     const container = document.createElement('div');
     pages.forEach((lines, page) => {
       const layer = document.createElement('div');
       layer.setAttribute(TEXT_LAYER_ATTR, String(page));
-      for (const [row, text] of lines) {
+      const model = lines.map(([row, text]) => ({ row, text }));
+      model.forEach(({ row, text }, i) => {
         const span = document.createElement('span');
         span.setAttribute(TEXT_ROW_ATTR, String(row));
         span.textContent = text;
         layer.append(span);
-      }
+        const separator = separatorAfter(model, i);
+        if (separator !== '') {
+          const sep = document.createElement('span');
+          sep.textContent = separator;
+          layer.append(sep);
+        }
+      });
       container.append(layer);
     });
     document.body.append(container);
@@ -98,23 +121,30 @@ describe('selection → clipboard text', () => {
     root = layers([
       [
         [0, 'Hello world'],
+        [0, 'same row'],
         [1, 'second line'],
       ],
       [[0, 'Top of page two']],
     ]);
-    const spans = root.querySelectorAll('span');
+    const lines = root.querySelectorAll(`[${TEXT_ROW_ATTR}]`);
+    // Separators sit between the lines in the DOM: a space in a row, a newline between rows.
+    expect(root.querySelector(`[${TEXT_LAYER_ATTR}="0"]`)?.textContent).toBe(
+      'Hello world same row\nsecond line',
+    );
     const range = document.createRange();
-    range.setStart(spans[0]!.firstChild!, 6);
-    range.setEnd(spans[2]!.firstChild!, 3);
+    range.setStart(lines[0]!.firstChild!, 6);
+    range.setEnd(lines[3]!.firstChild!, 3);
     expect(selectedPieces(range, root)).toEqual([
       { page: 0, row: 0, text: 'world' },
+      { page: 0, row: 0, text: 'same row' },
       { page: 0, row: 1, text: 'second line' },
       { page: 1, row: 0, text: 'Top' },
     ]);
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-    expect(selectionCopyText(selection)).toBe('world\nsecond line\n\nTop');
+    // Separators are not copied twice.
+    expect(selectionCopyText(selection)).toBe('world same row\nsecond line\n\nTop');
   });
 
   it('ignores selections outside the text layer', () => {

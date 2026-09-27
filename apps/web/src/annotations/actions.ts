@@ -5,7 +5,7 @@
  * the recorded edits with their inverses.
  */
 import type { EngineEdit, SourceId } from '@pdf-editor/document-model';
-import { type Annotation, type NewAnnotation, serializeAnnotation } from '@pdf-editor/engine';
+import type { Annotation, NewAnnotation } from '@pdf-editor/engine';
 
 import { announce } from '../shell/announcer';
 import { type PageTarget, useAnnotationStore } from './annotation-store';
@@ -20,6 +20,12 @@ import {
 import { type DisplayKind, displayKind } from './geometry';
 import { createLabel, deleteLabel, type UpdateAction, updateLabel } from './labels';
 import { builtinStampImage } from './stamps';
+
+/** The engine's JSON form of an annotation (engine chunk, loaded on first use). */
+async function serializeAnnotation(a: NewAnnotation | Annotation) {
+  const engine = await import('@pdf-editor/engine');
+  return engine.serializeAnnotation(a);
+}
 
 function newId(): string {
   return globalThis.crypto.randomUUID();

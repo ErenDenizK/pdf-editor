@@ -24,7 +24,7 @@ test('selects page text with the mouse and copies it with lines kept', async ({
   browserName,
 }) => {
   const layer = page.locator('[data-text-layer="0"]');
-  const lines = layer.locator('span');
+  const lines = layer.locator('[data-row]');
   await expect(lines.first()).toHaveText('PAGE 1 OF outline-named-dests');
   await expect(page.locator('[data-page-index="0"]')).toHaveAttribute('role', 'region');
 

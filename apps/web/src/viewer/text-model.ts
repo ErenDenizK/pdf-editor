@@ -76,6 +76,24 @@ export function layoutTextLines(runs: readonly TextRun[], frame: PageFrame): Tex
   return lines;
 }
 
+/**
+ * The text the DOM carries after line `i`, between it and the next line: a space within a
+ * visual row, a newline between rows, nothing after the last line (or when the line
+ * already ends in whitespace). Without it the runs are adjacent text with no boundary, and
+ * WebKit's word selection runs from the end of one line into the start of the next
+ * ("destsChapter"). The copy handler reads only the lines, so separators never double.
+ */
+export function separatorAfter(
+  lines: readonly Pick<TextLine, 'text' | 'row'>[],
+  i: number,
+): string {
+  const line = lines[i];
+  const next = lines[i + 1];
+  if (!line || !next) return '';
+  if (line.row !== next.row) return '\n';
+  return /\s$/.test(line.text) || /^\s/.test(next.text) ? '' : ' ';
+}
+
 // ---------------------------------------------------------------------------
 // Copy
 // ---------------------------------------------------------------------------

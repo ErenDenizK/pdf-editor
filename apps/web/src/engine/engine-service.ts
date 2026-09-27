@@ -238,6 +238,7 @@ export class EngineService {
   /** Content revision per `${sourceId}:${index}`, bumped by `invalidatePage`. */
   private readonly revisions = new Map<string, number>();
   private readonly revisionListeners = new Set<() => void>();
+  private readonly closeListeners = new Set<(sourceId: SourceId) => void>();
 
   constructor(options: EngineServiceOptions) {
     this.createRenderer = options.createRenderer;
@@ -350,6 +351,10 @@ export class EngineService {
     for (const key of [...this.texts.keys()]) {
       if (key.startsWith(prefix)) this.texts.delete(key);
     }
+    for (const key of [...this.revisions.keys()]) {
+      if (key.startsWith(prefix)) this.revisions.delete(key);
+    }
+    for (const listener of this.closeListeners) listener(sourceId);
     if (this.renderer === undefined) return ok(undefined);
     try {
       await (await this.renderer).close(sourceId);
@@ -504,8 +509,14 @@ export class EngineService {
     this.cache.removePrefix(prefix);
     for (const job of [...this.jobs.values()]) {
       if (!job.key.startsWith(prefix)) continue;
-      // Let it finish (PDFium cannot stop mid-page) but never cache or share its result:
-      // new requests start a fresh job.
+      if (!job.running) {
+        // Not started: nothing to wait for. Its requesters resolve as aborted and ask again
+        // (PageCanvas re-requests on the revision change below).
+        this.cancel(job, 'Page changed');
+        continue;
+      }
+      // Running: let it finish (PDFium cannot stop mid-page) but never cache or share its
+      // result; new requests start a fresh job.
       job.stale = true;
       if (this.jobs.get(job.key) === job) this.jobs.delete(job.key);
     }
@@ -517,6 +528,17 @@ export class EngineService {
   /** Content revision of a source page; changes whenever `invalidatePage` runs for it. */
   pageRevision(sourceId: SourceId, index: number): number {
     return this.revisions.get(`${sourceId}:${index}`) ?? 0;
+  }
+
+  /**
+   * Subscribes to source closes, so features that cache per-source data (annotations,
+   * links, edit logs) can drop it. Returns an unsubscribe function.
+   */
+  onSourceClosed(listener: (sourceId: SourceId) => void): () => void {
+    this.closeListeners.add(listener);
+    return () => {
+      this.closeListeners.delete(listener);
+    };
   }
 
   /** Subscribes to page revision changes (for `useSyncExternalStore`). */
