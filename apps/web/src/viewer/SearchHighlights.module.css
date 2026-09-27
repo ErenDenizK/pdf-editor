@@ -1,0 +1,17 @@
+.layer {
+  pointer-events: none;
+}
+
+.hit {
+  position: absolute;
+  border-radius: 1px;
+  background: rgb(124 140 255 / 0.28);
+  mix-blend-mode: multiply;
+}
+
+/* The current hit: stronger fill plus an outline (never colour alone). */
+.hit[data-current] {
+  background: rgb(124 140 255 / 0.55);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

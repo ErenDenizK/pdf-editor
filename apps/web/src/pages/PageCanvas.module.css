@@ -6,3 +6,16 @@
   width: 100%;
   height: 100%;
 }
+
+/* High-zoom tiles over the (capped) page bitmap; see TiledPage.tsx. */
+.tiles {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.tile {
+  position: absolute;
+  display: block;
+}

@@ -13,10 +13,13 @@
  * Image pages (`blobId`) are drawn from the stored image bytes instead, fitted and centred
  * on the page like the assembler places them, with the page rotation applied.
  *
+ * - Content edits (annotations) bump the page's revision in the engine service
+ *   (`invalidatePage`): the canvas keeps its current pixels and requests a fresh render.
+ *
  * The canvas exposes `data-state`: placeholder | preview | rendered | error.
  */
 import type { BlobId, Rotation, SourceId } from '@pdf-editor/document-model';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 
 import { type CachedBitmap, chooseBucket, getEngineService } from '../engine/engine-service';
 import { useWorkspaceStore } from '../state/workspace-store';
@@ -120,6 +123,10 @@ export function PageCanvas({
   const shownRef = useRef<string>('');
   const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
   const bucket = chooseBucket((cssWidth * dpr) / Math.max(1, widthPt), widthPt, heightPt);
+  const service = getEngineService();
+  const revision = useSyncExternalStore(service.subscribeRevisions, () =>
+    sourceId === undefined ? 0 : service.pageRevision(sourceId, index),
+  );
 
   useEffect(() => {
     const canvas = ref.current;
@@ -144,6 +151,7 @@ export function PageCanvas({
     if (!canvas || sourceId === undefined) return;
     const service = getEngineService();
     const page = `${sourceId}:${index}:${rotation}`;
+    const revisionKey = `${page}@${revision}`;
     if (shownRef.current !== page) {
       // Another page (or rotation): never show stale pixels in the new shape.
       canvas.width = 0;
@@ -151,6 +159,12 @@ export function PageCanvas({
       canvas.dataset.state = 'placeholder';
       delete canvas.dataset.bucket;
       shownRef.current = page;
+    }
+    if (canvas.dataset.revision !== revisionKey) {
+      // Same page, new content: keep the old pixels until the fresh render arrives.
+      if (canvas.dataset.state === 'rendered') canvas.dataset.state = 'preview';
+      canvas.dataset.bucket = '0';
+      canvas.dataset.revision = revisionKey;
     }
     const exact = service.peek(sourceId, index, rotation, bucket);
     if (exact && draw(canvas, exact, 'rendered')) return;
@@ -184,7 +198,7 @@ export function PageCanvas({
       // Abort after the next effect (if any) has subscribed to the same job.
       queueMicrotask(() => controller.abort());
     };
-  }, [sourceId, index, rotation, bucket, priority, delayMs]);
+  }, [sourceId, index, rotation, bucket, priority, delayMs, revision]);
 
   return <canvas ref={ref} className={styles.canvas} data-state="placeholder" aria-hidden="true" />;
 }

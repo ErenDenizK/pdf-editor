@@ -1,0 +1,55 @@
+/*
+ * Transparent text over the page bitmap. The font, size and stretch are set so each span
+ * covers its glyphs; letter spacing and line height are reset from the UI defaults.
+ */
+.layer {
+  isolation: isolate;
+  overflow: hidden;
+  line-height: 1;
+  letter-spacing: 0;
+  font-family: sans-serif;
+  font-kerning: none;
+  text-align: initial;
+  forced-color-adjust: none;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.layer > span {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  z-index: 1;
+  transform-origin: 0 0;
+  cursor: text;
+}
+
+.layer[data-selectable='true'] {
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.layer[data-selectable='true'] > span {
+  pointer-events: auto;
+}
+
+.layer > span::selection {
+  background: rgb(124 140 255 / 0.35);
+  color: transparent;
+}
+
+/* Catches the pointer between lines while a selection is dragged (see TextLayer.tsx). */
+.end {
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.layer[data-selecting='true'] .end {
+  top: 0;
+}
