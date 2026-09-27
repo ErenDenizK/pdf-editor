@@ -1,3 +1,13 @@
 packages:
   - apps/*
   - packages/*
+  - tools/*
+
+# lefthook's postinstall installs the Git hooks locally and skips itself when CI is set.
+onlyBuiltDependencies:
+  - lefthook
+
+peerDependencyRules:
+  allowedVersions:
+    # Works with ESLint 10 flat config; the plugin has not widened its peer range yet.
+    eslint-plugin-jsx-a11y>eslint: '10'

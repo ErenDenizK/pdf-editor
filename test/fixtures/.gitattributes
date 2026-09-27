@@ -1,0 +1,2 @@
+# Fixtures are byte-exact (offsets, hashes); never normalise line endings.
+*.pdf binary

@@ -1,0 +1,16 @@
+{
+  "name": "@pdf-editor/fixtures-tool",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Deterministic generator and verifier for the PDF test corpus in test/fixtures/.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "generate": "node --experimental-strip-types --no-warnings=ExperimentalWarning generate.ts",
+    "verify": "node --experimental-strip-types --no-warnings=ExperimentalWarning verify.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@cantoo/pdf-lib": "2.11.1"
+  }
+}
