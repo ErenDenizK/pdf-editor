@@ -90,7 +90,7 @@ follow-ups, not blockers):
 - Free text is limited to WinAnsi characters with the standard fonts until an embedded
   Unicode font path exists (M3, together with overlay fonts).
 
-## M3 — Documents as data  (→ v0.3) — **implemented 2026-09-27, review in progress**
+## M3 — Documents as data  (→ v0.3) — **done 2026-09-27**
 
 | Feature | Engine | Notes | Status |
 |---|---|---|---|
@@ -106,9 +106,9 @@ follow-ups, not blockers):
 | qpdf built from source in CI behind `PdfPlumber` | Q | ADR-0008 amended: Emscripten 6, zlib and libjpeg-turbo in-tree | done |
 
 Exit: v1.0 success criteria met → **v1.0.0**, merge `develop` into `main`, tag.
-Status: functionality complete; the independent correctness review of M3 and the M2
-cross-viewer annotation matrix (needs a person with Acrobat, Preview and Edge) are the
-remaining gates before v1.0.
+Status: functionality complete and the independent correctness review of M3 resolved (9
+findings fixed with regression tests). The one remaining gate before v1.0 is the M2
+cross-viewer annotation matrix, which needs a person with Acrobat, Preview and Edge.
 
 ## M4 — Editing content  (→ v1.x)
 
