@@ -162,6 +162,86 @@ export interface AnnotationExpectation {
   blendMode?: string;
 }
 
+/** Font behind a text region (text-editing fixtures). */
+export interface FontExpectation {
+  /** Resource name in the page (or form) /Font dictionary, without the slash. */
+  resource: string;
+  subtype: 'Type1' | 'TrueType' | 'Type0' | 'Type3';
+  baseFont?: string;
+  /** /Encoding as a name (WinAnsiEncoding, Identity-H) or "Differences" for a dict. */
+  encoding: string;
+  /** /Subtype of the descendant CIDFont (Type0 only). */
+  descendant?: 'CIDFontType0' | 'CIDFontType2';
+  /** A FontFile/FontFile2/FontFile3 program is embedded. */
+  embedded: boolean;
+  /** BaseFont carries a six-letter subset tag (ABCDEF+Name). */
+  subset: boolean;
+  /** /ToUnicode CMap present. */
+  toUnicode: boolean;
+}
+
+/**
+ * A documented target on a page (M4 redaction and text-editing fixtures). All
+ * coordinates are unrotated user space, [x, y, width, height].
+ */
+export interface RegionExpectation {
+  /** Stable id for tests, e.g. "tj-single". */
+  id: string;
+  page: number;
+  kind: 'text' | 'image' | 'inline-image' | 'annotations' | 'vector-text';
+  /** Exact string the region shows (text kinds). */
+  text?: string;
+  fontSize?: number;
+  /** Baseline: y for horizontal text, x for text rotated by a text matrix. */
+  baseline?: number;
+  /**
+   * Tight box. Text: advance width (TJ adjustments included) by font
+   * descender..ascender; images: the painted rectangle.
+   */
+  box: Box;
+  /** Suggested redaction / selection area. Covers the box and nothing unrelated. */
+  area?: Box;
+  /** Image XObject resource name or Form XObject path. */
+  xobject?: string;
+  font?: FontExpectation;
+  /** Text render mode (Tr) when not 0. */
+  renderMode?: number;
+  /** Whether a text extractor returns `text` here. */
+  extractable?: boolean;
+  /** How the region is encoded, in words. */
+  note: string;
+}
+
+/** Where a sensitive token lives (redaction fixtures). */
+export interface SecretExpectation {
+  token: string;
+  /**
+   * Objects of the current revision whose decoded value contains the token
+   * contiguously, as paths from the trailer (lib/scan.ts). Text split across
+   * TJ arrays or text objects is not found this way; see `extracted`.
+   */
+  locations: string[];
+  /** Occurrences a text extractor finds per page (split runs included). */
+  extracted: { page: number; count: number }[];
+  /** Whether the raw file bytes contain the token (strings in hex/UTF-16 or compressed streams do not). */
+  inRawBytes: boolean;
+}
+
+/** Incremental-update history (redaction fixtures). */
+export interface IncrementalExpectation {
+  revisions: number;
+  /** startxref value of each revision, oldest first. */
+  startxrefs: number[];
+  /** /Prev of the newest trailer (= the first revision's startxref). */
+  prev: number;
+  /** Length of revision 1: the file truncated here is the original, complete PDF. */
+  revision1Bytes: number;
+  /** Objects redefined by the update ("n g R"). */
+  replaced: string[];
+  /** Token locations in revision 1 alone (same format as SecretExpectation.locations). */
+  revision1Locations: string[];
+}
+
 export interface Expectations {
   /** What `PDFDocument.load` from @cantoo/pdf-lib does with this file. */
   pdfLibLoad: 'ok' | 'throws';
@@ -185,6 +265,9 @@ export interface Expectations {
   images?: { page: number; filter: string; width: number; height: number; smask: boolean }[];
   annotations?: AnnotationExpectation[];
   tagged?: { marked: boolean; structTypes: string[]; structParents: number[]; mcids: number[] };
+  regions?: RegionExpectation[];
+  secret?: SecretExpectation;
+  incremental?: IncrementalExpectation;
   /** For the damaged fixtures: what was done to the source bytes. */
   damage?: Record<string, string | number>;
   xref?: 'table' | 'stream';

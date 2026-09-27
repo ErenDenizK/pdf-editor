@@ -1,0 +1,262 @@
+%PDF-1.7
+%ÅÅÅÅ
+
+1 0 obj
+<<
+/Type /Pages
+/Kids [ 5 0 R ]
+/Count 1
+>>
+endobj
+
+2 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+>>
+endobj
+
+3 0 obj
+<<
+/Title <FEFF0052006500640061006300740069006F006E00200066006900780074007500720065003A00200061006E006E006F0074006100740069006F006E0073>
+/Creator <FEFF007000640066002D0065006400690074006F007200200066006900780074007500720065002000670065006E0065007200610074006F0072002000280074006F006F006C0073002F00660069007800740075007200650073002F00670065006E00650072006100740065002E007400730029>
+/Producer <FEFF004000630061006E0074006F006F002F007000640066002D006C0069006200200032002E00310031002E0031>
+/CreationDate (D:20240101000000Z)
+/ModDate (D:20240101000000Z)
+>>
+endobj
+
+4 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica
+/Encoding /WinAnsiEncoding
+>>
+endobj
+
+5 0 obj
+<<
+/Type /Page
+/Parent 1 0 R
+/Resources <<
+/Font <<
+/F1 4 0 R
+>>
+>>
+/MediaBox [ 0 0 612 792 ]
+/Contents 6 0 R
+/Annots [ 8 0 R 9 0 R 10 0 R 12 0 R 14 0 R 15 0 R ]
+>>
+endobj
+
+6 0 obj
+<<
+/Length 265
+>>
+stream
+BT /F1 10 Tf 72 740 Td (PAGE 1 OF redact-annotations) Tj ET
+BT /F1 14 Tf 72 680 Td (Annotated: SECRET-7731 stays) Tj ET
+BT /F1 14 Tf 72 600 Td (The quick brown fox jumps over the lazy dog) Tj ET
+BT /F1 12 Tf 100 400 Td (Survivor note to the left of this line) Tj ET
+endstream
+endobj
+
+7 0 obj
+<<
+/Type /XObject
+/Subtype /Form
+/FormType 1
+/BBox [ 0 0 20 20 ]
+/Length 96
+>>
+stream
+1 0.85 0 rg 0 0 0 RG 0.5 w 0.25 0.25 19.5 19.5 re B 4 14 m 16 14 l 4 10 m 16 10 l 4 6 m 12 6 l S
+endstream
+endobj
+
+8 0 obj
+<<
+/Type /Annot
+/P 5 0 R
+/NM (redact-annot-link)
+/M (D:20240101000000Z)
+/F 4
+/Subtype /Link
+/Rect [ 143.61 676 236.19 692 ]
+/Border [ 0 0 0 ]
+/H /I
+/A <<
+/S /URI
+/URI (https://example.com/redact-annotations)
+>>
+>>
+endobj
+
+9 0 obj
+<<
+/Type /Annot
+/P 5 0 R
+/NM (redact-annot-note)
+/M (D:20240101000000Z)
+/F 28
+/Subtype /Text
+/Rect [ 230.19 684 250.19 704 ]
+/Name /Comment
+/Open false
+/C [ 1 0.85 0 ]
+/T (Fixture Author)
+/CreationDate (D:20240101000000Z)
+/Contents (SECRET-7731 in a note)
+/Popup 10 0 R
+/AP <<
+/N 7 0 R
+>>
+>>
+endobj
+
+10 0 obj
+<<
+/Type /Annot
+/P 5 0 R
+/NM (redact-annot-popup)
+/M (D:20240101000000Z)
+/F 28
+/Subtype /Popup
+/Rect [ 320 560 520 640 ]
+/Parent 9 0 R
+/Open false
+>>
+endobj
+
+11 0 obj
+<<
+/Type /XObject
+/Subtype /Form
+/FormType 1
+/BBox [ 143.61 675 236.19 695 ]
+/Resources <<
+/ExtGState <<
+/GS0 <<
+/Type /ExtGState
+/BM /Multiply
+/CA 1
+/ca 1
+>>
+>>
+>>
+/Length 47
+>>
+stream
+/GS0 gs 1 0.92 0.23 rg 143.61 675 92.58 20 re f
+endstream
+endobj
+
+12 0 obj
+<<
+/Type /Annot
+/P 5 0 R
+/NM (redact-annot-highlight)
+/M (D:20240101000000Z)
+/F 4
+/Subtype /Highlight
+/Rect [ 143.61 675 236.19 695 ]
+/QuadPoints [ 143.61 695 236.19 695 143.61 675 236.19 675 ]
+/C [ 1 0.92 0.23 ]
+/T (Fixture Author)
+/CreationDate (D:20240101000000Z)
+/Contents (Highlight over the token)
+/AP <<
+/N 11 0 R
+>>
+>>
+endobj
+
+13 0 obj
+<<
+/Type /XObject
+/Subtype /Form
+/FormType 1
+/BBox [ 0 0 60 32 ]
+/Length 27
+>>
+stream
+0 0 1 RG 2 w 1 1 58 30 re S
+endstream
+endobj
+
+14 0 obj
+<<
+/Type /Annot
+/P 5 0 R
+/NM (redact-annot-square)
+/M (D:20240101000000Z)
+/F 4
+/Subtype /Square
+/Rect [ 119.61 668 179.61 700 ]
+/BS <<
+/Type /Border
+/W 2
+/S /S
+>>
+/C [ 0 0 1 ]
+/T (Fixture Author)
+/CreationDate (D:20240101000000Z)
+/Contents (Square over the start of the token)
+/AP <<
+/N 13 0 R
+>>
+>>
+endobj
+
+15 0 obj
+<<
+/Type /Annot
+/P 5 0 R
+/NM (redact-annot-survivor)
+/M (D:20240101000000Z)
+/F 28
+/Subtype /Text
+/Rect [ 72 394 92 414 ]
+/Name /Comment
+/Open false
+/C [ 1 0.85 0 ]
+/T (Fixture Author)
+/CreationDate (D:20240101000000Z)
+/Contents (Survivor note outside the area)
+/AP <<
+/N 7 0 R
+>>
+>>
+endobj
+
+xref
+0 16
+0000000000 65535 f 
+0000000016 00000 n 
+0000000076 00000 n 
+0000000126 00000 n 
+0000000694 00000 n 
+0000000792 00000 n 
+0000000973 00000 n 
+0000001290 00000 n 
+0000001499 00000 n 
+0000001729 00000 n 
+0000002037 00000 n 
+0000002204 00000 n 
+0000002465 00000 n 
+0000002809 00000 n 
+0000002950 00000 n 
+0000003267 00000 n 
+
+trailer
+<<
+/Size 16
+/Root 2 0 R
+/Info 3 0 R
+/ID [ <d5760c04fd8937a5c7f169c2fb162b2a> <d5760c04fd8937a5c7f169c2fb162b2a> ]
+>>
+
+startxref
+3567
+%%EOF

@@ -1223,6 +1223,837 @@
         "xref": "table",
         "fileIdDeterministic": true
       }
+    },
+    {
+      "file": "redact-text-runs.pdf",
+      "bytes": 1646,
+      "sha256": "b8f30cbfda221b67850ac3a9aed46adfa25ac65e6c3b2ce8dcfc16ca3011a53b",
+      "pageCount": 1,
+      "tags": ["redaction", "text", "tj-split"],
+      "summary": "1 Letter page, Helvetica. SECRET-7731 in one Tj (line 1), split across two TJ arrays with kerning inside one text object (line 2), split across two BT/ET objects on one baseline (line 3); innocuous line 4.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 1,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "markers": [
+              "PAGE 1 OF redact-text-runs",
+              "Line 1, one Tj: SECRET-7731 stays",
+              "The quick brown fox jumps over the lazy dog"
+            ]
+          }
+        ],
+        "info": {
+          "Title": "Redaction fixture: text runs"
+        },
+        "regions": [
+          {
+            "id": "tj-single",
+            "page": 1,
+            "kind": "text",
+            "text": "SECRET-7731",
+            "fontSize": 14,
+            "baseline": 680,
+            "box": [164.61, 677.1, 92.58, 12.95],
+            "area": [163.61, 675.7, 94.58, 17.85],
+            "extractable": true,
+            "note": "Inside one Tj string \"Line 1, one Tj: SECRET-7731 stays\" (page content stream)."
+          },
+          {
+            "id": "tj-split",
+            "page": 1,
+            "kind": "text",
+            "text": "SECRET-7731",
+            "fontSize": 14,
+            "baseline": 640,
+            "box": [166.93, 637.1, 92.86, 12.95],
+            "area": [165.93, 635.7, 94.86, 17.85],
+            "extractable": true,
+            "note": "One text object, two TJ arrays: [(Line 2, two TJ: SE) 20 (CR)] TJ [(ET-) -40 (7731 stays)] TJ; the adjustments sit inside the token and are included in the width."
+          },
+          {
+            "id": "bt-split",
+            "page": 1,
+            "kind": "text",
+            "text": "SECRET-7731",
+            "fontSize": 14,
+            "baseline": 600,
+            "box": [169.27, 597.1, 92.58, 12.95],
+            "area": [168.27, 595.7, 94.58, 17.85],
+            "extractable": true,
+            "note": "Two text objects on one baseline: \"Line 3, two BT: SECRET-\" at x 72 and \"7731 stays\" at x 230.72."
+          },
+          {
+            "id": "innocuous",
+            "page": 1,
+            "kind": "text",
+            "text": "The quick brown fox jumps over the lazy dog",
+            "fontSize": 14,
+            "baseline": 560,
+            "box": [72, 557.1, 277, 12.95],
+            "area": [71, 555.7, 279, 17.85],
+            "extractable": true,
+            "note": "Innocuous line, one Tj; must survive."
+          }
+        ],
+        "secret": {
+          "token": "SECRET-7731",
+          "locations": ["Root/Pages/Kids[0]/Contents (stream)"],
+          "extracted": [
+            {
+              "page": 1,
+              "count": 3
+            }
+          ],
+          "inRawBytes": true
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "redact-form-xobject.pdf",
+      "bytes": 1985,
+      "sha256": "0f0bf71306a9403fd8dd4a87e27e8b223abb865ad58aa98fba4d801d6d71f017",
+      "pageCount": 1,
+      "tags": ["redaction", "form-xobject", "nested-xobject"],
+      "summary": "SECRET-7731 inside Form XObject /Fm1 painted with Do, and inside /Fm2 nested in /Fm1; innocuous text directly on the page.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 1,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "markers": [
+              "PAGE 1 OF redact-form-xobject",
+              "The quick brown fox jumps over the lazy dog"
+            ]
+          }
+        ],
+        "info": {
+          "Title": "Redaction fixture: Form XObjects"
+        },
+        "regions": [
+          {
+            "id": "form-outer",
+            "page": 1,
+            "kind": "text",
+            "text": "SECRET-7731",
+            "fontSize": 14,
+            "baseline": 710,
+            "box": [146.69, 707.1, 92.58, 12.95],
+            "area": [145.69, 705.7, 94.58, 17.85],
+            "extractable": true,
+            "note": "Form XObject /Fm1 (page: q 1 0 0 1 72 640 cm /Fm1 Do Q; BBox [0 0 468 100]); in form space the line \"Outer form: SECRET-7731 stays\" starts at (0, 70).",
+            "xobject": "Fm1"
+          },
+          {
+            "id": "form-nested",
+            "page": 1,
+            "kind": "text",
+            "text": "SECRET-7731",
+            "fontSize": 14,
+            "baseline": 670,
+            "box": [156.03, 667.1, 92.58, 12.95],
+            "area": [155.03, 665.7, 94.58, 17.85],
+            "extractable": true,
+            "note": "Form XObject /Fm2 painted by /Fm1 (q 1 0 0 1 0 10 cm /Fm2 Do Q; BBox [0 0 468 40]); in Fm2 space \"Nested form: SECRET-7731 stays\" starts at (0, 20).",
+            "xobject": "Fm1/Fm2"
+          },
+          {
+            "id": "innocuous",
+            "page": 1,
+            "kind": "text",
+            "text": "The quick brown fox jumps over the lazy dog",
+            "fontSize": 14,
+            "baseline": 600,
+            "box": [72, 597.1, 277, 12.95],
+            "area": [71, 595.7, 279, 17.85],
+            "extractable": true,
+            "note": "Directly in the page content stream."
+          }
+        ],
+        "secret": {
+          "token": "SECRET-7731",
+          "locations": [
+            "Root/Pages/Kids[0]/Resources/XObject/Fm1 (stream)",
+            "Root/Pages/Kids[0]/Resources/XObject/Fm1/Resources/XObject/Fm2 (stream)"
+          ],
+          "extracted": [
+            {
+              "page": 1,
+              "count": 2
+            }
+          ],
+          "inRawBytes": true
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "redact-images.pdf",
+      "bytes": 2788,
+      "sha256": "ff9fb9ed0b0a71c69c9808573aa282dbdc365364c861a098baef7df2abfe5c11",
+      "pageCount": 1,
+      "tags": ["redaction", "images", "inline-image"],
+      "summary": "Three 64x64 RGB image XObjects (Im1 left half inside an area, Im2 fully inside, Im3 outside) and an 8x8 uncompressed inline image (BI/ID/EI) inside an area.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 1,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "markers": ["PAGE 1 OF redact-images", "The quick brown fox jumps over the lazy dog"]
+          }
+        ],
+        "info": {
+          "Title": "Redaction fixture: images"
+        },
+        "images": [
+          {
+            "page": 1,
+            "filter": "FlateDecode",
+            "width": 64,
+            "height": 64,
+            "smask": false
+          },
+          {
+            "page": 1,
+            "filter": "FlateDecode",
+            "width": 64,
+            "height": 64,
+            "smask": false
+          },
+          {
+            "page": 1,
+            "filter": "FlateDecode",
+            "width": 64,
+            "height": 64,
+            "smask": false
+          }
+        ],
+        "regions": [
+          {
+            "id": "image-partial",
+            "page": 1,
+            "kind": "image",
+            "xobject": "Im1",
+            "box": [72, 560, 128, 128],
+            "area": [66, 552, 70, 144],
+            "note": "64x64 DeviceRGB (FlateDecode), 2 pt per pixel; quadrants red (top-left), green (top-right), blue (bottom-left), yellow (bottom-right). The area spans x 66-136: image columns 0-31 (the red and blue quadrants) are covered, columns 32-63 must keep their pixels."
+          },
+          {
+            "id": "image-full",
+            "page": 1,
+            "kind": "image",
+            "xobject": "Im2",
+            "box": [240, 560, 128, 128],
+            "area": [234, 552, 140, 144],
+            "note": "64x64 DeviceRGB (FlateDecode), four horizontal bands; fully covered, so the image can be removed."
+          },
+          {
+            "id": "image-untouched",
+            "page": 1,
+            "kind": "image",
+            "xobject": "Im3",
+            "box": [408, 560, 128, 128],
+            "note": "64x64 DeviceRGB (FlateDecode), four vertical stripes; outside every area, must stay byte-identical."
+          },
+          {
+            "id": "inline-image",
+            "page": 1,
+            "kind": "inline-image",
+            "box": [72, 400, 64, 64],
+            "area": [66, 394, 76, 76],
+            "note": "BI /W 8 /H 8 /BPC 8 /CS /RGB ID <192 raw bytes> EI in the page content stream (no filter), under q 64 0 0 64 72 400 cm; quadrant colours as Im1."
+          }
+        ],
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "redact-annotations.pdf",
+      "bytes": 4044,
+      "sha256": "8a8c4686e726bbc4547f2e9f960d8ca01c43e26176f1c6c5aed0d3948b184afe",
+      "pageCount": 1,
+      "tags": ["redaction", "annotations", "links"],
+      "summary": "SECRET-7731 in page text overlapped by a Link (URI), a Text note with Popup (/Contents \"SECRET-7731 in a note\"), a Highlight and a Square; a second note outside the area.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 1,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "markers": [
+              "PAGE 1 OF redact-annotations",
+              "Annotated: SECRET-7731 stays",
+              "The quick brown fox jumps over the lazy dog",
+              "Survivor note to the left of this line"
+            ]
+          }
+        ],
+        "info": {
+          "Title": "Redaction fixture: annotations"
+        },
+        "links": [
+          {
+            "page": 1,
+            "kind": "uri",
+            "uri": "https://example.com/redact-annotations"
+          }
+        ],
+        "annotations": [
+          {
+            "page": 1,
+            "subtype": "Link",
+            "nm": "redact-annot-link",
+            "hasAppearance": false,
+            "flags": 4
+          },
+          {
+            "page": 1,
+            "subtype": "Text",
+            "nm": "redact-annot-note",
+            "hasAppearance": true,
+            "flags": 28
+          },
+          {
+            "page": 1,
+            "subtype": "Popup",
+            "nm": "redact-annot-popup",
+            "hasAppearance": false,
+            "flags": 28,
+            "popupOf": "redact-annot-note"
+          },
+          {
+            "page": 1,
+            "subtype": "Highlight",
+            "nm": "redact-annot-highlight",
+            "hasAppearance": true,
+            "flags": 4,
+            "quadPoints": [143.61, 695, 236.19, 695, 143.61, 675, 236.19, 675],
+            "blendMode": "Multiply"
+          },
+          {
+            "page": 1,
+            "subtype": "Square",
+            "nm": "redact-annot-square",
+            "hasAppearance": true,
+            "flags": 4
+          },
+          {
+            "page": 1,
+            "subtype": "Text",
+            "nm": "redact-annot-survivor",
+            "hasAppearance": true,
+            "flags": 28
+          }
+        ],
+        "regions": [
+          {
+            "id": "token",
+            "page": 1,
+            "kind": "text",
+            "text": "SECRET-7731",
+            "fontSize": 14,
+            "baseline": 680,
+            "box": [143.61, 677.1, 92.58, 12.95],
+            "area": [142.61, 675.7, 94.58, 17.85],
+            "extractable": true,
+            "note": "In the page content (\"Annotated: SECRET-7731 stays\"). Overlapping the area: Link [143.61 676 236.19 692] (URI), Text note [230.19 684 250.19 704] whose Popup [320 560 520 640] lies outside the area, Highlight (QuadPoints [143.61 695 236.19 695 143.61 675 236.19 675]), Square [119.61 668 179.61 700]."
+          },
+          {
+            "id": "survivor-note",
+            "page": 1,
+            "kind": "annotations",
+            "box": [72, 394, 20, 20],
+            "note": "Text note \"Survivor note outside the area\" (no popup), outside every area: must survive."
+          }
+        ],
+        "secret": {
+          "token": "SECRET-7731",
+          "locations": [
+            "Root/Pages/Kids[0]/Annots[1]/Contents",
+            "Root/Pages/Kids[0]/Contents (stream)"
+          ],
+          "extracted": [
+            {
+              "page": 1,
+              "count": 1
+            }
+          ],
+          "inRawBytes": true
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "redact-metadata.pdf",
+      "bytes": 6966,
+      "sha256": "9a519d32d5cd01ac043e81f4bcb9503bd6a0588134436e9880837dabab248dfc",
+      "pageCount": 1,
+      "tags": ["redaction", "metadata", "xmp", "outline", "named-dests", "tagged", "attachments"],
+      "summary": "SECRET-7731 in page text (tagged /P, MCID 0), an outline title, Info /Title and /Subject, XMP dc:title and dc:description, a named destination, /ActualText and /Alt, and an embedded file (Flate-compressed). The page also has a /Thumb.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 1,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "markers": [
+              "PAGE 1 OF redact-metadata",
+              "Tagged paragraph: SECRET-7731 stays",
+              "The quick brown fox jumps over the lazy dog"
+            ]
+          }
+        ],
+        "info": {
+          "Title": "Metadata scrub fixture: SECRET-7731",
+          "Subject": "Subject line naming SECRET-7731",
+          "Author": "Jane Q. Fixture",
+          "CreationDate": "2024-01-01T00:00:00.000Z",
+          "ModDate": "2024-01-01T00:00:00.000Z"
+        },
+        "xmp": {
+          "dc:title": "Metadata scrub fixture: SECRET-7731",
+          "dc:description": "Subject line naming SECRET-7731",
+          "dc:creator": "Jane Q. Fixture"
+        },
+        "outline": [
+          {
+            "title": "Introduction",
+            "page": 1,
+            "target": "explicit-dest"
+          },
+          {
+            "title": "Findings on SECRET-7731",
+            "page": 1,
+            "target": "explicit-dest"
+          }
+        ],
+        "outlineVisibleCount": 2,
+        "namedDests": [
+          {
+            "name": "SECRET-7731-dest",
+            "page": 1,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "intro",
+            "page": 1,
+            "tree": "Names/Dests"
+          }
+        ],
+        "attachments": [
+          {
+            "name": "notes.txt",
+            "content": "Attachment body: SECRET-7731 appears in this embedded file.\n",
+            "mimeType": "text/plain"
+          }
+        ],
+        "tagged": {
+          "marked": true,
+          "structTypes": ["Document", "P"],
+          "structParents": [0],
+          "mcids": [0]
+        },
+        "regions": [
+          {
+            "id": "token",
+            "page": 1,
+            "kind": "text",
+            "text": "SECRET-7731",
+            "fontSize": 14,
+            "baseline": 680,
+            "box": [194.96, 677.1, 92.58, 12.95],
+            "area": [193.96, 675.7, 94.58, 17.85],
+            "extractable": true,
+            "note": "Marked content /P <</MCID 0>> in the page content (\"Tagged paragraph: SECRET-7731 stays\"); the structure element carries the same text as /ActualText."
+          },
+          {
+            "id": "innocuous",
+            "page": 1,
+            "kind": "text",
+            "text": "The quick brown fox jumps over the lazy dog",
+            "fontSize": 14,
+            "baseline": 640,
+            "box": [72, 637.1, 277, 12.95],
+            "area": [71, 635.7, 279, 17.85],
+            "extractable": true,
+            "note": "Marked as /Artifact; must survive."
+          }
+        ],
+        "secret": {
+          "token": "SECRET-7731",
+          "locations": [
+            "Info/Subject",
+            "Info/Title",
+            "Root/Metadata (stream)",
+            "Root/Names/Dests/Names[0]",
+            "Root/Names/EmbeddedFiles/Names[1]/EF/F (stream)",
+            "Root/Outlines/First/Next/Title",
+            "Root/Pages/Kids[0]/Contents (stream)",
+            "Root/StructTreeRoot/K/K/ActualText",
+            "Root/StructTreeRoot/K/K/Alt"
+          ],
+          "extracted": [
+            {
+              "page": 1,
+              "count": 1
+            }
+          ],
+          "inRawBytes": true
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "redact-incremental.pdf",
+      "bytes": 1790,
+      "sha256": "6c3668f73b906fb5b21d696e5a79ab8dc6f5da3ad0468c284a924af13debf555",
+      "pageCount": 1,
+      "tags": ["redaction", "incremental-update", "history"],
+      "summary": "Two revisions: revision 1 draws \"SECRET-7731\" (uncompressed); an appended update redefines that content stream without it (xref section + trailer with /Prev).",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 1,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "markers": [
+              "PAGE 1 OF redact-incremental",
+              "The quick brown fox jumps over the lazy dog"
+            ]
+          }
+        ],
+        "info": {
+          "Title": "Redaction fixture: incremental update"
+        },
+        "regions": [
+          {
+            "id": "revision-1-token",
+            "page": 1,
+            "kind": "text",
+            "text": "SECRET-7731",
+            "fontSize": 14,
+            "baseline": 680,
+            "box": [171.6, 677.1, 92.58, 12.95],
+            "area": [170.6, 675.7, 94.58, 17.85],
+            "extractable": false,
+            "note": "Where revision 1 drew \"Revision 1 text: SECRET-7731 stays\" (uncompressed, object 6); the current revision draws the innocuous line at the same baseline instead, so nothing here is extractable any more."
+          },
+          {
+            "id": "innocuous",
+            "page": 1,
+            "kind": "text",
+            "text": "The quick brown fox jumps over the lazy dog",
+            "fontSize": 14,
+            "baseline": 680,
+            "box": [72, 677.1, 277, 12.95],
+            "area": [71, 675.7, 279, 17.85],
+            "extractable": true,
+            "note": "Current revision (the update)."
+          }
+        ],
+        "secret": {
+          "token": "SECRET-7731",
+          "locations": [],
+          "extracted": [
+            {
+              "page": 1,
+              "count": 0
+            }
+          ],
+          "inRawBytes": true
+        },
+        "incremental": {
+          "revisions": 2,
+          "startxrefs": [1126, 1607],
+          "prev": 1126,
+          "revision1Bytes": 1421,
+          "replaced": ["6 0 R"],
+          "revision1Locations": ["Root/Pages/Kids[0]/Contents (stream)"]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "text-edit-fonts.pdf",
+      "bytes": 78658,
+      "sha256": "856227bd9f0c2ce810f65eb1344e1d2e2c00da0f408dd50ce8d9a5d9d4920054",
+      "pageCount": 1,
+      "tags": ["text-editing", "fonts", "type0", "truetype", "type3", "ocr-layer"],
+      "summary": "The same sentence in Helvetica (WinAnsi), a Type0/Identity-H Inter subset, a Type0/Identity-H JetBrains Mono (whole font), a simple TrueType WinAnsi Inter subset, a Type3 font (\"ABBA\"), vector paths, and paths under invisible (3 Tr) text.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 1,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "markers": [
+              "PAGE 1 OF text-edit-fonts",
+              "The quick brown fox jumps over the lazy dog",
+              "ABBA"
+            ]
+          }
+        ],
+        "info": {
+          "Title": "Text editing fixture: font kinds"
+        },
+        "regions": [
+          {
+            "id": "helvetica-winansi",
+            "page": 1,
+            "kind": "text",
+            "text": "The quick brown fox jumps over the lazy dog",
+            "fontSize": 16,
+            "baseline": 700,
+            "box": [72, 696.69, 316.58, 14.8],
+            "area": [71, 695.09, 318.58, 20.4],
+            "font": {
+              "resource": "F1",
+              "subtype": "Type1",
+              "baseFont": "Helvetica",
+              "encoding": "WinAnsiEncoding",
+              "embedded": false,
+              "subset": false,
+              "toUnicode": false
+            },
+            "extractable": true,
+            "note": "(a) Standard 14 Helvetica, /WinAnsiEncoding, not embedded; literal string Tj."
+          },
+          {
+            "id": "type0-subset",
+            "page": 1,
+            "kind": "text",
+            "text": "The quick brown fox jumps over the lazy dog",
+            "fontSize": 16,
+            "baseline": 650,
+            "box": [72, 646.14, 341.83, 19.36],
+            "area": [71, 644.54, 343.83, 24.96],
+            "font": {
+              "resource": "F2",
+              "subtype": "Type0",
+              "baseFont": "FXTAAA+Inter-Regular",
+              "encoding": "Identity-H",
+              "descendant": "CIDFontType2",
+              "embedded": true,
+              "subset": true,
+              "toUnicode": true
+            },
+            "extractable": true,
+            "note": "(b) Inter Regular subset holding only the glyphs of this sentence (pdf-lib embedFont(bytes, { subset: true })): pdf-lib writes every custom font as Type0 / Identity-H over a CIDFontType2 (TrueType outlines); hex glyph-id string. Any character not in the sentence (e.g. capitals other than T, digits) is a missing glyph."
+          },
+          {
+            "id": "type0-full",
+            "page": 1,
+            "kind": "text",
+            "text": "The quick brown fox jumps over the lazy dog",
+            "fontSize": 16,
+            "baseline": 600,
+            "box": [72, 595.2, 412.8, 21.12],
+            "area": [71, 593.6, 414.8, 26.72],
+            "font": {
+              "resource": "F3",
+              "subtype": "Type0",
+              "baseFont": "JetBrainsMono-Regular",
+              "encoding": "Identity-H",
+              "descendant": "CIDFontType2",
+              "embedded": true,
+              "subset": false,
+              "toUnicode": true
+            },
+            "extractable": true,
+            "note": "(c) JetBrains Mono Regular embedded whole (pdf-lib embedFont(bytes, { subset: false })), Type0 / Identity-H / CIDFontType2: the program has every glyph of the bundled file, but /W and /ToUnicode list only the glyphs used here."
+          },
+          {
+            "id": "truetype-winansi-subset",
+            "page": 1,
+            "kind": "text",
+            "text": "The quick brown fox jumps over the lazy dog",
+            "fontSize": 16,
+            "baseline": 550,
+            "box": [72, 546.14, 341.76, 19.36],
+            "area": [71, 544.54, 343.76, 24.96],
+            "font": {
+              "resource": "F4",
+              "subtype": "TrueType",
+              "baseFont": "FXTAAB+Inter-Regular",
+              "encoding": "WinAnsiEncoding",
+              "embedded": true,
+              "subset": true,
+              "toUnicode": false
+            },
+            "extractable": true,
+            "note": "(b2) Simple /TrueType font, /WinAnsiEncoding, nonsymbolic, Inter subset with only the glyphs of this sentence plus a (3,1) cmap (built by hand; pdf-lib cannot write simple TrueType fonts). /Widths 32-122 are 0 for codes not in the sentence. The typical \"Save as PDF\" font of office suites."
+          },
+          {
+            "id": "type3",
+            "page": 1,
+            "kind": "text",
+            "text": "ABBA",
+            "fontSize": 16,
+            "baseline": 500,
+            "box": [72, 500, 46.4, 11.52],
+            "area": [71, 498.4, 48.4, 17.12],
+            "font": {
+              "resource": "F5",
+              "subtype": "Type3",
+              "encoding": "Differences",
+              "embedded": false,
+              "subset": false,
+              "toUnicode": true
+            },
+            "extractable": true,
+            "note": "(d) Type3 font /F5 with two glyphs drawn as filled paths (A = code 0x41, B = 0x42; d1 glyphs, FontMatrix 0.001), /ToUnicode maps them to \"A\" and \"B\". Not editable (spec §2.2)."
+          },
+          {
+            "id": "vector-paths",
+            "page": 1,
+            "kind": "vector-text",
+            "text": "The quick brown fox jumps over the lazy dog",
+            "fontSize": 16,
+            "baseline": 450,
+            "box": [72, 446.14, 339.82, 19.36],
+            "area": [71, 444.54, 341.82, 24.96],
+            "extractable": false,
+            "note": "(e) The sentence as filled vector paths (Inter outlines, no font, no text object): nothing to extract, not editable."
+          },
+          {
+            "id": "ocr-invisible",
+            "page": 1,
+            "kind": "text",
+            "text": "The quick brown fox jumps over the lazy dog",
+            "fontSize": 16,
+            "baseline": 400,
+            "box": [72, 396.14, 339.82, 19.36],
+            "area": [71, 394.54, 341.82, 24.96],
+            "font": {
+              "resource": "F1",
+              "subtype": "Type1",
+              "baseFont": "Helvetica",
+              "encoding": "WinAnsiEncoding",
+              "embedded": false,
+              "subset": false,
+              "toUnicode": false
+            },
+            "extractable": true,
+            "note": "(f) OCR-style layer: the sentence as vector paths again, with invisible Helvetica text (3 Tr, 107.34 Tz so its width matches the paths) over it. Extractable but invisible; editing must not simply re-show it.",
+            "renderMode": 3
+          }
+        ],
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "text-edit-rotated.pdf",
+      "bytes": 1894,
+      "sha256": "45efd23b14c133359f86b08ac008f89fe7d6f1784775ec220b777ad2cd88567f",
+      "pageCount": 2,
+      "tags": ["text-editing", "rotation"],
+      "summary": "Page 1 /Rotate 90, page 2 /Rotate 270 (Letter); each has one line horizontal in user space and one line counter-rotated by its text matrix so it reads upright.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 2,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 90,
+            "displayedSize": [792, 612],
+            "markers": [
+              "Page 1 rotate 90 line 1: The quick brown fox jumps over the lazy dog",
+              "Page 1 rotate 90 line 2 reads upright"
+            ]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 270,
+            "displayedSize": [792, 612],
+            "markers": [
+              "Page 2 rotate 270 line 1: The quick brown fox jumps over the lazy dog",
+              "Page 2 rotate 270 line 2 reads upright"
+            ]
+          }
+        ],
+        "info": {
+          "Title": "Text editing fixture: rotated pages"
+        },
+        "regions": [
+          {
+            "id": "page1-line1",
+            "page": 1,
+            "kind": "text",
+            "text": "Page 1 rotate 90 line 1: The quick brown fox jumps over the lazy dog",
+            "fontSize": 14,
+            "baseline": 700,
+            "box": [72, 697.1, 425.66, 12.95],
+            "area": [71, 695.7, 427.66, 17.85],
+            "extractable": true,
+            "note": "Horizontal in user space (Td 72 700); on screen it runs top to bottom."
+          },
+          {
+            "id": "page1-line2",
+            "page": 1,
+            "kind": "text",
+            "text": "Page 1 rotate 90 line 2 reads upright",
+            "fontSize": 14,
+            "baseline": 90,
+            "box": [79.95, 72, 12.95, 226.46],
+            "area": [76.45, 71, 17.85, 228.46],
+            "extractable": true,
+            "note": "Text matrix [0 1 -1 0 90 72] Tm: baseline is the vertical line x = 90, the text starts at y = 72 and runs up the user-space page, so it reads left to right on the /Rotate 90 display (landscape 792 x 612)."
+          },
+          {
+            "id": "page2-line1",
+            "page": 2,
+            "kind": "text",
+            "text": "Page 2 rotate 270 line 1: The quick brown fox jumps over the lazy dog",
+            "fontSize": 14,
+            "baseline": 700,
+            "box": [72, 697.1, 433.44, 12.95],
+            "area": [71, 695.7, 435.44, 17.85],
+            "extractable": true,
+            "note": "Horizontal in user space (Td 72 700); on screen it runs bottom to top."
+          },
+          {
+            "id": "page2-line2",
+            "page": 2,
+            "kind": "text",
+            "text": "Page 2 rotate 270 line 2 reads upright",
+            "fontSize": 14,
+            "baseline": 522,
+            "box": [519.1, 485.75, 12.95, 234.25],
+            "area": [517.7, 484.75, 17.85, 236.25],
+            "extractable": true,
+            "note": "Text matrix [0 -1 1 0 522 720] Tm: baseline is the vertical line x = 522, the text starts at y = 720 and runs down the user-space page, so it reads left to right on the /Rotate 270 display (landscape 792 x 612)."
+          }
+        ],
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
     }
   ]
 }

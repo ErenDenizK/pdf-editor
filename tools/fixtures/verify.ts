@@ -40,6 +40,7 @@ import {
   type OutlineExpectation,
   sha256,
 } from './lib/common.ts';
+import { findToken } from './lib/scan.ts';
 
 // pdf-lib logs parse recoveries with console.warn; keep the report readable.
 const warnings: string[] = [];
@@ -693,6 +694,122 @@ async function checkEntry(entry: ManifestEntry, c: Checker): Promise<void> {
     pages.forEach((page, i) => {
       c.ok(pageContent(doc, page).includes('/MCID 0'), `page ${i + 1} has marked content MCID 0`);
     });
+  }
+
+  await checkM4(entry, doc, bytes, c);
+}
+
+/** M4 fixtures: token locations, revision history, fonts and images behind regions. */
+async function checkM4(
+  entry: ManifestEntry,
+  doc: PDFDocument,
+  bytes: Uint8Array,
+  c: Checker,
+): Promise<void> {
+  const e = entry.expect;
+  const latin = Buffer.from(bytes).toString('latin1');
+  if (e.secret) {
+    c.eq(findToken(doc, e.secret.token), e.secret.locations, 'token locations');
+    c.eq(latin.includes(e.secret.token), e.secret.inRawBytes, 'token in raw bytes');
+  }
+
+  if (e.incremental) {
+    const inc = e.incremental;
+    const startxrefs = [...latin.matchAll(/startxref\s+(\d+)\s+%%EOF/g)].map((m) => Number(m[1]));
+    c.eq(startxrefs, inc.startxrefs, 'startxref chain');
+    c.eq((latin.match(/%%EOF/g) ?? []).length, inc.revisions, '%%EOF count');
+    const last = startxrefs.at(-1) ?? 0;
+    c.ok(latin.startsWith('xref', last), 'newest startxref points at an xref keyword');
+    const prev = /\/Prev (\d+)/.exec(latin.slice(last));
+    c.eq(Number(prev?.[1]), inc.prev, 'newest trailer /Prev');
+    c.ok(latin.startsWith('xref', inc.prev), '/Prev points at the first xref table');
+    const rev1 = bytes.slice(0, inc.revision1Bytes);
+    c.ok(
+      latin.slice(0, inc.revision1Bytes).trimEnd().endsWith('%%EOF'),
+      'revision 1 ends at %%EOF',
+    );
+    const rev1Doc = await PDFDocument.load(rev1, { updateMetadata: false });
+    const token = e.secret?.token;
+    if (token)
+      c.eq(findToken(rev1Doc, token), inc.revision1Locations, 'revision 1 token locations');
+    for (const ref of inc.replaced) {
+      const [n, g] = ref.split(' ');
+      c.eq(
+        latin.split(`\n${n} ${g} obj`).length - 1,
+        inc.revisions,
+        `${ref} defined once per revision`,
+      );
+    }
+  }
+
+  const pages = doc.getPages();
+  for (const region of e.regions ?? []) {
+    const page = pages[region.page - 1];
+    const label = `region ${region.id}`;
+    if (!page) {
+      c.ok(false, `${label}: page ${region.page} missing`);
+      continue;
+    }
+    const resources = page.node.Resources();
+    if (region.font) {
+      const fe = region.font;
+      const fonts = dictOf(doc, resources?.get(N('Font')));
+      const font = dictOf(doc, fonts?.get(N(fe.resource)));
+      c.ok(!!font, `${label}: font /${fe.resource} present`);
+      if (!font) continue;
+      const nameOf = (o: PDFObject | undefined) => resolve(doc, o)?.toString().slice(1);
+      c.eq(nameOf(font.get(N('Subtype'))), fe.subtype, `${label}: font /Subtype`);
+      const baseFont = nameOf(font.get(N('BaseFont')));
+      if (fe.baseFont) c.eq(baseFont, fe.baseFont, `${label}: /BaseFont`);
+      const encoding = resolve(doc, font.get(N('Encoding')));
+      c.eq(
+        encoding instanceof PDFDict ? 'Differences' : nameOf(encoding),
+        fe.encoding,
+        `${label}: /Encoding`,
+      );
+      let descriptorHost = font;
+      if (fe.subtype === 'Type0') {
+        const kids = resolve(doc, font.get(N('DescendantFonts')));
+        const cid = kids instanceof PDFArray ? dictOf(doc, kids.get(0)) : undefined;
+        c.eq(nameOf(cid?.get(N('Subtype'))), fe.descendant, `${label}: descendant /Subtype`);
+        if (cid) descriptorHost = cid;
+      }
+      const descriptor = dictOf(doc, descriptorHost.get(N('FontDescriptor')));
+      const embedded = ['FontFile', 'FontFile2', 'FontFile3'].some((k) => descriptor?.has(N(k)));
+      c.eq(embedded, fe.embedded, `${label}: font program embedded`);
+      c.eq(/^[A-Z]{6}\+/.test(baseFont ?? ''), fe.subset, `${label}: subset tag`);
+      c.eq(font.has(N('ToUnicode')), fe.toUnicode, `${label}: /ToUnicode`);
+    }
+    if (region.kind === 'image' && region.xobject) {
+      const xobjects = dictOf(doc, resources?.get(N('XObject')));
+      const image = dictOf(doc, xobjects?.get(N(region.xobject)));
+      c.eq(
+        image?.get(N('Subtype'))?.toString(),
+        '/Image',
+        `${label}: /${region.xobject} is an image`,
+      );
+      c.ok(
+        pageContent(doc, page).includes(`/${region.xobject} Do`),
+        `${label}: /${region.xobject} painted`,
+      );
+    }
+    if (region.kind === 'inline-image') {
+      c.ok(/\nBI [^]*? ID [^]*?\nEI\n/.test(pageContent(doc, page)), `${label}: BI/ID/EI present`);
+    }
+    if (region.xobject && region.kind === 'text') {
+      let host = resources;
+      for (const part of region.xobject.split('/')) {
+        host = dictOf(doc, dictOf(doc, host?.get(N('XObject')))?.get(N(part)));
+        c.eq(host?.get(N('Subtype'))?.toString(), '/Form', `${label}: ${part} is a Form XObject`);
+        host = dictOf(doc, host?.get(N('Resources')));
+      }
+    }
+    if (region.renderMode !== undefined) {
+      c.ok(
+        pageContent(doc, page).includes(` ${region.renderMode} Tr `),
+        `${label}: ${region.renderMode} Tr`,
+      );
+    }
   }
 }
 
