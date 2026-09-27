@@ -2,8 +2,8 @@
  * The floating tool bar: the one translucent surface (DESIGN.md §2–3). Roving tabindex:
  * one Tab stop, Left/Right/Home/End move between buttons (DESIGN.md §5).
  *
- * Tools are inert placeholders that only set `ui.tool`. Page actions stay disabled until
- * the document model provides a selection.
+ * Tools are inert placeholders that only set `ui.tool`. Page actions run the page
+ * commands on the selection and stay disabled (but focusable) while nothing is selected.
  */
 import {
   FileOutput,
@@ -18,8 +18,9 @@ import {
 } from 'lucide-react';
 import { type KeyboardEvent, useRef, useState } from 'react';
 
-import { parseShortcut } from '../commands/shortcuts';
+import { commandRegistry } from '../commands/registry';
 import { useCommands } from '../commands/use-commands';
+import { useSelectionStore } from '../state/selection-store';
 import { type ToolId, useUiStore } from '../state/ui-store';
 import { IconButton } from '../ui/IconButton';
 import styles from './FloatingToolbar.module.css';
@@ -33,11 +34,11 @@ const TOOL_ICONS: Record<ToolId, typeof Type> = {
   note: StickyNote,
 };
 
-// TODO(document-model): register these as commands once page selection exists.
+/** Page actions; `command: null` marks one that is not built yet. */
 const PAGE_ACTIONS = [
-  { key: 'rotate', label: 'Rotate pages', Icon: RotateCw, shortcut: parseShortcut('R') },
-  { key: 'delete', label: 'Delete pages', Icon: Trash2, shortcut: parseShortcut('Delete') },
-  { key: 'extract', label: 'Extract pages', Icon: FileOutput, shortcut: parseShortcut('E') },
+  { key: 'rotate', label: 'Rotate pages', Icon: RotateCw, command: 'pages.rotateRight' },
+  { key: 'delete', label: 'Delete pages', Icon: Trash2, command: 'pages.delete' },
+  { key: 'extract', label: 'Extract pages', Icon: FileOutput, command: null },
 ] as const;
 
 export function FloatingToolbar() {
@@ -45,6 +46,11 @@ export function FloatingToolbar() {
   const setTool = useUiStore((s) => s.setTool);
   const commands = useCommands();
   const toolCommands = commands.filter((c) => c.id.startsWith('tool.'));
+  // Re-render on selection changes so enablement follows it.
+  const selectionSize = useSelectionStore((s) => s.selected.size);
+  const focused = useSelectionStore((s) => s.focused);
+  const viewMode = useUiStore((s) => s.viewMode);
+  const hasTargets = selectionSize > 0 || (viewMode === 'arrange' && focused !== null);
   const ref = useRef<HTMLDivElement>(null);
   const [focusIndex, setFocusIndex] = useState(0);
 
@@ -92,19 +98,29 @@ export function FloatingToolbar() {
         );
       })}
       <div role="separator" aria-orientation="vertical" className={styles.divider} />
-      {PAGE_ACTIONS.map(({ key, label, Icon, shortcut }, position) => (
-        <IconButton
-          key={key}
-          size="toolbar"
-          tooltipSide="top"
-          label={label}
-          icon={<Icon />}
-          shortcut={shortcut}
-          aria-disabled="true"
-          aria-description="Select pages first"
-          tabIndex={tabIndexFor(toolCommands.length + position)}
-        />
-      ))}
+      {PAGE_ACTIONS.map(({ key, label, Icon, command }, position) => {
+        const registered = command === null ? undefined : commands.find((c) => c.id === command);
+        const enabled = registered !== undefined && hasTargets;
+        return (
+          <IconButton
+            key={key}
+            size="toolbar"
+            tooltipSide="top"
+            label={label}
+            tooltip={command === null ? `${label} · Coming in M1` : undefined}
+            icon={<Icon />}
+            shortcut={registered?.shortcuts[0]}
+            aria-disabled={enabled ? undefined : 'true'}
+            aria-description={
+              command === null ? 'Coming in M1' : enabled ? undefined : 'Select pages first'
+            }
+            tabIndex={tabIndexFor(toolCommands.length + position)}
+            onClick={() => {
+              if (enabled && command !== null) void commandRegistry.execute(command);
+            }}
+          />
+        );
+      })}
     </div>
   );
 }

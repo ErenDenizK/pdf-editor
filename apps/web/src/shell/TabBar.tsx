@@ -7,6 +7,7 @@
  * be an interactive element nested in a tab; keyboard and screen-reader users close with
  * Delete (announced through `aria-keyshortcuts`) or the "Close tab" command.
  */
+import type { DocumentId } from '@pdf-editor/document-model';
 import { PanelRight, Plus, Search, X } from 'lucide-react';
 import { type KeyboardEvent, useEffect } from 'react';
 
@@ -14,7 +15,7 @@ import { openFilesFromPicker } from '../commands/app-commands';
 import { commandRegistry } from '../commands/registry';
 import { currentPlatform, toAriaKeyShortcut } from '../commands/shortcuts';
 import { useUiStore } from '../state/ui-store';
-import { closeDocument, useWorkspaceStore } from '../state/workspace-store';
+import { useTabItems, useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
 import { Keycaps } from '../ui/Keycaps';
 import { AppGlyph } from './AppGlyph';
@@ -29,9 +30,10 @@ export function tabDomId(documentId: string): string {
 }
 
 export function TabBar() {
-  const documents = useWorkspaceStore((s) => s.documents);
-  const activeTabId = useUiStore((s) => s.activeTabId);
-  const setActiveTab = useUiStore((s) => s.setActiveTab);
+  const documents = useTabItems();
+  const activeTabId = useWorkspaceStore((s) => s.workspace.activeDocument ?? null);
+  const setActiveTab = useWorkspaceStore((s) => s.setActive);
+  const closeDocument = useWorkspaceStore((s) => s.closeDocument);
   const rightPanelOpen = useUiStore((s) => s.rightPanelOpen);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const openShortcut = useCommandShortcut('file.open');
@@ -45,12 +47,12 @@ export function TabBar() {
     el?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [activeTabId]);
 
-  const focusTab = (id: string) => {
+  const focusTab = (id: DocumentId) => {
     setActiveTab(id);
     requestAnimationFrame(() => document.getElementById(tabDomId(id))?.focus());
   };
 
-  const closeTab = (id: string, name: string, refocus: boolean) => {
+  const closeTab = (id: DocumentId, name: string, refocus: boolean) => {
     const index = documents.findIndex((d) => d.id === id);
     closeDocument(id);
     announce(`Closed ${name}`);
@@ -71,7 +73,7 @@ export function TabBar() {
     else if (event.key === 'Delete') {
       event.preventDefault();
       const current = documents[index];
-      if (current) closeTab(current.id, current.name, true);
+      if (current) closeTab(current.id, current.title, true);
       return;
     }
     if (target === null) return;
@@ -108,18 +110,18 @@ export function TabBar() {
                       // Middle click closes, as in browsers.
                       if (event.button === 1) {
                         event.preventDefault();
-                        closeTab(doc.id, doc.name, false);
+                        closeTab(doc.id, doc.title, false);
                       }
                     }}
-                    title={doc.name}
+                    title={doc.title}
                   >
                     <span className={styles.tag} data-tag={doc.colorIndex} aria-hidden="true" />
-                    <span className={styles.name}>{doc.name}</span>
+                    <span className={styles.name}>{doc.title}</span>
                   </button>
                   <span
                     aria-hidden="true"
                     className={styles.close}
-                    onClick={() => closeTab(doc.id, doc.name, false)}
+                    onClick={() => closeTab(doc.id, doc.title, false)}
                   >
                     <X />
                   </span>

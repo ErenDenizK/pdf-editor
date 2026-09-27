@@ -1,0 +1,8 @@
+/* Fills the page sheet; the sheet's white background is the placeholder. */
+.canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}

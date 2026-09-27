@@ -9,15 +9,16 @@
  */
 import { type DragEvent, useRef, useState } from 'react';
 
+import { openDocuments } from '../commands/app-commands';
 import { useShortcuts } from '../commands/use-shortcuts';
 import { dragHasFiles, filesFromDataTransfer } from '../files/open-files';
-import { openDocuments } from '../state/workspace-store';
 import { TooltipProvider } from '../ui/Tooltip';
 import { announce } from './announcer';
 import styles from './AppShell.module.css';
 import { CommandPalette } from './CommandPalette';
 import { LeftRail } from './LeftRail';
 import { LiveRegion } from './LiveRegion';
+import { PasswordDialog } from './PasswordDialog';
 import { RightPanel } from './RightPanel';
 import { ShortcutOverlay } from './ShortcutOverlay';
 import { Stage } from './Stage';
@@ -57,10 +58,7 @@ export function AppShell() {
         announce('No PDF files found in the drop');
         return;
       }
-      openDocuments(files);
-      announce(
-        files.length === 1 ? `Opened ${files[0]?.name ?? 'file'}` : `Opened ${files.length} files`,
-      );
+      void openDocuments(files);
     });
   };
 
@@ -82,6 +80,7 @@ export function AppShell() {
       </div>
       <CommandPalette />
       <ShortcutOverlay />
+      <PasswordDialog />
       <LiveRegion />
     </TooltipProvider>
   );

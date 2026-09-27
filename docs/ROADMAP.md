@@ -7,7 +7,7 @@ We ship when a milestone's exit criteria pass, not on a date. Versions follow Se
 Legend for engine columns: **P** = PDFium (EmbedPDF engines), **L** = @cantoo/pdf-lib,
 **Q** = qpdf-wasm, **T** = tesseract.js, **own** = our own code on top.
 
-## M0 — Foundation (no user-visible features)
+## M0 — Foundation (no user-visible features) — **done 2026-09-27**
 
 Goal: a repository a Microsoft/Google-grade team would be comfortable contributing to.
 
@@ -23,7 +23,9 @@ Goal: a repository a Microsoft/Google-grade team would be comfortable contributi
 - Design tokens and the base UI shell (app frame, panels, command palette skeleton).
 - Docs: this set, plus `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`.
 
-Exit: `pnpm ci` green; a page from a dropped PDF renders in the shell; deploy works.
+Exit: `pnpm run ci` green; a page from a dropped PDF renders in the shell; deploy works.
+Status: all three met except the first production deploy, which needs GitHub Pages enabled
+on the repository and a merge to `main` (owner action).
 
 ## M1 — Light table and structural editing  (→ v0.1)
 

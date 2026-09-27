@@ -40,6 +40,10 @@ and are reproduced in the application's "About and licenses" view.
   Copyright (c) Lucide Contributors; portions Copyright (c) 2013-2022 Cole Bemis (Feather).
   License: ISC.
 
+- TanStack Virtual (@tanstack/react-virtual)
+  Copyright (c) 2021-present Tanner Linsley.
+  License: MIT.
+
 - Zustand
   Copyright (c) 2019 Paul Henschel.
   License: MIT.

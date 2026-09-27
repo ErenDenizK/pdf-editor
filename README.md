@@ -3,9 +3,10 @@
 > A free, open-source PDF editor that runs entirely in your browser. Nothing is uploaded.
 > One workspace, not forty tools.
 
-**Status: planning.** No application code yet. This repository currently holds the
-research, architecture, roadmap and design documents that the implementation will follow.
-Development happens on `develop`; `main` will receive the first milestone once it is usable.
+**Status: M0 (foundation) complete, M1 (light table) in progress.** You can open PDFs and
+see them rendered, navigate, rotate, delete and undo. Merging, drag-and-drop and export land
+in M1. See [`docs/ROADMAP.md`](docs/ROADMAP.md). Development happens on the integration
+branch; `main` receives milestones.
 
 ## What it will do
 

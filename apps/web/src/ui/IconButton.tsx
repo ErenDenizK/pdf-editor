@@ -8,6 +8,8 @@ import { Tooltip } from './Tooltip';
 interface IconButtonProps extends Omit<ComponentPropsWithRef<'button'>, 'children'> {
   /** Accessible name and tooltip text. */
   readonly label: string;
+  /** Tooltip text when it should say more than the accessible name. */
+  readonly tooltip?: string | undefined;
   readonly icon: ReactNode;
   readonly shortcut?: ParsedShortcut | undefined;
   readonly tooltipSide?: 'top' | 'bottom' | 'left' | 'right';
@@ -17,6 +19,7 @@ interface IconButtonProps extends Omit<ComponentPropsWithRef<'button'>, 'childre
 /** Square icon button with tooltip. Hover and pressed states never change its box. */
 export function IconButton({
   label,
+  tooltip,
   icon,
   shortcut,
   tooltipSide = 'bottom',
@@ -37,7 +40,7 @@ export function IconButton({
     </button>
   );
   return (
-    <Tooltip label={label} shortcut={shortcut} side={tooltipSide}>
+    <Tooltip label={tooltip ?? label} shortcut={shortcut} side={tooltipSide}>
       {button}
     </Tooltip>
   );

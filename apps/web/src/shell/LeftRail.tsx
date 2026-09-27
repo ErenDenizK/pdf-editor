@@ -6,6 +6,8 @@
 import { FileStack, Files, Keyboard, ListTree } from 'lucide-react';
 import { type KeyboardEvent, useRef } from 'react';
 
+import { type SourceId, sourceReferences } from '@pdf-editor/document-model';
+
 import { commandRegistry } from '../commands/registry';
 import { formatBytes } from '../files/file-filters';
 import { LEFT_PANEL_WIDTH, type LeftPanelView, useUiStore } from '../state/ui-store';
@@ -14,6 +16,7 @@ import { IconButton } from '../ui/IconButton';
 import { ResizeHandle } from '../ui/ResizeHandle';
 import { EmptyNote } from './EmptyNote';
 import styles from './LeftRail.module.css';
+import { PagesPanel } from './PagesPanel';
 import { useCommandShortcut } from './use-command-shortcut';
 
 const VIEWS: readonly { id: LeftPanelView; label: string; Icon: typeof FileStack }[] = [
@@ -102,7 +105,7 @@ export function LeftRail() {
           style={{ width }}
         >
           <h2 className={styles.panelTitle}>{activeLabel}</h2>
-          <div className={styles.panelBody}>
+          <div className={styles.panelBody} data-view={view}>
             {view === 'pages' ? <PagesView /> : null}
             {view === 'outline' ? <OutlineView /> : null}
             {view === 'files' ? <FilesView /> : null}
@@ -124,13 +127,21 @@ export function LeftRail() {
 
 function PagesView() {
   const doc = useActiveDocument();
-  if (!doc) return <EmptyNote title="No document open" body="Page thumbnails appear here." />;
-  return (
-    <EmptyNote
-      title="Thumbnails not rendered yet"
-      body="Page thumbnails appear once the rendering engine is connected."
-    />
-  );
+  if (!doc) {
+    return (
+      <div className={styles.pagesEmpty}>
+        <EmptyNote title="No document open" body="Page thumbnails appear here." />
+      </div>
+    );
+  }
+  if (doc.pages.length === 0) {
+    return (
+      <div className={styles.pagesEmpty}>
+        <EmptyNote title="No pages" body="This document has no pages left." />
+      </div>
+    );
+  }
+  return <PagesPanel doc={doc} />;
 }
 
 function OutlineView() {
@@ -144,29 +155,46 @@ function OutlineView() {
   );
 }
 
+/** Opened files (sources). Clicking one activates the first document showing its pages. */
 function FilesView() {
-  const documents = useWorkspaceStore((s) => s.documents);
-  const activeTabId = useUiStore((s) => s.activeTabId);
-  const setActiveTab = useUiStore((s) => s.setActiveTab);
-  if (documents.length === 0) {
+  const workspace = useWorkspaceStore((s) => s.workspace);
+  const files = useWorkspaceStore((s) => s.files);
+  const setActive = useWorkspaceStore((s) => s.setActive);
+  const sources = Object.keys(workspace.sources) as SourceId[];
+  if (sources.length === 0) {
     return <EmptyNote title="No files open" body="Every file you open stays on this device." />;
   }
   return (
     <ul className={styles.fileList}>
-      {documents.map((doc) => (
-        <li key={doc.id}>
-          <button
-            type="button"
-            className={styles.fileRow}
-            aria-current={doc.id === activeTabId ? 'true' : undefined}
-            onClick={() => setActiveTab(doc.id)}
-          >
-            <span className={styles.fileTag} data-tag={doc.colorIndex} aria-hidden="true" />
-            <span className={styles.fileName}>{doc.name}</span>
-            <span className={styles.fileSize}>{formatBytes(doc.size)}</span>
-          </button>
-        </li>
-      ))}
+      {sources.map((id) => {
+        const info = files[id];
+        const home = sourceReferences(workspace, id)[0]?.document;
+        return (
+          <li key={id}>
+            <button
+              type="button"
+              className={styles.fileRow}
+              aria-current={
+                home !== undefined && home === workspace.activeDocument ? 'true' : undefined
+              }
+              disabled={home === undefined}
+              onClick={() => {
+                if (home !== undefined) setActive(home);
+              }}
+            >
+              <span
+                className={styles.fileTag}
+                data-tag={info?.colorIndex ?? 0}
+                aria-hidden="true"
+              />
+              <span className={styles.fileName}>{info?.name ?? workspace.sources[id]?.name}</span>
+              <span className={styles.fileSize}>
+                {formatBytes(info?.size ?? workspace.sources[id]?.byteLength ?? 0)}
+              </span>
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }

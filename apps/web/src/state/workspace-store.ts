@@ -1,89 +1,365 @@
 /**
- * ============================================================================
- * INTEGRATION POINT: workspace (document) state.
+ * Workspace state: the document model (`@pdf-editor/document-model`, ADR-0005) is the
+ * source of truth. The store holds the undo `History`; `workspace` is always
+ * `history.present.workspace`. Every mutating action pushes a labelled history entry.
  *
- * TODO(document-model): replace this placeholder with the workspace from
- * `@pdf-editor/document-model` (ARCHITECTURE.md §3, ADR-0005). The shell reads only the
- * `WorkspaceDocument` fields below; keep them (or adapt `useWorkspaceStore` selectors)
- * when swapping in the real model. Page counts, outline, history and selection come from
- * the model and are not represented here.
- * ============================================================================
+ * Next to the model, the store keeps UI facts the model deliberately does not carry: the
+ * original file facts (size, modified date) and the colour tag assigned per source and per
+ * document (light-table spec §1). These never change once assigned, so they live outside
+ * history.
  *
- * What the placeholder does: it records dropped or picked `File` objects (name, size) so
- * the tab bar, empty state, files panel and status bar work end to end. It never reads
- * file bytes.
+ * Engine lifetime: a source stays open in the PDFium worker while any history entry
+ * references it (undo can bring it back); it is closed once history no longer does.
  */
+import {
+  addSource,
+  closeDocument as closeDocumentOp,
+  createHistory,
+  createRandomIdGenerator,
+  createWorkspace,
+  deletePages as deletePagesOp,
+  type DocumentId,
+  duplicatePages as duplicatePagesOp,
+  getActiveDocument,
+  type History,
+  type IdGenerator,
+  jumpTo as jumpToOp,
+  movePages as movePagesOp,
+  type PageId,
+  type PageTarget,
+  pushHistory,
+  redo as redoOp,
+  removeSourceIfUnreferenced,
+  rotatePages as rotatePagesOp,
+  setActiveDocument,
+  type SourceId,
+  type SourceInput,
+  undo as undoOp,
+  type VirtualDocument,
+  type Workspace,
+} from '@pdf-editor/document-model';
 import { create } from 'zustand';
 
-import { useUiStore } from './ui-store';
+import { type EngineFailure, getEngineService, type OpenedSource } from '../engine/engine-service';
 
-export interface WorkspaceDocument {
-  readonly id: string;
+/** Number of source colour tags in tokens.css (`--tag-0` … `--tag-5`). */
+export const SOURCE_TAG_COUNT = 6;
+
+export interface SourceFileInfo {
   readonly name: string;
   readonly size: number;
   readonly lastModified: number;
-  /** Index into the source colour tags (light table), stable for the document's life. */
+  /** Index into the source colour tags, stable for the source's life. */
   readonly colorIndex: number;
-  /** Unknown until the engine opens the file. */
-  readonly pageCount: number | null;
-  readonly file: File;
 }
 
-export const SOURCE_TAG_COUNT = 6;
+export interface OpenFilesReport {
+  readonly opened: readonly { readonly name: string; readonly documentId: DocumentId }[];
+  readonly skipped: readonly { readonly name: string; readonly error: EngineFailure }[];
+}
 
 interface WorkspaceState {
-  documents: readonly WorkspaceDocument[];
-  /** Adds files as documents; returns the created entries. */
-  addFiles: (files: readonly File[]) => WorkspaceDocument[];
-  closeDocument: (id: string) => void;
+  readonly history: History;
+  /** Always `history.present.workspace`. */
+  readonly workspace: Workspace;
+  readonly files: Readonly<Record<SourceId, SourceFileInfo>>;
+  readonly documentColors: Readonly<Record<DocumentId, number>>;
+  /** Files being read or opened by the engine right now. */
+  readonly opening: number;
+
+  openFiles: (files: readonly File[]) => Promise<OpenFilesReport>;
+  closeDocument: (id: DocumentId) => void;
+  setActive: (id: DocumentId) => void;
+  movePages: (
+    pageIds: readonly PageId[],
+    target: PageTarget,
+    options?: { readonly label?: string; readonly coalesceKey?: string },
+  ) => boolean;
+  rotatePages: (pageIds: readonly PageId[], delta: number) => boolean;
+  deletePages: (pageIds: readonly PageId[]) => boolean;
+  duplicatePages: (pageIds: readonly PageId[]) => boolean;
+  undo: () => string | undefined;
+  redo: () => string | undefined;
+  jumpTo: (index: number) => void;
 }
 
-let counter = 0;
-function createId(): string {
-  counter += 1;
-  return globalThis.crypto?.randomUUID?.() ?? `doc-${Date.now().toString(36)}-${counter}`;
+const ids: IdGenerator = createRandomIdGenerator();
+let colorCounter = 0;
+
+export function pagesPhrase(count: number): string {
+  return `${count} ${count === 1 ? 'page' : 'pages'}`;
 }
 
-export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
-  documents: [],
-  addFiles: (files) => {
-    const start = get().documents.length;
-    const created = files.map<WorkspaceDocument>((file, index) => ({
-      id: createId(),
-      name: file.name,
-      size: file.size,
-      lastModified: file.lastModified,
-      colorIndex: (start + index) % SOURCE_TAG_COUNT,
-      pageCount: null,
-      file,
-    }));
-    if (created.length > 0) set((s) => ({ documents: [...s.documents, ...created] }));
-    return created;
-  },
-  closeDocument: (id) => set((s) => ({ documents: s.documents.filter((d) => d.id !== id) })),
-}));
-
-/** Opens files as tabs and activates the first new one. */
-export function openDocuments(files: readonly File[]): void {
-  const created = useWorkspaceStore.getState().addFiles(files);
-  const first = created[0];
-  if (first) useUiStore.getState().setActiveTab(first.id);
+/** Stable key for a set of pages; used to coalesce repeated edits of one selection. */
+function selectionKey(pageIds: readonly PageId[]): string {
+  return [...pageIds].sort().join(',');
 }
 
-/** Closes a tab and moves activation to its neighbour (right, else left). */
-export function closeDocument(id: string): void {
-  const { documents, closeDocument: remove } = useWorkspaceStore.getState();
-  const index = documents.findIndex((d) => d.id === id);
-  if (index < 0) return;
-  const ui = useUiStore.getState();
-  if (ui.activeTabId === id) {
-    const neighbour = documents[index + 1] ?? documents[index - 1] ?? null;
-    ui.setActiveTab(neighbour?.id ?? null);
-  }
-  remove(id);
+function toSourceInput(opened: OpenedSource): SourceInput {
+  const doc = opened.document;
+  return {
+    name: opened.name,
+    byteLength: opened.byteLength,
+    pageCount: doc.pageCount,
+    pages: doc.pages,
+    fingerprint: doc.fingerprint,
+    flags: doc.flags,
+    metadata: doc.metadata,
+    outline: doc.outline,
+  };
 }
 
-export function useActiveDocument(): WorkspaceDocument | undefined {
-  const activeId = useUiStore((s) => s.activeTabId);
-  return useWorkspaceStore((s) => s.documents.find((d) => d.id === activeId));
+function initialHistory(): History {
+  return createHistory(createWorkspace(), 'Start', Date.now());
+}
+
+export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
+  /** Applies a model operation; model misuse is reported, never thrown into the UI. */
+  const commit = (
+    operation: (ws: Workspace) => Workspace,
+    label: string,
+    coalesceKey?: string,
+  ): boolean => {
+    const { history, workspace } = get();
+    let next: Workspace;
+    try {
+      next = operation(workspace);
+    } catch (error) {
+      console.warn(`${label} failed`, error);
+      return false;
+    }
+    if (next === workspace) return false;
+    const pushed = pushHistory(
+      history,
+      next,
+      label,
+      coalesceKey === undefined ? {} : { coalesceKey },
+    );
+    set({ history: pushed, workspace: pushed.present.workspace });
+    collectGarbage();
+    return true;
+  };
+
+  /** Replaces the present snapshot without an undo step (tab activation). */
+  const replacePresent = (next: Workspace): void => {
+    const { history, workspace } = get();
+    if (next === workspace) return;
+    set({
+      history: { ...history, present: { ...history.present, workspace: next } },
+      workspace: next,
+    });
+  };
+
+  const moveHistory = (next: History): boolean => {
+    if (next === get().history) return false;
+    set({ history: next, workspace: next.present.workspace });
+    collectGarbage();
+    return true;
+  };
+
+  /** Closes engine sources that no history entry references any more. */
+  const collectGarbage = (): void => {
+    const { history, files } = get();
+    const live = new Set<string>();
+    for (const entry of [...history.past, history.present, ...history.future]) {
+      for (const id of Object.keys(entry.workspace.sources)) live.add(id);
+    }
+    const dead = (Object.keys(files) as SourceId[]).filter((id) => !live.has(id));
+    if (dead.length === 0) return;
+    for (const id of dead) void getEngineService().close(id);
+    const deadSet = new Set<string>(dead);
+    set({
+      files: Object.fromEntries(Object.entries(files).filter(([id]) => !deadSet.has(id))),
+    });
+  };
+
+  return {
+    history: initialHistory(),
+    workspace: createWorkspace(),
+    files: {},
+    documentColors: {},
+    opening: 0,
+
+    openFiles: async (files) => {
+      if (files.length === 0) return { opened: [], skipped: [] };
+      const service = getEngineService();
+      set((s) => ({ opening: s.opening + files.length }));
+      // Open in parallel; add to the workspace in the order the files were given.
+      const pending = files.map((file) => ({ file, result: service.open(file) }));
+      const opened: { name: string; documentId: DocumentId }[] = [];
+      const skipped: { name: string; error: EngineFailure }[] = [];
+      for (const { file, result: promise } of pending) {
+        const result = await promise;
+        set((s) => ({ opening: Math.max(0, s.opening - 1) }));
+        if (!result.ok) {
+          skipped.push({ name: file.name, error: result.error });
+          continue;
+        }
+        const source = result.value;
+        const sourceIds: IdGenerator = { ...ids, source: () => source.id };
+        let documentId: DocumentId | undefined;
+        const colorIndex = colorCounter % SOURCE_TAG_COUNT;
+        const added = commit((ws) => {
+          const r = addSource(ws, toSourceInput(source), sourceIds);
+          documentId = r.documentId;
+          return r.workspace;
+        }, `Open ${source.name}`);
+        if (!added || documentId === undefined) {
+          void service.close(source.id);
+          skipped.push({
+            name: file.name,
+            error: { code: 'internal', message: 'The document model rejected the file' },
+          });
+          continue;
+        }
+        colorCounter += 1;
+        const docId = documentId;
+        set((s) => ({
+          files: {
+            ...s.files,
+            [source.id]: {
+              name: source.name,
+              size: source.byteLength,
+              lastModified: source.lastModified,
+              colorIndex,
+            },
+          },
+          documentColors: { ...s.documentColors, [docId]: colorIndex },
+        }));
+        opened.push({ name: source.name, documentId: docId });
+      }
+      // Activate the first new document, as dropping several files reads left to right.
+      const first = opened[0];
+      if (first !== undefined && get().workspace.documents[first.documentId] !== undefined) {
+        replacePresent(setActiveDocument(get().workspace, first.documentId));
+      }
+      return { opened, skipped };
+    },
+
+    closeDocument: (id) => {
+      const doc = get().workspace.documents[id];
+      if (doc === undefined) return;
+      const sources = new Set<SourceId>();
+      for (const page of doc.pages) if (page.ref.kind === 'source') sources.add(page.ref.source);
+      commit((ws) => {
+        let next = closeDocumentOp(ws, id);
+        for (const source of sources) next = removeSourceIfUnreferenced(next, source);
+        return next;
+      }, `Close ${doc.title}`);
+    },
+
+    setActive: (id) => {
+      const { workspace } = get();
+      if (workspace.documents[id] === undefined) return;
+      replacePresent(setActiveDocument(workspace, id));
+    },
+
+    movePages: (pageIds, target, options = {}) =>
+      pageIds.length > 0 &&
+      commit(
+        (ws) => movePagesOp(ws, { pageIds, target }),
+        options.label ?? `Move ${pagesPhrase(pageIds.length)}`,
+        options.coalesceKey,
+      ),
+
+    rotatePages: (pageIds, delta) =>
+      pageIds.length > 0 &&
+      commit(
+        (ws) => rotatePagesOp(ws, pageIds, delta),
+        `Rotate ${pagesPhrase(pageIds.length)}`,
+        `rotate:${selectionKey(pageIds)}`,
+      ),
+
+    deletePages: (pageIds) =>
+      pageIds.length > 0 &&
+      commit((ws) => deletePagesOp(ws, pageIds), `Delete ${pagesPhrase(pageIds.length)}`),
+
+    duplicatePages: (pageIds) =>
+      pageIds.length > 0 &&
+      commit(
+        (ws) => duplicatePagesOp(ws, pageIds, ids),
+        `Duplicate ${pagesPhrase(pageIds.length)}`,
+      ),
+
+    undo: () => {
+      const label = get().history.present.label;
+      return moveHistory(undoOp(get().history)) ? label : undefined;
+    },
+    redo: () => (moveHistory(redoOp(get().history)) ? get().history.present.label : undefined),
+    jumpTo: (index) => {
+      try {
+        moveHistory(jumpToOp(get().history, index));
+      } catch (error) {
+        console.warn('History jump failed', error);
+      }
+    },
+  };
+});
+
+/** Resets to an empty workspace (tests). Open engine sources are closed. */
+export function resetWorkspace(): void {
+  const { files } = useWorkspaceStore.getState();
+  for (const id of Object.keys(files) as SourceId[]) void getEngineService().close(id);
+  useWorkspaceStore.setState({
+    history: initialHistory(),
+    workspace: createWorkspace(),
+    files: {},
+    documentColors: {},
+    opening: 0,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Derived data. Memoized on the workspace (and files) identity so selectors return
+// stable references and components re-render only when the model changes.
+// ---------------------------------------------------------------------------
+
+export interface TabItem {
+  readonly id: DocumentId;
+  readonly title: string;
+  readonly colorIndex: number;
+  readonly pageCount: number;
+}
+
+const tabCache = new WeakMap<Workspace, { colors: object; items: readonly TabItem[] }>();
+
+export function tabItems(
+  ws: Workspace,
+  documentColors: Readonly<Record<DocumentId, number>>,
+): readonly TabItem[] {
+  const cached = tabCache.get(ws);
+  if (cached?.colors === documentColors) return cached.items;
+  const items = ws.documentOrder.flatMap((id): TabItem[] => {
+    const doc = ws.documents[id];
+    if (doc === undefined) return [];
+    return [
+      {
+        id,
+        title: doc.title,
+        colorIndex: documentColors[id] ?? 0,
+        pageCount: doc.pages.length,
+      },
+    ];
+  });
+  tabCache.set(ws, { colors: documentColors, items });
+  return items;
+}
+
+export function useTabItems(): readonly TabItem[] {
+  return useWorkspaceStore((s) => tabItems(s.workspace, s.documentColors));
+}
+
+export function useActiveDocument(): VirtualDocument | undefined {
+  return useWorkspaceStore((s) => getActiveDocument(s.workspace));
+}
+
+export function useHasDocuments(): boolean {
+  return useWorkspaceStore((s) => s.workspace.documentOrder.length > 0);
+}
+
+/** Sources referenced by a document, in page order of first appearance. */
+export function documentSources(doc: VirtualDocument): SourceId[] {
+  const seen = new Set<SourceId>();
+  for (const page of doc.pages) if (page.ref.kind === 'source') seen.add(page.ref.source);
+  return [...seen];
 }

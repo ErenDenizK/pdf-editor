@@ -1,6 +1,6 @@
 /**
- * UI state: panels, view mode, zoom, active tab, overlays, recents. Document content is
- * not here; see `workspace-store.ts`.
+ * UI state: panels, view mode, zoom, light-table cell size, overlays, recents. Document
+ * content (including the active tab) is not here; see `workspace-store.ts`.
  *
  * Panel layout is persisted to localStorage (see `safe-storage.ts`); everything else is
  * per session.
@@ -22,6 +22,17 @@ export const ZOOM_LEVELS = [
   0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5,
 ] as const;
 export const MIN_ZOOM = ZOOM_LEVELS[0];
+/** Light-table cell widths (spec §1): S, M, L, XL, XXL. */
+export const ARRANGE_SIZES = [
+  { label: 'S', width: 96 },
+  { label: 'M', width: 144 },
+  { label: 'L', width: 200 },
+  { label: 'XL', width: 280 },
+  { label: 'XXL', width: 400 },
+] as const;
+const DEFAULT_ARRANGE_SIZE = 1;
+/** Read mode keeps zoom fitted to the stage while a fit mode is on. */
+export type FitMode = 'width' | 'page';
 export const MAX_ZOOM = ZOOM_LEVELS[ZOOM_LEVELS.length - 1] ?? 5;
 const MAX_RECENTS = 5;
 const STORAGE_KEY = 'pdf-editor:ui:v1';
@@ -73,9 +84,10 @@ export function parseLayout(value: unknown): PersistedLayout {
 export interface UiState extends PersistedLayout {
   viewMode: ViewMode;
   zoom: number;
-  /** When true the stage keeps zoom fitted to its width as it resizes. */
-  zoomToFit: boolean;
-  activeTabId: string | null;
+  /** While set, the stage keeps zoom fitted (to width or whole page) as it resizes. */
+  fitMode: FitMode | null;
+  /** Index into ARRANGE_SIZES. */
+  arrangeSize: number;
   paletteOpen: boolean;
   shortcutsOpen: boolean;
   /** Command ids, most recent first. In memory only. */
@@ -92,22 +104,27 @@ export interface UiState extends PersistedLayout {
   setZoom: (zoom: number) => void;
   zoomIn: () => void;
   zoomOut: () => void;
+  /** Fit width. */
   zoomFit: () => void;
-  /** Used by the stage while `zoomToFit` is on; does not clear the flag. */
+  zoomFitPage: () => void;
+  zoomActual: () => void;
+  /** Used by the stage while a fit mode is on; does not clear it. */
   applyFitZoom: (zoom: number) => void;
-  setActiveTab: (id: string | null) => void;
+  setArrangeSize: (index: number) => void;
+  /** Steps the light-table cell size; returns false at the ends. */
+  stepArrangeSize: (direction: 1 | -1) => boolean;
   setPaletteOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   pushRecent: (commandId: string) => void;
   setTool: (tool: ToolId) => void;
 }
 
-export const useUiStore = create<UiState>()((set) => ({
+export const useUiStore = create<UiState>()((set, get) => ({
   ...parseLayout(readJson(STORAGE_KEY)),
   viewMode: 'read',
   zoom: 1,
-  zoomToFit: true,
-  activeTabId: null,
+  fitMode: 'width',
+  arrangeSize: DEFAULT_ARRANGE_SIZE,
   paletteOpen: false,
   shortcutsOpen: false,
   recents: [],
@@ -128,12 +145,21 @@ export const useUiStore = create<UiState>()((set) => ({
       rightPanelWidth: clamp(Math.round(width), RIGHT_PANEL_WIDTH.min, RIGHT_PANEL_WIDTH.max),
     }),
   setViewMode: (viewMode) => set({ viewMode }),
-  setZoom: (zoom) => set({ zoom: clamp(zoom, MIN_ZOOM, MAX_ZOOM), zoomToFit: false }),
-  zoomIn: () => set((s) => ({ zoom: nextZoomLevel(s.zoom, 1), zoomToFit: false })),
-  zoomOut: () => set((s) => ({ zoom: nextZoomLevel(s.zoom, -1), zoomToFit: false })),
-  zoomFit: () => set({ zoomToFit: true }),
+  setZoom: (zoom) => set({ zoom: clamp(zoom, MIN_ZOOM, MAX_ZOOM), fitMode: null }),
+  zoomIn: () => set((s) => ({ zoom: nextZoomLevel(s.zoom, 1), fitMode: null })),
+  zoomOut: () => set((s) => ({ zoom: nextZoomLevel(s.zoom, -1), fitMode: null })),
+  zoomFit: () => set({ fitMode: 'width' }),
+  zoomFitPage: () => set({ fitMode: 'page' }),
+  zoomActual: () => set({ zoom: 1, fitMode: null }),
   applyFitZoom: (zoom) => set({ zoom: clamp(zoom, MIN_ZOOM, MAX_ZOOM) }),
-  setActiveTab: (activeTabId) => set({ activeTabId }),
+  setArrangeSize: (index) =>
+    set({ arrangeSize: clamp(Math.round(index), 0, ARRANGE_SIZES.length - 1) }),
+  stepArrangeSize: (direction) => {
+    const next = get().arrangeSize + direction;
+    if (next < 0 || next >= ARRANGE_SIZES.length) return false;
+    set({ arrangeSize: next });
+    return true;
+  },
   setPaletteOpen: (paletteOpen) =>
     set(paletteOpen ? { paletteOpen, shortcutsOpen: false } : { paletteOpen }),
   setShortcutsOpen: (shortcutsOpen) =>

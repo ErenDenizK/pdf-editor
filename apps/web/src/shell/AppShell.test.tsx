@@ -1,3 +1,9 @@
+import {
+  addSource,
+  createHistory,
+  createSequentialIdGenerator,
+  createWorkspace,
+} from '@pdf-editor/document-model';
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { userEvent } from 'vitest/browser';
@@ -5,7 +11,7 @@ import { userEvent } from 'vitest/browser';
 import { App } from '../app';
 import { currentPlatform } from '../commands/shortcuts';
 import { useUiStore } from '../state/ui-store';
-import { useWorkspaceStore } from '../state/workspace-store';
+import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 
 const MOD = currentPlatform === 'mac' ? 'Meta' : 'Control';
 
@@ -15,9 +21,8 @@ describe('AppShell', () => {
       paletteOpen: false,
       shortcutsOpen: false,
       recents: [],
-      activeTabId: null,
     });
-    useWorkspaceStore.setState({ documents: [] });
+    resetWorkspace();
   });
 
   it('renders the shell with the empty state and privacy indicator', () => {
@@ -61,10 +66,32 @@ describe('AppShell', () => {
 
   it('opens documents as tabs', async () => {
     render(<App />);
-    useWorkspaceStore.getState().addFiles([new File(['%PDF'], 'report.pdf')]);
-    const doc = useWorkspaceStore.getState().documents[0];
-    useUiStore.getState().setActiveTab(doc?.id ?? null);
-    expect(await screen.findByRole('tab', { name: 'report.pdf', selected: true })).toBeVisible();
+    // A model-only source (never opened by the engine): the shell must still show the tab,
+    // and its pages fail to render quietly.
+    const { workspace } = addSource(
+      createWorkspace(),
+      {
+        name: 'report.pdf',
+        byteLength: 4,
+        pageCount: 1,
+        pages: [{ size: { width: 612, height: 792 }, rotation: 0 }],
+        fingerprint: 'test',
+        flags: {
+          encrypted: false,
+          repaired: false,
+          hasAcroForm: false,
+          hasXfa: false,
+          hasSignatures: false,
+          tagged: false,
+          linearized: false,
+        },
+        metadata: { policy: 'inherit-first-source' },
+        outline: [],
+      },
+      createSequentialIdGenerator('test'),
+    );
+    useWorkspaceStore.setState({ history: createHistory(workspace), workspace });
+    expect(await screen.findByRole('tab', { name: 'report', selected: true })).toBeVisible();
     expect(screen.getByRole('toolbar', { name: 'Tools' })).toBeVisible();
   });
 });

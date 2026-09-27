@@ -55,6 +55,82 @@
   padding: var(--space-1) var(--space-4) var(--space-4);
 }
 
+.panelBody[data-view='pages'] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.pagesEmpty {
+  padding: var(--space-1) var(--space-4) var(--space-4);
+}
+
+.pagesScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.pageList {
+  position: relative;
+  width: 100%;
+  outline: none;
+}
+
+.pageOption {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding-top: 2px;
+  border-radius: var(--radius-2);
+  cursor: default;
+}
+
+.pageOption:focus-visible {
+  outline-offset: -2px;
+}
+
+.pageBox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pageSheet {
+  position: relative;
+  flex: none;
+  background: var(--page-background);
+  box-shadow: var(--page-shadow);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.pageOption[aria-selected='true'] .pageSheet {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.pageLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 16px;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+.pageOption[aria-current='page'] .pageLabel,
+.pageOption[aria-selected='true'] .pageLabel {
+  color: var(--text-primary);
+}
+
 .fileList {
   display: grid;
   gap: 1px;
@@ -78,6 +154,10 @@
     background: var(--surface-hover);
     color: var(--text-primary);
   }
+}
+
+.fileRow:disabled {
+  color: var(--text-disabled);
 }
 
 .fileRow[aria-current='true'] {

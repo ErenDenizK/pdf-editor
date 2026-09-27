@@ -18,6 +18,14 @@ const WIDGET_KEYS: readonly { title: string; keys: readonly ParsedShortcut[] }[]
   { title: 'Close focused tab', keys: [parseShortcut('Delete')] },
   { title: 'Move between tools', keys: [parseShortcut('Left'), parseShortcut('Right')] },
   { title: 'Resize a focused panel edge', keys: [parseShortcut('Left'), parseShortcut('Right')] },
+  { title: 'Move focus between pages', keys: [parseShortcut('Left'), parseShortcut('Down')] },
+  {
+    title: 'Extend page selection',
+    keys: [parseShortcut('Shift+Left'), parseShortcut('Shift+Down')],
+  },
+  { title: 'Toggle page selection', keys: [parseShortcut('Space')] },
+  { title: 'Move pages one row', keys: [parseShortcut('Alt+Up'), parseShortcut('Alt+Down')] },
+  { title: 'Open page in Read mode', keys: [parseShortcut('Enter')] },
 ];
 
 export function ShortcutOverlay() {
