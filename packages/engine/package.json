@@ -9,16 +9,21 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./assembler.worker": {
+      "types": "./src/worker/assembler.worker.ts",
+      "import": "./src/worker/assembler.worker.ts"
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
     "build": "echo 'source package; built by the consuming app'"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "2.11.1",
     "@embedpdf/engines": "2.15.1",
+    "@embedpdf/models": "2.15.1",
     "@embedpdf/pdfium": "2.15.1",
     "@pdf-editor/document-model": "workspace:*",
     "comlink": "^4.4.2"

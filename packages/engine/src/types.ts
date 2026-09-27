@@ -75,7 +75,11 @@ export interface OpenedDocument {
   readonly id: SourceId;
   readonly pageCount: number;
   /** Per page: unrotated size, intrinsic /Rotate, and page label when the document has labels. */
-  readonly pages: readonly { readonly size: Size; readonly rotation: Rotation; readonly label?: string }[];
+  readonly pages: readonly {
+    readonly size: Size;
+    readonly rotation: Rotation;
+    readonly label?: string;
+  }[];
   readonly fingerprint: string;
   readonly flags: SourceFlags;
   readonly metadata: DocumentMetadata;
@@ -130,7 +134,11 @@ export interface PdfRenderer {
   open(id: SourceId, bytes: ArrayBuffer, options?: OpenOptions): Promise<OpenedDocument>;
   close(id: SourceId): Promise<void>;
   renderPage(id: SourceId, pageIndex: number, options: RenderOptions): Promise<RenderResult>;
-  getPageText(id: SourceId, pageIndex: number, options?: EngineCallOptions): Promise<readonly TextRun[]>;
+  getPageText(
+    id: SourceId,
+    pageIndex: number,
+    options?: EngineCallOptions,
+  ): Promise<readonly TextRun[]>;
   search(
     id: SourceId,
     query: string,
@@ -143,9 +151,21 @@ export interface PdfRenderer {
 // ---------------------------------------------------------------------------
 
 export type AnnotationKind =
-  | 'highlight' | 'underline' | 'strikeout' | 'squiggly'
-  | 'ink' | 'square' | 'circle' | 'line' | 'polygon' | 'polyline'
-  | 'free-text' | 'text' | 'stamp' | 'link' | 'redact';
+  | 'highlight'
+  | 'underline'
+  | 'strikeout'
+  | 'squiggly'
+  | 'ink'
+  | 'square'
+  | 'circle'
+  | 'line'
+  | 'polygon'
+  | 'polyline'
+  | 'free-text'
+  | 'text'
+  | 'stamp'
+  | 'link'
+  | 'redact';
 
 export interface AnnotationBase {
   readonly id: string;
@@ -158,7 +178,11 @@ export interface AnnotationBase {
   readonly author?: string;
   readonly contents?: string;
   readonly modified?: string;
-  readonly flags?: { readonly hidden?: boolean; readonly print?: boolean; readonly locked?: boolean };
+  readonly flags?: {
+    readonly hidden?: boolean;
+    readonly print?: boolean;
+    readonly locked?: boolean;
+  };
 }
 
 export interface MarkupAnnotation extends AnnotationBase {
@@ -205,10 +229,32 @@ export interface LinkAnnotation extends AnnotationBase {
 }
 
 export type Annotation =
-  | MarkupAnnotation | InkAnnotation | ShapeAnnotation | FreeTextAnnotation
-  | NoteAnnotation | StampAnnotation | LinkAnnotation;
+  | MarkupAnnotation
+  | InkAnnotation
+  | ShapeAnnotation
+  | FreeTextAnnotation
+  | NoteAnnotation
+  | StampAnnotation
+  | LinkAnnotation;
 
-export type FormFieldKind = 'text' | 'checkbox' | 'radio' | 'combobox' | 'listbox' | 'button' | 'signature' | 'unknown';
+/**
+ * `Omit` distributed over a union. The built-in `Omit<Union, K>` collapses the union to its
+ * common keys, which would erase kind-specific fields such as `quads` or `paths`.
+ */
+export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/** An annotation to be created; the engine assigns the id. */
+export type NewAnnotation = DistributiveOmit<Annotation, 'id'>;
+
+export type FormFieldKind =
+  | 'text'
+  | 'checkbox'
+  | 'radio'
+  | 'combobox'
+  | 'listbox'
+  | 'button'
+  | 'signature'
+  | 'unknown';
 
 export interface FormField {
   readonly name: string;
@@ -230,13 +276,35 @@ export interface SaveOptions extends EngineCallOptions {
 }
 
 export interface PdfEditor {
-  listAnnotations(id: SourceId, pageIndex: number, options?: EngineCallOptions): Promise<readonly Annotation[]>;
-  createAnnotation(id: SourceId, annotation: Omit<Annotation, 'id'>, options?: EngineCallOptions): Promise<Annotation>;
-  updateAnnotation(id: SourceId, annotation: Annotation, options?: EngineCallOptions): Promise<Annotation>;
-  deleteAnnotation(id: SourceId, pageIndex: number, annotationId: string, options?: EngineCallOptions): Promise<void>;
+  listAnnotations(
+    id: SourceId,
+    pageIndex: number,
+    options?: EngineCallOptions,
+  ): Promise<readonly Annotation[]>;
+  createAnnotation(
+    id: SourceId,
+    annotation: NewAnnotation,
+    options?: EngineCallOptions,
+  ): Promise<Annotation>;
+  updateAnnotation(
+    id: SourceId,
+    annotation: Annotation,
+    options?: EngineCallOptions,
+  ): Promise<Annotation>;
+  deleteAnnotation(
+    id: SourceId,
+    pageIndex: number,
+    annotationId: string,
+    options?: EngineCallOptions,
+  ): Promise<void>;
 
   listFormFields(id: SourceId, options?: EngineCallOptions): Promise<readonly FormField[]>;
-  setFormFieldValue(id: SourceId, name: string, value: FormField['value'], options?: EngineCallOptions): Promise<void>;
+  setFormFieldValue(
+    id: SourceId,
+    name: string,
+    value: FormField['value'],
+    options?: EngineCallOptions,
+  ): Promise<void>;
 
   /** Removes content under the given redact annotations. Forces a full rewrite on save. */
   applyRedactions(id: SourceId, options?: EngineCallOptions): Promise<void>;
@@ -324,7 +392,11 @@ export interface VerificationResult {
 }
 
 export interface PdfVerifier {
-  verify(bytes: ArrayBuffer, expectation: VerificationExpectation, options?: EngineCallOptions): Promise<VerificationResult>;
+  verify(
+    bytes: ArrayBuffer,
+    expectation: VerificationExpectation,
+    options?: EngineCallOptions,
+  ): Promise<VerificationResult>;
 }
 
 // ---------------------------------------------------------------------------
