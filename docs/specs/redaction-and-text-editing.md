@@ -54,6 +54,35 @@ inside the area, a bookmark whose title contains the redacted word, `/ActualText
 the word, and a file with an incremental-update history containing the word. Golden
 tests assert every channel is clean.
 
+### 1.4 Decisions after the spike (`docs/research/06-redaction-spike.md`)
+
+- **Engine scope.** EmbedPDF 2.15.1 removes text (whole glyphs, across TJ arrays and
+  text objects, inside Form XObjects, invisible text), inline images and image pixels
+  under the area. Everything else is ours: vector paths, annotations and widgets in the
+  area, form values, outline titles, Info, XMP, named destinations, attachments,
+  `/ActualText` and `/Alt` outside the redacted element, and garbage collection (a second
+  apply leaves an unreachable stream with the old text; `dropUnreachable` is mandatory).
+- **Vector paths: remove if touched.** Any path object whose bounds intersect an area is
+  removed (MuPDF's `REMOVE_IF_TOUCHED`), because a clipped stroke can still leak shape.
+  The pre-apply review renders the page with the doomed graphics tinted so the user sees
+  what a large table border or signature stroke will cost before applying. Clipping with
+  an even-odd clip path is a follow-up if PDFium's clip API allows it.
+- **Tagged PDF: prune, do not untag.** Structure elements whose marked content was removed
+  lose `/ActualText`, `/Alt` and their dangling `/K` references; the tree stays. If the
+  pruned tree fails our own validation, the whole structure tree is removed and the export
+  summary says the file is no longer tagged.
+- **Attachments: removed by default.** Embedded files and FileAttachment annotations
+  cannot be searched reliably (binary, compressed), so applying redactions removes them
+  all unless the user unticks "Remove attachments"; keeping them is listed in the export
+  summary as unverified.
+- **Fill and overlay text are drawn by us** (pdf-lib pass) since the engine ignores
+  `drawBlackBoxes` and `/OverlayText`; the engine applies with no fill.
+- **Rotated pages.** Areas are converted to unrotated user space before the engine call
+  (`coords.userToDeviceRect`); a test per rotation guards it.
+- **Self-check** is exactly the list in §1.2 step 5 plus: no unreachable objects, no
+  annotation left in any area, area pixels equal the fill colour, and hex-encoded string
+  variants in the byte grep (PDFium writes text as hex).
+
 ## 2. Text editing
 
 ### 2.1 Tiers (docs/research/04 §5)
