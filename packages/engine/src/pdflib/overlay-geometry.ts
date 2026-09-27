@@ -119,22 +119,24 @@ export function placeOverlay(input: OverlayPlacementInput): Placement {
 
 /**
  * Lower-left corners (display space) of tiles covering the page, phased so that the tile
- * placed by anchor + offset is part of the grid.
+ * placed by anchor + offset is part of the grid. `margin` widens the covered area on every
+ * side (for rotated tiles, whose corners reach beyond their unrotated box).
  */
 export function tileOrigins(
   page: Size,
   content: Size,
   first: Point,
   gap: { readonly gapX: number; readonly gapY: number },
+  margin = 0,
 ): Point[] {
   const stepX = Math.max(1, content.width + gap.gapX);
   const stepY = Math.max(1, content.height + gap.gapY);
-  const startX = first.x - Math.ceil((first.x + content.width) / stepX) * stepX;
-  const startY = first.y - Math.ceil((first.y + content.height) / stepY) * stepY;
+  const startX = first.x - Math.ceil((first.x + content.width + margin) / stepX) * stepX;
+  const startY = first.y - Math.ceil((first.y + content.height + margin) / stepY) * stepY;
   const origins: Point[] = [];
-  for (let y = startY; y < page.height; y += stepY) {
-    for (let x = startX; x < page.width; x += stepX) {
-      if (x + content.width > 0 && y + content.height > 0) origins.push({ x, y });
+  for (let y = startY; y < page.height + margin; y += stepY) {
+    for (let x = startX; x < page.width + margin; x += stepX) {
+      if (x + content.width > -margin && y + content.height > -margin) origins.push({ x, y });
     }
   }
   return origins;

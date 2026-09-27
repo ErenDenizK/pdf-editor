@@ -55,3 +55,20 @@ and are reproduced in the application's "About and licenses" view.
 - JetBrains Mono (bundled via @fontsource-variable/jetbrains-mono)
   Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono).
   License: SIL Open Font License 1.1.
+
+- @cantoo/fontkit, a maintained fork of fontkit (font parsing and subsetting for embedding)
+  Copyright (c) 2014-present Devon Govett, and the @cantoo/fontkit contributors.
+  Its dependencies brotli (MIT, Copyright Devon Govett), dfa (MIT), restructure (MIT) and
+  fflate (MIT, Copyright Arjun Barrett) are bundled with it.
+  License: MIT.
+
+- Fonts embedded in exported PDFs (page numbers, headers, footers, Bates numbers,
+  watermarks) and used by the live preview, bundled as subset static TTFs under
+  packages/engine/assets/fonts (see LICENSES.md and OFL.txt there):
+  - Inter Regular and Bold 4.001
+    Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter).
+  - JetBrains Mono Regular 2.211
+    Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono).
+  - Noto Serif Regular and Bold 2.015
+    Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic).
+  License: SIL Open Font License 1.1 (modified versions: subset, hinting removed).

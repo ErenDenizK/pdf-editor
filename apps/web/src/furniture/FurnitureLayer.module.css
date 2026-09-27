@@ -1,0 +1,30 @@
+/* Page furniture preview: an SVG in display points over the page (page-overlays.tsx). */
+.layer {
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.text {
+  font-kerning: none;
+  font-variant-ligatures: common-ligatures;
+  white-space: pre;
+}
+
+/* "Behind" cannot be drawn under the rendered bitmap; multiply keeps page ink on top. */
+.behind {
+  mix-blend-mode: multiply;
+}
+
+.selected {
+  fill: none;
+  stroke: var(--accent);
+  stroke-dasharray: 3 2;
+  vector-effect: non-scaling-stroke;
+}
