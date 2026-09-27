@@ -17,6 +17,7 @@ import { type RefObject, useEffect, useLayoutEffect, useRef } from 'react';
 import { RENDER_PRIORITY } from '../engine/engine-service';
 import { m } from '../i18n';
 import { PageCanvas } from '../pages/PageCanvas';
+import { PageOverlays } from './page-overlays';
 import { CSS_PX_PER_PT, displaySize, rotationPhrase } from '../pages/page-geometry';
 import { useSelectionStore } from '../state/selection-store';
 import { useUiStore } from '../state/ui-store';
@@ -230,6 +231,17 @@ function PageColumn({
                 cssWidth={width}
                 priority={visible ? RENDER_PRIORITY.page : RENDER_PRIORITY.offscreen}
                 delayMs={ZOOM_RENDER_DELAY_MS}
+              />
+              <PageOverlays
+                page={page}
+                pageId={page.id}
+                pageIndex={item.index}
+                sourceId={page.ref.kind === 'source' ? page.ref.source : undefined}
+                sourceIndex={page.ref.kind === 'source' ? page.ref.index : 0}
+                sizePt={size}
+                cssScale={cssScale}
+                rotation={total}
+                visible={visible}
               />
             </div>
           </div>

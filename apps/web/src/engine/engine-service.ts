@@ -173,6 +173,10 @@ export interface OpenedSource {
 }
 
 /** The adapter surface the service needs; tests pass a mock. */
+function isEditor(engine: RendererLike): engine is RendererLike & PdfEditor {
+  return typeof (engine as Partial<PdfEditor>).createAnnotation === 'function';
+}
+
 export type RendererLike = Pick<PdfRenderer, 'open' | 'close' | 'renderPage' | 'getPageText'> &
   Partial<Pick<PdfEditor, 'save'>> &
   Partial<PdfVerifier> & {
@@ -224,6 +228,17 @@ export class EngineService {
       this.renderer = created;
     }
     return this.renderer;
+  }
+
+  /**
+   * The content editor (annotations, forms, redaction) behind the same adapter. Features
+   * that edit sources go through this rather than reaching for the adapter directly, so
+   * the service keeps a single instance and one lifecycle.
+   */
+  async editor(): Promise<PdfEditor> {
+    const engine = await this.engine();
+    if (!isEditor(engine)) throw new Error('The rendering engine has no content editor');
+    return engine;
   }
 
   /** The UI registers how to ask for a password; without one, locked files fail. */

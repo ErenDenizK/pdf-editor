@@ -71,6 +71,13 @@
   box-shadow: var(--page-shadow);
 }
 
+/* Layers registered through stage/page-overlays.tsx sit over the canvas. */
+.page :global(.page-overlays),
+.page :global(.page-overlays) > * {
+  position: absolute;
+  inset: 0;
+}
+
 .numeric {
   font-variant-numeric: tabular-nums;
 }
