@@ -501,7 +501,10 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
    * Text of a page as line runs. Glyph boxes come from PDFium's char boxes. Characters are
    * grouped into a line while PDFium emits no line break between them and they either
    * belong to the same text object or stay on the same baseline band. The band test runs in
-   * display space (after /Rotate), where text reads horizontally; output rects are user space.
+   * display space (after /Rotate) across the line's direction of flow, which is not always
+   * horizontal there: text drawn horizontally in user space runs top to bottom on a
+   * /Rotate 90 page, and a rotated text matrix can do the same on any page (see
+   * {@link LineBand}). Output rects are user space.
    */
   async getPageText(
     id: SourceId,
@@ -536,9 +539,7 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     });
     const g = pageGeometry(page);
     const lines: { text: string; glyphs: Glyph[] }[] = [];
-    let current:
-      | { text: string; glyphs: Glyph[]; top: number; bottom: number; runId: number }
-      | undefined;
+    let current: { text: string; glyphs: Glyph[]; band: LineBand; runId: number } | undefined;
     const flush = (): void => {
       if (current && current.text.trim() !== '') {
         lines.push({ text: current.text.trimEnd(), glyphs: current.glyphs });
@@ -557,12 +558,8 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
         if (current) current.text += text;
         continue;
       }
-      // Display space: y grows downward, lines are horizontal.
-      const top = box.origin.y;
-      const bottom = box.origin.y + box.size.height;
-      const mid = (top + bottom) / 2;
       const runId = runIds[i] ?? -1;
-      if (current && runId !== current.runId && (mid < current.top || mid > current.bottom)) {
+      if (current && runId !== current.runId && !current.band.holds(box)) {
         flush();
       }
       const fontName = fontNames[i];
@@ -573,10 +570,9 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
         ...(fontName === undefined ? {} : { fontName }),
       };
       if (!current) {
-        current = { text: '', glyphs: [], top, bottom, runId };
+        current = { text: '', glyphs: [], band: new LineBand(box), runId };
       } else {
-        current.top = Math.min(current.top, top);
-        current.bottom = Math.max(current.bottom, bottom);
+        current.band.add(box);
         current.runId = runId;
       }
       current.text += text;
@@ -1773,6 +1769,58 @@ function mapTarget(
     return { kind: 'uri', uri: target.action.uri };
   }
   return { kind: 'unresolved', reason: 'unsupported action' };
+}
+
+/** A glyph box in EmbedPDF display space. */
+interface DisplayBox {
+  readonly origin: { readonly x: number; readonly y: number };
+  readonly size: { readonly width: number; readonly height: number };
+}
+
+/**
+ * Extent of a text line in display space (y down), for `getPageText`'s baseline-band test.
+ * A line flows along x or y there: along y when it is horizontal in user space on a
+ * /Rotate 90 or 270 page, or when its text matrix turns it a quarter. The band is the line's
+ * extent across that flow; a glyph whose centre falls outside it starts a new line. The flow
+ * comes from the first two glyphs; until then a glyph in line with the first one along
+ * either axis belongs to it. (Testing only y, as before, let a line running down a /Rotate 90
+ * page swallow every perpendicular line that started beside it.)
+ */
+class LineBand {
+  private left: number;
+  private top: number;
+  private right: number;
+  private bottom: number;
+  private flow: 'x' | 'y' | undefined;
+
+  constructor(box: DisplayBox) {
+    this.left = box.origin.x;
+    this.top = box.origin.y;
+    this.right = box.origin.x + box.size.width;
+    this.bottom = box.origin.y + box.size.height;
+  }
+
+  holds(box: DisplayBox): boolean {
+    const midX = box.origin.x + box.size.width / 2;
+    const midY = box.origin.y + box.size.height / 2;
+    const inRow = midY >= this.top && midY <= this.bottom;
+    const inColumn = midX >= this.left && midX <= this.right;
+    if (this.flow === 'x') return inRow;
+    if (this.flow === 'y') return inColumn;
+    return inRow || inColumn;
+  }
+
+  add(box: DisplayBox): void {
+    if (this.flow === undefined) {
+      const dx = box.origin.x + box.size.width / 2 - (this.left + this.right) / 2;
+      const dy = box.origin.y + box.size.height / 2 - (this.top + this.bottom) / 2;
+      this.flow = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
+    }
+    this.left = Math.min(this.left, box.origin.x);
+    this.top = Math.min(this.top, box.origin.y);
+    this.right = Math.max(this.right, box.origin.x + box.size.width);
+    this.bottom = Math.max(this.bottom, box.origin.y + box.size.height);
+  }
 }
 
 function countBookmarks(nodes: readonly PdfBookmarkObject[]): number {

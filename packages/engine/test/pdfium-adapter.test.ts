@@ -1,7 +1,10 @@
-import { PDFDocument } from '@cantoo/pdf-lib';
+import { PDFDocument, StandardFonts } from '@cantoo/pdf-lib';
 import { createPdfiumEngine } from '@embedpdf/engines/pdfium-worker-engine';
+import type { Rect } from '@pdf-editor/document-model';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
+import rotatedPagesUrl from '../../../test/fixtures/rotated-pages.pdf?url';
+import textEditRotatedUrl from '../../../test/fixtures/text-edit-rotated.pdf?url';
 import { PdfiumAdapter } from '../src/pdfium/pdfium-adapter';
 import { EngineError, type MarkupAnnotation, type TextRun } from '../src/types';
 import { logTiming, makePdf, sid, toBuffer, wasmUrl } from './helpers';
@@ -324,6 +327,132 @@ describe('verify', () => {
       redactedRegions: [{ pageIndex: 0, rect: region }],
     });
     expect(result).toEqual({ ok: true, problems: [] });
+  });
+});
+
+describe('getPageText on rotated fixtures', () => {
+  // Glyph boxes come back in whole points, so edges match the fixture geometry within 1.5 pt.
+  const TOLERANCE = 1.5;
+
+  type Box = readonly [x: number, y: number, width: number, height: number];
+
+  interface ExpectedLine {
+    readonly text: string;
+    /** Advance width by descender..ascender, unrotated user space (fixture `box`). */
+    readonly box: Box;
+    /** Fixture `area`: the box 1 pt wider, 0.1 em below and 0.25 em beyond the ascender. */
+    readonly area: Box;
+  }
+
+  async function fixture(url: string): Promise<ArrayBuffer> {
+    return (await fetch(url)).arrayBuffer();
+  }
+
+  const edges = ([x, y, w, h]: Box) => ({ left: x, bottom: y, right: x + w, top: y + h });
+
+  /**
+   * Every edge of `rect` lies between the fixture box and area (PDFium's loose boxes reach
+   * past the ascender, which the area allows for), give or take the tolerance.
+   */
+  function fits(rect: Rect, line: ExpectedLine): boolean {
+    const r = edges([rect.x, rect.y, rect.width, rect.height]);
+    const box = edges(line.box);
+    const area = edges(line.area);
+    const between = (v: number, a: number, b: number) =>
+      v >= Math.min(a, b) - TOLERANCE && v <= Math.max(a, b) + TOLERANCE;
+    return (
+      between(r.left, box.left, area.left) &&
+      between(r.right, box.right, area.right) &&
+      between(r.bottom, box.bottom, area.bottom) &&
+      between(r.top, box.top, area.top)
+    );
+  }
+
+  function inside(rect: Rect, [x, y, w, h]: Box): boolean {
+    return (
+      rect.x >= x - TOLERANCE &&
+      rect.y >= y - TOLERANCE &&
+      rect.x + rect.width <= x + w + TOLERANCE &&
+      rect.y + rect.height <= y + h + TOLERANCE
+    );
+  }
+
+  function expectLines(runs: readonly TextRun[], expected: readonly ExpectedLine[]): void {
+    expect(runs.map((r) => r.text).sort()).toEqual(expected.map((l) => l.text).sort());
+    for (const line of expected) {
+      const run = runs.find((r) => r.text === line.text) as TextRun;
+      expect(fits(run.rect, line), `${line.text}: ${JSON.stringify(run.rect)}`).toBe(true);
+      const stray = run.glyphs.filter((g) => !inside(g.rect, line.area));
+      expect(stray.map((g) => `${g.text} ${JSON.stringify(g.rect)}`)).toEqual([]);
+      expect(run.glyphs.map((g) => g.text).join('')).toBe(line.text);
+    }
+  }
+
+  test('text-edit-rotated: /Rotate 90 and 270 pages keep perpendicular lines apart', async () => {
+    const id = sid('text-edit-rotated');
+    await adapter.open(id, await fixture(textEditRotatedUrl));
+    try {
+      // From test/fixtures/manifest.json (`expect.regions`).
+      expectLines(await adapter.getPageText(id, 0), [
+        {
+          text: 'Page 1 rotate 90 line 1: The quick brown fox jumps over the lazy dog',
+          box: [72, 697.1, 425.66, 12.95],
+          area: [71, 695.7, 427.66, 17.85],
+        },
+        {
+          text: 'Page 1 rotate 90 line 2 reads upright',
+          box: [79.95, 72, 12.95, 226.46],
+          area: [76.45, 71, 17.85, 228.46],
+        },
+      ]);
+      expectLines(await adapter.getPageText(id, 1), [
+        {
+          text: 'Page 2 rotate 270 line 1: The quick brown fox jumps over the lazy dog',
+          box: [72, 697.1, 433.44, 12.95],
+          area: [71, 695.7, 435.44, 17.85],
+        },
+        {
+          // Line 2 runs down user space: its ascender side is x = 519.1, the low x edge.
+          text: 'Page 2 rotate 270 line 2 reads upright',
+          box: [519.1, 485.75, 12.95, 234.25],
+          area: [517.7, 484.75, 17.85, 236.25],
+        },
+      ]);
+    } finally {
+      await adapter.close(id);
+    }
+  });
+
+  test('rotated-pages: /Rotate 0, 90, 180 and 270 each yield their three lines', async () => {
+    const measure = await PDFDocument.create();
+    const helvetica = await measure.embedFont(StandardFonts.Helvetica);
+    // Drawn with pdf-lib drawText (no kerning) by tools/fixtures/generate.ts, horizontal in
+    // user space; Helvetica spans 207/1000 below to 718/1000 above the baseline.
+    const line = (text: string, x: number, baseline: number, size: number): ExpectedLine => {
+      const width = Array.from(text).reduce(
+        (sum, ch) => sum + helvetica.widthOfTextAtSize(ch, size),
+        0,
+      );
+      const y = baseline - 0.207 * size;
+      return {
+        text,
+        box: [x, y, width, 0.925 * size],
+        area: [x - 1, y - 0.1 * size, width + 2, 1.275 * size],
+      };
+    };
+    const id = sid('rotated-pages');
+    await adapter.open(id, await fixture(rotatedPagesUrl));
+    try {
+      for (const [index, rotation] of [0, 90, 180, 270].entries()) {
+        expectLines(await adapter.getPageText(id, index), [
+          line(`PAGE ${index + 1} ROTATE ${rotation} OF rotated-pages`, 72, 760, 20),
+          line('This line is at the top of the unrotated page (user space).', 72, 730, 12),
+          line('BOTTOM-LEFT CORNER OF USER SPACE', 20, 20, 10),
+        ]);
+      }
+    } finally {
+      await adapter.close(id);
+    }
   });
 });
 
