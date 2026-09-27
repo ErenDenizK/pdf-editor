@@ -11,6 +11,11 @@
  */
 import { canRedo, canUndo, getActiveDocument, type PageId } from '@pdf-editor/document-model';
 
+import {
+  clearAnnotationTools,
+  hasAnnotationToolState,
+  registerAnnotationCommands,
+} from '../annotations';
 import type { EngineFailure } from '../engine/engine-service';
 import { partitionFiles, pickFiles } from '../files/open-files';
 import { m } from '../i18n';
@@ -18,8 +23,9 @@ import { registerLanguageCommands } from '../i18n/language-commands';
 import { announce } from '../shell/announcer';
 import { openImagesAsDocument } from '../stage/section-operations';
 import { selectAllOf, useSelectionStore } from '../state/selection-store';
-import { ARRANGE_SIZES, type ToolId, useUiStore } from '../state/ui-store';
+import { ARRANGE_SIZES, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
+import { registerViewerCommands } from '../viewer/viewer-commands';
 import { registerExportCommands } from './export-commands';
 import { type CommandRegistry, commandRegistry } from './registry';
 import { currentPlatform } from './shortcuts';
@@ -27,7 +33,6 @@ import { currentPlatform } from './shortcuts';
 const ui = () => useUiStore.getState();
 const model = () => useWorkspaceStore.getState();
 const selection = () => useSelectionStore.getState();
-const hasDocument = () => model().workspace.documentOrder.length > 0;
 const activeDocument = () => getActiveDocument(model().workspace);
 
 function failureReason(error: EngineFailure): string {
@@ -176,16 +181,6 @@ export function arrangeSizeMessage(): string {
   return m.announce_thumbnail_size({ size: size.label });
 }
 
-/** Tools; `title` is a message function so it follows the active language. */
-export const TOOLS: readonly { id: ToolId; title: () => string; shortcut: string }[] = [
-  { id: 'select', title: m.tool_select, shortcut: 'V' },
-  { id: 'highlight', title: m.tool_highlight, shortcut: 'H' },
-  { id: 'ink', title: m.tool_ink, shortcut: 'P' },
-  { id: 'text', title: m.tool_text, shortcut: 'T' },
-  { id: 'shapes', title: m.tool_shapes, shortcut: 'U' },
-  { id: 'note', title: m.tool_note, shortcut: 'N' },
-];
-
 /**
  * Registers all shell commands; returns a disposer (safe under StrictMode re-runs). Titles
  * and groups are read in the active language, so a language switch re-registers them.
@@ -239,12 +234,15 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
       group: m.group_general(),
       shortcut: 'Escape',
       hiddenInPalette: true,
-      when: () => ui().tool !== 'select' || selection().selected.size > 0,
+      when: () => hasAnnotationToolState() || selection().selected.size > 0,
       run: () => {
-        ui().setTool('select');
+        // Esc returns to Select and drops the annotation selection first (spec §2).
+        if (clearAnnotationTools()) return;
         selection().clear();
       },
     }),
+    // Before the page commands: in Read mode R, Delete, ... act on annotations.
+    registerAnnotationCommands(registry),
     registry.register({
       id: 'edit.undo',
       title: m.cmd_undo(),
@@ -455,19 +453,9 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
         if (ui().stepArrangeSize(-1)) announce(arrangeSizeMessage());
       },
     }),
-    ...TOOLS.map((tool) =>
-      registry.register({
-        id: `tool.${tool.id}`,
-        title: m.cmd_tool({ tool: tool.title() }),
-        group: m.group_tools(),
-        shortcut: tool.shortcut,
-        keywords: ['tool', 'annotate'],
-        when: hasDocument,
-        run: () => ui().setTool(tool.id),
-      }),
-    ),
     registerLanguageCommands(registry),
     registerExportCommands(registry),
+    registerViewerCommands(registry),
   ];
   return () => {
     for (const dispose of disposers) dispose();

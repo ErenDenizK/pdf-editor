@@ -1,0 +1,57 @@
+.properties {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.facts dt {
+  color: var(--text-secondary);
+}
+
+.facts dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.locked {
+  margin-left: var(--space-2);
+  color: var(--warning);
+}
+
+.note {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.contents {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.label {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.contents textarea {
+  min-height: 80px;
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-md);
+  resize: vertical;
+}

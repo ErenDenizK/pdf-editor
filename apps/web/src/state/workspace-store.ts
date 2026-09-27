@@ -33,9 +33,11 @@ import {
   createHistory,
   createRandomIdGenerator,
   createWorkspace,
+  DEFAULT_COALESCE_WINDOW_MS,
   deletePages as deletePagesOp,
   type DocumentId,
   duplicatePages as duplicatePagesOp,
+  type EngineEdit,
   getActiveDocument,
   type History,
   type IdGenerator,
@@ -112,6 +114,12 @@ interface WorkspaceState {
   readonly blobs: Readonly<Record<BlobId, StoredBlob>>;
   /** Files being read or opened by the engine right now. */
   readonly opening: number;
+  /**
+   * Sources whose engine document was changed by an engine edit (annotations) at any
+   * point in this session, even if the edit was undone since: export must serialize them
+   * through the engine (`needsEngineSave`) rather than reuse the original bytes.
+   */
+  readonly dirtySources: ReadonlySet<SourceId>;
 
   openFiles: (files: readonly File[]) => Promise<OpenFilesReport>;
   /**
@@ -160,6 +168,24 @@ interface WorkspaceState {
     operation: (ws: Workspace, ids: IdGenerator, prelude: P) => Workspace,
     label: string | ((prelude: P) => string),
   ) => Promise<boolean>;
+  /**
+   * Records content edits the engine has already executed (annotations) as one labelled
+   * history entry: appends them, each with its `inverse`, to `Workspace.engineEdits` and
+   * marks their sources dirty. Undo and redo move between snapshots; whoever executes
+   * engine edits (annotations/edit-runner.ts) replays the difference through the engine.
+   * With `coalesceKey`, a push that coalesces with the present entry (same key within the
+   * 800 ms window) may replace the present entry's last edit by `merge(last, next)` (e.g.
+   * one update from the first slider value to the last). Returns false when nothing was
+   * committed.
+   */
+  applyEngineEdit: (
+    edits: EngineEdit | readonly EngineEdit[],
+    label: string,
+    options?: {
+      readonly coalesceKey?: string;
+      readonly merge?: (previous: EngineEdit, next: EngineEdit) => EngineEdit | undefined;
+    },
+  ) => boolean;
   undo: () => string | undefined;
   redo: () => string | undefined;
   jumpTo: (index: number) => void;
@@ -455,6 +481,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
     documentColors: {},
     blobs: {},
     opening: 0,
+    dirtySources: new Set(),
 
     openFiles: async (files) => {
       if (files.length === 0) return { opened: [], skipped: [] };
@@ -579,6 +606,41 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
       }
     },
 
+    applyEngineEdit: (input, label, options = {}) => {
+      const edits: readonly EngineEdit[] = Array.isArray(input) ? input : [input as EngineEdit];
+      if (edits.length === 0) return false;
+      const { history } = get();
+      const { coalesceKey, merge } = options;
+      const now = Date.now();
+      const present = history.present;
+      const coalesces =
+        coalesceKey !== undefined &&
+        present.coalesceKey === coalesceKey &&
+        history.future.length === 0 &&
+        now - present.at >= 0 &&
+        now - present.at <= DEFAULT_COALESCE_WINDOW_MS;
+      const committed = commit(
+        (ws) => {
+          const previous = ws.engineEdits[ws.engineEdits.length - 1];
+          const only = edits.length === 1 ? edits[0] : undefined;
+          const merged = coalesces && merge && previous && only ? merge(previous, only) : undefined;
+          const engineEdits = merged
+            ? [...ws.engineEdits.slice(0, -1), merged]
+            : [...ws.engineEdits, ...edits];
+          return { ...ws, engineEdits };
+        },
+        label,
+        coalesceKey,
+      );
+      if (committed) {
+        const dirty = get().dirtySources;
+        if (edits.some((edit) => !dirty.has(edit.source))) {
+          set({ dirtySources: new Set([...dirty, ...edits.map((edit) => edit.source)]) });
+        }
+      }
+      return committed;
+    },
+
     undo: () => {
       const label = get().history.present.label;
       return moveHistory(undoOp(get().history)) ? label : undefined;
@@ -606,6 +668,7 @@ export function resetWorkspace(): void {
     documentColors: {},
     blobs: {},
     opening: 0,
+    dirtySources: new Set(),
   });
 }
 

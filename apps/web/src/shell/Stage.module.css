@@ -12,8 +12,17 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
   flex: none;
   height: 48px;
+}
+
+/* Read-mode layout switch, right-aligned so the mode switch stays centred. */
+.headerEnd {
+  position: absolute;
+  top: 50%;
+  right: var(--space-4);
+  transform: translateY(-50%);
 }
 
 .segmented {

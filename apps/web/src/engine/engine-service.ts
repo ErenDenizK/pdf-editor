@@ -19,7 +19,12 @@
  * (entries named `render …`, `open …`).
  */
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
-import { createRandomIdGenerator, type Rotation, type SourceId } from '@pdf-editor/document-model';
+import {
+  createRandomIdGenerator,
+  type Rect,
+  type Rotation,
+  type SourceId,
+} from '@pdf-editor/document-model';
 import type {
   EngineErrorCode,
   OpenedDocument,
@@ -27,6 +32,7 @@ import type {
   PdfRenderer,
   PdfVerifier,
   SaveOptions,
+  SearchHit,
   TextRun,
   VerificationExpectation,
   VerificationResult,
@@ -139,7 +145,22 @@ export interface RenderRequest {
   readonly bucket: number;
   readonly priority: number;
   readonly signal?: AbortSignal;
+  /**
+   * Render only this rectangle (unrotated user space) — a tile of a page too large to
+   * render in one piece. `tile` names it in the cache (e.g. `t1024:2,3`); both or neither.
+   */
+  readonly clip?: Rect;
+  readonly tile?: string;
 }
+
+/** Options of `EngineService.search` (PdfRenderer.search). */
+export interface SearchOptions {
+  readonly matchCase?: boolean;
+  readonly wholeWord?: boolean;
+}
+
+/** Text runs kept per page by `getPageText` (a small LRU; evicted on close). */
+const TEXT_CACHE_PAGES = 400;
 
 interface Subscriber {
   readonly priority: number;
@@ -156,6 +177,8 @@ interface Job {
   running: boolean;
   /** Set by `close`: the source went away, so a late result must not be cached. */
   sourceClosed: boolean;
+  /** Set by `invalidatePage`: the page changed while this job ran; its result is stale. */
+  stale: boolean;
 }
 
 export type PasswordPrompt = (request: {
@@ -178,6 +201,7 @@ function isEditor(engine: RendererLike): engine is RendererLike & PdfEditor {
 }
 
 export type RendererLike = Pick<PdfRenderer, 'open' | 'close' | 'renderPage' | 'getPageText'> &
+  Partial<Pick<PdfRenderer, 'search'>> &
   Partial<Pick<PdfEditor, 'save'>> &
   Partial<PdfVerifier> & {
     destroy?: () => Promise<void>;
@@ -204,9 +228,16 @@ export class EngineService {
   private readonly jobs = new Map<string, Job>();
   /** Original bytes of every open source (see the module comment). */
   private readonly retained = new Map<SourceId, Blob>();
+  /** Memoized text runs per `${sourceId}:${index}` (insertion order = LRU order). */
+  private readonly texts = new Map<string, Promise<EngineResult<readonly TextRun[]>>>();
+  /** CropBox per page of every open source, when the engine reports it. */
+  private readonly cropBoxes = new Map<SourceId, readonly (Rect | undefined)[]>();
   private running = 0;
   private seq = 0;
   private passwordPrompt: PasswordPrompt | undefined;
+  /** Content revision per `${sourceId}:${index}`, bumped by `invalidatePage`. */
+  private readonly revisions = new Map<string, number>();
+  private readonly revisionListeners = new Set<() => void>();
 
   constructor(options: EngineServiceOptions) {
     this.createRenderer = options.createRenderer;
@@ -276,6 +307,7 @@ export class EngineService {
           attempt === undefined ? {} : { password: attempt },
         );
         this.retained.set(id, retained);
+        this.cropBoxes.set(id, readCropBoxes(document));
         this.measure(`open ${file.name}`, started);
         return ok({
           id,
@@ -314,6 +346,10 @@ export class EngineService {
     }
     this.cache.removeSource(sourceId);
     this.retained.delete(sourceId);
+    this.cropBoxes.delete(sourceId);
+    for (const key of [...this.texts.keys()]) {
+      if (key.startsWith(prefix)) this.texts.delete(key);
+    }
     if (this.renderer === undefined) return ok(undefined);
     try {
       await (await this.renderer).close(sourceId);
@@ -363,18 +399,92 @@ export class EngineService {
     }
   }
 
-  async getPageText(
+  /**
+   * Text runs of a page, memoized per source page (the text of a source never changes).
+   * `signal` only abandons this caller's wait: the extraction still completes and is kept
+   * for the next request. Failures are not cached.
+   */
+  getPageText(
     sourceId: SourceId,
     index: number,
     signal?: AbortSignal,
   ): Promise<EngineResult<readonly TextRun[]>> {
+    const key = `${sourceId}:${index}`;
+    let pending = this.texts.get(key);
+    if (pending === undefined) {
+      pending = this.extractText(sourceId, index);
+      const stored = pending;
+      this.texts.set(key, stored);
+      void stored.then((result) => {
+        if (!result.ok && this.texts.get(key) === stored) this.texts.delete(key);
+      });
+      while (this.texts.size > TEXT_CACHE_PAGES) {
+        const oldest = this.texts.keys().next().value;
+        if (oldest === undefined) break;
+        this.texts.delete(oldest);
+      }
+    } else {
+      // Mark recently used.
+      this.texts.delete(key);
+      this.texts.set(key, pending);
+    }
+    if (signal === undefined) return pending;
+    if (signal.aborted) return Promise.resolve(fail('aborted', 'Text request aborted'));
+    const shared = pending;
+    return new Promise((resolve) => {
+      const onAbort = () => resolve(fail('aborted', 'Text request aborted'));
+      signal.addEventListener('abort', onAbort, { once: true });
+      void shared.then((result) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(result);
+      });
+    });
+  }
+
+  private async extractText(
+    sourceId: SourceId,
+    index: number,
+  ): Promise<EngineResult<readonly TextRun[]>> {
     try {
-      const runs = await (await this.engine()).getPageText(
-        sourceId,
-        index,
-        signal === undefined ? {} : { signal },
-      );
-      return ok(runs);
+      return ok(await (await this.engine()).getPageText(sourceId, index));
+    } catch (error) {
+      return { ok: false, error: toFailure(error) };
+    }
+  }
+
+  /**
+   * The CropBox of a source page in unrotated user space, when the engine reports it
+   * (`OpenedDocument.pages[i].cropBox`). Engine geometry (glyphs, hits, links, `clip`) is
+   * absolute user space, so viewers subtract its lower-left corner; undefined means (0, 0).
+   */
+  pageCropBox(sourceId: SourceId, index: number): Rect | undefined {
+    return this.cropBoxes.get(sourceId)?.[index];
+  }
+
+  /**
+   * Searches one source in the engine worker. `onHits` receives hits as the engine reports
+   * them page by page (when it streams); the resolved value is always the complete list.
+   */
+  async search(
+    sourceId: SourceId,
+    query: string,
+    options: SearchOptions = {},
+    signal?: AbortSignal,
+    onHits?: (hits: readonly SearchHit[]) => void,
+  ): Promise<EngineResult<readonly SearchHit[]>> {
+    try {
+      const engine = await this.engine();
+      if (!engine.search) return fail('unsupported', 'The engine cannot search');
+      if (signal?.aborted) return fail('aborted', 'Search aborted');
+      const callOptions: Parameters<PdfRenderer['search']>[2] = {
+        ...(options.matchCase ? { matchCase: true } : {}),
+        ...(options.wholeWord ? { wholeWord: true } : {}),
+        ...(signal === undefined ? {} : { signal }),
+        ...(onHits === undefined ? {} : { onProgress: (hits) => onHits(hits) }),
+      };
+      const hits = await engine.search(sourceId, query, callOptions);
+      if (signal?.aborted) return fail('aborted', 'Search aborted');
+      return ok(hits);
     } catch (error) {
       return { ok: false, error: toFailure(error) };
     }
@@ -383,6 +493,39 @@ export class EngineService {
   // -------------------------------------------------------------------------
   // Rendering
   // -------------------------------------------------------------------------
+
+  /**
+   * Drops every cached bitmap of one source page (all rotations and scales) after its
+   * content changed in the engine (an annotation edit), discards renders in flight for it,
+   * and bumps the page's revision so mounted canvases request a fresh render.
+   */
+  invalidatePage(sourceId: SourceId, index: number): void {
+    const prefix = `${sourceId}:${index}:`;
+    this.cache.removePrefix(prefix);
+    for (const job of [...this.jobs.values()]) {
+      if (!job.key.startsWith(prefix)) continue;
+      // Let it finish (PDFium cannot stop mid-page) but never cache or share its result:
+      // new requests start a fresh job.
+      job.stale = true;
+      if (this.jobs.get(job.key) === job) this.jobs.delete(job.key);
+    }
+    const key = `${sourceId}:${index}`;
+    this.revisions.set(key, (this.revisions.get(key) ?? 0) + 1);
+    for (const listener of this.revisionListeners) listener();
+  }
+
+  /** Content revision of a source page; changes whenever `invalidatePage` runs for it. */
+  pageRevision(sourceId: SourceId, index: number): number {
+    return this.revisions.get(`${sourceId}:${index}`) ?? 0;
+  }
+
+  /** Subscribes to page revision changes (for `useSyncExternalStore`). */
+  subscribeRevisions = (listener: () => void): (() => void) => {
+    this.revisionListeners.add(listener);
+    return () => {
+      this.revisionListeners.delete(listener);
+    };
+  };
 
   /** A cached bitmap for exactly this request, if any (marks it recently used). */
   peek(sourceId: SourceId, index: number, rotation: Rotation, bucket: number) {
@@ -414,7 +557,7 @@ export class EngineService {
 
   renderPage(request: RenderRequest): Promise<EngineResult<CachedBitmap>> {
     const { sourceId, index, rotation, bucket, signal } = request;
-    const key = bitmapKey(sourceId, index, rotation, bucket);
+    const key = tileAwareKey(pageKey(sourceId, index, rotation), request.tile, bucket);
     const hit = this.cache.get(key);
     if (hit !== undefined) return Promise.resolve(ok(hit));
     if (signal?.aborted) return Promise.resolve(fail('aborted', 'Render aborted'));
@@ -424,13 +567,14 @@ export class EngineService {
       if (job === undefined) {
         job = {
           key,
-          page: pageKey(sourceId, index, rotation),
+          page: tileAwarePage(pageKey(sourceId, index, rotation), request.tile),
           request,
           controller: new AbortController(),
           subscribers: new Set(),
           seq: this.seq++,
           running: false,
           sourceClosed: false,
+          stale: false,
         };
         this.jobs.set(key, job);
       }
@@ -491,7 +635,7 @@ export class EngineService {
   }
 
   private async run(job: Job): Promise<void> {
-    const { sourceId, index, rotation, bucket } = job.request;
+    const { sourceId, index, rotation, bucket, clip } = job.request;
     const started = this.mark(`render-start:${job.key}`);
     let result: EngineResult<CachedBitmap>;
     try {
@@ -499,6 +643,7 @@ export class EngineService {
         scale: bucket,
         rotation,
         signal: job.controller.signal,
+        ...(clip === undefined ? {} : { clip }),
       });
       const entry: CachedBitmap = {
         key: job.key,
@@ -507,11 +652,12 @@ export class EngineService {
         height: rendered.height,
         bucket,
       };
-      if (job.sourceClosed) {
+      if (job.sourceClosed || job.stale) {
         // The source was closed while PDFium rendered (the adapter finished before it saw
-        // the abort): nothing may be cached for it, or the bitmap would outlive it.
+        // the abort), or the page changed meanwhile: nothing may be cached for it, or the
+        // bitmap would outlive the source or show old content.
         rendered.bitmap.close();
-        result = fail('aborted', 'Source closed');
+        result = fail('aborted', job.stale ? 'Page changed' : 'Source closed');
       } else {
         // Cache even when nobody waits any more: scrolling back is common.
         this.cache.set(job.page, entry);
@@ -555,6 +701,8 @@ export class EngineService {
     for (const job of [...this.jobs.values()]) this.cancel(job, 'Engine destroyed');
     this.cache.clear();
     this.retained.clear();
+    this.texts.clear();
+    this.cropBoxes.clear();
     const renderer = this.renderer;
     this.renderer = undefined;
     try {
@@ -563,6 +711,29 @@ export class EngineService {
       // Nothing left to clean up.
     }
   }
+}
+
+/**
+ * Cache identity of a tile: its own "page" (`…:rotation#tile`) so tiles never stand in for
+ * a whole-page preview (`BitmapCache.best`), yet `removeSource` still drops them.
+ */
+function tileAwarePage(page: string, tile: string | undefined): string {
+  return tile === undefined ? page : `${page}#${tile}`;
+}
+
+function tileAwareKey(page: string, tile: string | undefined, bucket: number): string {
+  return `${tileAwarePage(page, tile)}:${bucket}`;
+}
+
+/** Per-page CropBoxes when the engine reports them (see `pageCropBox`). */
+function readCropBoxes(document: OpenedDocument): readonly (Rect | undefined)[] {
+  // Defensive: test doubles may omit `pages`.
+  const pages: OpenedDocument['pages'] = Array.isArray(document.pages) ? document.pages : [];
+  return pages.map(({ cropBox }) =>
+    cropBox !== undefined && Number.isFinite(cropBox.x) && Number.isFinite(cropBox.y)
+      ? cropBox
+      : undefined,
+  );
 }
 
 let instance: EngineService | undefined;

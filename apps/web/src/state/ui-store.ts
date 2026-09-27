@@ -11,7 +11,7 @@ import { create } from 'zustand';
 import { readJson, writeJson } from './safe-storage';
 
 export type ViewMode = 'read' | 'arrange';
-export type LeftPanelView = 'pages' | 'outline' | 'files';
+export type LeftPanelView = 'pages' | 'outline' | 'search' | 'comments' | 'files';
 /** Placeholder tool ids; the tool state machine (ARCHITECTURE.md §6) will own these. */
 export type ToolId = 'select' | 'highlight' | 'ink' | 'text' | 'shapes' | 'note';
 
@@ -70,7 +70,7 @@ export function parseLayout(value: unknown): PersistedLayout {
   const bool = (x: unknown, d: boolean) => (typeof x === 'boolean' ? x : d);
   const width = (x: unknown, range: { min: number; max: number; default: number }) =>
     typeof x === 'number' && Number.isFinite(x) ? clamp(x, range.min, range.max) : range.default;
-  const views: readonly LeftPanelView[] = ['pages', 'outline', 'files'];
+  const views: readonly LeftPanelView[] = ['pages', 'outline', 'search', 'comments', 'files'];
   return {
     leftPanelOpen: bool(v.leftPanelOpen, DEFAULT_LAYOUT.leftPanelOpen),
     leftPanelView: views.includes(v.leftPanelView as LeftPanelView)

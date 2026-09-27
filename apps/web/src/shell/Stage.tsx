@@ -11,6 +11,7 @@ import { ReadView } from '../stage/ReadView';
 import { useUiStore, type ViewMode } from '../state/ui-store';
 import { useActiveDocument, useHasDocuments, useWorkspaceStore } from '../state/workspace-store';
 import { Tooltip } from '../ui/Tooltip';
+import { LayoutSwitch } from '../viewer/LayoutSwitch';
 import { EmptyNote } from './EmptyNote';
 import { EmptyState } from './EmptyState';
 import { FloatingToolbar } from './FloatingToolbar';
@@ -47,6 +48,11 @@ export function Stage({ dragging }: { readonly dragging: boolean }) {
     >
       <div className={styles.header}>
         <ModeSwitch />
+        {viewMode === 'read' && doc && doc.pages.length > 0 ? (
+          <div className={styles.headerEnd}>
+            <LayoutSwitch />
+          </div>
+        ) : null}
       </div>
       {doc?.pages.length === 0 && viewMode === 'read' ? (
         <div className={styles.emptyDocument}>

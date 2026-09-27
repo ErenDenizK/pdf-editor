@@ -3,9 +3,9 @@
  * on the right. Numerals are tabular so counts never jitter (DESIGN.md §3).
  */
 import { Menu } from '@base-ui/react/menu';
-import { BookOpen, LayoutGrid, Minus, Plus } from 'lucide-react';
+import { BookOpen, LayoutGrid, Minus, Plus, Search } from 'lucide-react';
 
-import { formatPercent, m } from '../i18n';
+import { formatNumber, formatPercent, m } from '../i18n';
 import { PrivacyIndicator } from '../privacy/PrivacyIndicator';
 import { useShownSections } from '../stage/arrange-data';
 import { useSelectionStore } from '../state/selection-store';
@@ -13,6 +13,8 @@ import { MAX_ZOOM, MIN_ZOOM, useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 import { useActiveDocument, useHasDocuments, useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
+import { documentLabels } from '../viewer/navigation';
+import { useSearchStore } from '../viewer/search';
 import { Keycaps } from '../ui/Keycaps';
 import menuStyles from '../ui/Menu.module.css';
 import styles from './StatusBar.module.css';
@@ -50,22 +52,50 @@ function ArrangeShown() {
   );
 }
 
+/** "3 of 41" while a search has results in the active document (spec §1). */
+function SearchCount() {
+  const hits = useSearchStore((s) => s.hits.length);
+  const current = useSearchStore((s) => s.current);
+  const documentId = useSearchStore((s) => s.documentId);
+  const active = useWorkspaceStore((s) => s.workspace.activeDocument);
+  if (hits === 0 || documentId !== active) return null;
+  const text = m.search_count({
+    current: formatNumber(Math.max(0, current) + 1),
+    total: formatNumber(hits),
+  });
+  return (
+    <>
+      <span className={styles.dot} aria-hidden="true">
+        ·
+      </span>
+      <span className={`${styles.item} ${styles.search}`} data-testid="status-search">
+        <Search aria-hidden="true" />
+        <span className="visually-hidden">{m.status_search_prefix()}</span>
+        {text}
+      </span>
+    </>
+  );
+}
+
 export function StatusBar() {
   const hasDocuments = useHasDocuments();
   const doc = useActiveDocument();
   const opening = useWorkspaceStore((s) => s.opening);
   const viewMode = useUiStore((s) => s.viewMode);
   const currentPage = useViewStore((s) => s.currentPage);
+  const workspace = useWorkspaceStore((s) => s.workspace);
   const selection = useSelectionSummary();
   const pageCount = doc?.pages.length ?? 0;
   let summary: string;
   if (!doc) {
     summary = opening > 0 ? m.status_opening({ count: opening }) : m.documents_count({ count: 0 });
   } else if (viewMode === 'read' && pageCount > 0) {
-    summary = m.status_page_of({
-      current: Math.min(currentPage, pageCount - 1) + 1,
-      total: pageCount,
-    });
+    const current = Math.min(currentPage, pageCount - 1);
+    const label = documentLabels(workspace, doc)[current];
+    summary =
+      label !== undefined && label !== String(current + 1)
+        ? m.status_page_of_label({ label, current: current + 1, total: pageCount })
+        : m.status_page_of({ current: current + 1, total: pageCount });
   } else summary = m.pages_count({ count: pageCount });
 
   return (
@@ -75,6 +105,7 @@ export function StatusBar() {
           {summary}
         </span>
         {viewMode === 'arrange' ? <ArrangeShown /> : null}
+        {viewMode === 'read' ? <SearchCount /> : null}
         {selection ? (
           <>
             <span className={styles.dot} aria-hidden="true">

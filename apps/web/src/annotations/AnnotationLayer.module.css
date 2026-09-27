@@ -1,0 +1,284 @@
+/*
+ * Annotation layer: sits over the page bitmap (page-overlays positions it at inset 0).
+ * With the Select tool it only catches pointers on annotations; with a drawing tool it
+ * catches the whole page and sits above the text layer.
+ */
+.layer {
+  pointer-events: none;
+  touch-action: none;
+}
+
+.layer[data-drawing] {
+  z-index: 2;
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.layer[data-tool='text-box'] {
+  cursor: text;
+}
+
+.layer[data-tool='eraser'] {
+  cursor: cell;
+}
+
+.svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.hit {
+  fill: transparent;
+  stroke: transparent;
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.hit[data-stroke] {
+  fill: none;
+  pointer-events: stroke;
+}
+
+.hit[data-stroke] polyline {
+  fill: none;
+  stroke: transparent;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (hover: hover) {
+  .layer:not([data-drawing]) .hit:hover {
+    fill: rgb(124 140 255 / 0.1);
+  }
+
+  .layer:not([data-drawing]) .hit[data-stroke]:hover polyline {
+    stroke: rgb(124 140 255 / 0.25);
+  }
+}
+
+.selection .outline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+.handle {
+  fill: #ffffff;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  pointer-events: all;
+}
+
+.handle[data-handle='nw'],
+.handle[data-handle='se'] {
+  cursor: nwse-resize;
+}
+
+.handle[data-handle='ne'],
+.handle[data-handle='sw'] {
+  cursor: nesw-resize;
+}
+
+.handle[data-handle='n'],
+.handle[data-handle='s'] {
+  cursor: ns-resize;
+}
+
+.handle[data-handle='e'],
+.handle[data-handle='w'] {
+  cursor: ew-resize;
+}
+
+.handle[data-handle='start'],
+.handle[data-handle='end'] {
+  cursor: move;
+}
+
+.ghost {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 3;
+  pointer-events: none;
+}
+
+.ghost polyline {
+  fill: none;
+}
+
+.previewShape {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.previewBox {
+  fill: rgb(124 140 255 / 0.08);
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.previewMarkup {
+  mix-blend-mode: multiply;
+  opacity: 0.45;
+}
+
+.eraseTrail {
+  fill: none;
+  stroke: rgb(229 57 53 / 0.5);
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lockBadge {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--warning);
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.lockBadge svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Contextual bar: glass over the document, like the floating tool bar. */
+.bar {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 40px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-3);
+  background: var(--glass-solid);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: default;
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .bar {
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+  }
+}
+
+.barName {
+  padding-left: var(--space-1);
+  color: var(--text-secondary);
+}
+
+.barDivider {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  background: var(--border-strong);
+}
+
+.barLocked {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--warning);
+}
+
+.barLocked svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* In-place editors */
+.freeText {
+  position: absolute;
+  z-index: 3;
+  padding: 1px 2px;
+  border: 1px dashed var(--accent);
+  background: rgb(255 255 255 / 0.85);
+  font-family: Helvetica, Arial, sans-serif;
+  resize: none;
+  overflow: hidden;
+  pointer-events: auto;
+  transform-origin: center;
+}
+
+.freeText:focus-visible {
+  outline: none;
+}
+
+.notePopup {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  gap: var(--space-2);
+  width: 240px;
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-3);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  pointer-events: auto;
+  cursor: default;
+}
+
+.noteMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.noteText {
+  min-height: 72px;
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: inherit;
+  resize: vertical;
+}
+
+.noteActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.primary,
+.secondary {
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-2);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--surface-0);
+}
+
+.secondary {
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+}

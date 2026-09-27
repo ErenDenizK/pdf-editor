@@ -97,7 +97,18 @@ describe('command groups', () => {
     render(<App />);
     const groups = () => [...new Set(commandRegistry.list().map((c) => c.group))].sort();
     expect(groups()).toEqual(
-      ['Documents', 'Edit', 'File', 'General', 'Language', 'Pages', 'Tools', 'View', 'Zoom'].sort(),
+      [
+        'Documents',
+        'Edit',
+        'File',
+        'General',
+        'Language',
+        'Navigate',
+        'Pages',
+        'Tools',
+        'View',
+        'Zoom',
+      ].sort(),
     );
     setLocale('tr');
     await waitFor(() => {
@@ -109,6 +120,7 @@ describe('command groups', () => {
           'Dosya',
           'Düzen',
           'Genel',
+          'Gezinme',
           'Görünüm',
           'Sayfalar',
           'Yakınlaştırma',

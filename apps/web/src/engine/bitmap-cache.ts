@@ -117,7 +117,11 @@ export class BitmapCache {
 
   /** Drops every bitmap whose key starts with `${sourceId}:`. */
   removeSource(sourceId: string): void {
-    const prefix = `${sourceId}:`;
+    this.removePrefix(`${sourceId}:`);
+  }
+
+  /** Drops every bitmap whose key starts with `prefix` (e.g. one page: `${source}:${index}:`). */
+  removePrefix(prefix: string): void {
     for (const key of [...this.entries.keys()]) {
       if (key.startsWith(prefix)) this.remove(key);
     }

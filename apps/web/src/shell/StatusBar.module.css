@@ -32,6 +32,18 @@
   flex: none;
 }
 
+.search {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.search svg {
+  width: 12px;
+  height: 12px;
+  color: var(--text-tertiary);
+}
+
 .dot {
   color: var(--text-tertiary);
 }

@@ -1,9 +1,10 @@
 /**
- * Left rail: an icon tab list (Pages / Outline / Files) and a collapsible, resizable panel.
+ * Left rail: an icon tab list (Pages / Outline / Search / Comments / Files) and a
+ * collapsible, resizable panel.
  * Selecting the open view again collapses the panel (as in VS Code). State persists via
  * the UI store. Keyboard: Up/Down move between rail tabs, Enter/Space toggle.
  */
-import { FileStack, Files, Keyboard, ListTree } from 'lucide-react';
+import { FileStack, Files, Keyboard, ListTree, MessageSquareText, Search } from 'lucide-react';
 import { type KeyboardEvent, useRef } from 'react';
 
 import { type SourceId, sourceReferences } from '@pdf-editor/document-model';
@@ -15,15 +16,19 @@ import { LEFT_PANEL_WIDTH, type LeftPanelView, useUiStore } from '../state/ui-st
 import { useActiveDocument, useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
 import { ResizeHandle } from '../ui/ResizeHandle';
+import { CommentsPanel } from './CommentsPanel';
 import { EmptyNote } from './EmptyNote';
 import styles from './LeftRail.module.css';
 import { OutlinePanel } from './OutlinePanel';
 import { PagesPanel } from './PagesPanel';
+import { SearchPanel } from './SearchPanel';
 import { useCommandShortcut } from './use-command-shortcut';
 
 const VIEWS: readonly { id: LeftPanelView; label: () => string; Icon: typeof FileStack }[] = [
   { id: 'pages', label: m.view_pages, Icon: FileStack },
   { id: 'outline', label: m.view_outline, Icon: ListTree },
+  { id: 'search', label: m.view_search, Icon: Search },
+  { id: 'comments', label: m.view_comments, Icon: MessageSquareText },
   { id: 'files', label: m.view_files, Icon: Files },
 ];
 
@@ -110,6 +115,8 @@ export function LeftRail() {
           <div className={styles.panelBody} data-view={view}>
             {view === 'pages' ? <PagesView /> : null}
             {view === 'outline' ? <OutlinePanel /> : null}
+            {view === 'search' ? <SearchPanel /> : null}
+            {view === 'comments' ? <CommentsPanel /> : null}
             {view === 'files' ? <FilesView /> : null}
           </div>
           <ResizeHandle

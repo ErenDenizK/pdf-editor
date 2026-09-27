@@ -13,6 +13,8 @@ import {
 } from '@pdf-editor/document-model';
 import { type ReactNode, useEffect, useRef } from 'react';
 
+import { AnnotationProperties } from '../annotations/AnnotationProperties';
+import { useAnnotationStore } from '../annotations/annotation-store';
 import { formatBytes } from '../files/file-filters';
 import { getLocale, m } from '../i18n';
 import { useSelectionStore } from '../state/selection-store';
@@ -97,9 +99,13 @@ export function RightPanel() {
           <SelectionSection />
         </Section>
         <Section id="properties" title={m.inspector_properties()}>
-          <EmptyNote
-            title={m.inspector_no_properties_title()}
-            body={m.inspector_no_properties_body()}
+          <AnnotationProperties
+            fallback={
+              <EmptyNote
+                title={m.inspector_no_properties_title()}
+                body={m.inspector_no_properties_body()}
+              />
+            }
           />
         </Section>
         <Section id="history" title={m.inspector_history()}>
@@ -131,6 +137,15 @@ function describeSelection(ws: Workspace, selected: ReadonlySet<PageId>) {
 function SelectionSection() {
   const selected = useSelectionStore((s) => s.selected);
   const ws = useWorkspaceStore((s) => s.workspace);
+  const annotationCount = useAnnotationStore((s) => s.selection?.ids.length ?? 0);
+  if (selected.size === 0 && annotationCount > 0) {
+    return (
+      <dl className={styles.facts}>
+        <dt>{m.inspector_selected()}</dt>
+        <dd className={styles.numeric}>{m.annot_count({ count: annotationCount })}</dd>
+      </dl>
+    );
+  }
   if (selected.size === 0) {
     return (
       <EmptyNote

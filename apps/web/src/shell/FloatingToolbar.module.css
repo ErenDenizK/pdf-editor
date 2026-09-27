@@ -32,3 +32,40 @@
   margin: 0 var(--space-1);
   background: var(--border-strong);
 }
+
+.menuTrigger {
+  position: relative;
+}
+
+.menuTrigger .chevron {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 9px;
+  height: 9px;
+  opacity: 0.7;
+}
+
+.menuIcon {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+}
+
+.menuKey {
+  margin-left: auto;
+  padding-left: var(--space-3);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.stampChip {
+  padding: 1px 6px;
+  border: 1.5px solid currentColor;
+  border-radius: var(--radius-1);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
