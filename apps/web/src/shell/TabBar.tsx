@@ -14,12 +14,14 @@ import { type KeyboardEvent, useEffect } from 'react';
 import { openFilesFromPicker } from '../commands/app-commands';
 import { commandRegistry } from '../commands/registry';
 import { currentPlatform, toAriaKeyShortcut } from '../commands/shortcuts';
+import { FurnitureDialogs } from '../furniture';
 import { m } from '../i18n';
 import { InlineTitleEditor } from '../stage/InlineTitleEditor';
 import { startRename } from '../stage/section-operations';
 import { TabArrangeMenu } from '../stage/TabArrangeMenu';
 import { useUiStore } from '../state/ui-store';
 import { useTabItems, useWorkspaceStore } from '../state/workspace-store';
+import { DocumentMenu } from '../tools/DocumentMenu';
 import { IconButton } from '../ui/IconButton';
 import { Keycaps } from '../ui/Keycaps';
 import { AppGlyph } from './AppGlyph';
@@ -191,6 +193,7 @@ export function TabBar() {
           <span className={styles.searchLabel}>{m.search_commands_placeholder()}</span>
           {paletteShortcut ? <Keycaps shortcut={paletteShortcut} /> : null}
         </button>
+        <DocumentMenu visible={documents.length > 0} />
         {documents.length > 0 ? (
           <IconButton
             label={m.export_document()}
@@ -211,6 +214,7 @@ export function TabBar() {
           />
         ) : null}
       </div>
+      <FurnitureDialogs />
     </header>
   );
 }

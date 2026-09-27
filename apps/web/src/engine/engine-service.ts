@@ -228,6 +228,8 @@ export class EngineService {
   private readonly jobs = new Map<string, Job>();
   /** Original bytes of every open source (see the module comment). */
   private readonly retained = new Map<SourceId, Blob>();
+  /** The password that opened an encrypted source (diagnostics read the original bytes). */
+  private readonly passwords = new Map<SourceId, string>();
   /** Memoized text runs per `${sourceId}:${index}` (insertion order = LRU order). */
   private readonly texts = new Map<string, Promise<EngineResult<readonly TextRun[]>>>();
   /** CropBox per page of every open source, when the engine reports it. */
@@ -308,6 +310,7 @@ export class EngineService {
           attempt === undefined ? {} : { password: attempt },
         );
         this.retained.set(id, retained);
+        if (attempt !== undefined) this.passwords.set(id, attempt);
         this.cropBoxes.set(id, readCropBoxes(document));
         this.measure(`open ${file.name}`, started);
         return ok({
@@ -347,6 +350,7 @@ export class EngineService {
     }
     this.cache.removeSource(sourceId);
     this.retained.delete(sourceId);
+    this.passwords.delete(sourceId);
     this.cropBoxes.delete(sourceId);
     for (const key of [...this.texts.keys()]) {
       if (key.startsWith(prefix)) this.texts.delete(key);
@@ -362,6 +366,11 @@ export class EngineService {
     } catch (error) {
       return { ok: false, error: toFailure(error) };
     }
+  }
+
+  /** The password a source was opened with, if one was needed (kept in memory only). */
+  sourcePassword(sourceId: SourceId): string | undefined {
+    return this.passwords.get(sourceId);
   }
 
   /** A fresh copy of a source's original bytes (the caller may transfer it). */
@@ -723,6 +732,7 @@ export class EngineService {
     for (const job of [...this.jobs.values()]) this.cancel(job, 'Engine destroyed');
     this.cache.clear();
     this.retained.clear();
+    this.passwords.clear();
     this.texts.clear();
     this.cropBoxes.clear();
     const renderer = this.renderer;

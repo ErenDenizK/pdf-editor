@@ -17,6 +17,7 @@ import {
   EngineError,
   type InspectOptions,
   type PdfAssembler,
+  type SourceDiagnostics,
   type SourceInspection,
   type SourceInspector,
 } from '../types';
@@ -37,6 +38,8 @@ export interface AssemblerProxy extends PdfAssembler, SourceInspector {
     options?: { readonly ids?: readonly string[]; readonly password?: string },
     callOptions?: EngineCallOptions,
   ): Promise<AnnotationConformanceReport>;
+  /** Diagnostics (metadata-diagnostics.ts); `bytes` are transferred. */
+  diagnose(bytes: ArrayBuffer, options?: InspectOptions): Promise<SourceDiagnostics>;
   /** One label per page, or undefined when the file has no /PageLabels. */
   getPageLabels(
     bytes: ArrayBuffer,
@@ -88,6 +91,13 @@ export function createAssemblerProxy(worker: Worker): AssemblerProxy {
         throw new EngineError('aborted', 'inspect aborted', { cause: options.signal.reason });
       }
       return remote.inspect(transfer(bytes, [bytes]), options.password);
+    },
+    /** `bytes` are transferred (detached in the caller). */
+    async diagnose(bytes: ArrayBuffer, options: InspectOptions = {}): Promise<SourceDiagnostics> {
+      if (options.signal?.aborted) {
+        throw new EngineError('aborted', 'diagnose aborted', { cause: options.signal.reason });
+      }
+      return remote.diagnose(transfer(bytes, [bytes]), options.password);
     },
     async getPageLabels(bytes: ArrayBuffer, options: InspectOptions = {}) {
       return (await this.inspect(bytes, options)).pageLabels;

@@ -19,6 +19,9 @@ export default defineConfig({
   // `@embedpdf/pdfium` locates its binary with `new URL('pdfium.wasm', import.meta.url)`.
   // Pre-bundling was verified not to break that under Vite 8, so it is left enabled. If it
   // ever does, add: optimizeDeps: { exclude: ['@embedpdf/pdfium', '@embedpdf/engines'] }.
+  // Pre-bundle fontkit up front: discovering it mid-run (first overlay export) makes Vite
+  // reload the browser and can fail tests that are already running.
+  optimizeDeps: { include: ['@cantoo/fontkit'] },
   test: {
     include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
     passWithNoTests: true,

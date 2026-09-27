@@ -84,6 +84,78 @@ describe('summarizeReport', () => {
     ]);
   });
 
+  it('states the encryption algorithm and the metadata policy', () => {
+    const permissions = {
+      print: true,
+      printHighQuality: true,
+      modify: false,
+      copy: false,
+      annotate: true,
+      fillForms: true,
+      accessibility: true,
+      assemble: true,
+    };
+    const items = summarizeReport(
+      empty,
+      { securityRemoved: ['a.pdf'], repaired: [] },
+      {
+        security: { algorithm: 'aes-256', userPassword: 'x', permissions },
+        passwordRemoved: false,
+        metadata: { policy: 'explicit' },
+      },
+    );
+    expect(items.map((i) => [i.id, i.text])).toEqual([
+      [
+        'encryption',
+        'Encrypted with AES-256; a password is needed to open it; restricted: changing content, copying text and images.',
+      ],
+      [
+        'security',
+        'Password protection from 1 file was removed; set a new password in Export options.',
+      ],
+      ['metadata', 'Metadata written as edited; XMP rewritten to match.'],
+    ]);
+    const requested = summarizeReport(
+      {
+        ...empty,
+        metadataStripped: {
+          infoKeys: 6,
+          xmpPackets: 1,
+          attachments: 1,
+          javascript: 0,
+          pieceInfo: 0,
+          thumbnails: 0,
+          annotationAuthors: 0,
+          applied: {
+            info: true,
+            xmp: true,
+            attachments: true,
+            javascript: false,
+            pieceInfo: false,
+            thumbnails: false,
+            annotationAuthors: false,
+            customKeys: true,
+          },
+        },
+      },
+      { securityRemoved: ['a.pdf'], repaired: [] },
+      { passwordRemoved: true, metadata: { policy: 'explicit' } },
+    );
+    expect(requested[0]).toMatchObject({
+      tone: 'kept',
+      text: 'Password protection from 1 file was removed, as you asked.',
+    });
+    expect(requested[1]).toMatchObject({
+      id: 'metadata',
+      tone: 'changed',
+      details: [
+        'Document information: 6 removed',
+        'XMP metadata: 1 removed',
+        'Attachments: 1 removed',
+      ],
+    });
+  });
+
   it('marks a clean outline as kept', () => {
     expect(summarizeReport({ ...empty, outlineNodesKept: 1 })[0]).toMatchObject({
       tone: 'kept',

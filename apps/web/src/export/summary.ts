@@ -6,8 +6,10 @@
  */
 import type { ReconciliationReport } from '@pdf-editor/engine';
 
-import { m } from '../i18n';
-import type { SourceNotes } from './export-service';
+import { restrictionList } from '../document/security-text';
+import { STRIP_ITEMS } from '../document/strip-items';
+import { formatNumber, m } from '../i18n';
+import type { ExportOutcome, SourceNotes } from './export-service';
 
 export interface SummaryItem {
   readonly id: string;
@@ -32,16 +34,32 @@ const NO_NOTES: SourceNotes = { securityRemoved: [], repaired: [] };
 export function summarizeReport(
   report: ReconciliationReport,
   notes: SourceNotes = NO_NOTES,
+  outcome?: ExportOutcome,
 ): SummaryItem[] {
   const items: SummaryItem[] = [];
+  if (outcome?.security) {
+    const restricted = restrictionList(outcome.security.permissions);
+    items.push({
+      id: 'encryption',
+      tone: 'kept',
+      text: outcome.security.userPassword
+        ? restricted
+          ? m.summary_encrypted_password_restricted({ restricted })
+          : m.summary_encrypted_password()
+        : m.summary_encrypted_owner({ restricted: restricted || m.security_nothing() }),
+    });
+  }
   if (notes.securityRemoved.length > 0) {
     items.push({
       id: 'security',
-      tone: 'changed',
-      text: m.summary_security_removed({ count: notes.securityRemoved.length }),
+      tone: outcome?.passwordRemoved ? 'kept' : 'changed',
+      text: outcome?.passwordRemoved
+        ? m.summary_security_removed_requested({ count: notes.securityRemoved.length })
+        : m.summary_security_removed({ count: notes.securityRemoved.length }),
       details: notes.securityRemoved,
     });
   }
+  if (outcome) items.push(metadataItem(outcome, report));
   if (notes.repaired.length > 0) {
     items.push({
       id: 'repaired',
@@ -110,4 +128,43 @@ export function summarizeReport(
       items.push({ id: `warning-${index}`, tone: 'changed', text: warning });
     });
   return items;
+}
+
+/** The metadata policy line (spec document-tools.md §8), with strip counts as details. */
+function metadataItem(outcome: ExportOutcome, report: ReconciliationReport): SummaryItem {
+  const stripped = report.metadataStripped;
+  if (stripped) {
+    const counts: Record<string, number> = {
+      info: stripped.infoKeys,
+      customKeys: stripped.infoKeys,
+      xmp: stripped.xmpPackets,
+      attachments: stripped.attachments,
+      javascript: stripped.javascript,
+      pieceInfo: stripped.pieceInfo,
+      thumbnails: stripped.thumbnails,
+      annotationAuthors: stripped.annotationAuthors,
+    };
+    const details = STRIP_ITEMS.filter(
+      (item) => stripped.applied[item.key] && item.key !== 'customKeys',
+    ).map((item) =>
+      m.summary_strip_detail({
+        item: item.label(),
+        count: formatNumber(counts[item.key] ?? 0),
+      }),
+    );
+    return {
+      id: 'metadata',
+      tone: 'changed',
+      text: m.summary_metadata_stripped(),
+      details,
+    };
+  }
+  return {
+    id: 'metadata',
+    tone: 'kept',
+    text:
+      outcome.metadata.policy === 'explicit'
+        ? m.summary_metadata_explicit()
+        : m.summary_metadata_inherited(),
+  };
 }

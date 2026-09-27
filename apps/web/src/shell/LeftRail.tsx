@@ -1,10 +1,18 @@
 /**
- * Left rail: an icon tab list (Pages / Outline / Search / Comments / Files) and a
+ * Left rail: an icon tab list (Pages / Outline / Search / Comments / Forms / Files) and a
  * collapsible, resizable panel.
  * Selecting the open view again collapses the panel (as in VS Code). State persists via
  * the UI store. Keyboard: Up/Down move between rail tabs, Enter/Space toggle.
  */
-import { FileStack, Files, Keyboard, ListTree, MessageSquareText, Search } from 'lucide-react';
+import {
+  FileStack,
+  Files,
+  Keyboard,
+  ListTree,
+  MessageSquareText,
+  Search,
+  TextCursorInput,
+} from 'lucide-react';
 import { type KeyboardEvent, useRef } from 'react';
 
 import { type SourceId, sourceReferences } from '@pdf-editor/document-model';
@@ -18,6 +26,7 @@ import { IconButton } from '../ui/IconButton';
 import { ResizeHandle } from '../ui/ResizeHandle';
 import { CommentsPanel } from './CommentsPanel';
 import { EmptyNote } from './EmptyNote';
+import { FormsPanel } from './FormsPanel';
 import styles from './LeftRail.module.css';
 import { OutlinePanel } from './OutlinePanel';
 import { PagesPanel } from './PagesPanel';
@@ -29,6 +38,7 @@ const VIEWS: readonly { id: LeftPanelView; label: () => string; Icon: typeof Fil
   { id: 'outline', label: m.view_outline, Icon: ListTree },
   { id: 'search', label: m.view_search, Icon: Search },
   { id: 'comments', label: m.view_comments, Icon: MessageSquareText },
+  { id: 'forms', label: m.view_forms, Icon: TextCursorInput },
   { id: 'files', label: m.view_files, Icon: Files },
 ];
 
@@ -117,6 +127,7 @@ export function LeftRail() {
             {view === 'outline' ? <OutlinePanel /> : null}
             {view === 'search' ? <SearchPanel /> : null}
             {view === 'comments' ? <CommentsPanel /> : null}
+            {view === 'forms' ? <FormsPanel /> : null}
             {view === 'files' ? <FilesView /> : null}
           </div>
           <ResizeHandle

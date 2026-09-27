@@ -316,7 +316,8 @@ const applied = new Map<SourceId, readonly EngineEdit[]>();
 function annotationEdits(ws: Workspace): Map<SourceId, EngineEdit[]> {
   const bySource = new Map<SourceId, EngineEdit[]>();
   for (const edit of ws.engineEdits) {
-    if (!edit.kind.startsWith('annotation.')) continue;
+    // Form fills (forms/actions.ts) share the queue and the replay.
+    if (!edit.kind.startsWith('annotation.') && edit.kind !== 'form.set-value') continue;
     const list = bySource.get(edit.source);
     if (list) list.push(edit);
     else bySource.set(edit.source, [edit]);

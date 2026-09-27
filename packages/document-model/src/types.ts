@@ -70,7 +70,22 @@ export interface SourceFlags {
   readonly hasSignatures: boolean;
   readonly tagged: boolean;
   readonly linearized: boolean;
+  /**
+   * Encrypted sources: what the author allows (/P as written in the file, whatever password
+   * opened it). Absent for unencrypted files or when the engine could not read it.
+   */
+  readonly permissions?: PermissionFlags;
+  /** Encrypted sources: the standard security handler's algorithm (/V, /R, crypt filter). */
+  readonly securityHandler?: SecurityHandler;
+  /**
+   * Encrypted sources: a user password was needed to open the file. `false` means the file
+   * opens without a password and only carries owner restrictions ("owner-only").
+   */
+  readonly passwordProtected?: boolean;
 }
+
+/** Encryption algorithm of a source's standard security handler. */
+export type SecurityHandler = 'rc4-40' | 'rc4-128' | 'aes-128' | 'aes-256' | 'unknown';
 
 // ---------------------------------------------------------------------------
 // Pages
@@ -104,10 +119,32 @@ export interface VirtualPage {
 
 export type OverlayLayer = 'behind' | 'over';
 
+/**
+ * Pages an overlay is drawn on, by 1-based position in the document (inclusive). Absent
+ * fields do not restrict: `{ from: 2 }` skips the cover, `{ parity: 'odd' }` keeps
+ * recto pages. An overlay without `pages` is drawn on every page that carries it.
+ */
+export interface OverlayPageRange {
+  readonly from?: number;
+  readonly to?: number;
+  readonly parity?: 'odd' | 'even';
+}
+
+/** What a piece of page furniture is, so the UI can find, edit and replace it. */
+export type OverlayRole = 'page-number' | 'header' | 'footer' | 'bates' | 'watermark';
+
+export interface OverlayTile {
+  readonly gapX: number;
+  readonly gapY: number;
+}
+
 export interface TextOverlay {
   readonly kind: 'text';
   readonly layer: OverlayLayer;
-  /** Template with tokens: {page}, {pages}, {label}, {title}, {date}, {bates}. */
+  /**
+   * Template with tokens: {page}, {pages}, {label}, {title}, {date}, {bates}. {date} takes
+   * an optional style: {date:short}, {date:medium} (default), {date:long}, {date:iso}.
+   */
   readonly template: string;
   readonly anchor: Anchor;
   readonly offset: { readonly x: number; readonly y: number };
@@ -115,6 +152,16 @@ export interface TextOverlay {
   readonly color: RgbColor;
   readonly opacity: number;
   readonly rotate?: number;
+  readonly tile?: OverlayTile;
+  readonly pages?: OverlayPageRange;
+  /** Mirror left/right anchors and the horizontal offset on even pages (duplex). */
+  readonly mirror?: boolean;
+  /**
+   * Number shown by {page} on the first page the overlay is drawn on; {pages} becomes the
+   * last number shown. Without it, {page} is the 1-based position and {pages} the count.
+   */
+  readonly startNumber?: number;
+  readonly role?: OverlayRole;
 }
 
 export interface ImageOverlay {
@@ -126,7 +173,10 @@ export interface ImageOverlay {
   readonly scale: number;
   readonly opacity: number;
   readonly rotate?: number;
-  readonly tile?: { readonly gapX: number; readonly gapY: number };
+  readonly tile?: OverlayTile;
+  readonly pages?: OverlayPageRange;
+  readonly mirror?: boolean;
+  readonly role?: OverlayRole;
 }
 
 export type OverlayOp = TextOverlay | ImageOverlay;
@@ -217,8 +267,39 @@ export interface DocumentMetadata {
   readonly creationDate?: string;
   readonly modificationDate?: string;
   readonly language?: string;
+  /**
+   * Custom document information keys (ISO 32000-2 §14.3.3), name without the slash → text.
+   * Written to the Info dictionary and mirrored in XMP under the `pdfx:` namespace.
+   */
+  readonly custom?: Readonly<Record<string, string>>;
   /** Policy for export: keep first source's Info/XMP, or write only what is above. */
   readonly policy: 'inherit-first-source' | 'explicit';
+  /** "Strip metadata": what the assembler removes at export. Absent: nothing is stripped. */
+  readonly strip?: MetadataStrip;
+}
+
+/**
+ * What "Strip metadata" removes at export. Outlines and page labels always stay. With
+ * `info`, the output's Info dictionary carries only /Producer (plus fields typed after
+ * stripping) and no dates; the file identifier (/ID) is always regenerated.
+ */
+export interface MetadataStrip {
+  /** Standard Info keys (Title, Author, Subject, Keywords, Creator, dates). */
+  readonly info: boolean;
+  /** XMP packets: the document's, and those on pages and images. */
+  readonly xmp: boolean;
+  /** Embedded files (/EmbeddedFiles, /AF) and file attachment annotations. */
+  readonly attachments: boolean;
+  /** JavaScript: document scripts, /OpenAction, additional actions (/AA), JS link actions. */
+  readonly javascript: boolean;
+  /** Private application data (/PieceInfo) on pages and forms. */
+  readonly pieceInfo: boolean;
+  /** Embedded page thumbnails (/Thumb). */
+  readonly thumbnails: boolean;
+  /** Author (/T) and dates (/M, /CreationDate) on annotations. */
+  readonly annotationAuthors: boolean;
+  /** Custom Info keys. */
+  readonly customKeys: boolean;
 }
 
 export interface PermissionFlags {
@@ -242,6 +323,19 @@ export interface SecurityPolicy {
 /** How to reconcile form fields whose fully-qualified names collide at export. */
 export type FormMergePolicy = 'namespace-by-source' | 'rename-collisions' | 'unify-same-name';
 
+/**
+ * Bates numbering of a document: the {bates} token on the page at index i reads
+ * `prefix + pad(start + i, width) + suffix`. A run across several documents gives each
+ * document the start that continues the previous one.
+ */
+export interface BatesConfig {
+  readonly prefix: string;
+  /** Minimum number of digits (zero padded). */
+  readonly width: number;
+  readonly start: number;
+  readonly suffix: string;
+}
+
 export interface VirtualDocument {
   readonly id: DocumentId;
   readonly title: string;
@@ -257,7 +351,15 @@ export interface VirtualDocument {
   readonly labels: readonly PageLabelRange[];
   readonly metadata: DocumentMetadata;
   readonly security?: SecurityPolicy;
+  /**
+   * Set by "Remove password": the user chose an unprotected output although sources were
+   * encrypted (the export summary reports it as requested rather than as a warning).
+   * Cleared when a password is set again.
+   */
+  readonly passwordRemoved?: boolean;
   readonly formMergePolicy: FormMergePolicy;
+  /** Bates numbering for the {bates} overlay token; absent when none was applied. */
+  readonly bates?: BatesConfig;
   /** Set when the user has not changed the document since it was opened or exported. */
   readonly clean: boolean;
 }

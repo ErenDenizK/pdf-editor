@@ -58,6 +58,8 @@ import {
   type EngineOutlineNode,
   type FormField,
   type FormFieldKind,
+  type FormFieldSignature,
+  type FormFieldWidget,
   type Glyph,
   type NewAnnotation,
   type OpenedDocument,
@@ -79,6 +81,8 @@ import {
   type VerificationResult,
 } from '../types';
 import { checkXrefStructure } from '../structure/xref-check';
+import { permissionsFromP } from '../pdflib/inspect';
+import { finalizeForms } from './form-finalize';
 import {
   effectiveRect,
   followRect,
@@ -173,6 +177,9 @@ function newAnnotationState(notes: readonly NoteStateFact[] = []): AnnotationSta
 
 const LOG_SOURCE = 'PdfiumAdapter';
 
+/** Files up to this size are always inspected (custom Info keys have no byte token). */
+const ALWAYS_INSPECT_BYTES = 32 * 1024 * 1024;
+
 const EMPTY_FLAGS: SourceFlags = {
   encrypted: false,
   repaired: false,
@@ -194,6 +201,8 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   private readonly inspector: SourceInspector | undefined;
   private enginePromise: Promise<PdfEngine> | undefined;
   private readonly docs = new Map<SourceId, OpenEntry>();
+  /** Sources whose form values were set since open (save regenerates appearances). */
+  private readonly formsEdited = new Set<SourceId>();
   private scratchCounter = 0;
 
   constructor(options: PdfiumAdapterOptions) {
@@ -227,6 +236,7 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     const pending = this.enginePromise;
     this.enginePromise = undefined;
     this.docs.clear();
+    this.formsEdited.clear();
     if (pending) {
       const engine = await pending;
       await engine.destroy?.().toPromise();
@@ -348,9 +358,16 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
           };
         }),
         fingerprint,
-        flags,
-        metadata:
-          inspected.language === undefined ? mapped : { ...mapped, language: inspected.language },
+        flags: doc.isEncrypted
+          ? { ...flags, ...(await this.securityFlags(engine, doc, inspected, options)) }
+          : flags,
+        metadata: {
+          ...mapped,
+          ...(inspected.language === undefined ? {} : { language: inspected.language }),
+          ...(inspected.customInfo && Object.keys(inspected.customInfo).length > 0
+            ? { custom: { ...inspected.customInfo } }
+            : {}),
+        },
         outline: mapOutline(bookmarks.bookmarks, inspected.outline),
       };
     } catch (error) {
@@ -360,9 +377,37 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   }
 
   /**
+   * Security facts of an encrypted document: the authored permissions (PDFium's
+   * FPDF_GetDocUserPermissions, which reports /P even when the owner password unlocked
+   * everything; else the inspector's /P), the handler from the inspector's /Encrypt facts,
+   * and whether a user password was needed (a file that opens without one is owner-only).
+   */
+  private async securityFlags(
+    engine: PdfEngine,
+    doc: PdfDocumentObject,
+    inspected: SourceInspection,
+    options: OpenOptions,
+  ): Promise<Pick<SourceFlags, 'permissions' | 'securityHandler' | 'passwordProtected'>> {
+    const revision = inspected.encryption?.r ?? 3;
+    let permissions = inspected.encryption?.permissions;
+    try {
+      const p = await this.run(engine.getDocUserPermissions(doc), options, 'permissions');
+      if (typeof p === 'number') permissions = permissionsFromP(p | 0, revision);
+    } catch {
+      // Keep the inspector's reading.
+    }
+    return {
+      ...(permissions ? { permissions } : {}),
+      securityHandler: inspected.encryption?.handler ?? 'unknown',
+      passwordProtected: (options.password ?? '') !== '',
+    };
+  }
+
+  /**
    * Runs the inspector on a copy of `bytes` when the file may carry what it reads (page
-   * labels, /Lang; both can hide in compressed object streams). Inspection problems never
-   * fail an open: they only cost the labels.
+   * labels, /Lang; both can hide in compressed object streams; custom Info keys and the
+   * /Encrypt facts, read for files up to ALWAYS_INSPECT_BYTES and every encrypted file).
+   * Inspection problems never fail an open: they only cost those facts.
    */
   private inspect(
     bytes: ArrayBuffer,
@@ -377,7 +422,9 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
         heuristics.langToken ||
         heuristics.outlinesToken ||
         heuristics.popupToken ||
-        heuristics.objectStreams
+        heuristics.objectStreams ||
+        bytes.byteLength <= ALWAYS_INSPECT_BYTES ||
+        indexOfAscii(new Uint8Array(bytes), '/Encrypt') !== -1
       )
     ) {
       return Promise.resolve({});
@@ -410,6 +457,7 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     const entry = this.docs.get(id);
     if (!entry) return;
     this.docs.delete(id);
+    this.formsEdited.delete(id);
     const engine = await this.engine();
     await this.run(engine.closeDocument(entry.doc), undefined, 'close');
   }
@@ -418,7 +466,9 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
    * Renders a page (or `clip`, in user space) to an ImageBitmap. The bitmap is created fresh
    * for the caller and not retained; when this adapter sits behind Comlink, the caller's
    * wrapper should transfer it (`Comlink.transfer(result, [result.bitmap])`).
-   * Defaults: annotations on, interactive form layer off, white background.
+   * Defaults: annotations on, form fields drawn with them (PDFium leaves widgets out of the
+   * annotation pass once a form environment exists, so they need `FPDF_FFLDraw`), white
+   * background.
    */
   async renderPage(id: SourceId, pageIndex: number, options: RenderOptions): Promise<RenderResult> {
     const engine = await this.engine();
@@ -427,7 +477,7 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
       scaleFactor: options.scale,
       rotation: ((options.rotation ?? 0) / 90) & 3,
       withAnnotations: options.withAnnotations ?? true,
-      withForms: options.withForms ?? false,
+      withForms: options.withForms ?? options.withAnnotations ?? true,
       transparentBackground: options.background === 'transparent',
     };
     const raw = options.clip
@@ -891,10 +941,10 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   private async widgets(
     id: SourceId,
     options: EngineCallOptions | undefined,
-  ): Promise<{ page: PdfPageObject; widget: PdfWidgetAnnoObject }[]> {
+  ): Promise<WidgetRef[]> {
     const engine = await this.engine();
     const { doc } = this.entry(id);
-    const result: { page: PdfPageObject; widget: PdfWidgetAnnoObject }[] = [];
+    const result: WidgetRef[] = [];
     for (const page of doc.pages) {
       const widgets = await this.run(engine.getPageAnnoWidgets(doc, page), options, 'formFields');
       for (const widget of widgets) result.push({ page, widget });
@@ -902,57 +952,51 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     return result;
   }
 
+  /**
+   * Form fields in page order, one per fully-qualified name, with every widget (user-space
+   * rects, rotated pages included: see `annotationRectToUser`). Radio export values are the
+   * /Opt entries when the field has them (PDFium reports the appearance state, an index).
+   */
   async listFormFields(
     id: SourceId,
     options: EngineCallOptions = {},
   ): Promise<readonly FormField[]> {
     const widgets = await this.widgets(id, options);
-    const byName = new Map<string, FormField>();
-    for (const { page, widget } of widgets) {
-      const field = widget.field;
-      const kind = FIELD_KINDS[field.type] ?? 'unknown';
-      const existing = byName.get(field.name);
-      if (existing) {
-        // Radio groups (and fields with several widgets): report the checked export value.
-        if (kind === 'radio' && isWidgetChecked(widget)) {
-          byName.set(field.name, { ...existing, value: widget.exportValue ?? field.value });
-        }
-        continue;
-      }
-      const options = 'options' in field ? field.options : undefined;
-      let value: FormField['value'];
-      switch (kind) {
-        case 'checkbox':
-          value = isWidgetChecked(widget);
-          break;
-        case 'radio':
-          value = isWidgetChecked(widget) ? (widget.exportValue ?? field.value) : undefined;
-          break;
-        case 'combobox':
-          value = options?.find((o) => o.isSelected)?.label ?? field.value;
-          break;
-        case 'listbox': {
-          const selected = options?.filter((o) => o.isSelected).map((o) => o.label) ?? [];
-          value = field.flag & PDF_FORM_FIELD_FLAG.CHOICE_MULTL_SELECT ? selected : selected[0];
-          break;
-        }
-        default:
-          value = field.value;
-      }
-      byName.set(field.name, {
-        name: field.name,
-        kind,
-        pageIndex: page.index,
-        rect: annotationRectToUser(pageGeometry(page), widget.rect),
-        ...(value === undefined ? {} : { value }),
-        ...(options ? { options: options.map((o) => o.label) } : {}),
-        readOnly: (field.flag & PDF_FORM_FIELD_FLAG.READONLY) !== 0,
-        required: (field.flag & PDF_FORM_FIELD_FLAG.REQUIRED) !== 0,
-      });
+    const groups = new Map<string, WidgetRef[]>();
+    for (const ref of widgets) {
+      const list = groups.get(ref.widget.field.name);
+      if (list) list.push(ref);
+      else groups.set(ref.widget.field.name, [ref]);
     }
-    return [...byName.values()];
+    const fields = [...groups.values()].map(describeField);
+    const signatureFields = fields.filter((f) => f.kind === 'signature');
+    if (signatureFields.length === 0) return fields;
+    // EmbedPDF lists signatures without their field: pair them only when the counts agree.
+    const engine = await this.engine();
+    const signatures = await this.run(
+      engine.getSignatures(this.entry(id).doc),
+      options,
+      'getSignatures',
+    );
+    if (signatures.length !== signatureFields.length) return fields;
+    return fields.map((field) => {
+      const index = signatureFields.indexOf(field);
+      const signature = index < 0 ? undefined : signatures[index];
+      if (!signature) return field;
+      const facts: FormFieldSignature = {
+        ...(signature.time ? { date: signature.time } : {}),
+        ...(signature.reason ? { reason: signature.reason } : {}),
+      };
+      return { ...field, signature: facts };
+    });
   }
 
+  /**
+   * Sets a field's value (see `FormField` for the value per kind) through PDFium's form
+   * filler, then regenerates the appearance of every widget of the field so the page and
+   * other viewers show the value. Checkbox values may also be state names (`Off`, or a
+   * widget's export value); radio values are export values, `undefined` clears the group.
+   */
   async setFormFieldValue(
     id: SourceId,
     name: string,
@@ -966,43 +1010,127 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     if (!first) {
       throw new EngineError('internal', `Form field ${name} not found`);
     }
-    const kind = FIELD_KINDS[first.widget.field.type] ?? 'unknown';
+    const field = first.widget.field;
+    const kind = FIELD_KINDS[field.type] ?? 'unknown';
+    if ((field.flag & PDF_FORM_FIELD_FLAG.READONLY) !== 0) {
+      throw new EngineError('unsupported', `Form field ${name} is read-only`);
+    }
     const apply = (page: PdfPageObject, widget: PdfWidgetAnnoObject, v: FormFieldValue) =>
       this.run(engine.setFormFieldValue(doc, page, widget, v), options, 'setFormFieldValue');
+    const cleared = value === undefined || value === null || value === false || value === 'Off';
     switch (kind) {
-      case 'text':
-        await apply(first.page, first.widget, { kind: 'text', text: String(value ?? '') });
-        return;
-      case 'checkbox':
-        for (const { page, widget } of targets) {
-          await apply(page, widget, { kind: 'checked', checked: value === true });
-        }
-        return;
-      case 'radio': {
-        const target = targets.find((t) => t.widget.exportValue === value);
-        if (!target)
-          throw new EngineError('internal', `Radio ${name} has no option ${String(value)}`);
-        await apply(target.page, target.widget, { kind: 'checked', checked: true });
-        return;
+      case 'text': {
+        const text =
+          typeof value === 'object' ? value.join('') : typeof value === 'string' ? value : '';
+        await apply(first.page, first.widget, { kind: 'text', text });
+        break;
       }
-      case 'combobox':
-      case 'listbox': {
-        const field = first.widget.field;
+      case 'checkbox': {
+        const exports = targets.map((t) => widgetExportValue(t.widget));
+        if (typeof value === 'string' && !cleared && !exports.includes(value)) {
+          throw new EngineError('unsupported', `Checkbox ${name} has no state ${value}`);
+        }
+        for (const [index, { page, widget }] of targets.entries()) {
+          const on = value === true || (typeof value === 'string' && exports[index] === value);
+          await apply(page, widget, { kind: 'checked', checked: on && !cleared });
+        }
+        break;
+      }
+      case 'radio': {
+        if (cleared || value === '') {
+          const on = targets.filter((t) => isWidgetChecked(t.widget));
+          for (const { page, widget } of on) {
+            await apply(page, widget, { kind: 'checked', checked: false });
+          }
+          const after = (await this.widgets(id, options)).filter(
+            (w) => w.widget.field.name === name && isWidgetChecked(w.widget),
+          );
+          if (after.length > 0) {
+            // PDFium's form filler only turns radio buttons on (NoToggleToOff behaviour).
+            throw new EngineError('unsupported', `Radio group ${name} cannot be cleared`);
+          }
+          break;
+        }
+        const wanted = String(value);
+        const target =
+          targets.find((t) => widgetExportValue(t.widget) === wanted) ??
+          targets.find((t) => t.widget.exportValue === wanted);
+        if (!target) throw new EngineError('internal', `Radio ${name} has no option ${wanted}`);
+        await apply(target.page, target.widget, { kind: 'checked', checked: true });
+        break;
+      }
+      case 'combobox': {
         const choices = 'options' in field ? field.options : [];
-        const wanted = new Set(Array.isArray(value) ? value : [String(value ?? '')]);
-        for (let index = 0; index < choices.length; index++) {
-          const label = choices[index]?.label ?? '';
-          if (kind === 'combobox' && !wanted.has(label)) continue;
+        const wanted =
+          typeof value === 'object' ? (value[0] ?? '') : typeof value === 'string' ? value : '';
+        const index = choices.findIndex((o) => o.label === wanted);
+        // Not an option: free text (editable combo boxes; PDFium refuses it otherwise).
+        await apply(
+          first.page,
+          first.widget,
+          index >= 0
+            ? { kind: 'selection', index, isSelected: true }
+            : { kind: 'text', text: wanted },
+        );
+        break;
+      }
+      case 'listbox': {
+        const choices = 'options' in field ? field.options : [];
+        const wanted = new Set(
+          typeof value === 'object'
+            ? value
+            : typeof value === 'string' && value !== ''
+              ? [value]
+              : [],
+        );
+        const unknown = [...wanted].filter((w) => !choices.some((o) => o.label === w));
+        if (unknown.length > 0) {
+          throw new EngineError('unsupported', `List box ${name} has no option ${unknown[0]}`);
+        }
+        const multi = (field.flag & PDF_FORM_FIELD_FLAG.CHOICE_MULTL_SELECT) !== 0;
+        if (!multi && wanted.size > 1) {
+          throw new EngineError('unsupported', `List box ${name} allows one selection`);
+        }
+        // Deselect first, then select: a single-select list moves its selection.
+        const order = choices
+          .map((o, index) => ({ index, on: wanted.has(o.label), was: o.isSelected }))
+          .filter((c) => c.on !== c.was)
+          .sort((a, b) => Number(a.on) - Number(b.on));
+        for (const change of order) {
           await apply(first.page, first.widget, {
             kind: 'selection',
-            index,
-            isSelected: wanted.has(label),
+            index: change.index,
+            isSelected: change.on,
           });
         }
-        return;
+        break;
       }
       default:
         throw new EngineError('unsupported', `Setting values of ${kind} fields is not supported`);
+    }
+    this.formsEdited.add(id);
+    await this.regenerateAppearances(doc, targets, options);
+  }
+
+  /** Regenerates the appearance streams of the given widgets (grouped per page). */
+  private async regenerateAppearances(
+    doc: PdfDocumentObject,
+    targets: readonly WidgetRef[],
+    options: EngineCallOptions,
+  ): Promise<void> {
+    const engine = await this.engine();
+    const byPage = new Map<PdfPageObject, string[]>();
+    for (const { page, widget } of targets) {
+      const ids = byPage.get(page);
+      if (ids) ids.push(widget.id);
+      else byPage.set(page, [widget.id]);
+    }
+    for (const [page, ids] of byPage) {
+      await this.run(
+        engine.regenerateWidgetAppearances(doc, page, ids),
+        options,
+        'regenerateWidgetAppearances',
+      );
     }
   }
 
@@ -1041,15 +1169,26 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     const state = entry.annotations;
     const includeComments = (options.includeComments ?? true) && !options.flattenAnnotations;
     const finalize = state.dirty || !includeComments;
-    if (finalize && entry.doc.isEncrypted && !options.removeSecurity) {
+    // Forms: filled fields get every text/choice appearance regenerated and
+    // /NeedAppearances false; flattening forms bakes widgets only (form-finalize.ts).
+    const formPass = this.formsEdited.has(id) || options.flattenForms === true;
+    if ((finalize || formPass) && entry.doc.isEncrypted && !options.removeSecurity) {
       // pdf-lib can read the encrypted copy but would write it unencrypted.
       throw new EngineError(
         'unsupported',
-        'Annotation edits in an encrypted document can only be saved with removeSecurity (the export re-encrypts the output)',
+        'Annotation or form edits in an encrypted document can only be saved with removeSecurity (the export re-encrypts the output)',
       );
     }
     if (options.removeSecurity && entry.doc.isEncrypted) {
       await this.run(engine.removeEncryption(entry.doc), options, 'save');
+    }
+    if (formPass) {
+      const widgets = await this.widgets(id, options);
+      await this.regenerateAppearances(
+        entry.doc,
+        widgets.filter((w) => REGENERATED_KINDS.has(FIELD_KINDS[w.widget.field.type] ?? 'unknown')),
+        options,
+      );
     }
     let bytes = await this.run(engine.saveAsCopy(entry.doc), options, 'save');
     if (finalize) {
@@ -1062,28 +1201,37 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
       };
       bytes = await this.finalize(bytes, request, options);
     }
-    if (!options.flattenAnnotations && !options.flattenForms) {
-      return bytes;
-    }
-    return this.withScratch(bytes, entry.password, options, async (doc) => {
-      for (const page of doc.pages) {
-        const annotations = await this.run(
-          engine.getPageAnnotations(doc, page),
-          options,
-          'flatten',
-        );
-        for (const annotation of annotations) {
-          const type = annotation.type;
-          // Links stay interactive; popups have no appearance and go with their parents.
-          if (type === PdfAnnotationSubtype.LINK || type === PdfAnnotationSubtype.POPUP) continue;
-          const isWidget = type === PdfAnnotationSubtype.WIDGET;
-          if (isWidget ? options.flattenForms : options.flattenAnnotations) {
+    if (options.flattenAnnotations) {
+      bytes = await this.withScratch(bytes, entry.password, options, async (doc) => {
+        for (const page of doc.pages) {
+          const annotations = await this.run(
+            engine.getPageAnnotations(doc, page),
+            options,
+            'flatten',
+          );
+          for (const annotation of annotations) {
+            const type = annotation.type;
+            // Links stay interactive; popups have no appearance and go with their parents;
+            // widgets are the form pass's (flattened only with `flattenForms`).
+            if (
+              type === PdfAnnotationSubtype.LINK ||
+              type === PdfAnnotationSubtype.POPUP ||
+              type === PdfAnnotationSubtype.WIDGET
+            ) {
+              continue;
+            }
             await this.run(engine.flattenAnnotation(doc, page, annotation), options, 'flatten');
           }
         }
-      }
-      return this.run(engine.saveAsCopy(doc), options, 'save');
-    });
+        return this.run(engine.saveAsCopy(doc), options, 'save');
+      });
+    }
+    if (formPass) {
+      throwIfAborted(options.signal, 'save');
+      // Encrypted sources reach here only with removeSecurity: the bytes are plain.
+      bytes = (await finalizeForms(bytes, { flatten: options.flattenForms === true })).bytes;
+    }
+    return bytes;
   }
 
   /** Runs the annotation post-pass in the inspector's worker when it offers one. */
@@ -1292,6 +1440,9 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Field kinds whose appearances the form pass regenerates (buttons keep theirs). */
+const REGENERATED_KINDS: ReadonlySet<FormFieldKind> = new Set(['text', 'combobox', 'listbox']);
+
 const FIELD_KINDS: Partial<Record<PDF_FORM_FIELD_TYPE, FormFieldKind>> = {
   [PDF_FORM_FIELD_TYPE.TEXTFIELD]: 'text',
   [PDF_FORM_FIELD_TYPE.CHECKBOX]: 'checkbox',
@@ -1301,6 +1452,111 @@ const FIELD_KINDS: Partial<Record<PDF_FORM_FIELD_TYPE, FormFieldKind>> = {
   [PDF_FORM_FIELD_TYPE.PUSHBUTTON]: 'button',
   [PDF_FORM_FIELD_TYPE.SIGNATURE]: 'signature',
 };
+
+/** A widget and the page it sits on. */
+interface WidgetRef {
+  readonly page: PdfPageObject;
+  readonly widget: PdfWidgetAnnoObject;
+}
+
+/**
+ * What a checkbox / radio widget stands for when on. PDFium reports the appearance state
+ * name; when the field has /Opt, state names are indices into it (ISO 32000-2 12.7.5.2.4,
+ * as pdf-lib writes radio groups), so the /Opt entry is the export value.
+ */
+function widgetExportValue(widget: PdfWidgetAnnoObject): string | undefined {
+  const raw = widget.exportValue;
+  if (raw === undefined) return undefined;
+  const field = widget.field;
+  const options = 'options' in field ? field.options : undefined;
+  if (options && /^\d+$/.test(raw)) {
+    const label = options[Number(raw)]?.label;
+    if (label) return label;
+  }
+  return raw;
+}
+
+/** One `FormField` from all widgets sharing a name (in page, then /Annots order). */
+function describeField(refs: readonly WidgetRef[]): FormField {
+  const first = refs[0] as WidgetRef;
+  const field = first.widget.field;
+  const flag = field.flag;
+  const kind = FIELD_KINDS[field.type] ?? 'unknown';
+  const has = (bit: PDF_FORM_FIELD_FLAG) => (flag & bit) !== 0;
+  const widgets: FormFieldWidget[] = refs.map(({ page, widget }) => {
+    const exportValue =
+      kind === 'checkbox' || kind === 'radio' ? widgetExportValue(widget) : undefined;
+    return {
+      pageIndex: page.index,
+      rect: annotationRectToUser(pageGeometry(page), widget.rect),
+      ...(exportValue === undefined ? {} : { exportValue }),
+    };
+  });
+  const exports = [
+    ...new Set(widgets.flatMap((w) => (w.exportValue === undefined ? [] : [w.exportValue]))),
+  ];
+  const choices = 'options' in field ? field.options : undefined;
+  let value: FormField['value'];
+  let options: readonly string[] | undefined;
+  let exportValues: readonly string[] | undefined;
+  switch (kind) {
+    case 'checkbox':
+      value = refs.some((r) => isWidgetChecked(r.widget));
+      exportValues = exports;
+      break;
+    case 'radio': {
+      const on = refs.find((r) => isWidgetChecked(r.widget));
+      value = on ? widgetExportValue(on.widget) : undefined;
+      options = exports;
+      exportValues = exports;
+      break;
+    }
+    case 'combobox':
+      options = choices?.map((o) => o.label);
+      exportValues = options;
+      value = choices?.find((o) => o.isSelected)?.label ?? field.value;
+      break;
+    case 'listbox': {
+      options = choices?.map((o) => o.label);
+      exportValues = options;
+      const selected = choices?.filter((o) => o.isSelected).map((o) => o.label) ?? [];
+      value = has(PDF_FORM_FIELD_FLAG.CHOICE_MULTL_SELECT) ? selected : selected[0];
+      break;
+    }
+    case 'button':
+    case 'signature':
+      value = undefined;
+      break;
+    default:
+      value = field.value;
+  }
+  const maxLength =
+    kind === 'text' && 'maxLen' in field && typeof field.maxLen === 'number' && field.maxLen > 0
+      ? Math.round(field.maxLen)
+      : undefined;
+  const firstWidget = widgets[0] as FormFieldWidget;
+  return {
+    name: field.name,
+    kind,
+    pageIndex: firstWidget.pageIndex,
+    rect: firstWidget.rect,
+    ...(value === undefined ? {} : { value }),
+    ...(options ? { options } : {}),
+    ...(exportValues ? { exportValues } : {}),
+    readOnly: has(PDF_FORM_FIELD_FLAG.READONLY),
+    required: has(PDF_FORM_FIELD_FLAG.REQUIRED),
+    ...(field.alternateName ? { tooltip: field.alternateName } : {}),
+    ...(kind === 'text' && has(PDF_FORM_FIELD_FLAG.TEXT_MULTIPLINE) ? { multiline: true } : {}),
+    ...(kind === 'text' && has(PDF_FORM_FIELD_FLAG.TEXT_PASSWORD) ? { password: true } : {}),
+    ...(kind === 'text' && has(PDF_FORM_FIELD_FLAG.TEXT_COMB) ? { comb: true } : {}),
+    ...(maxLength === undefined ? {} : { maxLength }),
+    ...(kind === 'listbox' && has(PDF_FORM_FIELD_FLAG.CHOICE_MULTL_SELECT)
+      ? { multiSelect: true }
+      : {}),
+    ...(kind === 'combobox' && has(PDF_FORM_FIELD_FLAG.CHOICE_EDIT) ? { editable: true } : {}),
+    widgets,
+  };
+}
 
 function flattenTitles(nodes: readonly EngineOutlineNode[], into: string[] = []): string[] {
   for (const node of nodes) {

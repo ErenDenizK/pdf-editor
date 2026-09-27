@@ -9,3 +9,4 @@ export * from './history';
 export * from './selectors';
 export * from './serialize';
 export * from './invariants';
+export * from './metadata';

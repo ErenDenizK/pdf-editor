@@ -98,6 +98,7 @@ describe('command groups', () => {
     const groups = () => [...new Set(commandRegistry.list().map((c) => c.group))].sort();
     expect(groups()).toEqual(
       [
+        'Document',
         'Documents',
         'Edit',
         'File',
@@ -115,6 +116,7 @@ describe('command groups', () => {
       expect(groups()).toEqual(
         [
           'Araçlar',
+          'Belge',
           'Belgeler',
           'Dil',
           'Dosya',

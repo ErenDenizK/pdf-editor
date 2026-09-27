@@ -7,8 +7,11 @@
 import type {
   DestinationView,
   DocumentMetadata,
+  MetadataStrip,
+  PermissionFlags,
   Rect,
   Rotation,
+  SecurityHandler,
   SecurityPolicy,
   Size,
   SourceFlags,
@@ -310,15 +313,74 @@ export type FormFieldKind =
   | 'signature'
   | 'unknown';
 
+/** One widget (on-page appearance) of a form field. */
+export interface FormFieldWidget {
+  readonly pageIndex: number;
+  /** Widget /Rect in unrotated user space (like annotation rects). */
+  readonly rect: Rect;
+  /**
+   * Checkbox / radio: the value this widget stands for when it is on (the /Opt entry for
+   * its state when the field has /Opt, else its appearance state name, e.g. `Yes`).
+   */
+  readonly exportValue?: string;
+}
+
+/**
+ * A signature on a signature field, as far as the engine can read it. Never validated:
+ * presence of these facts says nothing about the signature's integrity.
+ */
+export interface FormFieldSignature {
+  /** Signer name (/Name), when the engine exposes it. */
+  readonly signer?: string;
+  /** Signing time (/M) as the PDF wrote it (`D:YYYYMMDDHHmmSS…`) or ISO 8601. */
+  readonly date?: string;
+  readonly reason?: string;
+}
+
+/**
+ * A form field (all widgets sharing a fully-qualified name). Values:
+ * text → string; checkbox → boolean; radio → the selected export value (undefined when
+ * none is on); combo box → the selected option; list box → the selected option, or every
+ * selected option when `multiSelect`.
+ */
 export interface FormField {
   readonly name: string;
   readonly kind: FormFieldKind;
+  /** Page and rect of the first widget (see `widgets` for all of them). */
   readonly pageIndex: number;
   readonly rect: Rect;
   readonly value?: string | readonly string[] | boolean;
+  /**
+   * Choices: combo / list box options (display labels), radio export values in widget
+   * order. What `value` holds and what `setFormFieldValue` accepts.
+   */
   readonly options?: readonly string[];
+  /**
+   * The value exported for each of `options` (same order). Radio: the export values
+   * themselves. Combo / list box: the display labels (EmbedPDF 2.15 does not expose /Opt
+   * export pairs). Checkbox: its on state(s).
+   */
+  readonly exportValues?: readonly string[];
   readonly readOnly: boolean;
   readonly required: boolean;
+  /** Alternate field name (/TU), meant for display. */
+  readonly tooltip?: string;
+  /** Text: /Ff multiline. */
+  readonly multiline?: boolean;
+  /** Text: /Ff password. */
+  readonly password?: boolean;
+  /** Text: /Ff comb (characters spread over `maxLength` cells). */
+  readonly comb?: boolean;
+  /** Text: /MaxLen when the widget carries it. */
+  readonly maxLength?: number;
+  /** List box: /Ff MultiSelect. */
+  readonly multiSelect?: boolean;
+  /** Combo box: /Ff Edit (free text allowed). */
+  readonly editable?: boolean;
+  /** Every widget of the field, in page order then /Annots order. */
+  readonly widgets?: readonly FormFieldWidget[];
+  /** Signature fields: what the engine read about a signature, when one is present. */
+  readonly signature?: FormFieldSignature;
 }
 
 export interface SaveOptions extends EngineCallOptions {
@@ -431,6 +493,11 @@ export interface ReconciliationReport {
   readonly formFieldsUnified: readonly string[];
   readonly structureTreeRemoved: boolean;
   readonly xfaRemoved: boolean;
+  /**
+   * What "Strip metadata" removed (`DocumentMetadata.strip`), as counts per item; absent
+   * when nothing was to be stripped.
+   */
+  readonly metadataStripped?: MetadataStripReport;
   readonly warnings: readonly string[];
 }
 
@@ -463,6 +530,10 @@ export interface SourceInspection {
    * position in the page's /Annots; `nm` the note's /NM when it has one.
    */
   readonly noteStates?: readonly NoteStateFact[];
+  /** Custom (non-standard) text keys of the Info dictionary, name without slash → text. */
+  readonly customInfo?: Readonly<Record<string, string>>;
+  /** The /Encrypt dictionary's facts, for encrypted files. */
+  readonly encryption?: EncryptionFacts;
 }
 
 export interface OutlineItemFacts {
@@ -475,6 +546,18 @@ export interface OutlineItemFacts {
   };
 }
 
+/** Facts of a standard security handler's /Encrypt dictionary (ISO 32000-2 §7.6.4). */
+export interface EncryptionFacts {
+  readonly handler: SecurityHandler;
+  /** /Filter, e.g. `Standard`. */
+  readonly filter: string;
+  readonly v: number;
+  readonly r: number;
+  /** Key length in bits, when stated or implied. */
+  readonly keyBits?: number;
+  /** What /P allows (absent when /P is missing). */
+  readonly permissions?: PermissionFlags;
+}
 export interface NoteStateFact {
   readonly pageIndex: number;
   readonly index: number;
@@ -504,6 +587,12 @@ export interface InspectOptions extends EngineCallOptions {
 export interface SourceInspector {
   /** Reads `bytes` without mutating them. Never rejects for damaged files; returns `{}`. */
   inspect(bytes: ArrayBuffer, options?: InspectOptions): Promise<SourceInspection>;
+  /**
+   * Optional: the document tools' diagnostics (spec document-tools.md §7) and what "Strip
+   * metadata" would find. `bytes` may be transferred. Never rejects for damaged files: the
+   * result then carries what could be read and a warning.
+   */
+  diagnose?(bytes: ArrayBuffer, options?: InspectOptions): Promise<SourceDiagnostics>;
   /**
    * Optional: runs the annotation post-pass of `PdfEditor.save()` off the caller's thread
    * (the assembly worker). `bytes` may be transferred. Without it the adapter runs the same
@@ -645,4 +734,115 @@ export interface EngineCapabilities {
   readonly ocr: boolean;
   readonly threads: boolean;
   readonly maxHeapBytes: number;
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics and metadata findings (pdf-lib adapter, spec document-tools.md §3, §7)
+// ---------------------------------------------------------------------------
+
+/** Removal counts reported by the assembler for `DocumentMetadata.strip`. */
+export interface MetadataStripReport {
+  /** Info keys removed (standard and custom), counted over the sources. */
+  readonly infoKeys: number;
+  /** XMP packets removed (document, pages, images and forms). */
+  readonly xmpPackets: number;
+  /** Embedded files and file attachment annotations removed. */
+  readonly attachments: number;
+  /** JavaScript actions, /OpenAction and /AA entries removed. */
+  readonly javascript: number;
+  readonly pieceInfo: number;
+  readonly thumbnails: number;
+  /** Annotations whose author or dates were removed. */
+  readonly annotationAuthors: number;
+  /** The selection that was applied. */
+  readonly applied: MetadataStrip;
+}
+
+export interface FontFact {
+  /** /BaseFont without the subset prefix. */
+  readonly name: string;
+  /** /Subtype: Type1, TrueType, Type0, Type3, MMType1, … */
+  readonly subtype: string;
+  readonly embedded: boolean;
+  /** The name carries a subset tag (`ABCDEF+`). */
+  readonly subset: boolean;
+}
+
+export interface ImageFact {
+  /** First page (0-based) that draws the image directly, when found. */
+  readonly pageIndex?: number;
+  readonly width: number;
+  readonly height: number;
+  /** /Filter of the image stream (last filter), e.g. DCTDecode, FlateDecode. */
+  readonly filter?: string;
+  /** /ColorSpace name (family for arrays), e.g. DeviceRGB, ICCBased, Indexed. */
+  readonly colorSpace?: string;
+  readonly bitsPerComponent?: number;
+  /**
+   * Approximate effective resolution at the first placement found in a page content stream
+   * (pixels per inch of the placed size, the lower of both axes); absent when the image is
+   * only drawn inside forms or patterns.
+   */
+  readonly dpi?: number;
+}
+
+/** What a source carries that "Strip metadata" can remove (counts; 0 = none found). */
+export interface MetadataFindings {
+  /** Standard Info keys present (Title, Author, …; Producer included). */
+  readonly infoKeys: readonly string[];
+  /** Custom Info keys present. */
+  readonly customKeys: readonly string[];
+  /** XMP packets (document, pages, images, forms). */
+  readonly xmpPackets: number;
+  /** Embedded files in /Names /EmbeddedFiles plus file attachment annotations. */
+  readonly attachments: number;
+  /** File names of embedded files (capped). */
+  readonly attachmentNames: readonly string[];
+  /** JavaScript: name tree entries, JS actions, /OpenAction and /AA entries. */
+  readonly javascript: number;
+  readonly pieceInfo: number;
+  readonly thumbnails: number;
+  /** Annotations with an author (/T) or dates (/M, /CreationDate); widgets excluded. */
+  readonly annotationAuthors: number;
+}
+
+export interface SourceDiagnostics {
+  /** Effective version: the header's, raised by catalog /Version; e.g. `1.7`. */
+  readonly version: string;
+  /** Adobe extension level (/Extensions /ADBE), e.g. 3 for AES-256 on 1.7. */
+  readonly extensionLevel?: number;
+  readonly pageCount: number;
+  readonly encryption?: EncryptionFacts;
+  readonly linearized: boolean;
+  /** /MarkInfo /Marked true or a /StructTreeRoot. */
+  readonly tagged: boolean;
+  readonly formType: 'none' | 'acroform' | 'xfa';
+  /** Form fields (terminal) in /AcroForm /Fields. */
+  readonly formFields: number;
+  readonly fonts: {
+    readonly total: number;
+    readonly embedded: number;
+    readonly notEmbedded: number;
+    readonly subset: number;
+    /** Distinct fonts (capped at 200). */
+    readonly list: readonly FontFact[];
+  };
+  readonly images: {
+    readonly count: number;
+    /** Distinct image XObjects (capped at 200). */
+    readonly list: readonly ImageFact[];
+    /** Over images with a DPI estimate; approximate. */
+    readonly minDpi?: number;
+    readonly medianDpi?: number;
+  };
+  /** Annotations excluding widgets and popups, by /Subtype. */
+  readonly annotations: {
+    readonly total: number;
+    readonly bySubtype: Readonly<Record<string, number>>;
+  };
+  readonly metadata: MetadataFindings;
+  /** Structural warnings (xref check, parse problems, limits reached), English. */
+  readonly warnings: readonly string[];
+  /** Some facts could not be read (e.g. encrypted without the password). */
+  readonly partial: boolean;
 }

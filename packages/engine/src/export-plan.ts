@@ -50,8 +50,11 @@ export interface ExportPlan {
 }
 
 export interface ExportPlanOptions {
-  /** Overrides the document's security policy, as `AssemblyOptions.security` does. */
-  readonly security?: SecurityPolicy;
+  /**
+   * Overrides the document's security policy, as `AssemblyOptions.security` does; `null`
+   * exports without a password even when the document has a policy.
+   */
+  readonly security?: SecurityPolicy | null;
 }
 
 function outlineTitles(nodes: readonly OutlineNode[]): string[] {
@@ -66,12 +69,15 @@ export function planExport(
   options: ExportPlanOptions = {},
 ): ExportPlan {
   const doc = getDocument(ws, documentId);
-  const security = options.security ?? doc.security;
+  const security = options.security === null ? undefined : (options.security ?? doc.security);
   const password = security?.userPassword;
   const labeled = needsPageLabels(ws, doc);
   const outline = dropUnresolved(doc.outline);
+  const { security: _documentPolicy, ...rest } = doc;
   const document: VirtualDocument = {
-    ...doc,
+    ...rest,
+    // The effective policy only: the assembler falls back to the document's own.
+    ...(security === undefined ? {} : { security }),
     labels: labeled ? deriveLabelRanges(ws, doc) : [],
     outline,
   };

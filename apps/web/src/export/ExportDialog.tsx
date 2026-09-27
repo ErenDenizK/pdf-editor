@@ -1,6 +1,8 @@
 /**
- * Export dialog (ARCHITECTURE.md §4): file name, compatibility mode and the annotation
- * options (flatten, comments as popups; spec viewer-annotations.md §6), then assembly and
+ * Export dialog (ARCHITECTURE.md §4): the options in sections (document-tools spec §8):
+ * Output (file name, compatibility mode), Security (effective password outcome, override),
+ * Annotations (flatten, comments as popups; spec viewer-annotations.md §6), Forms
+ * (flatten), Compression and Metadata (policy), then assembly and
  * verification with progress, then the reconciliation summary — what was kept, rewritten,
  * renamed or removed — and only then the Save/Download button (a fresh click, which the
  * save picker needs as user activation). Styled as the password dialog.
@@ -8,11 +10,26 @@
 import { Dialog } from '@base-ui/react/dialog';
 import type { DocumentId } from '@pdf-editor/document-model';
 import { X } from 'lucide-react';
-import { type RefObject, type SyntheticEvent, useEffect, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  type RefObject,
+  type SyntheticEvent,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import { formatBytes } from '../files/file-filters';
+import {
+  ExportMetadataSection,
+  ExportSecuritySection,
+  type SecurityChoice,
+} from '../document/ExportSections';
+import { DocumentDialogs } from '../document/DocumentDialogs';
+import { useFormStore } from '../forms/form-store';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
+import { CompressionExportRow } from '../tools/CompressionExportRow';
 import overlay from '../shell/ShortcutOverlay.module.css';
 import { pagesPhrase, useWorkspaceStore } from '../state/workspace-store';
 import { useRetained } from '../ui/use-retained';
@@ -79,6 +96,14 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
   const [compatibility, setCompatibility] = useState(false);
   const [flattenAnnotations, setFlattenAnnotations] = useState(false);
   const [includeComments, setIncludeComments] = useState(true);
+  const [securityChoice, setSecurityChoice] = useState<SecurityChoice>('document');
+  // "Flatten on export" is shared with the Forms panel (forms/form-store.ts).
+  const flattenForms = useFormStore((s) => s.flattenOnExport);
+  const hasForms = useWorkspaceStore((s) =>
+    (doc?.pages ?? []).some(
+      (p) => p.ref.kind === 'source' && s.workspace.sources[p.ref.source]?.flags.hasAcroForm,
+    ),
+  );
   const [step, setStep] = useState<Step>({ kind: 'form' });
   const controller = useRef<AbortController | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -100,7 +125,9 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
     const result = await prepareExport(documentId, {
       compatibility,
       flattenAnnotations,
+      flattenForms: hasForms && flattenForms,
       includeComments,
+      ...(securityChoice === 'none' ? { security: null } : {}),
       signal: abort.signal,
       onProgress: (progress) => {
         if (!abort.signal.aborted) setStep({ kind: 'working', progress });
@@ -172,52 +199,86 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
               files: m.files_count({ count: sourceCount }),
             })}
           </Dialog.Description>
-          <label className={styles.field}>
-            <span className={styles.label}>{m.export_file_name()}</span>
-            <input
-              ref={nameRef}
-              className={styles.input}
-              value={fileName}
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(event) => setFileName(event.target.value)}
-            />
-          </label>
-          <label className={styles.check}>
-            <input
-              type="checkbox"
-              checked={compatibility}
-              onChange={(event) => setCompatibility(event.target.checked)}
-            />
-            <span>
-              {m.export_compatibility()}
-              <span className={styles.hint}>{m.export_compatibility_hint()}</span>
-            </span>
-          </label>
-          <label className={styles.check}>
-            <input
-              type="checkbox"
-              checked={flattenAnnotations}
-              onChange={(event) => setFlattenAnnotations(event.target.checked)}
-            />
-            <span>
-              {m.export_flatten_annotations()}
-              <span className={styles.hint}>{m.export_flatten_annotations_hint()}</span>
-            </span>
-          </label>
-          <label className={styles.check}>
-            <input
-              type="checkbox"
-              // Flattened annotations have no comments left to show.
-              checked={includeComments && !flattenAnnotations}
-              disabled={flattenAnnotations}
-              onChange={(event) => setIncludeComments(event.target.checked)}
-            />
-            <span>
-              {m.export_include_comments()}
-              <span className={styles.hint}>{m.export_include_comments_hint()}</span>
-            </span>
-          </label>
+          <ExportSection title={m.export_section_output()}>
+            <label className={styles.field}>
+              <span className={styles.label}>{m.export_file_name()}</span>
+              <input
+                ref={nameRef}
+                className={styles.input}
+                value={fileName}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(event) => setFileName(event.target.value)}
+              />
+            </label>
+            <label className={styles.check}>
+              <input
+                type="checkbox"
+                checked={compatibility}
+                onChange={(event) => setCompatibility(event.target.checked)}
+              />
+              <span>
+                {m.export_compatibility()}
+                <span className={styles.hint}>{m.export_compatibility_hint()}</span>
+              </span>
+            </label>
+          </ExportSection>
+          {doc ? (
+            <ExportSection title={m.export_security()}>
+              <ExportSecuritySection
+                doc={doc}
+                choice={securityChoice}
+                onChoice={setSecurityChoice}
+              />
+            </ExportSection>
+          ) : null}
+          <ExportSection title={m.export_section_annotations()}>
+            <label className={styles.check}>
+              <input
+                type="checkbox"
+                checked={flattenAnnotations}
+                onChange={(event) => setFlattenAnnotations(event.target.checked)}
+              />
+              <span>
+                {m.export_flatten_annotations()}
+                <span className={styles.hint}>{m.export_flatten_annotations_hint()}</span>
+              </span>
+            </label>
+            <label className={styles.check}>
+              <input
+                type="checkbox"
+                // Flattened annotations have no comments left to show.
+                checked={includeComments && !flattenAnnotations}
+                disabled={flattenAnnotations}
+                onChange={(event) => setIncludeComments(event.target.checked)}
+              />
+              <span>
+                {m.export_include_comments()}
+                <span className={styles.hint}>{m.export_include_comments_hint()}</span>
+              </span>
+            </label>
+          </ExportSection>
+          {/* Forms: the flatten option (forms engineer, forms/form-store.ts). */}
+          {hasForms ? (
+            <ExportSection title={m.export_section_forms()}>
+              <label className={styles.check}>
+                <input
+                  type="checkbox"
+                  checked={flattenForms}
+                  onChange={(e) => useFormStore.getState().setFlattenOnExport(e.target.checked)}
+                />
+                <span>{m.export_flatten_forms()}</span>
+              </label>
+            </ExportSection>
+          ) : null}
+          <ExportSection title={m.export_section_compression()}>
+            <CompressionExportRow documentId={documentId} className={styles.description} />
+          </ExportSection>
+          {doc ? (
+            <ExportSection title={m.export_section_metadata()}>
+              <ExportMetadataSection doc={doc} />
+            </ExportSection>
+          ) : null}
           <div className={styles.actions}>
             <Dialog.Close className={styles.secondary}>{m.common_cancel()}</Dialog.Close>
             <button type="submit" className={styles.primary} disabled={pageCount === 0}>
@@ -281,7 +342,29 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
           </div>
         </div>
       ) : null}
+      {/* Set password / Strip metadata opened from the sections nest in this dialog. */}
+      <DocumentDialogs origin="export" />
     </Dialog.Popup>
+  );
+}
+
+/**
+ * One section of the export form (spec document-tools.md §8): Output, Security,
+ * Annotations, Forms, Compression, Metadata. A section is a fieldset with a legend, so
+ * adding an option is one line inside the right section.
+ */
+function ExportSection({
+  title,
+  children,
+}: {
+  readonly title: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <fieldset className={styles.section}>
+      <legend className={styles.sectionTitle}>{title}</legend>
+      {children}
+    </fieldset>
   );
 }
 
@@ -298,7 +381,7 @@ function ReviewStep({
   readonly onBack: () => void;
   readonly onSave: () => void;
 }) {
-  const items = summarizeReport(prepared.report, prepared.sourceNotes);
+  const items = summarizeReport(prepared.report, prepared.sourceNotes, prepared.outcome);
   const seconds = (prepared.durationMs / 1000).toFixed(1);
   return (
     <div className={styles.body}>
@@ -311,6 +394,9 @@ function ReviewStep({
       <p className={styles.verified} data-testid="export-verified">
         {m.export_verified({ seconds })}
       </p>
+      {prepared.compression ? (
+        <CompressionExportRow className={styles.verified} result={prepared.compression} />
+      ) : null}
       {items.length > 0 ? (
         <ul className={styles.summary} aria-label={m.export_summary_label()}>
           {items.map((item) => (

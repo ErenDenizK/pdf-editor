@@ -9,10 +9,14 @@
  */
 
 import {
+  beginMarkedContent,
+  beginText,
+  concatTransformationMatrix,
   degrees,
-  drawImage,
-  drawText,
+  drawObject,
   EncryptedPDFError,
+  endMarkedContent,
+  endText,
   PDFArray,
   PDFDict,
   PDFDocument,
@@ -33,12 +37,21 @@ import {
   popGraphicsState,
   pushGraphicsState,
   rgb,
+  setFillingColor,
+  setFontAndSize,
+  setGraphicsState,
+  setLineWidth,
+  setStrokingColor,
+  setTextMatrix,
+  setTextRenderingMode,
+  showText,
   StandardFonts,
+  TextRenderingMode,
 } from '@cantoo/pdf-lib';
 import type {
   Destination,
   FontSpec,
-  ImageOverlay,
+  OverlayOp,
   OutlineNode,
   PageId,
   PageLabelRange,
@@ -64,24 +77,33 @@ import {
   type InspectOptions,
   type PdfAssembler,
   type ReconciliationReport,
+  type SourceDiagnostics,
   type SourceInspection,
   type SourceInspector,
 } from '../types';
+import { loadBundledFont } from '../fonts/bundled-fonts';
 import {
-  anchorOrigin,
-  displaySize,
-  normalizeRotation,
-  placeAt,
-  placeOverlay,
-  tileOrigins,
-} from './overlay-geometry';
+  type ResolvedFont,
+  resolveFont,
+  SYNTHETIC_BOLD_STROKE,
+  SYNTHETIC_ITALIC_DEGREES,
+  substituteFont,
+} from '../fonts/font-catalog';
+import { displaySize, normalizeRotation, type Placement, placeAt } from './overlay-geometry';
+import {
+  layoutOverlay,
+  type OverlayBox,
+  type OverlayTextContext,
+  overlayText,
+  pageInRange,
+} from './overlay-layout';
 import { checkAnnotationConformance } from '../annotations/conformance';
 import { finalizeAnnotations } from '../annotations/finalize';
-import { inspectSource, readLanguage } from './inspect';
+import { inspectSource } from './inspect';
+import { applyMetadata } from './metadata';
+import { diagnoseSource } from './metadata-diagnostics';
 import { nameText, namedDestinationResolver } from './named-destinations';
 import { effectiveRanges, labelForIndex, PDF_LABEL_STYLE } from './page-labels';
-
-const PRODUCER = 'pdf-editor';
 
 /** Private marker written on link annotations between sanitizing and rewriting. */
 const LINK_TAG = PDFName.of('PdfEditorLinkTarget');
@@ -186,17 +208,6 @@ function sniffImage(bytes: Uint8Array): 'png' | 'jpeg' | undefined {
   return undefined;
 }
 
-function parseDate(value: string | undefined): Date | undefined {
-  if (value === undefined) return undefined;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? undefined : date;
-}
-
-function isoDate(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
 /** Accepts 0..1 or 0..255 components. */
 function toPdfColor(color: RgbColor) {
   const scale = Math.max(color.r, color.g, color.b) > 1 ? 255 : 1;
@@ -266,7 +277,14 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
     );
   }
 
-  /** One label per page, or undefined when the file has no /PageLabels. */
+  /** Diagnostics and metadata findings (metadata-diagnostics.ts). Never rejects. */
+  diagnose(bytes: ArrayBuffer, options: InspectOptions = {}): Promise<SourceDiagnostics> {
+    throwIfAborted(options.signal);
+    return diagnoseSource(
+      bytes,
+      options.password === undefined ? {} : { password: options.password },
+    );
+  } /** One label per page, or undefined when the file has no /PageLabels. */
   async getPageLabels(
     bytes: ArrayBuffer,
     options: InspectOptions = {},
@@ -406,27 +424,29 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
     // new page objects; drop links to removed pages and to names that do not resolve.
     rewriteLinks(out, placed, firstOutputIndex, counters);
 
-    // 6. Overlays.
+    // 6. Overlays (page furniture), laid out by overlay-layout.ts.
     const labelRanges = effectiveRanges(vdoc.labels, placed.length);
-    const title = vdoc.metadata.title ?? vdoc.title;
-    const today = isoDate(new Date());
-    const fonts = new Map<StandardFonts, PDFFont>();
+    const overlayContext: OverlayContext = {
+      count: placed.length,
+      text: {
+        label: '',
+        title: vdoc.metadata.title ?? vdoc.title,
+        date: new Date(),
+        ...(vdoc.metadata.language ? { locale: vdoc.metadata.language } : {}),
+        ...(vdoc.bates ? { bates: vdoc.bates } : {}),
+      },
+      blobs: input.blobs,
+      fonts: new OverlayFonts(out),
+      images: imageCache,
+      forms: new Map(),
+      warnings,
+    };
     for (const [index, entry] of placed.entries()) {
       if (entry.virtual.overlays.length === 0) continue;
       throwIfAborted(signal);
-      await materializeOverlays(out, entry, {
-        tokens: {
-          page: String(index + 1),
-          pages: String(placed.length),
-          label: labelForIndex(labelRanges, index),
-          title,
-          date: today,
-          // TODO(M2): {bates} numbering.
-        },
-        blobs: input.blobs,
-        fonts,
-        images: imageCache,
-        warnings,
+      await materializeOverlays(out, entry, index, {
+        ...overlayContext,
+        text: { ...overlayContext.text, label: labelForIndex(labelRanges, index) },
       });
     }
 
@@ -441,7 +461,15 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
     if (structureTreeRemoved) {
       warnings.add('Tagged PDF structure was removed; the output is not tagged');
     }
-    applyMetadata(out, vdoc, sources, needed, warnings);
+    const metadataStripped = await applyMetadata(
+      out,
+      vdoc,
+      [...needed.keys()].flatMap((id) => {
+        const doc = sources.get(id)?.doc;
+        return doc ? [doc] : [];
+      }),
+      warnings,
+    );
 
     // 8. Compatibility and security.
     if (options.compatibility) {
@@ -476,6 +504,7 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
       formFieldsUnified: forms.unified,
       structureTreeRemoved,
       xfaRemoved: forms.xfaRemoved,
+      ...(metadataStripped ? { metadataStripped } : {}),
       warnings: warnings.list,
     };
     return { bytes: toArrayBuffer(bytes), report };
@@ -775,36 +804,115 @@ function rewriteLinks(
 // ---------------------------------------------------------------------------
 // Overlays
 // ---------------------------------------------------------------------------
+//
+// Placement comes from overlay-layout.ts, shared with the app's live preview. Each text
+// overlay copy is a Form XObject (text at the origin, baseline on y = 0) drawn with a
+// `cm` per copy, so a watermark tiled over every page is one stream reused everywhere.
+// Page furniture is wrapped in /Artifact marked content (not part of the reading order).
 
 interface OverlayContext {
-  readonly tokens: Readonly<Record<string, string>>;
+  readonly count: number;
+  readonly text: Omit<OverlayTextContext, 'index' | 'count'>;
   readonly blobs: ReadonlyMap<string, ArrayBuffer>;
-  readonly fonts: Map<StandardFonts, PDFFont>;
+  readonly fonts: OverlayFonts;
   readonly images: Map<string, PDFImage>;
+  /** Text Form XObjects by content key, reused across pages. */
+  readonly forms: Map<string, PDFRef>;
   readonly warnings: Warnings;
 }
 
-/** Replaces characters the (WinAnsi) standard font cannot encode with '?'. */
-function encodableText(font: PDFFont, text: string, warnings: Warnings): string {
-  try {
-    font.encodeText(text);
-    return text;
-  } catch {
-    let result = '';
+interface LoadedFont {
+  readonly font: PDFFont;
+  readonly resolved: ResolvedFont;
+  /** Code points the font has glyphs for (bundled fonts only). */
+  readonly charset?: ReadonlySet<number>;
+}
+
+/** Embeds each font once per output document: standard-14 or bundled (subset) TTF. */
+class OverlayFonts {
+  private readonly cache = new Map<string, Promise<LoadedFont>>();
+  private fontkitRegistered = false;
+
+  constructor(private readonly out: PDFDocument) {}
+
+  get(resolved: ResolvedFont): Promise<LoadedFont> {
+    const key =
+      resolved.kind === 'bundled'
+        ? resolved.face.key
+        : standardFontFor({
+            family: resolved.family,
+            size: 1,
+            weight: resolved.bold ? 700 : 400,
+            italic: resolved.italic,
+          });
+    let pending = this.cache.get(key);
+    if (!pending) {
+      pending = this.embed(resolved);
+      this.cache.set(key, pending);
+    }
+    return pending;
+  }
+
+  private async embed(resolved: ResolvedFont): Promise<LoadedFont> {
+    if (resolved.kind === 'standard') {
+      const name = standardFontFor({
+        family: resolved.family,
+        size: 1,
+        weight: resolved.bold ? 700 : 400,
+        italic: resolved.italic,
+      });
+      return { font: await this.out.embedFont(name), resolved };
+    }
+    if (!this.fontkitRegistered) {
+      // Loaded on first use: exports without bundled-font furniture never fetch fontkit.
+      const { default: fontkit } = await import('@cantoo/fontkit');
+      this.out.registerFontkit(fontkit);
+      this.fontkitRegistered = true;
+    }
+    const bytes = await loadBundledFont(resolved.face);
+    const font = await this.out.embedFont(bytes, { subset: true });
+    return { font, resolved, charset: new Set(font.getCharacterSet()) };
+  }
+}
+
+/** Whether a standard-14 font (WinAnsi) has every character of `text`. */
+function canEncode(font: PDFFont, text: string): boolean {
+  const charset = new Set(font.getCharacterSet());
+  for (const char of text) {
+    if (!charset.has(char.codePointAt(0) ?? 0)) return false;
+  }
+  return true;
+}
+
+/**
+ * The font a text overlay is set in on this page: its own, or, when a standard-14 font
+ * cannot encode the text (non-WinAnsi characters), the closest bundled family.
+ */
+async function fontForText(
+  overlay: TextOverlay,
+  text: string,
+  ctx: OverlayContext,
+): Promise<LoadedFont> {
+  const resolved = resolveFont(overlay.font);
+  const loaded = await ctx.fonts.get(resolved);
+  if (resolved.kind === 'standard' && !canEncode(loaded.font, text)) {
+    ctx.warnings.add(
+      `Overlay text uses characters the standard ${resolved.family} font cannot encode; a bundled font was embedded instead`,
+    );
+    return ctx.fonts.get(substituteFont(overlay.font));
+  }
+  if (loaded.charset) {
     for (const char of text) {
-      try {
-        font.encodeText(char);
-        result += char;
-      } catch {
-        result += '?';
+      const code = char.codePointAt(0) ?? 0;
+      if (code > 0x20 && !loaded.charset.has(code)) {
+        ctx.warnings.add(
+          'Some overlay characters are not covered by the bundled fonts and were left blank',
+        );
+        break;
       }
     }
-    // TODO(M3): embed a bundled Unicode font (subset) instead of the standard 14.
-    warnings.add(
-      'Some overlay characters are not supported by the standard fonts and were replaced by "?"',
-    );
-    return result;
   }
+  return loaded;
 }
 
 function graphicsStateFor(out: PDFDocument, page: PDFPage, opacity: number): PDFName | undefined {
@@ -813,80 +921,130 @@ function graphicsStateFor(out: PDFDocument, page: PDFPage, opacity: number): PDF
   return page.node.newExtGState('GS', out.context.obj({ Type: 'ExtGState', ca: alpha, CA: alpha }));
 }
 
-async function textOverlayOps(
+/** A Form XObject drawing `text` with its baseline origin at (0, 0). */
+function textForm(
   out: PDFDocument,
-  entry: PlacedPage,
+  loaded: LoadedFont,
   overlay: TextOverlay,
+  text: string,
+  width: number,
   ctx: OverlayContext,
-): Promise<PDFOperator[]> {
-  const standard = standardFontFor(overlay.font);
-  let font = ctx.fonts.get(standard);
-  if (!font) {
-    font = await out.embedFont(standard);
-    ctx.fonts.set(standard, font);
-  }
-  const text = encodableText(font, expandTemplate(overlay.template, ctx.tokens), ctx.warnings);
-  if (text.trim() === '') return [];
+): PDFRef {
+  const { resolved, font } = loaded;
   const size = overlay.font.size;
-  const content = {
-    width: font.widthOfTextAtSize(text, size),
-    height: font.heightAtSize(size, { descender: false }),
-  };
-  const placement = placeOverlay({
-    box: entry.box,
-    rotation: entry.rotation,
-    anchor: overlay.anchor,
-    offset: overlay.offset,
-    content,
-    ...(overlay.rotate === undefined ? {} : { rotate: overlay.rotate }),
-  });
-  const fontKey = entry.page.node.newFontDictionary(font.name, font.ref);
-  const graphicsState = graphicsStateFor(out, entry.page, overlay.opacity);
-  return drawText(font.encodeText(text), {
-    color: toPdfColor(overlay.color),
-    font: fontKey,
-    size,
-    rotate: degrees(placement.angle),
-    xSkew: degrees(0),
-    ySkew: degrees(0),
-    x: placement.x,
-    y: placement.y,
-    ...(graphicsState ? { graphicsState } : {}),
-  });
-}
-
-async function imageOverlayOps(
-  out: PDFDocument,
-  entry: PlacedPage,
-  overlay: ImageOverlay,
-  ctx: OverlayContext,
-): Promise<PDFOperator[]> {
-  const image = await embedImageCached(out, ctx.blobs, overlay.blob, ctx.images);
-  const content = { width: image.width * overlay.scale, height: image.height * overlay.scale };
-  const name = entry.page.node.newXObject('Image', image.ref);
-  const graphicsState = graphicsStateFor(out, entry.page, overlay.opacity);
-  const rotate = overlay.rotate ?? 0;
-  const page = displaySize(entry.box, entry.rotation);
-  const anchored = anchorOrigin(overlay.anchor, page, content);
-  const first = { x: anchored.x + overlay.offset.x, y: anchored.y + overlay.offset.y };
-  const origins = overlay.tile ? tileOrigins(page, content, first, overlay.tile) : [first];
-  const ops: PDFOperator[] = [];
-  for (const origin of origins) {
-    const placement = placeAt(origin, content, entry.box, entry.rotation, rotate);
+  const color = toPdfColor(overlay.color);
+  const bold = resolved.kind === 'bundled' && resolved.syntheticBold;
+  const italic = resolved.kind === 'bundled' && resolved.syntheticItalic;
+  const key = JSON.stringify([font.name, size, overlay.color, bold, italic, text]);
+  const cached = ctx.forms.get(key);
+  if (cached) return cached;
+  const skew = italic ? Math.tan((SYNTHETIC_ITALIC_DEGREES * Math.PI) / 180) : 0;
+  const ops: PDFOperator[] = [pushGraphicsState(), setFillingColor(color)];
+  if (bold) {
     ops.push(
-      ...drawImage(name, {
-        x: placement.x,
-        y: placement.y,
-        width: content.width,
-        height: content.height,
-        rotate: degrees(placement.angle),
-        xSkew: degrees(0),
-        ySkew: degrees(0),
-        ...(graphicsState ? { graphicsState } : {}),
-      }),
+      setStrokingColor(color),
+      setLineWidth(size * SYNTHETIC_BOLD_STROKE),
+      setTextRenderingMode(TextRenderingMode.FillAndOutline),
     );
   }
+  ops.push(
+    beginText(),
+    setFontAndSize('F0', size),
+    setTextMatrix(1, 0, skew, 1, 0, 0),
+    showText(font.encodeText(text)),
+    endText(),
+    popGraphicsState(),
+  );
+  const pad = size;
+  const form = out.context.formXObject(ops, {
+    BBox: [-pad, -pad, width + 2 * pad, 2 * pad],
+    Resources: { Font: { F0: font.ref } },
+  });
+  const ref = out.context.register(form);
+  ctx.forms.set(key, ref);
+  return ref;
+}
+
+/** `q [gs] cm <object> Q` for every box of a laid-out overlay. */
+function placeCopies(
+  entry: PlacedPage,
+  boxes: readonly OverlayBox[],
+  draw: (placement: Placement) => PDFOperator[],
+  graphicsState: PDFName | undefined,
+): PDFOperator[] {
+  const ops: PDFOperator[] = [];
+  for (const box of boxes) {
+    const placement = placeAt(box, box, entry.box, entry.rotation, box.rotate);
+    ops.push(pushGraphicsState());
+    if (graphicsState) ops.push(setGraphicsState(graphicsState));
+    ops.push(...draw(placement), popGraphicsState());
+  }
   return ops;
+}
+
+function placementMatrix(placement: Placement): PDFOperator {
+  const rad = (placement.angle * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return concatTransformationMatrix(cos, sin, -sin, cos, placement.x, placement.y);
+}
+
+async function overlayOps(
+  out: PDFDocument,
+  entry: PlacedPage,
+  index: number,
+  overlay: OverlayOp,
+  ctx: OverlayContext,
+): Promise<PDFOperator[]> {
+  const input = {
+    index,
+    count: ctx.count,
+    page: displaySize(entry.box, entry.rotation),
+    text: ctx.text,
+  };
+  if (!pageInRange(overlay.pages, index, ctx.count)) return [];
+  if (overlay.kind === 'text') {
+    const text = overlayText(overlay, { ...ctx.text, index, count: ctx.count });
+    if (text.trim() === '') return [];
+    const loaded = await fontForText(overlay, text, ctx);
+    const size = overlay.font.size;
+    const layout = layoutOverlay(overlay, input, {
+      textWidth: (t) => loaded.font.widthOfTextAtSize(t, size),
+      imageSize: () => undefined,
+    });
+    if (layout?.kind !== 'text') return [];
+    const width = layout.boxes[0]?.width ?? 0;
+    const form = textForm(out, loaded, overlay, layout.text, width, ctx);
+    const name = entry.page.node.newXObject('Fm', form);
+    const graphicsState = graphicsStateFor(out, entry.page, overlay.opacity);
+    return placeCopies(
+      entry,
+      layout.boxes,
+      (placement) => [placementMatrix(placement), drawObject(name)],
+      graphicsState,
+    );
+  }
+  const image = await embedImageCached(out, ctx.blobs, overlay.blob, ctx.images);
+  const layout = layoutOverlay(overlay, input, {
+    textWidth: () => 0,
+    imageSize: () => ({ width: image.width, height: image.height }),
+  });
+  if (!layout) return [];
+  const name = entry.page.node.newXObject('Image', image.ref);
+  const graphicsState = graphicsStateFor(out, entry.page, overlay.opacity);
+  return placeCopies(
+    entry,
+    layout.boxes,
+    (placement) => {
+      const box = layout.boxes[0] as OverlayBox;
+      return [
+        placementMatrix(placement),
+        concatTransformationMatrix(box.width, 0, 0, box.height, 0, 0),
+        drawObject(name),
+      ];
+    },
+    graphicsState,
+  );
 }
 
 /**
@@ -900,22 +1058,27 @@ async function imageOverlayOps(
 async function materializeOverlays(
   out: PDFDocument,
   entry: PlacedPage,
+  index: number,
   ctx: OverlayContext,
 ): Promise<void> {
   const behind: PDFOperator[] = [];
   const over: PDFOperator[] = [];
   for (const overlay of entry.virtual.overlays) {
-    const ops =
-      overlay.kind === 'text'
-        ? await textOverlayOps(out, entry, overlay, ctx)
-        : await imageOverlayOps(out, entry, overlay, ctx);
+    const ops = await overlayOps(out, entry, index, overlay, ctx);
     (overlay.layer === 'behind' ? behind : over).push(...ops);
   }
+  if (behind.length === 0 && over.length === 0) return;
   const node = entry.page.node;
   node.normalize();
   const wrap = (ops: PDFOperator[]) =>
     out.context.register(
-      out.context.contentStream([pushGraphicsState(), ...ops, popGraphicsState()]),
+      out.context.contentStream([
+        pushGraphicsState(),
+        beginMarkedContent('Artifact'),
+        ...ops,
+        endMarkedContent(),
+        popGraphicsState(),
+      ]),
     );
   if (behind.length > 0) {
     const ref = wrap(behind);
@@ -1574,144 +1737,6 @@ function reconcileAcroForm(
 // Metadata and security
 // ---------------------------------------------------------------------------
 
-function applyMetadata(
-  out: PDFDocument,
-  vdoc: VirtualDocument,
-  sources: ReadonlyMap<SourceId, LoadedSource>,
-  needed: ReadonlyMap<SourceId, number[]>,
-  warnings: Warnings,
-): void {
-  const meta = vdoc.metadata;
-  const firstSourceId = needed.keys().next().value;
-  const first = firstSourceId === undefined ? undefined : sources.get(firstSourceId)?.doc;
-  if (meta.policy === 'inherit-first-source' && first) {
-    const title = first.getTitle();
-    const author = first.getAuthor();
-    const subject = first.getSubject();
-    const keywords = first.getKeywords();
-    const creator = first.getCreator();
-    const created = first.getCreationDate();
-    if (title) out.setTitle(title);
-    if (author) out.setAuthor(author);
-    if (subject) out.setSubject(subject);
-    if (keywords) out.setKeywords([keywords]);
-    if (creator) out.setCreator(creator);
-    if (created) out.setCreationDate(created);
-    const language = readLanguage(first);
-    if (language !== undefined && meta.language === undefined) out.setLanguage(language);
-    // The first source's XMP packet is not copied: a fresh one mirroring the Info dict is
-    // written below, so Info and XMP never disagree (research 04, pitfall 14).
-    // TODO(M2): carry over custom XMP schemas (e.g. PDF/A or rights metadata) when merging.
-  }
-  if (meta.title !== undefined) out.setTitle(meta.title);
-  if (meta.author !== undefined) out.setAuthor(meta.author);
-  if (meta.subject !== undefined) out.setSubject(meta.subject);
-  if (meta.keywords !== undefined) out.setKeywords([meta.keywords]);
-  if (meta.creator !== undefined) out.setCreator(meta.creator);
-  if (meta.language !== undefined) out.setLanguage(meta.language);
-  const created = parseDate(meta.creationDate);
-  if (created) out.setCreationDate(created);
-  else if (meta.creationDate !== undefined)
-    warnings.add(`Ignored invalid creation date "${meta.creationDate}"`);
-  out.setProducer(meta.producer ?? PRODUCER);
-  const modified = parseDate(meta.modificationDate);
-  if (meta.modificationDate !== undefined && !modified) {
-    warnings.add(`Ignored invalid modification date "${meta.modificationDate}"`);
-  }
-  out.setModificationDate(modified ?? new Date());
-  // A new document gets a new /ID (both halves equal, ISO 32000-2 §14.4). Encryption
-  // replaces it with its own random id later, which is equally fresh.
-  const id = PDFHexString.fromBytes(randomBytes(16));
-  out.context.trailerInfo.ID = out.context.obj([id, id]);
-  writeXmp(out);
-}
-
-function randomBytes(length: number): Uint8Array {
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  return bytes;
-}
-
-/** XML 1.0 text: escaped, with the control characters XML forbids removed. */
-function escapeXml(value: string): string {
-  let out = '';
-  for (const char of value) {
-    const code = char.charCodeAt(0);
-    if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) continue;
-    out +=
-      char === '&'
-        ? '&amp;'
-        : char === '<'
-          ? '&lt;'
-          : char === '>'
-            ? '&gt;'
-            : char === '"'
-              ? '&quot;'
-              : char;
-  }
-  return out;
-}
-
-/**
- * Writes a fresh XMP packet (ISO 16684-1) mirroring the final Info dictionary and /Lang, as
- * an uncompressed /Metadata stream on the catalog.
- */
-function writeXmp(out: PDFDocument): void {
-  const props: string[] = ['<dc:format>application/pdf</dc:format>'];
-  const alt = (tag: string, value: string) =>
-    `<${tag}><rdf:Alt><rdf:li xml:lang="x-default">${escapeXml(value)}</rdf:li></rdf:Alt></${tag}>`;
-  const simple = (tag: string, value: string) => `<${tag}>${escapeXml(value)}</${tag}>`;
-  const title = out.getTitle();
-  const author = out.getAuthor();
-  const subject = out.getSubject();
-  const keywords = out.getKeywords();
-  const creator = out.getCreator();
-  const producer = out.getProducer();
-  const created = out.getCreationDate();
-  const modified = out.getModificationDate();
-  const language = readLanguage(out);
-  if (title) props.push(alt('dc:title', title));
-  if (author) {
-    props.push(`<dc:creator><rdf:Seq><rdf:li>${escapeXml(author)}</rdf:li></rdf:Seq></dc:creator>`);
-  }
-  if (subject) props.push(alt('dc:description', subject));
-  if (language) {
-    props.push(
-      `<dc:language><rdf:Bag><rdf:li>${escapeXml(language)}</rdf:li></rdf:Bag></dc:language>`,
-    );
-  }
-  if (keywords) props.push(simple('pdf:Keywords', keywords));
-  if (producer) props.push(simple('pdf:Producer', producer));
-  if (creator) props.push(simple('xmp:CreatorTool', creator));
-  if (created) props.push(simple('xmp:CreateDate', created.toISOString()));
-  if (modified) {
-    props.push(simple('xmp:ModifyDate', modified.toISOString()));
-    props.push(simple('xmp:MetadataDate', modified.toISOString()));
-  }
-  props.push(simple('xmpMM:DocumentID', `uuid:${crypto.randomUUID()}`));
-  props.push(simple('xmpMM:InstanceID', `uuid:${crypto.randomUUID()}`));
-  const packet = [
-    '<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>',
-    '<x:xmpmeta xmlns:x="adobe:ns:meta/">',
-    '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">',
-    '<rdf:Description rdf:about=""',
-    ' xmlns:dc="http://purl.org/dc/elements/1.1/"',
-    ' xmlns:pdf="http://ns.adobe.com/pdf/1.3/"',
-    ' xmlns:xmp="http://ns.adobe.com/xap/1.0/"',
-    ' xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/">',
-    ...props,
-    '</rdf:Description>',
-    '</rdf:RDF>',
-    '</x:xmpmeta>',
-    '<?xpacket end="w"?>',
-  ].join('\n');
-  const stream = out.context.stream(new TextEncoder().encode(packet), {
-    Type: 'Metadata',
-    Subtype: 'XML',
-  });
-  out.catalog.set(PDFName.of('Metadata'), out.context.register(stream));
-}
-
 /**
  * AES-256 (V5/R6) via pdf-lib, plus a string-encryption pass: @cantoo/pdf-lib 2.11.1's
  * writer encrypts stream data only and leaves every string (Info, annotation /Contents,
@@ -1723,10 +1748,17 @@ async function applySecurity(out: PDFDocument, security: SecurityPolicy): Promis
   if (!security.userPassword && !security.ownerPassword) {
     throw new EngineError('unsupported', 'Encryption needs a user or an owner password');
   }
+  // Without an owner password pdf-lib reuses the user password as the owner password, so
+  // whoever can open the file could lift the restrictions: a random one keeps them.
+  // An empty owner password counts as none.
+  const ownerPassword =
+    security.ownerPassword === undefined || security.ownerPassword === ''
+      ? randomOwnerPassword()
+      : security.ownerPassword;
   out.encrypt({
     algorithm: 'AES-256',
     ...(security.userPassword ? { userPassword: security.userPassword } : {}),
-    ...(security.ownerPassword ? { ownerPassword: security.ownerPassword } : {}),
+    ownerPassword,
     permissions: permissionsFor(security.permissions),
   });
   // Materialize lazily embedded fonts/images first so every string object exists now.
@@ -1734,7 +1766,12 @@ async function applySecurity(out: PDFDocument, security: SecurityPolicy): Promis
   encryptStrings(out);
 }
 
-/**
+/** 32 random bytes as hex: an owner password nobody knows. */
+function randomOwnerPassword(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+} /**
  * Encrypts every string of every indirect object (except /Encrypt itself) with that
  * object's key, visiting each container once. Trailer strings (/ID) are direct objects of
  * the trailer and stay clear, as the spec requires. Must run after `encrypt()` and after

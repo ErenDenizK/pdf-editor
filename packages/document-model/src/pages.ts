@@ -35,6 +35,7 @@ import {
 import { pruneOutline, restrictOutline, wrapOutline } from './outline';
 import { pageDisplaySize } from './selectors';
 import type {
+  BatesConfig,
   BlobId,
   DocumentId,
   OutlineNode,
@@ -165,6 +166,26 @@ function assertOverlays(overlays: readonly OverlayOp[]): void {
     if (overlay.kind === 'text' && !(overlay.font.size > 0 && Number.isFinite(overlay.font.size))) {
       throw new DocumentModelError('invalid-argument', 'Text overlay font size must be positive');
     }
+    const range = overlay.pages;
+    if (range !== undefined) {
+      const bad = (n: number | undefined) =>
+        n !== undefined && !(Number.isSafeInteger(n) && n >= 1);
+      if (bad(range.from) || bad(range.to)) {
+        throw new DocumentModelError('invalid-argument', 'Overlay page range must be 1-based');
+      }
+    }
+    if (overlay.tile !== undefined && !(overlay.tile.gapX >= 0 && overlay.tile.gapY >= 0)) {
+      throw new DocumentModelError('invalid-argument', 'Overlay tile gaps must not be negative');
+    }
+  }
+}
+
+function assertBates(bates: BatesConfig): void {
+  if (
+    !(Number.isSafeInteger(bates.start) && bates.start >= 0) ||
+    !(Number.isSafeInteger(bates.width) && bates.width >= 1 && bates.width <= 12)
+  ) {
+    throw new DocumentModelError('invalid-argument', 'Bates start must be ≥ 0, width 1…12');
   }
 }
 
@@ -319,6 +340,51 @@ export function setDocumentOverlays(
     doc.pages.map((p) => p.id),
     overlays,
   );
+}
+
+/**
+ * Rewrites the overlays of every page of a document with `fn(overlays, page, index)`, in
+ * one step (page furniture: replace the page numbers, keep the watermark). Pages whose
+ * overlays come back unchanged (same array) keep their identity.
+ */
+export function updateDocumentOverlays(
+  ws: Workspace,
+  documentId: DocumentId,
+  fn: (overlays: readonly OverlayOp[], page: VirtualPage, index: number) => readonly OverlayOp[],
+): Workspace {
+  const doc = requireDocument(ws, documentId);
+  let changed = false;
+  const pages = doc.pages.map((page, index) => {
+    const overlays = fn(page.overlays, page, index);
+    if (overlays === page.overlays) return page;
+    assertOverlays(overlays);
+    changed = true;
+    return { ...page, overlays };
+  });
+  if (!changed) return ws;
+  return withWorkspace(ws, {
+    documents: putDocuments(ws.documents, [{ ...doc, pages, clean: false }]),
+  });
+}
+
+/** Sets (or clears, with undefined) the document's Bates numbering. */
+export function setDocumentBates(
+  ws: Workspace,
+  documentId: DocumentId,
+  bates: BatesConfig | undefined,
+): Workspace {
+  const doc = requireDocument(ws, documentId);
+  if (bates === undefined) {
+    if (doc.bates === undefined) return ws;
+    const { bates: _removed, ...rest } = doc;
+    return withWorkspace(ws, {
+      documents: putDocuments(ws.documents, [{ ...rest, clean: false }]),
+    });
+  }
+  assertBates(bates);
+  return withWorkspace(ws, {
+    documents: putDocuments(ws.documents, [{ ...doc, bates, clean: false }]),
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,19 @@
     "./assembler.worker": {
       "types": "./src/worker/assembler.worker.ts",
       "import": "./src/worker/assembler.worker.ts"
+    },
+    "./compress.worker": {
+      "types": "./src/worker/compress.worker.ts",
+      "import": "./src/worker/compress.worker.ts"
+    },
+    "./qpdf.wasm": "./qpdf/dist/qpdf.wasm",
+    "./overlay-geometry": {
+      "types": "./src/pdflib/overlay-public.ts",
+      "import": "./src/pdflib/overlay-public.ts"
+    },
+    "./fonts": {
+      "types": "./src/fonts/index.ts",
+      "import": "./src/fonts/index.ts"
     }
   },
   "scripts": {
@@ -21,11 +34,13 @@
     "build": "echo 'source package; built by the consuming app'"
   },
   "dependencies": {
+    "@cantoo/fontkit": "2.0.12",
     "@cantoo/pdf-lib": "2.11.1",
     "@embedpdf/engines": "2.15.1",
     "@embedpdf/models": "2.15.1",
     "@embedpdf/pdfium": "2.15.1",
     "@pdf-editor/document-model": "workspace:*",
-    "comlink": "^4.4.2"
+    "comlink": "^4.4.2",
+    "fflate": "0.8.3"
   }
 }

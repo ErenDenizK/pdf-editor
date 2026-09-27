@@ -12,6 +12,7 @@ import type {
   AssemblyResult,
   EngineErrorCode,
   ProgressCallback,
+  SourceDiagnostics,
   SourceInspection,
 } from '../types';
 
@@ -27,6 +28,8 @@ export interface AssemblerWorkerApi {
   ): Promise<WireResult>;
   /** Reads page labels and /Lang from (transferred) bytes. Never rejects. */
   inspect(bytes: ArrayBuffer, password?: string): Promise<SourceInspection>;
+  /** Diagnostics and metadata findings of (transferred) bytes. Never rejects. */
+  diagnose(bytes: ArrayBuffer, password?: string): Promise<SourceDiagnostics>;
   /** Annotation post-pass of `PdfEditor.save()` on (transferred) bytes. */
   finalizeAnnotations(
     bytes: ArrayBuffer,

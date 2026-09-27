@@ -18,6 +18,8 @@ import {
 } from '../annotations';
 import type { EngineFailure } from '../engine/engine-service';
 import { partitionFiles, pickFiles } from '../files/open-files';
+import { registerFurnitureCommands } from '../furniture';
+import { registerFormCommands } from '../forms';
 import { m } from '../i18n';
 import { registerLanguageCommands } from '../i18n/language-commands';
 import { announce } from '../shell/announcer';
@@ -25,6 +27,7 @@ import { openImagesAsDocument } from '../stage/section-operations';
 import { selectAllOf, useSelectionStore } from '../state/selection-store';
 import { ARRANGE_SIZES, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
+import { registerToolCommands } from '../tools/tool-commands';
 import { registerViewerCommands } from '../viewer/viewer-commands';
 import { registerExportCommands } from './export-commands';
 import { type CommandRegistry, commandRegistry } from './registry';
@@ -456,6 +459,9 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     registerLanguageCommands(registry),
     registerExportCommands(registry),
     registerViewerCommands(registry),
+    registerToolCommands(registry),
+    registerFurnitureCommands(registry),
+    registerFormCommands(registry),
   ];
   return () => {
     for (const dispose of disposers) dispose();

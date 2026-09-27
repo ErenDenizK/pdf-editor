@@ -75,6 +75,12 @@ assembler writes exactly the labels it is given. Reconciliation covers: outlines
 and named destinations resolved on open), links (explicit and named, rewritten or dropped
 and counted), AcroForm (`namespace-by-source`, `rename-collisions`, `unify-same-name`),
 /PageLabels, structure tree removal, XFA removal, fresh /ID and XMP, /Lang passthrough.
+Metadata (`pdflib/metadata.ts`): Info with custom keys mirrored in XMP (`pdfx:`), the
+sources' embedded files carried over, and `DocumentMetadata.strip` applied to the output
+(removed objects are dropped, not just unlinked; the report's `metadataStripped` counts
+them). AES-256 without an owner password gets a random one, so restrictions hold.
+`diagnose()` (`pdflib/metadata-diagnostics.ts`) reports version, encryption, fonts, images
+(approximate DPI from the first direct placement), annotations and strip findings.
 `PdfLibAssembler` can also be used directly on the main thread.
 
 Overlay placement: anchors and offsets refer to the visible page (CropBox after /Rotate);

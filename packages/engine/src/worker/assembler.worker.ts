@@ -56,6 +56,9 @@ const api: AssemblerWorkerApi = {
   inspect(bytes: ArrayBuffer, password?: string) {
     return assembler.inspect(bytes, password === undefined ? {} : { password });
   },
+  diagnose(bytes: ArrayBuffer, password?: string) {
+    return assembler.diagnose(bytes, password === undefined ? {} : { password });
+  },
   async finalizeAnnotations(bytes, request) {
     try {
       const out = await assembler.finalizeAnnotations(bytes, request);

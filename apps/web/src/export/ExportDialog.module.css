@@ -6,6 +6,7 @@
 .body {
   display: grid;
   gap: var(--space-3);
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-5) var(--space-6) var(--space-6);
 }
@@ -207,4 +208,46 @@
     background: var(--surface-hover);
     color: var(--text-primary);
   }
+}
+
+/* Form sections (spec document-tools.md §8): hairline-separated fieldsets with a label. */
+.section {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-3) 0 0;
+  border: none;
+  border-top: 1px solid var(--border-hairline);
+}
+
+.section:first-of-type {
+  padding-top: 0;
+  border-top: none;
+}
+
+.sectionTitle {
+  float: left;
+  width: 100%;
+  margin-bottom: var(--space-1);
+  padding: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.sectionTitle + * {
+  clear: both;
+}
+
+/* With every section the form scrolls; its actions stay in view. */
+.body > .actions:last-child {
+  position: sticky;
+  bottom: calc(var(--space-6) * -1);
+  margin: 0 calc(var(--space-6) * -1) calc(var(--space-6) * -1);
+  padding: var(--space-3) var(--space-6) var(--space-6);
+  border-top: 1px solid var(--border-hairline);
+  background: var(--surface-1);
 }

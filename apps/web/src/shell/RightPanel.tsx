@@ -1,7 +1,8 @@
 /**
  * Inspector: shows only what applies to the current selection (DESIGN.md §2). Selection
- * and history come from the document model; Info shows the active document's file facts
- * and the engine-reported honesty badges (light-table spec §6).
+ * and history come from the document model; Info shows the active document's file facts,
+ * the engine-reported honesty badges (light-table spec §6), editable metadata, passwords
+ * and diagnostics (document-tools spec §3, §4, §7).
  */
 import {
   effectiveLabel,
@@ -14,6 +15,9 @@ import {
 import { type ReactNode, useEffect, useRef } from 'react';
 
 import { AnnotationProperties } from '../annotations/AnnotationProperties';
+import { DiagnosticsDetails } from '../document/Diagnostics';
+import { MetadataEditor } from '../document/MetadataEditor';
+import { SecurityInfo } from '../document/SecurityInfo';
 import { useAnnotationStore } from '../annotations/annotation-store';
 import { formatBytes } from '../files/file-filters';
 import { getLocale, m } from '../i18n';
@@ -211,6 +215,10 @@ function HistorySection() {
   );
 }
 
+/**
+ * The active document's Info (spec document-tools.md §3, §4, §7): file facts and honesty
+ * badges, editable metadata, passwords, and the collapsible diagnostics ("Details").
+ */
 function InfoSection() {
   const doc = useActiveDocument();
   const ws = useWorkspaceStore((s) => s.workspace);
@@ -224,39 +232,50 @@ function InfoSection() {
   const badges = SOURCE_BADGES.filter((badge) =>
     sources.some((id) => ws.sources[id]?.flags[badge.flag] === true),
   );
+  const sourceDocs = sources.flatMap((id) => {
+    const source = ws.sources[id];
+    return source ? [source] : [];
+  });
   return (
-    <dl className={styles.facts}>
-      <dt>{m.info_name()}</dt>
-      <dd title={name}>{name}</dd>
-      {sources.length > 1 ? (
-        <>
-          <dt>{m.info_files()}</dt>
-          <dd className={styles.numeric}>{sources.length}</dd>
-        </>
-      ) : null}
-      <dt>{m.info_size()}</dt>
-      <dd className={styles.numeric}>{formatBytes(size)}</dd>
-      <dt>{m.info_pages()}</dt>
-      <dd className={styles.numeric}>{doc.pages.length}</dd>
-      <dt>{m.info_modified()}</dt>
-      <dd className={styles.numeric}>
-        {file && file.lastModified > 0 ? dateFormat(file.lastModified) : '—'}
-      </dd>
-      {badges.length > 0 ? (
-        <>
-          <dt>{m.info_notes()}</dt>
-          <dd className={styles.badges}>
-            {badges.map((badge) => (
-              <Tooltip key={badge.flag} label={badge.explanation} side="left">
-                <button type="button" className={styles.badge} aria-label={badge.explanation}>
-                  {badge.label}
-                </button>
-              </Tooltip>
-            ))}
-          </dd>
-        </>
-      ) : null}
-    </dl>
+    <div className={styles.info}>
+      <dl className={styles.facts}>
+        <dt>{m.info_name()}</dt>
+        <dd title={name}>{name}</dd>
+        {sources.length > 1 ? (
+          <>
+            <dt>{m.info_files()}</dt>
+            <dd className={styles.numeric}>{sources.length}</dd>
+          </>
+        ) : null}
+        <dt>{m.info_size()}</dt>
+        <dd className={styles.numeric}>{formatBytes(size)}</dd>
+        <dt>{m.info_pages()}</dt>
+        <dd className={styles.numeric}>{doc.pages.length}</dd>
+        <dt>{m.info_modified()}</dt>
+        <dd className={styles.numeric}>
+          {file && file.lastModified > 0 ? dateFormat(file.lastModified) : '—'}
+        </dd>
+        {badges.length > 0 ? (
+          <>
+            <dt>{m.info_notes()}</dt>
+            <dd className={styles.badges}>
+              {badges.map((badge) => (
+                <Tooltip key={badge.flag} label={badge.explanation} side="left">
+                  <button type="button" className={styles.badge} aria-label={badge.explanation}>
+                    {badge.label}
+                  </button>
+                </Tooltip>
+              ))}
+            </dd>
+          </>
+        ) : null}
+      </dl>
+      <h3 className={styles.subTitle}>{m.info_metadata()}</h3>
+      <MetadataEditor doc={doc} />
+      <h3 className={styles.subTitle}>{m.info_security()}</h3>
+      <SecurityInfo doc={doc} />
+      {sourceDocs.length > 0 ? <DiagnosticsDetails sources={sourceDocs} /> : null}
+    </div>
   );
 }
 

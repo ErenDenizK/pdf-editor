@@ -8,6 +8,7 @@ import { checkWorkspaceInvariants } from './invariants';
 import { PAGE_LABEL_STYLES } from './labels';
 import type {
   Anchor,
+  BatesConfig,
   BlobId,
   Destination,
   DestinationView,
@@ -18,14 +19,18 @@ import type {
   FormMergePolicy,
   OutlineNode,
   OverlayOp,
+  OverlayPageRange,
+  OverlayRole,
   PageId,
   PageLabelRange,
   PageLabelStyle,
   PageRef,
+  MetadataStrip,
   PermissionFlags,
   Rect,
   RgbColor,
   Rotation,
+  SecurityHandler,
   SecurityPolicy,
   Size,
   SourceDocument,
@@ -195,8 +200,19 @@ function readFlags(value: unknown, path: string): SourceFlags {
     hasSignatures: flag('hasSignatures'),
     tagged: flag('tagged'),
     linearized: flag('linearized'),
+    ...opt(o, 'permissions', path, readPermissions),
+    ...opt(o, 'securityHandler', path, (v, p) => oneOf(v, SECURITY_HANDLERS, p)),
+    ...opt(o, 'passwordProtected', path, bool),
   };
 }
+
+const SECURITY_HANDLERS: readonly SecurityHandler[] = [
+  'rc4-40',
+  'rc4-128',
+  'aes-128',
+  'aes-256',
+  'unknown',
+];
 
 function readSource(value: unknown, path: string): SourceDocument {
   const o = obj(value, path);
@@ -261,6 +277,10 @@ function readOverlay(value: unknown, path: string): OverlayOp {
     offset: readOffset(o.offset, `${path}.offset`),
     opacity: num(o.opacity, `${path}.opacity`),
     ...opt(o, 'rotate', path, num),
+    ...opt(o, 'tile', path, (v, p) => readTile(v, p)),
+    ...opt(o, 'pages', path, readOverlayPages),
+    ...opt(o, 'mirror', path, bool),
+    ...opt(o, 'role', path, (v, p) => oneOf(v, OVERLAY_ROLES, p)),
   };
   if (o.kind === 'text') {
     return {
@@ -269,6 +289,7 @@ function readOverlay(value: unknown, path: string): OverlayOp {
       template: str(o.template, `${path}.template`),
       font: readFont(o.font, `${path}.font`),
       color: readColor(o.color, `${path}.color`),
+      ...opt(o, 'startNumber', path, int),
     };
   }
   if (o.kind === 'image') {
@@ -277,10 +298,36 @@ function readOverlay(value: unknown, path: string): OverlayOp {
       ...common,
       blob: nonEmpty(o.blob, `${path}.blob`) as BlobId,
       scale: num(o.scale, `${path}.scale`),
-      ...opt(o, 'tile', path, (v, p) => readTile(v, p)),
     };
   }
   return fail(`${path}.kind`, "'text' or 'image'");
+}
+
+const OVERLAY_ROLES: readonly OverlayRole[] = [
+  'page-number',
+  'header',
+  'footer',
+  'bates',
+  'watermark',
+];
+
+function readOverlayPages(value: unknown, path: string): OverlayPageRange {
+  const o = obj(value, path);
+  return {
+    ...opt(o, 'from', path, int),
+    ...opt(o, 'to', path, int),
+    ...opt(o, 'parity', path, (v, p) => oneOf(v, ['odd', 'even'] as const, p)),
+  };
+}
+
+function readBates(value: unknown, path: string): BatesConfig {
+  const o = obj(value, path);
+  return {
+    prefix: str(o.prefix, `${path}.prefix`),
+    width: int(o.width, `${path}.width`),
+    start: int(o.start, `${path}.start`),
+    suffix: str(o.suffix, `${path}.suffix`),
+  };
 }
 
 function readTile(value: unknown, path: string): { gapX: number; gapY: number } {
@@ -378,7 +425,29 @@ function readMetadata(value: unknown, path: string): DocumentMetadata {
     ...opt(o, 'creationDate', path, str),
     ...opt(o, 'modificationDate', path, str),
     ...opt(o, 'language', path, str),
+    ...opt(o, 'custom', path, readStringRecord),
     policy: oneOf(o.policy, ['inherit-first-source', 'explicit'] as const, `${path}.policy`),
+    ...opt(o, 'strip', path, readStrip),
+  };
+}
+
+function readStringRecord(value: unknown, path: string): Record<string, string> {
+  const o = obj(value, path);
+  return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, str(v, `${path}.${k}`)]));
+}
+
+function readStrip(value: unknown, path: string): MetadataStrip {
+  const o = obj(value, path);
+  const flag = (key: keyof MetadataStrip): boolean => bool(o[key], `${path}.${key}`);
+  return {
+    info: flag('info'),
+    xmp: flag('xmp'),
+    attachments: flag('attachments'),
+    javascript: flag('javascript'),
+    pieceInfo: flag('pieceInfo'),
+    thumbnails: flag('thumbnails'),
+    annotationAuthors: flag('annotationAuthors'),
+    customKeys: flag('customKeys'),
   };
 }
 
@@ -427,7 +496,9 @@ function readDocument(value: unknown, path: string): VirtualDocument {
     ),
     metadata: readMetadata(o.metadata, `${path}.metadata`),
     ...opt(o, 'security', path, readSecurity),
+    ...opt(o, 'passwordRemoved', path, bool),
     formMergePolicy: oneOf(o.formMergePolicy, FORM_POLICIES, `${path}.formMergePolicy`),
+    ...opt(o, 'bates', path, readBates),
     clean: bool(o.clean, `${path}.clean`),
   };
 }

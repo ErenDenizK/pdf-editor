@@ -26,12 +26,14 @@
 import {
   type BlobId,
   type DocumentId,
+  type DocumentMetadata,
   type SecurityPolicy,
   type SourceId,
   type VirtualDocument,
   type Workspace,
 } from '@pdf-editor/document-model';
 import type {
+  CompressionSettings,
   PdfAssembler,
   PdfEditor,
   ReconciliationReport,
@@ -49,6 +51,8 @@ import {
 } from '../engine/engine-service';
 import { m } from '../i18n';
 import { blobsOfDocument, useWorkspaceStore } from '../state/workspace-store';
+import { compressExport, type ExportCompressor } from '../tools/export-compression';
+import { exportCompressionFor } from '../tools/tools-store';
 
 export type ExportPhase = 'reading' | 'assembling' | 'verifying';
 
@@ -66,6 +70,14 @@ export interface SourceNotes {
   readonly repaired: readonly string[];
 }
 
+/** Document-level choices the export applied (spec document-tools.md §8). */
+export interface ExportOutcome {
+  /** The encryption written (always AES-256), absent when the output is not encrypted. */
+  readonly security?: SecurityPolicy;
+  /** The user chose "Remove password" for encrypted sources. */
+  readonly passwordRemoved: boolean;
+  readonly metadata: DocumentMetadata;
+}
 export interface PreparedExport {
   readonly bytes: ArrayBuffer;
   /** The assembler's report, plus warnings about security removed and repairs. */
@@ -75,19 +87,40 @@ export interface PreparedExport {
   readonly pageCount: number;
   readonly sourceCount: number;
   readonly durationMs: number;
+  /** What the export applied at document level, for the summary's security and metadata lines. */
+  readonly outcome?: ExportOutcome;
+  /** Sizes around the compression pass (spec §5, §8), when a preset was applied. */
+  readonly compression?: {
+    readonly preset: CompressionSettings['preset'];
+    readonly before: number;
+    readonly after: number;
+  };
 }
 
 export interface ExportOptions {
   readonly compatibility?: boolean;
-  /** Encrypt the output (overrides the document's own policy). */
-  readonly security?: SecurityPolicy;
+  /**
+   * Encrypt the output (overrides the document's own policy); `null` exports without a
+   * password even when the document has one (the export dialog's Security override).
+   */
+  readonly security?: SecurityPolicy | null;
   /**
    * Bake annotations into the page content (spec §6, off by default). Links stay
    * interactive; comments go with their annotations.
    */
   readonly flattenAnnotations?: boolean;
+  /**
+   * Bake form fields into the page content and remove the form (spec document-tools §1,
+   * off by default). Other annotations stay unless `flattenAnnotations` is set too.
+   */
+  readonly flattenForms?: boolean;
   /** Write comment popups for notes and commented markup (spec §6, on by default). */
   readonly includeComments?: boolean;
+  /**
+   * Compress the assembled bytes (spec §5). Undefined: the preset applied to this document
+   * with "Apply to export" (tools store), if any; null: none.
+   */
+  readonly compression?: CompressionSettings | null;
   readonly signal?: AbortSignal;
   readonly onProgress?: (progress: ExportProgress) => void;
 }
@@ -112,6 +145,10 @@ export interface ExportDependencies {
    * `runExclusive`). Without it the export runs at once.
    */
   readonly exclusive?: <T>(task: () => Promise<T>) => Promise<T>;
+  /** Compresses assembled bytes; without it compression settings are ignored. */
+  readonly compress?: ExportCompressor;
+  /** The compression preset applied to a document's export, if any. */
+  readonly compressionFor?: (documentId: DocumentId) => CompressionSettings | undefined;
 }
 
 const defaultDependencies = (): ExportDependencies => ({
@@ -124,6 +161,8 @@ const defaultDependencies = (): ExportDependencies => ({
     (useWorkspaceStore.getState() as { readonly dirtySources?: ReadonlySet<SourceId> })
       .dirtySources,
   exclusive: runExclusive,
+  compress: compressExport,
+  compressionFor: exportCompressionFor,
 });
 
 const failed = (message: string, code: 'internal' | 'aborted' = 'internal') =>
@@ -134,6 +173,7 @@ export interface EngineSaveContext {
   /** Sources with engine edits beyond `workspace.engineEdits` (the store's dirtySources). */
   readonly dirty?: ReadonlySet<SourceId>;
   readonly flattenAnnotations?: boolean;
+  readonly flattenForms?: boolean;
   readonly includeComments?: boolean;
 }
 
@@ -157,6 +197,7 @@ export function needsEngineSave(
     source?.flags.encrypted === true ||
     source?.flags.repaired === true ||
     context.flattenAnnotations === true ||
+    (context.flattenForms === true && source?.flags.hasAcroForm === true) ||
     context.includeComments === false ||
     hasEngineEdits(ws, sourceId, context.dirty)
   );
@@ -246,7 +287,11 @@ async function prepareExportNow(
   if (doc.pages.length === 0) return failed(m.export_error_no_pages());
   try {
     const { annotationIdsOfEdits, planExport } = await import('@pdf-editor/engine');
-    const plan = planExport(ws, documentId, options.security ? { security: options.security } : {});
+    const plan = planExport(
+      ws,
+      documentId,
+      options.security === undefined ? {} : { security: options.security },
+    );
 
     const dirty = deps.dirtySources?.();
     const edited = new Set(plan.sources.filter((id) => hasEngineEdits(ws, id, dirty)));
@@ -254,6 +299,7 @@ async function prepareExportNow(
     const saveContext: EngineSaveContext = {
       ...(dirty ? { dirty } : {}),
       ...(flatten ? { flattenAnnotations: true } : {}),
+      ...(options.flattenForms ? { flattenForms: true } : {}),
       ...(options.includeComments === false ? { includeComments: false } : {}),
     };
     const editor = edited.size > 0 && !flatten ? await deps.engine.editor?.() : undefined;
@@ -291,6 +337,7 @@ async function prepareExportNow(
         ? await deps.engine.saveSource(sourceId, {
             removeSecurity: encrypted,
             ...(flatten ? { flattenAnnotations: true } : {}),
+            ...(options.flattenForms ? { flattenForms: true } : {}),
             ...(options.includeComments === false ? { includeComments: false } : {}),
             ...(signal ? { signal } : {}),
           })
@@ -319,7 +366,7 @@ async function prepareExportNow(
     const assembler = await deps.assembler();
     const pageCount = doc.pages.length;
     onProgress?.({ phase: 'assembling', done: 0, total: pageCount });
-    const { bytes, report } = await assembler.assemble(
+    const assembled = await assembler.assemble(
       {
         document: plan.document,
         sources,
@@ -333,6 +380,17 @@ async function prepareExportNow(
         onProgress: (done, total) => onProgress?.({ phase: 'assembling', done, total }),
       },
     );
+
+    const { report } = assembled;
+    let { bytes } = assembled;
+    const compressWith =
+      options.compression === undefined ? deps.compressionFor?.(documentId) : options.compression;
+    let compression: PreparedExport['compression'];
+    if (compressWith && deps.compress) {
+      const packed = await deps.compress(bytes, compressWith, plan.security, signal);
+      bytes = packed.bytes;
+      compression = { preset: compressWith.preset, before: packed.before, after: packed.after };
+    }
 
     onProgress?.({ phase: 'verifying', done: 0, total: 1 });
     // The verifier's adapter transfers what it opens; keep `bytes` for the download.
@@ -354,6 +412,12 @@ async function prepareExportNow(
         pageCount,
         sourceCount: plan.sources.length,
         durationMs: performance.now() - started,
+        ...(compression ? { compression } : {}),
+        outcome: {
+          ...(plan.security ? { security: plan.security } : {}),
+          passwordRemoved: doc.passwordRemoved === true,
+          metadata: doc.metadata,
+        },
       },
     };
   } catch (error) {

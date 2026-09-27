@@ -23,7 +23,8 @@ export {
   type Point,
 } from './pdflib/overlay-geometry';
 export { formatNumber, labelForIndex, toAlpha, toRoman } from './pdflib/page-labels';
-export { inspectSource } from './pdflib/inspect';
+export { inspectSource, permissionsFromP } from './pdflib/inspect';
+export { diagnoseSource } from './pdflib/metadata-diagnostics';
 export { checkXrefStructure, type XrefCheckResult } from './structure/xref-check';
 
 export { type ExportPlan, type ExportPlanOptions, planExport } from './export-plan';
@@ -39,3 +40,15 @@ export { stampLabel } from './annotations/stamp-appearance';
 export { NOTE_ICONS, STAMP_NAMES } from './pdfium/annotation-mapping';
 export * from './edits';
 export { type AssemblerProxy, createAssemblerProxy } from './worker/create-assembler-proxy';
+// Compression, PDF → images and qpdf plumbing (M3). The worker entry is
+// `@pdf-editor/engine/compress.worker`; qpdf and PDFium's decoder load only inside it.
+export * from './compress';
+export * from './rasterize';
+export type { PlumberCheckResult } from './plumber/qpdf-plumber';
+export { type CompressProxy, createCompressProxy } from './worker/create-compress-proxy';
+export type {
+  CompressRunWireOptions,
+  CompressWorkerConfig,
+  RasterFile,
+} from './worker/compress-protocol';
+export type { RasterPageInput, RasterTile } from './rasterize/encode-page';

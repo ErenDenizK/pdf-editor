@@ -1,6 +1,9 @@
 import { useLayoutEffect } from 'react';
 
 import { registerAppCommands } from './commands/app-commands';
+import { commandRegistry } from './commands/registry';
+import { registerDocumentCommands } from './document/document-commands';
+import { DocumentDialogs } from './document/DocumentDialogs';
 import { getEngineService } from './engine/engine-service';
 import { ExportDialog } from './export/ExportDialog';
 import { useLocale } from './i18n';
@@ -21,6 +24,7 @@ export function App() {
   const locale = useLocale();
   useLayoutEffect(() => registerAppCommands(), [locale]);
   useLayoutEffect(() => registerArrangeCommands(), [locale]);
+  useLayoutEffect(() => registerDocumentCommands(commandRegistry), [locale]);
   useLayoutEffect(() => {
     const engine = getEngineService();
     engine.setPasswordPrompt(requestPassword);
@@ -30,6 +34,7 @@ export function App() {
     <LocaleBoundary>
       <AppShell />
       <ExportDialog />
+      <DocumentDialogs />
       <OperationDialogs />
       <UpdateToast />
     </LocaleBoundary>
