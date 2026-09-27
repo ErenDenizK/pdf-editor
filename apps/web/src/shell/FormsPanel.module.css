@@ -1,0 +1,232 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.toolbar {
+  display: grid;
+  gap: var(--space-2);
+  flex: none;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.button[aria-pressed='true'] {
+  border-color: rgb(124 140 255 / 0.45);
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+
+.button:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .button:not(:disabled):hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.check input {
+  accent-color: var(--accent);
+}
+
+.xfa {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.badge {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid rgb(245 196 81 / 0.4);
+  border-radius: var(--radius-1);
+  color: var(--warning);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+}
+
+.xfaText {
+  min-width: 0;
+}
+
+.warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-2);
+  border: 1px solid rgb(245 196 81 / 0.3);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.warning svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  color: var(--warning);
+}
+
+.empty {
+  padding-top: var(--space-3);
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-top: var(--space-2);
+}
+
+.group + .group {
+  margin-top: var(--space-3);
+}
+
+.pageTitle {
+  padding: var(--space-1) 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.list {
+  display: grid;
+  gap: 2px;
+}
+
+.item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-2);
+  text-align: left;
+  color: var(--text-primary);
+}
+
+@media (hover: hover) {
+  .item:hover {
+    background: var(--surface-hover);
+  }
+}
+
+.item[aria-current='true'] {
+  background: var(--accent-muted);
+}
+
+.item:focus-visible {
+  outline-offset: -2px;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-1);
+  background: var(--surface-3);
+  color: var(--text-secondary);
+}
+
+.icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.body {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  overflow: hidden;
+  font-size: var(--text-md);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.required {
+  color: var(--danger);
+}
+
+.tag {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 400;
+}
+
+.value {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.value[data-empty] {
+  color: var(--text-tertiary);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -1,0 +1,131 @@
+/*
+ * Form layer: sits over the page bitmap (page-overlays positions it at inset 0), above
+ * the text layer so widgets take the pointer; with a drawing tool it lets everything
+ * through to the annotation layer.
+ */
+.layer {
+  z-index: 2;
+  pointer-events: none;
+}
+
+.target {
+  position: absolute;
+  border-radius: 2px;
+  background: transparent;
+  pointer-events: none;
+  cursor: default;
+}
+
+.layer[data-live] .target {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.layer[data-live] .target[data-field-kind='text'],
+.layer[data-live] .target[data-field-kind='combobox'],
+.layer[data-live] .target[data-field-kind='listbox'] {
+  cursor: text;
+}
+
+.layer[data-live] .target[aria-disabled='true'],
+.layer[data-live] .target[aria-readonly='true'] {
+  cursor: not-allowed;
+}
+
+/* "Highlight fields": a translucent accent fill; the page itself is never tinted. */
+.layer[data-highlight] .target {
+  background: var(--accent-muted);
+  box-shadow: inset 0 0 0 1px rgb(124 140 255 / 0.45);
+}
+
+.layer[data-highlight] .target[aria-disabled='true'],
+.layer[data-highlight] .target[aria-readonly='true'] {
+  background: rgb(255 255 255 / 0.06);
+  box-shadow: inset 0 0 0 1px rgb(107 112 120 / 0.6);
+}
+
+@media (hover: hover) {
+  .layer[data-live] .target:hover {
+    box-shadow: inset 0 0 0 1px rgb(124 140 255 / 0.7);
+  }
+}
+
+.target:focus-visible,
+.target[data-active] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Editors sit on the widget, white like the page, with the accent focus ring. */
+.editor {
+  position: absolute;
+  z-index: 1;
+  margin: 0;
+  padding: 0 3px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: #ffffff;
+  color: #111111;
+  font-family: var(--font-sans);
+  line-height: 1.2;
+  pointer-events: auto;
+  transform-origin: center;
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(124 140 255 / 0.35);
+}
+
+textarea.editor {
+  padding: 2px 3px;
+  resize: none;
+}
+
+select.editor {
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+select.editor option:disabled {
+  color: #6b7078;
+}
+
+.notice {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  gap: var(--space-1);
+  min-width: 180px;
+  max-width: 260px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  pointer-events: auto;
+}
+
+.noticeTitle {
+  font-weight: 500;
+}
+
+.noticeMeta {
+  color: var(--text-secondary);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: var(--space-1);
+  padding: 1px 6px;
+  border: 1px solid rgb(245 196 81 / 0.4);
+  border-radius: var(--radius-1);
+  color: var(--warning);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+}
+
+.badge svg {
+  width: 12px;
+  height: 12px;
+}
