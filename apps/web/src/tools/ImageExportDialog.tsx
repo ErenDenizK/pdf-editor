@@ -113,7 +113,7 @@ function ImageExportFlow({ documentId }: { readonly documentId: DocumentId }) {
         },
       });
       if (abort.signal.aborted) return;
-      const outcome = await deliverFile(file.bytes, file.name, file.type);
+      const outcome = await deliverFile(file.blob, file.name, file.type);
       if (outcome === 'cancelled') {
         setStep({ kind: 'form' });
         return;
@@ -137,7 +137,7 @@ function ImageExportFlow({ documentId }: { readonly documentId: DocumentId }) {
     // The clipboard item is created synchronously in the click, with a promise of the PNG.
     const png = rasterizeDocument(documentId, options({ format: 'png' }), {
       signal: abort.signal,
-    }).then((file) => new Blob([file.bytes], { type: 'image/png' }));
+    }).then((file) => file.blob);
     copyImage(png)
       .then(() => {
         announce(m.announce_image_copied());

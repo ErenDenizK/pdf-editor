@@ -6,7 +6,7 @@
  */
 import type { PermissionFlags, SecurityPolicy } from '@pdf-editor/document-model';
 
-import type { PlumberOptions } from '../types';
+import { EngineError, type PlumberOptions } from '../types';
 
 export const QPDF_INPUT = '/work/in.pdf';
 export const QPDF_OUTPUT = '/work/out.pdf';
@@ -26,14 +26,17 @@ function yn(value: boolean): 'y' | 'n' {
  */
 export function encryptArgs(policy: SecurityPolicy): string[] {
   const p: PermissionFlags = policy.permissions;
+  // An empty owner password would let anyone lift the permissions, and qpdf refuses it
+  // with a user password set; like the pdf-lib path, use a random one nobody knows.
+  const owner =
+    policy.ownerPassword === undefined || policy.ownerPassword === ''
+      ? randomOwnerPassword()
+      : policy.ownerPassword;
   const print = p.print ? (p.printHighQuality ? 'full' : 'low') : 'none';
   return [
     '--encrypt',
     `--user-password=${policy.userPassword ?? ''}`,
-    // qpdf refuses an empty owner password with a non-empty user password only when
-    // --allow-weak-crypto is missing for R<6; for AES-256 an empty owner is accepted, but a
-    // random owner makes the permissions meaningful, so callers should always pass one.
-    `--owner-password=${policy.ownerPassword ?? ''}`,
+    `--owner-password=${owner}`,
     '--bits=256',
     `--print=${print}`,
     `--modify=${p.modify ? 'all' : 'none'}`,
@@ -49,6 +52,12 @@ export function encryptArgs(policy: SecurityPolicy): string[] {
 /** `PlumberOptions` plus the password of an encrypted input that stays encrypted. */
 export interface QpdfJobOptions extends PlumberOptions {
   readonly password?: string;
+}
+
+/** 32 random hex characters (128 bits). */
+export function randomOwnerPassword(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /** Arguments of one rewrite job (without the program name). */
@@ -70,9 +79,15 @@ export function qpdfArgs(options: QpdfJobOptions = {}): string[] {
   return args;
 }
 
-/** Arguments of a structural check (`qpdf --check`). */
-export function qpdfCheckArgs(password?: string): string[] {
-  return [...(password === undefined ? [] : [`--password=${password}`]), '--check', QPDF_INPUT];
+/** Arguments of a structural check (see `QpdfPlumber.check`). */
+export function qpdfCheckArgs(
+  options: { readonly password?: string; readonly thorough?: boolean } = {},
+): string[] {
+  return [
+    ...(options.password === undefined ? [] : [`--password=${options.password}`]),
+    ...(options.thorough ? ['--check'] : ['--show-encryption', '--show-npages']),
+    QPDF_INPUT,
+  ];
 }
 
 /** qpdf exit statuses (qpdf manual, "Exit Status"). */
@@ -111,4 +126,28 @@ export function cleanWarning(line: string): string {
     .replaceAll(QPDF_OUTPUT, 'output')
     .replace(/^input:\s*/, '')
     .trim();
+}
+
+/**
+ * The engine error for a failed qpdf job (exit status 2), from its cleaned stderr. Usage
+ * errors (options qpdf refuses) are internal errors of this app, never shown as qpdf's
+ * usage text alone.
+ */
+export function qpdfFailure(
+  text: string,
+  options: { readonly password?: string; readonly decrypt?: { readonly password?: string } },
+): EngineError {
+  if (/invalid password/i.test(text)) {
+    return new EngineError(
+      options.password === undefined && options.decrypt?.password === undefined
+        ? 'password-required'
+        : 'password-incorrect',
+      'The password is not correct for this file',
+    );
+  }
+  if (/usage|insecure|unrecognized|unknown (argument|option)|--help/i.test(text)) {
+    return new EngineError('internal', `The PDF rewrite was refused: ${text}`);
+  }
+  if (/memory|bad_alloc/i.test(text)) return new EngineError('out-of-memory', text);
+  return new EngineError('corrupt', `The file could not be rewritten: ${text}`);
 }

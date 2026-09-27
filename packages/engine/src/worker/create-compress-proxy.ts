@@ -12,8 +12,8 @@ import type {
   CompressionResult,
   CompressionSettings,
 } from '../compress/types';
-import type { PlumberCheckResult } from '../plumber/qpdf-plumber';
-import type { RasterPageInput } from '../rasterize/encode-page';
+import type { PlumberCheckOptions, PlumberCheckResult } from '../plumber/qpdf-plumber';
+import type { RasterPageSpec, RasterTile } from '../rasterize/encode-page';
 import {
   type EngineCallOptions,
   EngineError,
@@ -35,8 +35,11 @@ export interface CompressProxy extends PdfPlumber {
     bytes: ArrayBuffer,
     options?: PlumberOptions & { readonly password?: string },
   ): Promise<PlumberResult>;
-  /** `qpdf --check`: structural warnings for diagnostics. Never rejects on damage. */
-  check(bytes: ArrayBuffer, password?: string): Promise<PlumberCheckResult>;
+  /**
+   * Structural check for diagnostics (cheap by default, `thorough` = `qpdf --check`).
+   * Never rejects on damage.
+   */
+  check(bytes: ArrayBuffer, options?: PlumberCheckOptions): Promise<PlumberCheckResult>;
   analyze(
     bytes: ArrayBuffer,
     options?: { readonly password?: string },
@@ -49,7 +52,10 @@ export interface CompressProxy extends PdfPlumber {
       readonly onProgress?: (progress: CompressionProgress) => void;
     },
   ): Promise<CompressionResult>;
-  rasterAdd(job: string, page: RasterPageInput): Promise<number>;
+  rasterBegin(job: string, page: RasterPageSpec): Promise<void>;
+  /** The tile's bitmap is transferred (and closed in the worker once drawn). */
+  rasterTile(job: string, tile: RasterTile): Promise<void>;
+  rasterEnd(job: string): Promise<number>;
   rasterFinish(job: string, zipName: string): Promise<RasterFile>;
   rasterCancel(job: string): void;
   dispose(): void;
@@ -76,9 +82,9 @@ export function createCompressProxy(worker: Worker, config: CompressWorkerConfig
       await ready;
       return unwrap(await remote.plumb(transfer(bytes, [bytes]), wire));
     },
-    async check(bytes, password) {
+    async check(bytes, options = {}) {
       await ready;
-      return unwrap(await remote.check(transfer(bytes, [bytes]), password));
+      return unwrap(await remote.check(transfer(bytes, [bytes]), options));
     },
     async analyze(bytes, options = {}) {
       await ready;
@@ -93,7 +99,9 @@ export function createCompressProxy(worker: Worker, config: CompressWorkerConfig
       if (signal) {
         channel = new MessageChannel();
         const port = channel.port1;
-        onAbort = () => port.postMessage(COMPRESS_ABORT_MESSAGE);
+        onAbort = () => {
+          port.postMessage(COMPRESS_ABORT_MESSAGE);
+        };
         signal.addEventListener('abort', onAbort, { once: true });
       }
       try {
@@ -113,17 +121,17 @@ export function createCompressProxy(worker: Worker, config: CompressWorkerConfig
         channel?.port1.close();
       }
     },
-    async rasterAdd(job, page) {
+    async rasterBegin(job, page) {
       await ready;
-      return unwrap(
-        await remote.rasterAdd(
-          job,
-          transfer(
-            page,
-            page.tiles.map((t) => t.bitmap),
-          ),
-        ),
-      );
+      unwrap(await remote.rasterBegin(job, page));
+    },
+    async rasterTile(job, tile) {
+      await ready;
+      unwrap(await remote.rasterTile(job, transfer(tile, [tile.bitmap])));
+    },
+    async rasterEnd(job) {
+      await ready;
+      return unwrap(await remote.rasterEnd(job));
     },
     async rasterFinish(job, zipName) {
       await ready;

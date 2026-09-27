@@ -1,6 +1,6 @@
 /**
  * PDF → images (spec §6): renders the chosen pages through the PDFium adapter at the
- * requested DPI, in tiles when a page exceeds the single-bitmap cap, and hands the tiles
+ * requested DPI, in tiles when a page exceeds the single-bitmap cap, and streams the tiles
  * to the compress worker, which stitches, encodes (PNG/JPEG/WebP) and zips them (fflate).
  *
  * Pages that are plain source pages (no overlays, no crop override) render straight from
@@ -17,17 +17,16 @@ import {
   rasterFileName,
   rasterSize,
   rasterTiles,
-  type RasterTile,
   uniqueNames,
 } from '@pdf-editor/engine';
 
 import { getEngineService } from '../engine/engine-service';
-import { prepareExport } from '../export/export-service';
 import { displaySize } from '../pages/page-geometry';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { displayRectToUser, type PageFrame } from '../viewer/geometry';
 import { getCompressor } from './compress-client';
 import { openScratch, type ScratchDocument, toolRenderer } from './engine-access';
+import { ToolSourceError, toolSourceBytes } from './tool-source';
 
 export interface RasterOptions {
   readonly format: RasterFormat;
@@ -116,17 +115,18 @@ export async function rasterizeDocument(
       });
     }
   } else {
-    const prepared = await prepareExport(documentId, {
-      compression: null,
-      ...(signal ? { signal } : {}),
-    });
-    if (!prepared.ok) {
+    let bytes: ArrayBuffer;
+    try {
+      // The images are rendered from this copy: no password, whatever the export applies.
+      bytes = await toolSourceBytes(documentId, signal);
+    } catch (error) {
+      const code = error instanceof ToolSourceError ? error.code : 'internal';
       throw new RasterError(
-        prepared.error.code === 'aborted' ? 'aborted' : 'export-failed',
-        prepared.error.message,
+        code === 'aborted' ? 'aborted' : 'export-failed',
+        error instanceof Error ? error.message : String(error),
       );
     }
-    scratch = await openScratch(prepared.value.bytes.slice(0));
+    scratch = await openScratch(bytes);
     for (const i of options.pages) {
       const info = scratch.document.pages[i];
       if (!info) continue;
@@ -177,9 +177,12 @@ export async function rasterizeDocument(
         throw new RasterError('too-large', `${width}×${height}`);
       }
       const background = options.format === 'jpeg' ? 'white' : options.background;
-      const tiles: RasterTile[] = [];
-      let pageWidth = width;
-      let pageHeight = height;
+      const spec = {
+        name: names[n] ?? `page-${n + 1}`,
+        format: options.format,
+        quality: options.quality,
+        background,
+      };
       const layout = rasterTiles(width, height);
       if (layout.length === 1) {
         const rendered = await renderer.renderPage(target.sourceId, target.index, {
@@ -188,10 +191,16 @@ export async function rasterizeDocument(
           background,
           ...(signal ? { signal } : {}),
         });
-        pageWidth = rendered.width;
-        pageHeight = rendered.height;
-        tiles.push({ bitmap: rendered.bitmap, x: 0, y: 0 });
+        await compressor.rasterBegin(job, {
+          ...spec,
+          width: rendered.width,
+          height: rendered.height,
+        });
+        await compressor.rasterTile(job, { bitmap: rendered.bitmap, x: 0, y: 0 });
       } else {
+        // Each tile goes to the worker's page canvas as soon as it is rendered: at most one
+        // tile bitmap is alive at a time.
+        await compressor.rasterBegin(job, { ...spec, width, height });
         for (const tile of layout) {
           const clip = displayRectToUser(frame, {
             left: tile.x / scale,
@@ -206,18 +215,10 @@ export async function rasterizeDocument(
             background,
             ...(signal ? { signal } : {}),
           });
-          tiles.push({ bitmap: rendered.bitmap, x: tile.x, y: tile.y });
+          await compressor.rasterTile(job, { bitmap: rendered.bitmap, x: tile.x, y: tile.y });
         }
       }
-      await compressor.rasterAdd(job, {
-        name: names[n] ?? `page-${n + 1}`,
-        width: pageWidth,
-        height: pageHeight,
-        tiles,
-        format: options.format,
-        quality: options.quality,
-        background,
-      });
+      await compressor.rasterEnd(job);
     }
     onProgress?.({ done: targets.length, total: targets.length });
     return await compressor.rasterFinish(

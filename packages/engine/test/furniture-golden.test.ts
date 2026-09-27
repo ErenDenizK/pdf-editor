@@ -8,13 +8,29 @@
  */
 import fontkit from '@cantoo/fontkit';
 import { PDFDict, PDFDocument, PDFName } from '@cantoo/pdf-lib';
-import type { Anchor, OverlayOp, Rect, Rotation, TextOverlay } from '@pdf-editor/document-model';
+import {
+  addSource,
+  type Anchor,
+  createSequentialIdGenerator,
+  createWorkspace,
+  type DocumentId,
+  insertBlankPage,
+  type OverlayOp,
+  type Rect,
+  type Rotation,
+  type SourceId,
+  setDocumentBates,
+  setDocumentFurniture,
+  type TextOverlay,
+  type Workspace,
+} from '@pdf-editor/document-model';
 import cropboxUrl from '../../../test/fixtures/cropbox.pdf?url';
 import rotatedUrl from '../../../test/fixtures/rotated-pages.pdf?url';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
 import { loadBundledFont } from '../src/fonts/bundled-fonts';
 import { resolveFont } from '../src/fonts/font-catalog';
+import { planExport } from '../src/export-plan';
 import { PdfiumAdapter } from '../src/pdfium/pdfium-adapter';
 import { displaySize, displayToUser } from '../src/pdflib/overlay-geometry';
 import { layoutOverlay, type OverlayBox } from '../src/pdflib/overlay-layout';
@@ -358,10 +374,34 @@ function pageTexts(id: ReturnType<typeof sid>, count: number): Promise<string[]>
 }
 
 describe('tokens and filters', () => {
-  test('Bates numbering continues across two documents', async () => {
-    const a = await makePdf([{ size: [300, 300] }, { size: [300, 300] }, { size: [300, 300] }]);
-    const b = await makePdf([{ size: [300, 300] }, { size: [300, 300] }]);
-    const bates: OverlayOp = {
+  test('Bates numbering continues across two documents and survives an inserted page', async () => {
+    // Two documents opened as in the app, numbered in one run (document-level rule).
+    const ids = createSequentialIdGenerator();
+    let ws = createWorkspace();
+    const bytes = new Map<SourceId, ArrayBuffer>();
+    const docs: DocumentId[] = [];
+    for (const [name, pages] of [
+      ['a', 3],
+      ['b', 2],
+    ] as const) {
+      const source = sid(`bates-${name}`);
+      const data = await makePdf(
+        Array.from({ length: pages }, () => ({ size: [300, 300] as [number, number] })),
+      );
+      bytes.set(source, data);
+      const opened = await adapter.open(source, data.slice(0));
+      const added = addSource(
+        ws,
+        { ...opened, name: `${name}.pdf`, byteLength: data.byteLength },
+        ids,
+        {
+          sourceId: source,
+        },
+      );
+      ws = added.workspace;
+      docs.push(added.documentId);
+    }
+    const stamp: OverlayOp = {
       kind: 'text',
       layer: 'over',
       template: '{bates}',
@@ -372,32 +412,78 @@ describe('tokens and filters', () => {
       opacity: 1,
       role: 'bates',
     };
-    const config = { prefix: 'ACME', width: 6, suffix: '-C' };
-    const run = async (source: ArrayBuffer, pages: number, start: number) => {
-      const s = sid(`bates-${start}`);
-      const doc = vdoc(
-        Array.from({ length: pages }, (_, i) =>
-          vpage({ kind: 'source', source: s, index: i }, { overlays: [bates] }),
-        ),
-        { bates: { ...config, start } },
-      );
-      const { bytes } = await assembler.assemble({
-        document: doc,
-        sources: new Map([[s, source]]),
-        blobs: new Map(),
-      });
-      return pageTexts(await openBytes(bytes), pages);
+    const config = {
+      prefix: 'ACME',
+      width: 6,
+      start: 1,
+      suffix: '-C',
+      run: { id: 'run', documents: docs },
     };
-    // The app gives the second document the start that continues the first (3 pages).
-    const first = await run(a, 3, 1);
-    const second = await run(b, 2, 1 + 3);
-    expect([...first, ...second].map((t) => t.trim())).toEqual([
+    for (const id of docs) {
+      ws = setDocumentFurniture(setDocumentBates(ws, id, config), id, [stamp]);
+    }
+    const exportTexts = async (w: Workspace) => {
+      const texts: string[] = [];
+      for (const id of docs) {
+        const plan = planExport(w, id);
+        const { bytes: out } = await assembler.assemble({
+          document: plan.document,
+          sources: new Map(plan.sources.map((s) => [s, bytes.get(s) as ArrayBuffer])),
+          blobs: new Map(),
+        });
+        texts.push(...(await pageTexts(await openBytes(out), plan.document.pages.length)));
+      }
+      return texts.map((t) => t.trim());
+    };
+    expect(await exportTexts(ws)).toEqual([
       'ACME000001-C',
       'ACME000002-C',
       'ACME000003-C',
       'ACME000004-C',
       'ACME000005-C',
     ]);
+    // A page inserted into the first document is stamped, and the second document moves
+    // on: no number is used twice.
+    const inserted = insertBlankPage(ws, { document: docs[0] as DocumentId, index: 1 }, ids);
+    expect(await exportTexts(inserted)).toEqual([
+      'ACME000001-C',
+      'ACME000002-C',
+      'ACME000003-C',
+      'ACME000004-C',
+      'ACME000005-C',
+      'ACME000006-C',
+    ]);
+  });
+
+  test('document-level furniture is drawn on every page, including pages added later', async () => {
+    const s = sid('doc-furniture');
+    const src = await makePdf([{ size: [300, 300] }, { size: [300, 300] }]);
+    const numbersRule: OverlayOp = {
+      kind: 'text',
+      layer: 'over',
+      template: 'p{page}/{pages}',
+      anchor: 'bottom-center',
+      offset: { x: 0, y: 20 },
+      font: { family: 'Inter', size: 10 },
+      color: { r: 0, g: 0, b: 0 },
+      opacity: 1,
+      role: 'page-number',
+    };
+    const doc = vdoc(
+      [
+        vpage({ kind: 'source', source: s, index: 0 }),
+        vpage({ kind: 'blank', size: { width: 300, height: 300 } }),
+        vpage({ kind: 'source', source: s, index: 1 }),
+      ],
+      { furniture: [numbersRule] },
+    );
+    const { bytes } = await assembler.assemble({
+      document: doc,
+      sources: new Map([[s, src]]),
+      blobs: new Map(),
+    });
+    const texts = (await pageTexts(await openBytes(bytes), 3)).map((t) => t.trim());
+    expect(texts).toEqual(['p1/3', 'p2/3', 'p3/3']);
   });
 
   test('page ranges, start number and mirroring', async () => {

@@ -26,6 +26,17 @@ import { anchorOrigin, type Point, tileOrigins } from './overlay-geometry';
 // Page ranges and numbering
 // ---------------------------------------------------------------------------
 
+/**
+ * Overlays drawn on a page: the document-level furniture (`VirtualDocument.furniture`,
+ * which pages added later inherit), then the page's own overlays.
+ */
+export function pageOverlays(
+  furniture: readonly OverlayOp[] | undefined,
+  own: readonly OverlayOp[],
+): readonly OverlayOp[] {
+  return furniture === undefined || furniture.length === 0 ? own : [...furniture, ...own];
+}
+
 /** Whether the page at 0-based `index` of a `count`-page document is in `range`. */
 export function pageInRange(
   range: OverlayPageRange | undefined,

@@ -290,7 +290,10 @@ export interface MetadataStrip {
   readonly xmp: boolean;
   /** Embedded files (/EmbeddedFiles, /AF) and file attachment annotations. */
   readonly attachments: boolean;
-  /** JavaScript: document scripts, /OpenAction, additional actions (/AA), JS link actions. */
+  /**
+   * Scripts and external actions: /JavaScript, /Launch, /SubmitForm, /ImportData and
+   * scripted /Rendition actions (also as /OpenAction or /Next), and additional actions (/AA).
+   */
   readonly javascript: boolean;
   /** Private application data (/PieceInfo) on pages and forms. */
   readonly pieceInfo: boolean;
@@ -325,8 +328,11 @@ export type FormMergePolicy = 'namespace-by-source' | 'rename-collisions' | 'uni
 
 /**
  * Bates numbering of a document: the {bates} token on the page at index i reads
- * `prefix + pad(start + i, width) + suffix`. A run across several documents gives each
- * document the start that continues the previous one.
+ * `prefix + pad(s + i, width) + suffix`, where `s` is the document's effective start
+ * (`effectiveBates`). Without a run, `s = start`. In a run, every member document carries
+ * the same config, `start` is the number of the run's first page, and `s` continues after
+ * the current pages of the run members before this document, so numbers stay unique and
+ * contiguous when pages are inserted or removed.
  */
 export interface BatesConfig {
   readonly prefix: string;
@@ -334,6 +340,13 @@ export interface BatesConfig {
   readonly width: number;
   readonly start: number;
   readonly suffix: string;
+  readonly run?: BatesRun;
+}
+
+/** One continuous Bates counter across documents, in this order. */
+export interface BatesRun {
+  readonly id: string;
+  readonly documents: readonly DocumentId[];
 }
 
 export interface VirtualDocument {
@@ -360,6 +373,12 @@ export interface VirtualDocument {
   readonly formMergePolicy: FormMergePolicy;
   /** Bates numbering for the {bates} overlay token; absent when none was applied. */
   readonly bates?: BatesConfig;
+  /**
+   * Document-level furniture (page numbers, headers and footers, Bates stamps, watermarks):
+   * overlays drawn on every page of the document, subject to each overlay's own page
+   * range, before the page's own overlays. Pages added later inherit them.
+   */
+  readonly furniture?: readonly OverlayOp[];
   /** Set when the user has not changed the document since it was opened or exported. */
   readonly clean: boolean;
 }

@@ -59,20 +59,20 @@ export async function fillField(
   }
 }
 
-/** The value that empties a field, or undefined when it cannot be emptied. */
-export function emptyValue(field: FormField): FieldValue | undefined {
+/** The value that empties a field (`{ value: undefined }`: a radio group with none on). */
+export function emptyValue(field: FormField): { readonly value: FieldValue } | undefined {
   switch (field.kind) {
     case 'text':
-      return '';
-    case 'checkbox':
-      return false;
-    case 'listbox':
-      return field.multiSelect ? [] : '';
     case 'combobox':
-      // Only a free-text combo box takes a value that is not an option.
-      return field.editable ? '' : undefined;
+      return { value: '' };
+    case 'checkbox':
+      return { value: false };
+    case 'listbox':
+      return { value: field.multiSelect ? [] : '' };
+    case 'radio':
+      return { value: undefined };
     default:
-      // Radio groups cannot be turned off through PDFium; buttons have no value.
+      // Buttons and signatures have no value to empty.
       return undefined;
   }
 }
@@ -93,9 +93,9 @@ export async function clearAllFields(sources: readonly SourceId[]): Promise<numb
       for (const source of sources) {
         for (const field of await ctx.editor.listFormFields(source)) {
           if (field.readOnly || isEmpty(field)) continue;
-          const value = emptyValue(field);
-          if (value === undefined) continue;
-          edits.push((await executeEdit(ctx, formEdit(source, field, value))).recorded);
+          const empty = emptyValue(field);
+          if (empty === undefined) continue;
+          edits.push((await executeEdit(ctx, formEdit(source, field, empty.value))).recorded);
         }
       }
       if (edits.length === 0) return undefined;

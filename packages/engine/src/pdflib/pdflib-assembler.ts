@@ -96,6 +96,7 @@ import {
   type OverlayTextContext,
   overlayText,
   pageInRange,
+  pageOverlays,
 } from './overlay-layout';
 import { checkAnnotationConformance } from '../annotations/conformance';
 import { finalizeAnnotations } from '../annotations/finalize';
@@ -433,6 +434,7 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
         title: vdoc.metadata.title ?? vdoc.title,
         date: new Date(),
         ...(vdoc.metadata.language ? { locale: vdoc.metadata.language } : {}),
+        // Callers resolve a run's start (`planExport` via `effectiveBates`).
         ...(vdoc.bates ? { bates: vdoc.bates } : {}),
       },
       blobs: input.blobs,
@@ -442,9 +444,10 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
       warnings,
     };
     for (const [index, entry] of placed.entries()) {
-      if (entry.virtual.overlays.length === 0) continue;
+      const overlays = pageOverlays(vdoc.furniture, entry.virtual.overlays);
+      if (overlays.length === 0) continue;
       throwIfAborted(signal);
-      await materializeOverlays(out, entry, index, {
+      await materializeOverlays(out, entry, index, overlays, {
         ...overlayContext,
         text: { ...overlayContext.text, label: labelForIndex(labelRanges, index) },
       });
@@ -1059,11 +1062,12 @@ async function materializeOverlays(
   out: PDFDocument,
   entry: PlacedPage,
   index: number,
+  overlays: readonly OverlayOp[],
   ctx: OverlayContext,
 ): Promise<void> {
   const behind: PDFOperator[] = [];
   const over: PDFOperator[] = [];
-  for (const overlay of entry.virtual.overlays) {
+  for (const overlay of overlays) {
     const ops = await overlayOps(out, entry, index, overlay, ctx);
     (overlay.layer === 'behind' ? behind : over).push(...ops);
   }
@@ -1546,11 +1550,37 @@ function unifyTerminal(
       merge.needAppearances = true;
     }
   }
-  // Button /Opt has one entry per widget kid, in order.
   if (targetOpt && otherOpt) {
-    for (let i = 0; i < otherOpt.size(); i++) targetOpt.push(otherOpt.get(i));
+    if (isButton) {
+      // Button /Opt has one entry per widget kid, in order.
+      for (let i = 0; i < otherOpt.size(); i++) targetOpt.push(otherOpt.get(i));
+    } else {
+      // Choice /Opt is the option list: add only options the field does not offer yet.
+      const seen = new Set(targetOpt.asArray().map((entry) => optionKey(context, entry)));
+      for (let i = 0; i < otherOpt.size(); i++) {
+        const entry = otherOpt.get(i);
+        const key = optionKey(context, entry);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        targetOpt.push(entry);
+      }
+    }
   }
   merge.unified.add(path);
+}
+
+/** Identity of a choice option: its export value and label (`[export, label]` or text). */
+function optionKey(context: PdfContext, entry: PDFObject): string {
+  const resolved = context.lookup(entry);
+  const text = (value: PDFObject | undefined): string => {
+    const v = context.lookup(value);
+    return v instanceof PDFString || v instanceof PDFHexString ? v.decodeText() : String(v);
+  };
+  if (resolved instanceof PDFArray) {
+    return JSON.stringify([text(resolved.get(0)), text(resolved.get(1))]);
+  }
+  const single = text(resolved);
+  return JSON.stringify([single, single]);
 }
 
 /** Merges field tree `other` into `target` (same full name `path`) under `unify-same-name`. */

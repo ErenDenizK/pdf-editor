@@ -109,6 +109,12 @@ test('strip metadata, export: the output has no author', async ({ page }) => {
   const details = page.getByTestId('diagnostics');
   await details.getByText('Details', { exact: true }).click();
   await expect(details.getByTestId('diagnostics-facts')).toContainText('attachment.txt');
+  // qpdf's structural check runs on request (it loads the qpdf worker).
+  const structural = details.getByTestId('structural-warnings');
+  await structural.getByRole('button', { name: 'Run structural check' }).click();
+  await expect(structural.getByText('No structural problems found.')).toBeVisible({
+    timeout: 30_000,
+  });
   if (capture) {
     await details.scrollIntoViewIfNeeded();
     await page.screenshot({

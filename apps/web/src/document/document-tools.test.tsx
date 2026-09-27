@@ -54,6 +54,7 @@ function useLocalDiagnostics() {
     diagnose: (bytes, password) =>
       diagnoseSource(bytes, password === undefined ? {} : { password }),
     onSourceClosed: () => () => undefined,
+    structuralWarnings: () => Promise.resolve([]),
   });
 }
 
@@ -266,6 +267,7 @@ describe('Strip metadata and diagnostics', () => {
 
   it('computes diagnostics lazily when Details opens', async () => {
     let calls = 0;
+    let checks = 0;
     setDiagnosticsDependencies({
       bytes: async () => ({ ok: true, value: await (await fetch(metadataUrl)).arrayBuffer() }),
       password: () => undefined,
@@ -274,6 +276,10 @@ describe('Strip metadata and diagnostics', () => {
         return diagnoseSource(bytes);
       },
       onSourceClosed: () => () => undefined,
+      structuralWarnings: () => {
+        checks += 1;
+        return Promise.resolve(['qpdf: object 12 0: expected endobj']);
+      },
     });
     await openMetadataFixture();
     const ws = useWorkspaceStore.getState().workspace;
@@ -287,5 +293,13 @@ describe('Strip metadata and diagnostics', () => {
     expect(within(facts).getByText('Attachments').nextElementSibling).toHaveTextContent(
       '1 (attachment.txt)',
     );
+
+    // qpdf's structural check runs only on request and joins the warnings list.
+    const structural = screen.getByTestId('structural-warnings');
+    expect(checks).toBe(0);
+    await userEvent.click(within(structural).getByRole('button', { name: 'Run structural check' }));
+    await within(structural).findByText('qpdf: object 12 0: expected endobj');
+    expect(checks).toBe(1);
+    expect(within(structural).queryByRole('button')).toBeNull();
   });
 });

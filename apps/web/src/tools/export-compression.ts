@@ -17,14 +17,23 @@ export type ExportCompressor = (
   settings: CompressionSettings,
   security: SecurityPolicy | undefined,
   signal: AbortSignal | undefined,
+  /** The export's compatibility mode: no object or xref streams in the output. */
+  options?: { readonly compatibility?: boolean },
 ) => Promise<CompressedExport>;
 
-export const compressExport: ExportCompressor = async (bytes, settings, security, signal) => {
+export const compressExport: ExportCompressor = async (
+  bytes,
+  settings,
+  security,
+  signal,
+  options = {},
+) => {
   const { getCompressor } = await import('./compress-client');
   const compressor = await getCompressor();
   const result = await compressor.compress(bytes.slice(0), settings, {
     ...(security ? { password: security.userPassword ?? '', encrypt: security } : {}),
     ...(signal ? { signal } : {}),
+    ...(options.compatibility ? { compatibility: true } : {}),
   });
   return { bytes: result.bytes, before: result.before, after: result.after };
 };

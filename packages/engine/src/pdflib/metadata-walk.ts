@@ -26,6 +26,7 @@ export const NAMES = {
   F: PDFName.of('F'),
   FS: PDFName.of('FS'),
   JavaScript: PDFName.of('JavaScript'),
+  JS: PDFName.of('JS'),
   Kids: PDFName.of('Kids'),
   M: PDFName.of('M'),
   Metadata: PDFName.of('Metadata'),
@@ -124,10 +125,28 @@ export function catalogNameTree(doc: PDFDocument, key: PDFName): PDFDict | undef
   return names ? doc.context.lookupMaybe(names.get(key), PDFDict) : undefined;
 }
 
-/** An action dictionary of type /JavaScript. */
-export function isJavaScriptAction(doc: PDFDocument, value: PDFObject | undefined): boolean {
-  const action = doc.context.lookupMaybe(value, PDFDict);
-  return action !== undefined && doc.context.lookup(action.get(NAMES.S)) === NAMES.JavaScript;
+/** Action types that run code or reach outside the document (ISO 32000-2 §12.6.4). */
+const SCRIPT_OR_EXTERNAL = new Set(['JavaScript', 'Launch', 'SubmitForm', 'ImportData']);
+
+/**
+ * An action dictionary that runs a script or reaches outside the document: /JavaScript,
+ * /Launch, /SubmitForm, /ImportData, and /Rendition actions carrying a /JS script.
+ */
+export function isScriptOrExternalActionDict(doc: PDFDocument, dict: PDFDict): boolean {
+  const type = doc.context.lookup(dict.get(NAMES.S));
+  if (!(type instanceof PDFName)) return false;
+  const name = type.decodeText();
+  return SCRIPT_OR_EXTERNAL.has(name) || (name === 'Rendition' && dict.has(NAMES.JS));
+}
+
+/**
+ * Whether `value` (a direct or indirect action, or anything else: /OpenAction may be a
+ * destination array, a Measure dictionary's /A an array of number formats) is a script or
+ * external action. Never throws on unexpected types.
+ */
+export function isScriptOrExternalAction(doc: PDFDocument, value: PDFObject | undefined): boolean {
+  const resolved = doc.context.lookup(value);
+  return resolved instanceof PDFDict && isScriptOrExternalActionDict(doc, resolved);
 }
 
 /** Annotation /Subtype of a dictionary that is an annotation, else undefined. */

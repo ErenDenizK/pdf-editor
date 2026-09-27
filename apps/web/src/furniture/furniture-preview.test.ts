@@ -1,5 +1,5 @@
-import type { DocumentId, OverlayOp, TextOverlay } from '@pdf-editor/document-model';
-import { layoutOverlay } from '@pdf-editor/engine/overlay-geometry';
+import type { DocumentId, OverlayOp, TextOverlay, Workspace } from '@pdf-editor/document-model';
+import { layoutOverlay, pageOverlays } from '@pdf-editor/engine/overlay-geometry';
 import { describe, expect, it } from 'vitest';
 
 import { defaultPageNumbers, pageNumberOverlay } from './furniture-model';
@@ -61,7 +61,14 @@ describe('preview math', () => {
     expect(overlaysForPage([committed], a, preview)).toEqual([draft]);
     expect(overlaysForPage([committed], b, preview)).toEqual([committed]);
     const bates = { prefix: 'Z', width: 2, start: 5, suffix: '' };
-    expect(batesFor({ id: a }, { ...preview, bates: { [a]: bates } })).toBe(bates);
-    expect(batesFor({ id: b, bates }, null)).toBe(bates);
+    const ws = {
+      sources: {},
+      documents: { [b]: { id: b, pages: [], bates } },
+      documentOrder: [b],
+      engineEdits: [],
+    } as unknown as Workspace;
+    expect(batesFor(ws, a, { ...preview, bates: { [a]: bates } })).toBe(bates);
+    expect(batesFor(ws, b, null)).toEqual(bates);
+    expect(overlaysForPage(pageOverlays([committed], []), a, preview)).toEqual([draft]);
   });
 });

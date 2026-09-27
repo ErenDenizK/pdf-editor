@@ -11,7 +11,12 @@
  *   choice widget (spec document-tools §1), so other viewers show the stored appearances
  *   instead of re-laying out the values themselves.
  *
- * Pure function of the bytes and the request; the adapter runs it after PDFium's save.
+ * - Emptying fields PDFium's form filler cannot empty (`clearFields`): it only ever turns
+ *   radio buttons on, and it cannot deselect a non-editable combo box. The field gets
+ *   `/V /Off` and every widget `/AS /Off` (radio), or loses `/V` and `/I` (choice); the
+ *   adapter re-opens the rewritten bytes so rendering and listing agree at once.
+ *
+ * Pure functions of the bytes and the request; the adapter runs them around PDFium.
  */
 
 import {
@@ -28,6 +33,8 @@ import {
   pushGraphicsState,
   PDFRef,
   PDFStream,
+  PDFString,
+  PDFHexString,
 } from '@cantoo/pdf-lib';
 
 export interface FormFinalizeRequest {
@@ -52,7 +59,13 @@ const N = {
   F: PDFName.of('F'),
   Matrix: PDFName.of('Matrix'),
   N: PDFName.of('N'),
+  Fields: PDFName.of('Fields'),
+  I: PDFName.of('I'),
+  Kids: PDFName.of('Kids'),
   NeedAppearances: PDFName.of('NeedAppearances'),
+  Off: PDFName.of('Off'),
+  T: PDFName.of('T'),
+  V: PDFName.of('V'),
   Rect: PDFName.of('Rect'),
   Subtype: PDFName.of('Subtype'),
   Widget: PDFName.of('Widget'),
@@ -181,4 +194,90 @@ export async function finalizeForms(
   }
   const saved = await doc.save({ useObjectStreams: false, updateFieldAppearances: false });
   return { bytes: saved.slice().buffer, flattened };
+}
+
+export interface ClearFieldsRequest {
+  /** Radio groups (fully-qualified names) to turn off: no option selected. */
+  readonly radiosOff?: readonly string[];
+  /** Choice fields (fully-qualified names) to leave without a selection. */
+  readonly choicesEmpty?: readonly string[];
+  /** Password of an encrypted input (the output is written unencrypted). */
+  readonly password?: string;
+}
+
+function partialName(doc: PDFDocument, dict: PDFDict): string | undefined {
+  const t = doc.context.lookup(dict.get(N.T));
+  return t instanceof PDFString || t instanceof PDFHexString ? t.decodeText() : undefined;
+}
+
+/** Field dictionaries by fully-qualified name (terminal fields and groups). */
+function fieldsByName(doc: PDFDocument): Map<string, PDFDict> {
+  const out = new Map<string, PDFDict>();
+  const form = doc.context.lookupMaybe(doc.catalog.get(N.AcroForm), PDFDict);
+  const seen = new Set<PDFDict>();
+  const visit = (value: PDFObject | undefined, parent: string | undefined) => {
+    const dict = doc.context.lookupMaybe(value, PDFDict);
+    if (!dict || seen.has(dict)) return;
+    seen.add(dict);
+    const t = partialName(doc, dict);
+    const name = t === undefined ? parent : parent === undefined ? t : `${parent}.${t}`;
+    if (t !== undefined && name !== undefined && !out.has(name)) out.set(name, dict);
+    const kids = doc.context.lookupMaybe(dict.get(N.Kids), PDFArray);
+    for (let i = 0; i < (kids?.size() ?? 0); i++) visit(kids?.get(i), name);
+  };
+  const fields = doc.context.lookupMaybe(form?.get(N.Fields), PDFArray);
+  for (let i = 0; i < (fields?.size() ?? 0); i++) visit(fields?.get(i), undefined);
+  return out;
+}
+
+/** The widget dictionaries of a field: itself when merged, and its widget descendants. */
+function widgetDicts(doc: PDFDocument, field: PDFDict): PDFDict[] {
+  const out: PDFDict[] = [];
+  const visit = (dict: PDFDict) => {
+    if (dict.get(N.Subtype) === N.Widget) out.push(dict);
+    const kids = doc.context.lookupMaybe(dict.get(N.Kids), PDFArray);
+    for (let i = 0; i < (kids?.size() ?? 0); i++) {
+      const kid = doc.context.lookupMaybe(kids?.get(i), PDFDict);
+      if (kid) visit(kid);
+    }
+  };
+  visit(field);
+  return out;
+}
+
+/**
+ * Empties the named fields (see the module comment). Resolves to the new bytes and the
+ * names that were not found.
+ */
+export async function clearFields(
+  bytes: ArrayBuffer | Uint8Array,
+  request: ClearFieldsRequest,
+): Promise<{ bytes: ArrayBuffer; missing: string[] }> {
+  const doc = await PDFDocument.load(bytes, {
+    updateMetadata: false,
+    throwOnInvalidObject: false,
+    ...(request.password === undefined ? {} : { password: request.password }),
+  });
+  const fields = fieldsByName(doc);
+  const missing: string[] = [];
+  for (const name of request.radiosOff ?? []) {
+    const field = fields.get(name);
+    if (!field) {
+      missing.push(name);
+      continue;
+    }
+    field.set(N.V, N.Off);
+    for (const widget of widgetDicts(doc, field)) widget.set(N.AS, N.Off);
+  }
+  for (const name of request.choicesEmpty ?? []) {
+    const field = fields.get(name);
+    if (!field) {
+      missing.push(name);
+      continue;
+    }
+    field.delete(N.V);
+    field.delete(N.I);
+  }
+  const saved = await doc.save({ useObjectStreams: false, updateFieldAppearances: false });
+  return { bytes: saved.slice().buffer, missing };
 }

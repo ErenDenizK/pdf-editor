@@ -327,6 +327,15 @@ function readBates(value: unknown, path: string): BatesConfig {
     width: int(o.width, `${path}.width`),
     start: int(o.start, `${path}.start`),
     suffix: str(o.suffix, `${path}.suffix`),
+    ...opt(o, 'run', path, (v, p) => {
+      const run = obj(v, p);
+      return {
+        id: nonEmpty(run.id, `${p}.id`),
+        documents: arr(run.documents, `${p}.documents`).map(
+          (d, i) => nonEmpty(d, `${p}.documents[${i}]`) as DocumentId,
+        ),
+      };
+    }),
   };
 }
 
@@ -499,6 +508,9 @@ function readDocument(value: unknown, path: string): VirtualDocument {
     ...opt(o, 'passwordRemoved', path, bool),
     formMergePolicy: oneOf(o.formMergePolicy, FORM_POLICIES, `${path}.formMergePolicy`),
     ...opt(o, 'bates', path, readBates),
+    ...opt(o, 'furniture', path, (v, p) =>
+      arr(v, p).map((overlay, i) => readOverlay(overlay, `${p}[${i}]`)),
+    ),
     clean: bool(o.clean, `${path}.clean`),
   };
 }

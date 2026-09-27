@@ -4,12 +4,17 @@
  * and an approximate resolution), annotations, attachments, JavaScript and structural
  * warnings. Computed in the assembly worker only once the disclosure opens.
  */
-import type { SourceDocument } from '@pdf-editor/document-model';
+import type { SourceDocument, SourceId } from '@pdf-editor/document-model';
 import type { SourceDiagnostics } from '@pdf-editor/engine';
 import { useState } from 'react';
 
 import { formatNumber, m } from '../i18n';
-import { type DiagnosticsEntry, useSourceDiagnostics } from './diagnostics';
+import {
+  type DiagnosticsEntry,
+  requestStructuralCheck,
+  useDiagnosticsStore,
+  useSourceDiagnostics,
+} from './diagnostics';
 import styles from './DocumentTools.module.css';
 import { handlerLabel } from './security-text';
 
@@ -30,7 +35,7 @@ export function DiagnosticsDetails({ sources }: { readonly sources: readonly Sou
         ? sources.map((source, index) => (
             <section key={source.id} className={styles.diagSource} aria-label={source.name}>
               {sources.length > 1 ? <h3 className={styles.subheading}>{source.name}</h3> : null}
-              <DiagnosticsEntryView entry={entries[index]} />
+              <DiagnosticsEntryView entry={entries[index]} sourceId={source.id} />
             </section>
           ))
         : null}
@@ -38,7 +43,13 @@ export function DiagnosticsDetails({ sources }: { readonly sources: readonly Sou
   );
 }
 
-function DiagnosticsEntryView({ entry }: { readonly entry: DiagnosticsEntry | undefined }) {
+function DiagnosticsEntryView({
+  entry,
+  sourceId,
+}: {
+  readonly entry: DiagnosticsEntry | undefined;
+  readonly sourceId: SourceId;
+}) {
   if (entry === undefined || entry.status === 'loading') {
     return (
       <p className={styles.note} role="status">
@@ -49,7 +60,7 @@ function DiagnosticsEntryView({ entry }: { readonly entry: DiagnosticsEntry | un
   if (entry.status === 'failed') {
     return <p className={styles.error}>{m.diag_failed({ reason: entry.message })}</p>;
   }
-  return <DiagnosticsView diagnostics={entry.value} />;
+  return <DiagnosticsView diagnostics={entry.value} sourceId={sourceId} />;
 }
 
 const yesNo = (value: boolean) => (value ? m.common_yes() : m.common_no());
@@ -93,7 +104,14 @@ function formLine(d: SourceDiagnostics): string {
 }
 
 /** The facts of one source (also rendered directly by tests from a fixture). */
-export function DiagnosticsView({ diagnostics: d }: { readonly diagnostics: SourceDiagnostics }) {
+export function DiagnosticsView({
+  diagnostics: d,
+  sourceId,
+}: {
+  readonly diagnostics: SourceDiagnostics;
+  /** With a source, qpdf's structural check can be run from the warnings list. */
+  readonly sourceId?: SourceId | undefined;
+}) {
   const version =
     d.extensionLevel === undefined
       ? d.version
@@ -179,12 +197,58 @@ export function DiagnosticsView({ diagnostics: d }: { readonly diagnostics: Sour
           </ul>
         </details>
       ) : null}
-      {d.warnings.length > 0 ? (
+      <StructuralWarnings xref={d.warnings} sourceId={sourceId} />
+    </div>
+  );
+}
+
+/**
+ * Structural warnings: the cross-reference check read with the diagnostics, plus qpdf's
+ * full structural check (`qpdf --check`), run on request because it loads the qpdf worker.
+ */
+function StructuralWarnings({
+  xref,
+  sourceId,
+}: {
+  readonly xref: readonly string[];
+  readonly sourceId: SourceId | undefined;
+}) {
+  const check = useDiagnosticsStore((s) =>
+    sourceId === undefined ? undefined : s.structural[sourceId],
+  );
+  const qpdf = check?.status === 'ready' ? check.warnings : [];
+  const warnings = [...xref, ...qpdf.filter((w) => !xref.includes(w))];
+  return (
+    <div className={styles.structural} data-testid="structural-warnings">
+      <h3 className={styles.subheading}>{m.diag_warnings()}</h3>
+      {warnings.length > 0 ? (
         <ul className={styles.warnings} aria-label={m.diag_warnings()}>
-          {d.warnings.map((warning) => (
+          {warnings.map((warning) => (
             <li key={warning}>{warning}</li>
           ))}
         </ul>
+      ) : check?.status === 'ready' ? (
+        <p className={styles.note}>{m.diag_structure_ok()}</p>
+      ) : null}
+      {sourceId === undefined ? null : check === undefined || check.status === 'failed' ? (
+        <>
+          {check?.status === 'failed' ? (
+            <p className={styles.error}>{m.diag_structure_failed({ reason: check.message })}</p>
+          ) : null}
+          <div className={styles.buttons}>
+            <button
+              type="button"
+              className={styles.small}
+              onClick={() => requestStructuralCheck(sourceId)}
+            >
+              {m.diag_structure_run()}
+            </button>
+          </div>
+        </>
+      ) : check.status === 'running' ? (
+        <p className={styles.note} role="status">
+          {m.diag_structure_running()}
+        </p>
       ) : null}
     </div>
   );

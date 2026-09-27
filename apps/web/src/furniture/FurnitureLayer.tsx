@@ -17,6 +17,7 @@ import {
 } from '@pdf-editor/document-model';
 import {
   type LaidOutOverlay,
+  pageOverlays,
   resolveFont,
   SYNTHETIC_BOLD_STROKE,
 } from '@pdf-editor/engine/overlay-geometry';
@@ -56,12 +57,13 @@ export function FurnitureLayer(props: PageOverlayProps) {
   const version = useSyncExternalStore(subscribeFonts, fontsVersion, fontsVersion);
   const location = findPageLocation(workspace, pageId);
   const doc = location ? workspace.documents[location.document] : undefined;
-  const overlays = overlaysForPage(page.overlays, doc?.id, preview);
+  // Document-level furniture (inherited by every page) first, then the page's own.
+  const overlays = overlaysForPage(pageOverlays(doc?.furniture, page.overlays), doc?.id, preview);
 
   const laid = useMemo(() => {
     // `version` (fonts loaded) and `blobs` are dependencies: re-measure when they change.
     if (!doc || overlays.length === 0 || !visible || version < 0 || !blobs) return [];
-    const bates = batesFor(doc, preview);
+    const bates = batesFor(workspace, doc.id, preview);
     return layoutPage(
       overlays,
       {

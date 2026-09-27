@@ -94,6 +94,46 @@ describe('export with compression', () => {
     expect(off.ok && off.value.compression).toBe(undefined);
   });
 
+  it('compresses an export protected by a user password only (review M3 #2)', async () => {
+    setExportCompression(documentId, presetSettings('screen'));
+    const result = await prepareExport(
+      documentId,
+      {
+        security: {
+          algorithm: 'aes-256',
+          userPassword: 'only-user',
+          permissions: {
+            print: true,
+            printHighQuality: true,
+            modify: true,
+            copy: true,
+            annotate: true,
+            fillForms: true,
+            accessibility: true,
+            assemble: true,
+          },
+        },
+      },
+      deps(),
+    );
+    expect(result.ok ? result.value.verification.ok : result.error.message).toBe(true);
+    if (!result.ok) return;
+    const reopened = await PDFDocument.load(result.value.bytes.slice(0), {
+      password: 'only-user',
+    });
+    expect(reopened.getPageCount()).toBe(3);
+  });
+
+  it('keeps compatibility mode when compressing (review M3 #4)', async () => {
+    setExportCompression(documentId, presetSettings('screen'));
+    const result = await prepareExport(documentId, { compatibility: true }, deps());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.compression).toBeDefined();
+    const text = new TextDecoder('latin1').decode(new Uint8Array(result.value.bytes));
+    expect(text).not.toMatch(/\/ObjStm|\/Type\s*\/XRef/);
+  });
+
   it('re-encrypts an encrypted export after compressing it', async () => {
     setExportCompression(documentId, presetSettings('ebook'));
     const result = await prepareExport(

@@ -41,6 +41,7 @@ import {
   catalogNameTree,
   forEachDict,
   isMetadataStream,
+  isScriptOrExternalActionDict,
   NAMES,
   nameTreeEntries,
   pageAnnotations,
@@ -377,7 +378,7 @@ export async function diagnoseSource(
       if (smask instanceof PDFRef) smasks.add(smask);
     }
     if (isMetadataStream(doc, entry)) xmpPackets++;
-    if (context.lookup(dict.get(NAMES.S)) === NAMES.JavaScript) javascript++;
+    if (isScriptOrExternalActionDict(doc, dict)) javascript++;
     if (dict.has(NAMES.AA)) javascript++;
     if (dict.has(NAMES.PieceInfo)) pieceInfo++;
     if (dict.has(NAMES.Thumb)) thumbnails++;

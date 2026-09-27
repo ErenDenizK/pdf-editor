@@ -44,11 +44,11 @@ export { type AssemblerProxy, createAssemblerProxy } from './worker/create-assem
 // `@pdf-editor/engine/compress.worker`; qpdf and PDFium's decoder load only inside it.
 export * from './compress';
 export * from './rasterize';
-export type { PlumberCheckResult } from './plumber/qpdf-plumber';
+export type { PlumberCheckOptions, PlumberCheckResult } from './plumber/qpdf-plumber';
 export { type CompressProxy, createCompressProxy } from './worker/create-compress-proxy';
 export type {
   CompressRunWireOptions,
   CompressWorkerConfig,
   RasterFile,
 } from './worker/compress-protocol';
-export type { RasterPageInput, RasterTile } from './rasterize/encode-page';
+export type { RasterPageInput, RasterPageSpec, RasterTile } from './rasterize/encode-page';

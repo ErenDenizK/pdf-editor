@@ -8,7 +8,7 @@ export type FileDeliveryOutcome = 'saved' | 'downloaded' | 'cancelled';
 const REVOKE_DELAY_MS = 60_000;
 
 interface Writable {
-  write(data: BufferSource): Promise<void>;
+  write(data: BufferSource | Blob): Promise<void>;
   close(): Promise<void>;
   abort(reason?: unknown): Promise<void>;
 }
@@ -18,7 +18,7 @@ type SavePicker = (options: {
 }) => Promise<{ createWritable(): Promise<Writable> }>;
 
 export async function deliverFile(
-  bytes: ArrayBuffer,
+  data: Blob | ArrayBuffer,
   name: string,
   type: string,
   win: Window = window,
@@ -34,7 +34,7 @@ export async function deliverFile(
       });
       const writable = await handle.createWritable();
       try {
-        await writable.write(bytes);
+        await writable.write(data);
         await writable.close();
       } catch (error) {
         await writable.abort(error).catch(() => undefined);
@@ -46,7 +46,7 @@ export async function deliverFile(
       if (!(error instanceof DOMException) || error.name !== 'SecurityError') throw error;
     }
   }
-  const url = URL.createObjectURL(new Blob([bytes], { type }));
+  const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type }));
   const anchor = win.document.createElement('a');
   anchor.href = url;
   anchor.download = name;

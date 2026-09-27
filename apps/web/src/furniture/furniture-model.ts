@@ -20,6 +20,7 @@ import {
   type OverlayRole,
   type RgbColor,
   setDocumentBates,
+  setDocumentFurniture,
   type TextOverlay,
   updateDocumentOverlays,
   type VirtualDocument,
@@ -414,28 +415,43 @@ export function readBates(
 
 export interface BatesRunEntry {
   readonly documentId: DocumentId;
+  /** The config every member of the run stores (the run's start, id and documents). */
   readonly config: BatesConfig;
-  /** First and last numbers of this document. */
+  /** This document's numbering right now (resolved start, no run), for the preview. */
+  readonly effective: BatesConfig;
+  /** First and last numbers of this document at its current page count. */
   readonly first: number;
   readonly last: number;
 }
 
 /**
- * One continuous counter across `documents` (in the given order, i.e. tab order): each
- * document starts where the previous one ended. Empty documents take no numbers.
+ * One continuous counter across `documents` (in the given order, i.e. tab order), stored
+ * as a run (`BatesConfig.run`): each member's start is derived from the current page
+ * counts of the members before it (`effectiveBates`), so pages inserted later are
+ * numbered and the next document moves on. Empty documents take no numbers.
  */
 export function planBatesRun(
   documents: readonly Pick<VirtualDocument, 'id' | 'pages'>[],
   settings: Pick<BatesSettings, 'prefix' | 'width' | 'start' | 'suffix'>,
+  runId: string,
 ): BatesRunEntry[] {
-  let next = Math.max(0, Math.floor(settings.start));
+  const start = Math.max(0, Math.floor(settings.start));
   const width = Math.min(12, Math.max(1, Math.floor(settings.width)));
-  return documents.map((doc) => {
+  const members = documents.filter((doc) => doc.pages.length > 0);
+  const base = { prefix: settings.prefix, width, suffix: settings.suffix };
+  const config: BatesConfig = {
+    ...base,
+    start,
+    run: { id: runId, documents: members.map((doc) => doc.id) },
+  };
+  let next = start;
+  return members.map((doc) => {
     const first = next;
     next += doc.pages.length;
     return {
       documentId: doc.id,
-      config: { prefix: settings.prefix, width, start: first, suffix: settings.suffix },
+      config,
+      effective: { ...base, start: first },
       first,
       last: next - 1,
     };
@@ -536,11 +552,17 @@ export function readWatermark(overlay: OverlayOp, pageCount: number): WatermarkS
 // Workspace operations
 // ---------------------------------------------------------------------------
 
-/** Overlays of one kind on a document (from the first page that carries any). */
+/**
+ * Overlays of one kind on a document: its document-level furniture, else (furniture put
+ * on pages one by one) the first page that carries any.
+ */
 export function furnitureOf(doc: VirtualDocument, kind: FurnitureKind): OverlayOp[] {
   const roles = FURNITURE_ROLES[kind];
+  const isKind = (o: OverlayOp) => o.role !== undefined && roles.includes(o.role);
+  const rule = (doc.furniture ?? []).filter(isKind);
+  if (rule.length > 0) return rule;
   for (const page of doc.pages) {
-    const found = page.overlays.filter((o) => o.role !== undefined && roles.includes(o.role));
+    const found = page.overlays.filter(isKind);
     if (found.length > 0) return found;
   }
   return [];
@@ -550,7 +572,7 @@ export function hasFurniture(doc: VirtualDocument, kind: FurnitureKind): boolean
   return furnitureOf(doc, kind).length > 0;
 }
 
-/** The page overlays with one kind of furniture replaced by `overlays`. */
+/** A list of overlays with one kind of furniture replaced by `overlays`. */
 export function replaceFurniture(
   current: readonly OverlayOp[],
   kind: FurnitureKind,
@@ -563,16 +585,24 @@ export function replaceFurniture(
   return kind === 'watermark' ? [...overlays, ...kept] : [...kept, ...overlays];
 }
 
-/** Puts `overlays` of one kind on every page of a document, replacing that kind. */
+/**
+ * Makes `overlays` the document's rule for one kind of furniture: document-level, so
+ * every page, including pages added later, shows it. Page overlays of that kind (applied
+ * page by page) are dropped so nothing is drawn twice.
+ */
 export function applyFurniture(
   ws: Workspace,
   documentId: DocumentId,
   kind: FurnitureKind,
   overlays: readonly OverlayOp[],
 ): Workspace {
-  return updateDocumentOverlays(ws, documentId, (current) =>
-    replaceFurniture(current, kind, overlays),
+  const doc = getDocument(ws, documentId);
+  const next = setDocumentFurniture(
+    ws,
+    documentId,
+    replaceFurniture(doc.furniture ?? [], kind, overlays),
   );
+  return updateDocumentOverlays(next, documentId, (current) => replaceFurniture(current, kind, []));
 }
 
 /** Removes one kind of furniture (and, for Bates, the document's numbering). */
@@ -586,7 +616,7 @@ export function removeFurniture(
   return next;
 }
 
-/** Applies a Bates run: the overlay on every page and each document's numbering. */
+/** Applies a Bates run: the stamp rule and the shared run numbering on each document. */
 export function applyBatesRun(
   ws: Workspace,
   run: readonly BatesRunEntry[],
@@ -594,7 +624,6 @@ export function applyBatesRun(
 ): Workspace {
   let next = ws;
   for (const entry of run) {
-    if (getDocument(next, entry.documentId).pages.length === 0) continue;
     next = applyFurniture(next, entry.documentId, 'bates', [overlay]);
     next = setDocumentBates(next, entry.documentId, entry.config);
   }

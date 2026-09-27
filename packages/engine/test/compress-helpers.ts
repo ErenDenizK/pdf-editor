@@ -56,6 +56,49 @@ export function photoPixels(width: number, height: number, seed = 7): Uint8Array
   return out;
 }
 
+/** Photo-like 8-bit grey samples (a greyscale scan). */
+export function grayPixels(width: number, height: number): Uint8Array {
+  const rgb = photoPixels(width, height);
+  const gray = new Uint8Array(width * height);
+  for (let i = 0; i < gray.length; i++) {
+    gray[i] = Math.round(((rgb[i * 3] ?? 0) + (rgb[i * 3 + 1] ?? 0) + (rgb[i * 3 + 2] ?? 0)) / 3);
+  }
+  return gray;
+}
+
+/**
+ * A Letter page with one Flate DeviceGray image of `width` × `height` pixels placed
+ * `inches` wide: a greyscale scan.
+ */
+export async function flateGrayPdf(
+  width: number,
+  height: number,
+  inches: number,
+): Promise<ArrayBuffer> {
+  const doc = await PDFDocument.create({ updateMetadata: false });
+  const ref = doc.context.register(
+    doc.context.flateStream(grayPixels(width, height), {
+      Type: 'XObject',
+      Subtype: 'Image',
+      Width: width,
+      Height: height,
+      ColorSpace: 'DeviceGray',
+      BitsPerComponent: 8,
+    }),
+  );
+  const page = doc.addPage([612, 792]);
+  page.node.setXObject(PDFName.of('Scan'), ref);
+  const w = inches * 72;
+  const h = (w * height) / width;
+  page.pushOperators(
+    pushGraphicsState(),
+    concatTransformationMatrix(w, 0, 0, h, 36, 36),
+    drawObject('Scan'),
+    popGraphicsState(),
+  );
+  return toBuffer(await doc.save());
+}
+
 /**
  * A Letter page with one Flate-compressed DeviceRGB image of `width` × `height` pixels
  * placed `inches` wide (so its DPI is width / inches).

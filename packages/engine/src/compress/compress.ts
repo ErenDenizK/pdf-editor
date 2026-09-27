@@ -28,7 +28,15 @@ import type { SecurityPolicy } from '@pdf-editor/document-model';
 import { EngineError, type PlumberOptions, type PlumberResult } from '../types';
 import { analyzeFonts, analyzeImages } from './analyze';
 import { dedupeStreams, findDuplicateStreams } from './dedupe';
-import { encodeIndexed, type ImageEncoder, palette } from './encode';
+import {
+  encodeGray,
+  encodeIndexed,
+  grayLevels,
+  type ImageEncoder,
+  isGray,
+  LINE_ART_COLOURS,
+  palette,
+} from './encode';
 import type { DecodedImage } from './pdfium-decoder';
 import { planImage } from './presets';
 import { buildProbe } from './probe';
@@ -49,6 +57,8 @@ export interface CompressionDependencies {
       bytes: ArrayBuffer,
       options?: PlumberOptions & { readonly password?: string },
     ): Promise<PlumberResult>;
+    /** Shares one qpdf instance across the jobs `task` runs (see `QpdfPlumber.batch`). */
+    batch?<T>(task: () => Promise<T>): Promise<T>;
   };
   readonly decoder: {
     decode(
@@ -64,6 +74,8 @@ export interface CompressionRunOptions {
   readonly password?: string;
   /** Encrypt the output with this policy (e.g. the export's security settings). */
   readonly encrypt?: SecurityPolicy;
+  /** PDF 1.4-compatible output: no object streams or xref streams. */
+  readonly compatibility?: boolean;
   readonly signal?: AbortSignal;
   readonly onProgress?: (progress: CompressionProgress) => void;
 }
@@ -108,10 +120,19 @@ async function decrypted(
 }
 
 /** Analysis for the dialog's first stage, including the measured lossless size. */
-export async function analyzeCompression(
+export function analyzeCompression(
   bytes: ArrayBuffer,
   deps: Pick<CompressionDependencies, 'plumber'>,
   options: Pick<CompressionRunOptions, 'password' | 'signal'> = {},
+): Promise<CompressionAnalysis> {
+  const run = () => analyzeNow(bytes, deps, options);
+  return deps.plumber.batch ? deps.plumber.batch(run) : run();
+}
+
+async function analyzeNow(
+  bytes: ArrayBuffer,
+  deps: Pick<CompressionDependencies, 'plumber'>,
+  options: Pick<CompressionRunOptions, 'password' | 'signal'>,
 ): Promise<CompressionAnalysis> {
   const totalBytes = bytes.byteLength;
   const plain = await decrypted(bytes, deps as CompressionDependencies, options.password);
@@ -143,6 +164,15 @@ export async function analyzeCompression(
     losslessBytes,
     duplicateStreams: duplicates.size,
   };
+}
+
+interface Candidate {
+  readonly contents: Uint8Array;
+  readonly width: number;
+  readonly height: number;
+  readonly colorSpace: PDFName | PDFArray;
+  readonly filter: 'DCTDecode' | 'FlateDecode';
+  readonly encoding: NonNullable<ImageReport['encoding']>;
 }
 
 /** Keys of an image dictionary that survive re-encoding. */
@@ -218,46 +248,66 @@ async function compressImage(
   }
   if (!decoded) return skipped('decode-failed');
 
-  const colours = palette(decoded.data);
-  let contents: Uint8Array;
-  let colorSpace: PDFName | PDFArray;
-  let filter: 'DCTDecode' | 'FlateDecode';
-  let encoding: 'jpeg' | 'flate-indexed';
-  let width = decoded.width;
-  let height = decoded.height;
-  if (colours !== null) {
-    // Few colours: lossless palette at full resolution (downsampling would invent colours
-    // and blur edges that JPEG then rings around).
+  const candidates: Candidate[] = [];
+  const gray = isGray(decoded.data);
+  const colours = gray ? null : palette(decoded.data);
+  // Lossless candidate at full resolution: 8-bit gray, or a palette for ≤ 256 colours.
+  if (gray) {
+    candidates.push({
+      contents: encodeGray(decoded.data),
+      width: decoded.width,
+      height: decoded.height,
+      colorSpace: PDFName.of('DeviceGray'),
+      filter: 'FlateDecode',
+      encoding: 'flate-gray',
+    });
+  } else if (colours !== null) {
     const indexed = encodeIndexed(decoded.data, colours);
-    contents = indexed.data;
-    colorSpace = doc.context.obj([
-      PDFName.of('Indexed'),
-      PDFName.of('DeviceRGB'),
-      PDFNumber.of(indexed.hival),
-      PDFHexString.of(Array.from(indexed.lookup, (b) => b.toString(16).padStart(2, '0')).join('')),
-    ]);
-    filter = 'FlateDecode';
-    encoding = 'flate-indexed';
-  } else {
-    const pixels =
-      plan.downsample && (plan.width < width || plan.height < height)
-        ? downsampleArea(
-            decoded.data,
-            width,
-            height,
-            Math.min(plan.width, width),
-            Math.min(plan.height, height),
-          )
-        : decoded.data;
-    if (pixels !== decoded.data) {
-      width = Math.min(plan.width, width);
-      height = Math.min(plan.height, height);
-    }
-    contents = await deps.encoder.jpeg(pixels, width, height, settings.quality);
-    colorSpace = PDFName.of('DeviceRGB');
-    filter = 'DCTDecode';
-    encoding = 'jpeg';
+    candidates.push({
+      contents: indexed.data,
+      width: decoded.width,
+      height: decoded.height,
+      colorSpace: doc.context.obj([
+        PDFName.of('Indexed'),
+        PDFName.of('DeviceRGB'),
+        PDFNumber.of(indexed.hival),
+        PDFHexString.of(
+          Array.from(indexed.lookup, (b) => b.toString(16).padStart(2, '0')).join(''),
+        ),
+      ]),
+      filter: 'FlateDecode',
+      encoding: 'flate-indexed',
+    });
   }
+  // Line art (few colours or grey levels) stays lossless: JPEG rings around sharp edges.
+  // Everything else also gets a downsampled JPEG candidate; the smaller one wins.
+  const levels = gray ? grayLevels(decoded.data, LINE_ART_COLOURS) : colours?.length;
+  if (levels === undefined || levels > LINE_ART_COLOURS) {
+    let width = decoded.width;
+    let height = decoded.height;
+    let pixels = decoded.data;
+    if (plan.downsample && (plan.width < width || plan.height < height)) {
+      const w = Math.min(plan.width, width);
+      const h = Math.min(plan.height, height);
+      pixels = downsampleArea(decoded.data, width, height, w, h);
+      width = w;
+      height = h;
+    }
+    candidates.push({
+      contents: await deps.encoder.jpeg(pixels, width, height, settings.quality),
+      width,
+      height,
+      colorSpace: PDFName.of('DeviceRGB'),
+      filter: 'DCTDecode',
+      encoding: 'jpeg',
+    });
+  }
+  const best = candidates.reduce<Candidate | undefined>(
+    (min, c) => (min === undefined || c.contents.length < min.contents.length ? c : min),
+    undefined,
+  );
+  if (!best) return skipped('not-smaller');
+  const { contents, width, height, colorSpace, filter, encoding } = best;
   // A soft mask flattened onto white goes away with the old stream; count its bytes too.
   let before = image.bytes;
   if (plan.flattenAlpha) {
@@ -277,11 +327,22 @@ async function compressImage(
   };
 }
 
-export async function compressPdf(
+export function compressPdf(
   bytes: ArrayBuffer,
   settings: CompressionSettings,
   deps: CompressionDependencies,
   options: CompressionRunOptions = {},
+): Promise<CompressionResult> {
+  // One qpdf instance for the whole job (decrypt, rewrite, re-encrypt).
+  const run = () => compressNow(bytes, settings, deps, options);
+  return deps.plumber.batch ? deps.plumber.batch(run) : run();
+}
+
+async function compressNow(
+  bytes: ArrayBuffer,
+  settings: CompressionSettings,
+  deps: CompressionDependencies,
+  options: CompressionRunOptions,
 ): Promise<CompressionResult> {
   const started = performance.now();
   const { signal, onProgress } = options;
@@ -304,7 +365,10 @@ export async function compressPdf(
     onProgress?.({ phase: 'images', done: images.length, total: images.length });
   }
   const changed = merged > 0 || reports.some((r) => r.action !== 'skipped');
-  const intermediate = changed ? toBuffer(await doc.save({ useObjectStreams: true })) : plain;
+  const compatibility = options.compatibility === true;
+  const intermediate = changed
+    ? toBuffer(await doc.save({ useObjectStreams: !compatibility }))
+    : plain;
   throwIfAborted(signal);
 
   onProgress?.({ phase: 'lossless', done: 0, total: 1 });
@@ -313,6 +377,7 @@ export async function compressPdf(
   try {
     const result = await deps.plumber.process(intermediate, {
       ...LOSSLESS_OPTIONS,
+      ...(compatibility ? { objectStreams: 'disable' as const } : {}),
       ...(settings.linearize ? { linearize: true } : {}),
       ...(options.encrypt ? { encrypt: options.encrypt } : {}),
     });

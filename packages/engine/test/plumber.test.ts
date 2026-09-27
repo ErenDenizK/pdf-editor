@@ -8,15 +8,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import qpdfWasmUrl from '../qpdf/dist/qpdf.wasm?url';
 import brokenXrefUrl from '../../../test/fixtures/broken-xref.pdf?url';
+import encryptedAesUrl from '../../../test/fixtures/encrypted-aes-256.pdf?url';
 import garbagePrefixUrl from '../../../test/fixtures/garbage-prefix.pdf?url';
 import manyPagesUrl from '../../../test/fixtures/many-pages.pdf?url';
 import simpleTextUrl from '../../../test/fixtures/simple-text.pdf?url';
 import truncatedUrl from '../../../test/fixtures/truncated.pdf?url';
 import { PdfiumAdapter } from '../src/pdfium/pdfium-adapter';
 import { QpdfPlumber } from '../src/plumber/qpdf-plumber';
-import { qpdfArgs } from '../src/plumber/qpdf-args';
+import { qpdfArgs, qpdfFailure } from '../src/plumber/qpdf-args';
 import type { SourceId } from '@pdf-editor/document-model';
-import { wasmUrl } from './helpers';
+import { toBuffer, wasmUrl } from './helpers';
 
 const fetchBytes = async (url: string) => (await fetch(url)).arrayBuffer();
 
@@ -109,7 +110,7 @@ describe('QpdfPlumber', () => {
     // The rewrite has a sound xref chain: our own check no longer flags it.
     expect(opened.flags.repaired).toBe(false);
     // And qpdf itself finds nothing left to fix.
-    const check = await plumber.check(result.bytes.slice(0));
+    const check = await plumber.check(result.bytes.slice(0), { thorough: true });
     expect(check.ok, check.warnings.join('\n')).toBe(true);
   });
 
@@ -159,7 +160,7 @@ describe('QpdfPlumber', () => {
       password: 'user',
     });
     expect(viaPdfLib.getPageCount()).toBe(3);
-    const check = await plumber.check(encrypted.bytes.slice(0), 'owner');
+    const check = await plumber.check(encrypted.bytes.slice(0), { password: 'owner' });
     expect(check.encrypted).toBe(true);
 
     await expect(
@@ -180,9 +181,117 @@ describe('QpdfPlumber', () => {
     const check = await plumber.check(result.bytes.slice(0));
     expect(check.linearized).toBe(true);
     expect(check.ok, check.warnings.join('\n')).toBe(true);
+    const thorough = await plumber.check(result.bytes.slice(0), { thorough: true });
+    expect(thorough).toMatchObject({ ok: true, linearized: true });
     const opened = await pdfiumPages(result.bytes);
     expect(opened.pageCount).toBe(400);
     expect(opened.flags.linearized).toBe(true);
+  });
+
+  it('encrypts with a user password only (random owner password, never refused)', async () => {
+    const policy = {
+      algorithm: 'aes-256' as const,
+      userPassword: 'user',
+      permissions: {
+        print: true,
+        printHighQuality: true,
+        modify: false,
+        copy: false,
+        annotate: false,
+        fillForms: true,
+        accessibility: true,
+        assemble: false,
+      },
+    };
+    const args = qpdfArgs({ encrypt: policy });
+    const owner = args.find((a) => a.startsWith('--owner-password='));
+    expect(owner).toMatch(/^--owner-password=[0-9a-f]{32}$/);
+    expect(args).not.toContain('--allow-insecure');
+    const encrypted = await plumber.process(await fetchBytes(simpleTextUrl), { encrypt: policy });
+    expect((await pdfiumPages(encrypted.bytes, 'user')).pageCount).toBe(3);
+    // The empty password does not open it as owner.
+    await expect(pdfiumPages(encrypted.bytes)).rejects.toMatchObject({ code: 'password-required' });
+  });
+
+  it('maps qpdf refusals to engine errors with a readable message', () => {
+    const usage = qpdfFailure(
+      'using an empty owner password with a non-empty user password is insecure; supply --allow-insecure',
+      {},
+    );
+    expect(usage).toMatchObject({ code: 'internal' });
+    expect(usage.message).toMatch(/^The PDF rewrite was refused: /);
+    expect(qpdfFailure('invalid password', { decrypt: { password: 'x' } }).code).toBe(
+      'password-incorrect',
+    );
+    expect(qpdfFailure('invalid password', {}).code).toBe('password-required');
+    expect(qpdfFailure("can't find PDF header", {}).code).toBe('corrupt');
+  });
+
+  it('checks cheaply by default, with the password for encrypted files', async () => {
+    const bytes = await fetchBytes(encryptedAesUrl);
+    // The structure (xref, trailer, page tree outside object streams) is not encrypted.
+    const locked = await plumber.check(bytes.slice(0));
+    expect(locked).toMatchObject({ unreadable: false, encrypted: true });
+    const open = await plumber.check(bytes.slice(0), { password: 'user' });
+    expect(open).toMatchObject({ unreadable: false, encrypted: true, ok: true, warnings: [] });
+    const damaged = await plumber.check(await fetchBytes(garbagePrefixUrl));
+    expect(damaged).toMatchObject({ repaired: true, unreadable: false, encrypted: false });
+  });
+
+  it('runs several jobs in one qpdf instance inside a batch', async () => {
+    const policy = {
+      algorithm: 'aes-256' as const,
+      userPassword: 'a',
+      ownerPassword: 'b',
+      permissions: {
+        print: true,
+        printHighQuality: true,
+        modify: true,
+        copy: true,
+        annotate: true,
+        fillForms: true,
+        accessibility: true,
+        assemble: true,
+      },
+    };
+    const source = await fetchBytes(simpleTextUrl);
+    const [encrypted, decrypted] = await plumber.batch(async () => {
+      const e = await plumber.process(source.slice(0), { encrypt: policy });
+      const d = await plumber.process(e.bytes.slice(0), { decrypt: { password: 'a' } });
+      return [e, d] as const;
+    });
+    expect((await pdfiumPages(encrypted.bytes, 'a')).flags.encrypted).toBe(true);
+    expect((await pdfiumPages(decrypted.bytes)).flags.encrypted).toBe(false);
+  });
+
+  it('round-trips a non-ASCII password between pdf-lib, qpdf and PDFium', async () => {
+    const password = 'şifre-Ü1';
+    const doc = await PDFDocument.load(await fetchBytes(simpleTextUrl));
+    doc.encrypt({ userPassword: password, ownerPassword: `${password}-owner` });
+    const byPdfLib = toBuffer(await doc.save());
+    // pdf-lib (AES-256) → qpdf decrypt.
+    const plain = await plumber.process(byPdfLib.slice(0), { decrypt: { password } });
+    expect((await pdfiumPages(plain.bytes)).pageCount).toBe(3);
+    // qpdf encrypt → PDFium and pdf-lib open it with the same password.
+    const byQpdf = await plumber.process(plain.bytes, {
+      encrypt: {
+        algorithm: 'aes-256',
+        userPassword: password,
+        permissions: {
+          print: true,
+          printHighQuality: true,
+          modify: true,
+          copy: true,
+          annotate: true,
+          fillForms: true,
+          accessibility: true,
+          assemble: true,
+        },
+      },
+    });
+    expect((await pdfiumPages(byQpdf.bytes, password)).pageCount).toBe(3);
+    const reopened = await PDFDocument.load(byQpdf.bytes.slice(0), { password });
+    expect(reopened.getPageCount()).toBe(3);
   });
 
   it('refuses inputs above the size bound without loading them', async () => {

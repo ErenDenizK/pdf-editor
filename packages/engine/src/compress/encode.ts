@@ -74,3 +74,35 @@ export function encodeIndexed(data: Uint8ClampedArray, colours: readonly number[
   });
   return { data: zlibSync(pixels, { level: 9 }), lookup, hival: colours.length - 1 };
 }
+
+/** Images with at most this many colours (or grey levels) are line art: lossless only. */
+export const LINE_ART_COLOURS = 16;
+
+/** Whether every pixel of an RGBA image is grey (R = G = B). */
+export function isGray(data: Uint8ClampedArray): boolean {
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] !== data[i + 1] || data[i] !== data[i + 2]) return false;
+  }
+  return true;
+}
+
+/** Distinct grey levels of a grey RGBA image, counting up to `limit + 1`. */
+export function grayLevels(data: Uint8ClampedArray, limit: number): number {
+  const seen = new Uint8Array(256);
+  let count = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const v = data[i] as number;
+    if (seen[v] === 0) {
+      seen[v] = 1;
+      if (++count > limit) return count;
+    }
+  }
+  return count;
+}
+
+/** Flate (zlib) compressed 8-bit DeviceGray samples of a grey RGBA image. */
+export function encodeGray(data: Uint8ClampedArray): Uint8Array {
+  const samples = new Uint8Array(data.length / 4);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) samples[p] = data[i] as number;
+  return zlibSync(samples, { level: 9 });
+}

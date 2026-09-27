@@ -17,11 +17,21 @@ export type DiagnosticsEntry =
   | { readonly status: 'ready'; readonly value: SourceDiagnostics }
   | { readonly status: 'failed'; readonly message: string };
 
+/** qpdf's structural check (`qpdf --check`), run on demand: it loads the qpdf worker. */
+export type StructuralEntry =
+  | { readonly status: 'running' }
+  | { readonly status: 'ready'; readonly warnings: readonly string[] }
+  | { readonly status: 'failed'; readonly message: string };
+
 interface DiagnosticsState {
   readonly entries: Readonly<Record<string, DiagnosticsEntry>>;
+  readonly structural: Readonly<Record<string, StructuralEntry>>;
 }
 
-export const useDiagnosticsStore = create<DiagnosticsState>()(() => ({ entries: {} }));
+export const useDiagnosticsStore = create<DiagnosticsState>()(() => ({
+  entries: {},
+  structural: {},
+}));
 
 export interface DiagnosticsDependencies {
   readonly bytes: (sourceId: SourceId) => Promise<EngineResult<ArrayBuffer>>;
@@ -30,6 +40,8 @@ export interface DiagnosticsDependencies {
   readonly diagnose: (bytes: ArrayBuffer, password?: string) => Promise<SourceDiagnostics>;
   /** Registers a listener for closed sources; returns its removal. */
   readonly onSourceClosed: (listener: (sourceId: SourceId) => void) => () => void;
+  /** qpdf's structural warnings for a source (tools/repair.ts). */
+  readonly structuralWarnings: (sourceId: SourceId) => Promise<readonly string[]>;
 }
 
 const defaults = (): DiagnosticsDependencies => ({
@@ -38,6 +50,8 @@ const defaults = (): DiagnosticsDependencies => ({
   diagnose: async (bytes, password) =>
     (await getAssembler()).diagnose(bytes, password === undefined ? {} : { password }),
   onSourceClosed: (listener) => getEngineService().onSourceClosed(listener),
+  // Loaded on demand: the check starts the qpdf (compress) worker.
+  structuralWarnings: async (id) => (await import('../tools/repair')).structuralWarnings(id),
 });
 
 let deps: DiagnosticsDependencies | undefined;
@@ -46,10 +60,11 @@ let unsubscribe: (() => void) | undefined;
 function dependencies(): DiagnosticsDependencies {
   deps ??= defaults();
   unsubscribe ??= deps.onSourceClosed((id) => {
-    const { entries } = useDiagnosticsStore.getState();
-    if (entries[id] === undefined) return;
+    const { entries, structural } = useDiagnosticsStore.getState();
+    if (entries[id] === undefined && structural[id] === undefined) return;
     const { [id]: _closed, ...rest } = entries;
-    useDiagnosticsStore.setState({ entries: rest });
+    const { [id]: _checked, ...checks } = structural;
+    useDiagnosticsStore.setState({ entries: rest, structural: checks });
   });
   return deps;
 }
@@ -59,7 +74,25 @@ export function setDiagnosticsDependencies(next: DiagnosticsDependencies | undef
   unsubscribe?.();
   unsubscribe = undefined;
   deps = next;
-  useDiagnosticsStore.setState({ entries: {} });
+  useDiagnosticsStore.setState({ entries: {}, structural: {} });
+}
+
+function putStructural(id: SourceId, entry: StructuralEntry): void {
+  useDiagnosticsStore.setState((s) => ({ structural: { ...s.structural, [id]: entry } }));
+}
+
+/** Runs qpdf's structural check for a source once (unless running or done). */
+export function requestStructuralCheck(sourceId: SourceId): void {
+  const current = useDiagnosticsStore.getState().structural[sourceId];
+  if (current !== undefined && current.status !== 'failed') return;
+  const d = dependencies();
+  putStructural(sourceId, { status: 'running' });
+  void d
+    .structuralWarnings(sourceId)
+    .then((warnings) => putStructural(sourceId, { status: 'ready', warnings }))
+    .catch((error: unknown) =>
+      putStructural(sourceId, { status: 'failed', message: toFailure(error).message }),
+    );
 }
 
 function put(id: SourceId, entry: DiagnosticsEntry): void {

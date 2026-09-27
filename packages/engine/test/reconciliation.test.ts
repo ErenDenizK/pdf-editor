@@ -221,6 +221,16 @@ describe('form merge policies (forms-a + forms-b)', () => {
     expect(agree.map((w) => w.getAppearanceState()?.decodeText())).toEqual(
       agree.map(() => agree[0]?.getAppearanceState()?.decodeText()),
     );
+    // Choice options are not duplicated by joining equal fields (both files offer the same).
+    const sourceForm = (await PDFDocument.load(await fetchBytes(formsAUrl))).getForm();
+    const expected = sourceForm.getDropdown('country').getOptions();
+    const options = form.getDropdown('country').getOptions();
+    expect(options).toEqual(expected);
+    expect(new Set(options).size).toBe(options.length);
+    // Radio /Opt keeps one entry per widget.
+    const radio = form.getRadioGroup('choice').acroField;
+    const opt = radio.dict.lookupMaybe(PDFName.of('Opt'), PDFArray);
+    expect(opt?.size()).toBe(radio.getWidgets().length);
   });
 });
 

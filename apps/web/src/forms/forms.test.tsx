@@ -185,6 +185,35 @@ describe('form layer', () => {
     expect(await engineValue(source, 'agree')).toBe(true);
   });
 
+  it('undoing the first radio selection clears the group in the engine and the export', async () => {
+    const pdf = await PDFDocument.create();
+    const page = pdf.addPage([300, 200]);
+    const group = pdf.getForm().createRadioGroup('pick');
+    group.addOptionToPage('left', page, { x: 20, y: 20, width: 15, height: 15 });
+    group.addOptionToPage('right', page, { x: 60, y: 20, width: 15, height: 15 });
+    const { source, pages } = await openFile(
+      new File([(await pdf.save()).slice()], 'radio.pdf', { type: 'application/pdf' }),
+    );
+    render(<FormLayer {...overlayProps(source, pages, 0, { width: 300, height: 200 })} />);
+    await userEvent.click(await screen.findByRole('radio', { name: 'pick: right' }));
+    await settle();
+    expect(await engineValue(source, 'pick')).toBe('right');
+    expect(labels().at(-1)).toBe('Fill pick');
+
+    act(() => {
+      model().undo();
+    });
+    await settle();
+    expect(await engineValue(source, 'pick')).toBeUndefined();
+    expect(screen.getByRole('radio', { name: 'pick: right' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    const { editor } = await engineContext();
+    const saved = await PDFDocument.load(new Uint8Array(await editor.save(source)));
+    expect(saved.getForm().getRadioGroup('pick').getSelected()).toBeUndefined();
+  });
+
   it('Tab commits and moves to the next field in document order', async () => {
     const { source, pages } = await openFile(await fixtureFile(formsAUrl, 'forms-a.pdf'));
     render(<FormLayer {...overlayProps(source, pages, 0, { width: 612, height: 792 })} />);
@@ -240,9 +269,9 @@ describe('Forms panel', () => {
     expect(await engineValue(source, 'name')).toBe('');
     expect(await engineValue(source, 'agree')).toBe(false);
     expect(await engineValue(source, 'address.city')).toBe('');
-    // A non-editable dropdown and a radio group cannot be emptied; they keep their values.
-    expect(await engineValue(source, 'country')).toBe('France');
-    expect(await engineValue(source, 'choice')).toBe('optionA');
+    // The radio group and the dropdown are emptied too (PDF-level rewrite in the engine).
+    expect(await engineValue(source, 'country')).toBe('');
+    expect(await engineValue(source, 'choice')).toBeUndefined();
     expect(
       within(screen.getByRole('region', { name: 'Page 1' })).getByText('Unchecked'),
     ).toBeVisible();
@@ -253,6 +282,8 @@ describe('Forms panel', () => {
     await settle();
     expect(await engineValue(source, 'name')).toBe('Alice Example');
     expect(await engineValue(source, 'agree')).toBe(true);
+    expect(await engineValue(source, 'country')).toBe('France');
+    expect(await engineValue(source, 'choice')).toBe('optionA');
   });
 
   it('shows the empty state for a document without fields', async () => {

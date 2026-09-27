@@ -1,18 +1,18 @@
 /**
  * Compress worker entry: qpdf (`QpdfPlumber`), the compression pipeline (pdf-lib + a
  * private PDFium for decoding + OffscreenCanvas for JPEG) and the PDF → images encoder
- * with its ZIP builder (fflate). Loaded lazily by the app; the wasm files are fetched on
- * the first job that needs them. Construct with Vite's `?worker` import and wrap with
+ * with its streaming ZIP (fflate). Loaded lazily by the app; the wasm files are fetched
+ * on the first job that needs them. Construct with Vite's `?worker` import and wrap with
  * `createCompressProxy`.
  */
-import { expose, transfer } from 'comlink';
+import { expose, releaseProxy, type Remote, transfer } from 'comlink';
 
 import { analyzeCompression, compressPdf } from '../compress/compress';
 import { canvasEncoder } from '../compress/encode';
 import { PdfiumImageDecoder } from '../compress/pdfium-decoder';
 import { QpdfPlumber } from '../plumber/qpdf-plumber';
-import { encodeRasterPage, zipFiles } from '../rasterize/encode-page';
-import { RASTER_MIME, type RasterFormat } from '../rasterize/plan';
+import { RasterArchive, RasterCanvas } from '../rasterize/encode-page';
+import { RASTER_MIME } from '../rasterize/plan';
 import { EngineError } from '../types';
 import {
   COMPRESS_ABORT_MESSAGE,
@@ -48,10 +48,19 @@ function failure(error: unknown): Wire<never> {
   };
 }
 
+const ok = <T>(value: T): Wire<T> => ({ ok: true, value });
+
 interface RasterJob {
-  readonly files: { name: string; bytes: Uint8Array; format: RasterFormat }[];
+  readonly archive: RasterArchive;
+  page: RasterCanvas | undefined;
 }
 const rasterJobs = new Map<string, RasterJob>();
+
+function job(id: string): RasterJob {
+  const found = rasterJobs.get(id);
+  if (!found) throw new EngineError('internal', `Unknown raster job ${id}`);
+  return found;
+}
 
 const api: CompressWorkerApi = {
   configure(next) {
@@ -60,14 +69,14 @@ const api: CompressWorkerApi = {
   async plumb(bytes, options) {
     try {
       const result = await getPlumber().process(bytes, options);
-      return transfer({ ok: true as const, value: result }, [result.bytes]);
+      return transfer(ok(result), [result.bytes]);
     } catch (error) {
       return failure(error);
     }
   },
-  async check(bytes, password) {
+  async check(bytes, options) {
     try {
-      return { ok: true, value: await getPlumber().check(bytes, password) };
+      return ok(await getPlumber().check(bytes, options));
     } catch (error) {
       return failure(error);
     }
@@ -79,7 +88,7 @@ const api: CompressWorkerApi = {
         { plumber: getPlumber() },
         password === undefined ? {} : { password },
       );
-      return { ok: true, value };
+      return ok(value);
     } catch (error) {
       return failure(error);
     }
@@ -102,47 +111,63 @@ const api: CompressWorkerApi = {
           ...(onProgress ? { onProgress } : {}),
         },
       );
-      return transfer({ ok: true as const, value: result }, [result.bytes]);
+      return transfer(ok(result), [result.bytes]);
     } catch (error) {
       return failure(error);
     } finally {
       abortPort?.close();
+      // The progress callback is a Comlink proxy: release its MessageChannel.
+      (onProgress as Remote<(p: unknown) => void> | undefined)?.[releaseProxy]();
     }
   },
-  async rasterAdd(job, page) {
+  rasterBegin(id, page) {
     try {
-      const bytes = await encodeRasterPage(page);
-      const entry = rasterJobs.get(job) ?? { files: [] };
-      entry.files.push({ name: page.name, bytes, format: page.format });
-      rasterJobs.set(job, entry);
-      return { ok: true, value: bytes.byteLength };
-    } catch (error) {
-      return failure(error);
-    }
-  },
-  rasterFinish(job, zipName) {
-    const entry = rasterJobs.get(job);
-    rasterJobs.delete(job);
-    try {
-      if (!entry || entry.files.length === 0) {
-        throw new EngineError('internal', 'No pages were rendered');
-      }
-      const only = entry.files.length === 1 ? entry.files[0] : undefined;
-      const bytes = only ? only.bytes : zipFiles(entry.files);
-      const buffer = bytes.buffer.slice(
-        bytes.byteOffset,
-        bytes.byteOffset + bytes.byteLength,
-      ) as ArrayBuffer;
-      const value = only
-        ? { bytes: buffer, name: only.name, type: RASTER_MIME[only.format] }
-        : { bytes: buffer, name: zipName, type: 'application/zip' };
-      return Promise.resolve(transfer({ ok: true as const, value }, [buffer]));
+      const entry = rasterJobs.get(id) ?? { archive: new RasterArchive(), page: undefined };
+      rasterJobs.set(id, entry);
+      entry.page = new RasterCanvas(page);
+      return Promise.resolve(ok(null));
     } catch (error) {
       return Promise.resolve(failure(error));
     }
   },
-  rasterCancel(job) {
-    rasterJobs.delete(job);
+  rasterTile(id, tile) {
+    try {
+      const page = job(id).page;
+      if (!page) {
+        tile.bitmap.close();
+        throw new EngineError('internal', 'No page started');
+      }
+      page.draw(tile);
+      return Promise.resolve(ok(null));
+    } catch (error) {
+      return Promise.resolve(failure(error));
+    }
+  },
+  async rasterEnd(id) {
+    try {
+      const entry = job(id);
+      const page = entry.page;
+      if (!page) throw new EngineError('internal', 'No page started');
+      entry.page = undefined;
+      const bytes = await page.encode();
+      entry.archive.add(page.spec.name, bytes, RASTER_MIME[page.spec.format]);
+      return ok(bytes.byteLength);
+    } catch (error) {
+      return failure(error);
+    }
+  },
+  rasterFinish(id, zipName) {
+    const entry = rasterJobs.get(id);
+    rasterJobs.delete(id);
+    try {
+      if (!entry) throw new EngineError('internal', 'No pages were rendered');
+      return Promise.resolve(ok(entry.archive.finish(zipName)));
+    } catch (error) {
+      return Promise.resolve(failure(error));
+    }
+  },
+  rasterCancel(id) {
+    rasterJobs.delete(id);
   },
 };
 

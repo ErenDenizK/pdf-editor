@@ -387,7 +387,9 @@ async function prepareExportNow(
       options.compression === undefined ? deps.compressionFor?.(documentId) : options.compression;
     let compression: PreparedExport['compression'];
     if (compressWith && deps.compress) {
-      const packed = await deps.compress(bytes, compressWith, plan.security, signal);
+      const packed = await deps.compress(bytes, compressWith, plan.security, signal, {
+        compatibility: options.compatibility === true,
+      });
       bytes = packed.bytes;
       compression = { preset: compressWith.preset, before: packed.before, after: packed.after };
     }

@@ -134,8 +134,11 @@ export interface ImageReport {
   readonly height: number;
   readonly newWidth?: number;
   readonly newHeight?: number;
-  /** Encoding written: 'jpeg' or 'flate-indexed' (few colours, lossless). */
-  readonly encoding?: 'jpeg' | 'flate-indexed';
+  /**
+   * Encoding written: 'jpeg', or lossless at full resolution: 'flate-indexed' (≤ 256
+   * colours) or 'flate-gray' (grey images); the smallest candidate wins.
+   */
+  readonly encoding?: 'jpeg' | 'flate-indexed' | 'flate-gray';
 }
 
 export interface PageDelta {

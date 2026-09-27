@@ -278,11 +278,56 @@ describe('edits', () => {
     await adapter.close(id);
   });
 
-  test('clearing a radio group is refused (PDFium only turns radios on)', async () => {
-    const { id } = await open(await fetchBytes(formsAUrl));
-    await expect(adapter.setFormFieldValue(id, 'choice', undefined)).rejects.toMatchObject({
-      code: 'unsupported',
+  test('undoing the first radio fill clears the group in the engine and the output', async () => {
+    const bytes = await makePdf([{ size: [300, 200] }], (doc) => {
+      const group = doc.getForm().createRadioGroup('pick');
+      group.addOptionToPage('left', doc.getPage(0), { x: 20, y: 20, width: 15, height: 15 });
+      group.addOptionToPage('right', doc.getPage(0), { x: 60, y: 20, width: 15, height: 15 });
     });
+    const { id } = await open(bytes);
+    const note = await adapter.createAnnotation(id, {
+      kind: 'square',
+      pageIndex: 0,
+      rect: { x: 100, y: 100, width: 40, height: 30 },
+      strokeWidth: 1,
+    });
+    expect(field(await adapter.listFormFields(id), 'pick').value).toBeUndefined();
+    const undo = await applyEngineEdit(adapter, {
+      id: 'first',
+      source: id,
+      pageIndex: 0,
+      kind: 'form.set-value',
+      payload: { name: 'pick', value: 'right' },
+    });
+    expect(undo.payload).toEqual({ name: 'pick', value: null });
+    expect(field(await adapter.listFormFields(id), 'pick').value).toBe('right');
+
+    const redo = await applyEngineEdit(adapter, undo);
+    expect(field(await adapter.listFormFields(id), 'pick').value).toBeUndefined();
+    // Annotation ids survive the rewrite; the group can be filled again.
+    expect((await adapter.listAnnotations(id, 0)).map((a) => a.id)).toEqual([note.id]);
+    const saved = await adapter.save(id);
+    const lib = await PDFDocument.load(saved.slice(0));
+    expect(lib.getForm().getRadioGroup('pick').getSelected()).toBeUndefined();
+    for (const widget of lib.getForm().getRadioGroup('pick').acroField.getWidgets()) {
+      expect(String(widget.getAppearanceState())).toBe('/Off');
+    }
+    await applyEngineEdit(adapter, redo);
+    expect(field(await adapter.listFormFields(id), 'pick').value).toBe('right');
+    await adapter.close(id);
+  });
+
+  test('a non-editable dropdown can be emptied', async () => {
+    const { id } = await open(await fetchBytes(formsAUrl));
+    await adapter.setFormFieldValue(id, 'name', 'Kept');
+    await adapter.setFormFieldValue(id, 'country', '');
+    const fields = await adapter.listFormFields(id);
+    expect(field(fields, 'country').value ?? '').toBe('');
+    expect(field(fields, 'name').value).toBe('Kept');
+    const lib = await PDFDocument.load((await adapter.save(id)).slice(0));
+    expect(lib.getForm().getDropdown('country').getSelected()).toEqual([]);
+    await adapter.setFormFieldValue(id, 'country', 'Japan');
+    expect(field(await adapter.listFormFields(id), 'country').value).toBe('Japan');
     await adapter.close(id);
   });
 

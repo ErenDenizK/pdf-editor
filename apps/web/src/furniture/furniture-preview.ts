@@ -4,13 +4,14 @@
  * space (points, y up, origin bottom-left of the page as shown) becomes SVG user space
  * (points, y down) with a single flip, `svgY = pageHeight - y`.
  */
-import type {
-  BatesConfig,
-  DocumentId,
-  OverlayOp,
-  OverlayRole,
-  Size,
-  VirtualDocument,
+import {
+  type BatesConfig,
+  type DocumentId,
+  effectiveBates,
+  type OverlayOp,
+  type OverlayRole,
+  type Size,
+  type Workspace,
 } from '@pdf-editor/document-model';
 import {
   layoutOverlay,
@@ -35,12 +36,16 @@ export function overlaysForPage(
   return replaceFurniture(overlays, preview.kind, preview.overlays);
 }
 
-/** Bates numbering in effect for a document (the preview's while a dialog is open). */
+/**
+ * Bates numbering in effect for a document: the open dialog's preview, else the
+ * document's own with the run's start resolved from the current page counts.
+ */
 export function batesFor(
-  doc: Pick<VirtualDocument, 'id' | 'bates'>,
+  ws: Workspace,
+  documentId: DocumentId,
   preview: FurniturePreview | null,
 ): BatesConfig | undefined {
-  return preview?.bates?.[doc.id] ?? doc.bates;
+  return preview?.bates?.[documentId] ?? effectiveBates(ws, documentId);
 }
 
 export interface PagePreviewInput {

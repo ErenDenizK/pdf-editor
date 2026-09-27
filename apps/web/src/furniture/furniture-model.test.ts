@@ -1,10 +1,13 @@
 import {
+  addSource,
   createSequentialIdGenerator,
   createWorkspace,
-  addSource,
   type DocumentId,
+  effectiveBates,
   getDocument,
+  insertBlankPage,
   type OverlayOp,
+  updateDocumentOverlays,
 } from '@pdf-editor/document-model';
 import { overlayText } from '@pdf-editor/engine/overlay-geometry';
 import { describe, expect, it } from 'vitest';
@@ -174,28 +177,73 @@ describe('Bates', () => {
         { id: 'c' as DocumentId, pages: new Array(2) },
       ],
       { prefix: 'X', width: 4, start: 10, suffix: '' },
+      'run-1',
     );
-    expect(run.map((e) => [e.documentId, e.first, e.last, e.config.start])).toEqual([
+    // Empty documents are left out of the run; every member stores the same run config.
+    expect(run.map((e) => [e.documentId, e.first, e.last, e.effective.start])).toEqual([
       ['a', 10, 12, 10],
-      ['b', 13, 12, 13],
       ['c', 13, 14, 13],
     ]);
+    expect(run[1]?.config).toEqual({
+      prefix: 'X',
+      width: 4,
+      start: 10,
+      suffix: '',
+      run: { id: 'run-1', documents: ['a', 'c'] },
+    });
   });
 
-  it('applies the run to every page and each document in one step', () => {
+  it('stores the run as a document rule: inserted pages are numbered, numbers stay unique', () => {
     const { ws, docs } = workspace(3, 2);
+    const [a, b] = docs as [DocumentId, DocumentId];
     const run = planBatesRun(
       docs.map((id) => getDocument(ws, id)),
       { ...defaultBates(), prefix: 'P', start: 1 },
+      'r',
     );
     const next = applyBatesRun(ws, run, batesOverlay(defaultBates()));
-    expect(docs.map((id) => getDocument(next, id).bates?.start)).toEqual([1, 4]);
+    expect(docs.map((id) => effectiveBates(next, id)?.start)).toEqual([1, 4]);
+    // The stamp is a document-level rule, not copied onto pages.
+    expect(getDocument(next, b).furniture).toHaveLength(1);
+    expect(getDocument(next, b).pages.every((p) => p.overlays.length === 0)).toBe(true);
+    // Inserting a page into A: A now spans 1…4 and B moves on to 5.
+    const inserted = insertBlankPage(
+      next,
+      { document: a, index: 0 },
+      createSequentialIdGenerator('x'),
+    );
+    expect(effectiveBates(inserted, b)?.start).toBe(5);
+    const removed = removeFurniture(next, a, 'bates');
+    expect(getDocument(removed, a).bates).toBeUndefined();
+    expect(furnitureOf(getDocument(removed, a), 'bates')).toEqual([]);
+    // B no longer counts A's pages once A left the run.
+    expect(effectiveBates(removed, b)?.start).toBe(1);
+  });
+});
+
+describe('document-level furniture', () => {
+  it('applies to pages added later and replaces page-by-page furniture of its kind', () => {
+    const { ws, docs } = workspace(2);
+    const id = docs[0] as DocumentId;
+    const numbers = pageNumberOverlay(defaultPageNumbers(2));
+    // Page numbers put on the pages one by one (older files, or explicit page overlays).
+    const legacy = updateDocumentOverlays(ws, id, () => [numbers]);
+    const applied = applyFurniture(legacy, id, 'page-numbers', [{ ...numbers, template: 'n' }]);
+    const doc = getDocument(applied, id);
+    expect(doc.pages.every((p) => p.overlays.length === 0)).toBe(true);
     expect(
-      getDocument(next, docs[1] as DocumentId).pages.every((p) => p.overlays.length === 1),
-    ).toBe(true);
-    const removed = removeFurniture(next, docs[0] as DocumentId, 'bates');
-    expect(getDocument(removed, docs[0] as DocumentId).bates).toBeUndefined();
-    expect(furnitureOf(getDocument(removed, docs[0] as DocumentId), 'bates')).toEqual([]);
+      furnitureOf(doc, 'page-numbers').map((o) => (o.kind === 'text' ? o.template : '')),
+    ).toEqual(['n']);
+    const inserted = insertBlankPage(
+      applied,
+      { document: id, index: 2 },
+      createSequentialIdGenerator('y'),
+    );
+    expect(getDocument(inserted, id).pages).toHaveLength(3);
+    expect(getDocument(inserted, id).furniture).toEqual(doc.furniture);
+    expect(
+      getDocument(removeFurniture(inserted, id, 'page-numbers'), id).furniture,
+    ).toBeUndefined();
   });
 });
 
@@ -222,7 +270,7 @@ describe('watermark and replacing furniture', () => {
     const once = applyFurniture(ws, id, 'page-numbers', [numbers]);
     const twice = applyFurniture(once, id, 'page-numbers', [{ ...numbers, template: 'x' }]);
     expect(
-      getDocument(twice, id).pages[0]?.overlays.map((o) => (o.kind === 'text' ? o.template : '')),
+      getDocument(twice, id).furniture?.map((o) => (o.kind === 'text' ? o.template : '')),
     ).toEqual(['x']);
   });
 });

@@ -100,7 +100,7 @@ describe('raster encoding', () => {
       background: 'transparent',
     });
     expect([...jpeg.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
-    const zip = zipFiles([
+    const zip = await zipFiles([
       { name: 'a.png', bytes: png },
       { name: 'b.jpg', bytes: jpeg },
     ]);

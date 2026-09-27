@@ -748,7 +748,10 @@ export interface MetadataStripReport {
   readonly xmpPackets: number;
   /** Embedded files and file attachment annotations removed. */
   readonly attachments: number;
-  /** JavaScript actions, /OpenAction and /AA entries removed. */
+  /**
+   * Script and external actions (/JavaScript, /Launch, /SubmitForm, /ImportData, /Rendition
+   * with /JS), including /OpenAction and /Next, plus /AA entries, removed.
+   */
   readonly javascript: number;
   readonly pieceInfo: number;
   readonly thumbnails: number;
@@ -798,7 +801,7 @@ export interface MetadataFindings {
   readonly attachments: number;
   /** File names of embedded files (capped). */
   readonly attachmentNames: readonly string[];
-  /** JavaScript: name tree entries, JS actions, /OpenAction and /AA entries. */
+  /** Script and external actions (see `MetadataStripReport.javascript`) and /AA entries. */
   readonly javascript: number;
   readonly pieceInfo: number;
   readonly thumbnails: number;

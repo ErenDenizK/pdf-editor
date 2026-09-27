@@ -793,16 +793,21 @@ function BatesDialog({ documentId }: { readonly documentId: DocumentId }) {
   });
   const [settings, setSettings] = useState(initial);
   const [startEdited, setStartEdited] = useState(existing);
-  const [selected, setSelected] = useState<readonly DocumentId[]>([documentId]);
+  // Editing a run starts with its members that are still open; the run id is kept.
+  const [selected, setSelected] = useState<readonly DocumentId[]>(() => {
+    const members = doc?.bates?.run?.documents.filter((id) => tabs.some((t) => t.id === id));
+    return members?.includes(documentId) ? members : [documentId];
+  });
+  const [runId] = useState(() => doc?.bates?.run?.id ?? crypto.randomUUID());
   const update = (patch: Partial<BatesSettings>) => setSettings((s) => ({ ...s, ...patch }));
 
   const documents = tabs
     .filter((t) => selected.includes(t.id))
     .map((t) => workspace.documents[t.id])
     .filter((d) => d !== undefined);
-  const run = planBatesRun(documents, settings);
+  const run = planBatesRun(documents, settings, runId);
   const overlay = batesOverlay(settings);
-  const bates = Object.fromEntries(run.map((entry) => [entry.documentId, entry.config]));
+  const bates = Object.fromEntries(run.map((entry) => [entry.documentId, entry.effective]));
   usePreview('bates', selected, [overlay], bates);
   if (!doc) return null;
   const first = run[0];
@@ -876,8 +881,8 @@ function BatesDialog({ documentId }: { readonly documentId: DocumentId }) {
         {first && last && last.last >= first.first ? (
           <p className={local2.sample} role="status" data-testid="bates-sample">
             {m.furniture_bates_sample({
-              first: formatBates(first.config, 0),
-              last: formatBates(last.config, last.last - last.first),
+              first: formatBates(first.effective, 0),
+              last: formatBates(last.effective, last.last - last.first),
             })}
           </p>
         ) : null}

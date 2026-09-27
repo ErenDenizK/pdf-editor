@@ -20,7 +20,6 @@ import { X } from 'lucide-react';
 import { useEffect, useReducer, useRef, useState } from 'react';
 
 import { deliverPdf } from '../export/deliver';
-import { prepareExport } from '../export/export-service';
 import { exportFileName } from '../export/filename';
 import { formatBytes } from '../files/file-filters';
 import { m } from '../i18n';
@@ -38,7 +37,9 @@ import {
 } from './compress-model';
 import { openScratch, type ScratchDocument, toolRenderer } from './engine-access';
 import { presetName, skipReason } from './labels';
+import { toolSourceBytes } from './tool-source';
 import styles from './ToolDialog.module.css';
+import { verifyCopy } from './verify-copy';
 import {
   closeToolDialog,
   exportCompressionFor,
@@ -82,15 +83,11 @@ function CompressFlow({ documentId }: { readonly documentId: DocumentId }) {
     controller.current = abort;
     void (async () => {
       try {
-        const prepared = await prepareExport(documentId, {
-          compression: null,
-          signal: abort.signal,
-        });
+        const bytes = await toolSourceBytes(documentId, abort.signal);
         if (abort.signal.aborted) return;
-        if (!prepared.ok) throw new Error(prepared.error.message);
-        setSource(prepared.value.bytes);
+        setSource(bytes);
         const compressor = await getCompressor();
-        const analysis = await compressor.analyze(prepared.value.bytes.slice(0));
+        const analysis = await compressor.analyze(bytes.slice(0));
         if (abort.signal.aborted) return;
         const initial = exportCompressionFor(documentId);
         dispatch({ type: 'analyzed', analysis, ...(initial ? { initial } : {}) });
@@ -143,6 +140,13 @@ function CompressFlow({ documentId }: { readonly documentId: DocumentId }) {
   const download = async (result: CompressionResult) => {
     const name = exportFileName(`${title}-compressed`);
     try {
+      // Only verified bytes are offered (ARCHITECTURE.md §4): same pages as the source.
+      if (source === null) return;
+      const problems = await verifyCopy(source, result.bytes);
+      if (problems.length > 0) {
+        dispatch({ type: 'failed', message: problems.join('; ') });
+        return;
+      }
       const outcome = await deliverPdf(result.bytes.slice(0), name);
       if (outcome === 'cancelled') return;
       announce(outcome === 'saved' ? m.announce_saved({ name }) : m.announce_downloaded({ name }));

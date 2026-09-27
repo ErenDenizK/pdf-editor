@@ -18,6 +18,7 @@ import {
   deriveLabelRanges,
   documentTitleFromName,
   dropUnresolved,
+  effectiveBates,
   effectiveLabels,
   getDocument,
   needsPageLabels,
@@ -74,8 +75,12 @@ export function planExport(
   const labeled = needsPageLabels(ws, doc);
   const outline = dropUnresolved(doc.outline);
   const { security: _documentPolicy, ...rest } = doc;
+  const bates = effectiveBates(ws, documentId);
+  const { bates: _run, ...unnumbered } = rest;
   const document: VirtualDocument = {
-    ...rest,
+    ...unnumbered,
+    // Bates starts of a run follow the current page counts of its documents.
+    ...(bates === undefined ? {} : { bates }),
     // The effective policy only: the assembler falls back to the document's own.
     ...(security === undefined ? {} : { security }),
     labels: labeled ? deriveLabelRanges(ws, doc) : [],

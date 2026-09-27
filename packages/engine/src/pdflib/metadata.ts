@@ -35,7 +35,7 @@ import {
   annotationSubtype,
   catalogNameTree,
   forEachDict,
-  isJavaScriptAction,
+  isScriptOrExternalAction,
   isMetadataStream,
   NAMES,
   nameTreeEntries,
@@ -288,7 +288,7 @@ function sourceLevelCounts(sources: readonly PDFDocument[], strip: MetadataStrip
     if (strip.javascript) {
       const js = catalogNameTree(source, NAMES.JavaScript);
       if (js) javascript += nameTreeEntries(source, js).length;
-      if (isJavaScriptAction(source, source.catalog.get(NAMES.OpenAction))) javascript++;
+      if (isScriptOrExternalAction(source, source.catalog.get(NAMES.OpenAction))) javascript++;
       if (source.catalog.has(NAMES.AA)) javascript++;
     }
   });
@@ -308,7 +308,7 @@ const STANDARD_KEYS = new Set([
 ]);
 
 /** Keys holding actions that may be JavaScript. */
-const ACTION_KEYS = [NAMES.A, NAMES.OpenAction, NAMES.Next];
+const ACTION_KEYS = [NAMES.A, NAMES.OpenAction];
 
 function stripOutput(
   out: PDFDocument,
@@ -360,10 +360,24 @@ function stripOutput(
         javascript++;
       }
       for (const key of ACTION_KEYS) {
-        if (isJavaScriptAction(out, dict.get(key))) {
+        if (isScriptOrExternalAction(out, dict.get(key))) {
           dict.delete(key);
           javascript++;
         }
+      }
+      // /Next: one action or an array of them, run after this one.
+      const next = out.context.lookup(dict.get(NAMES.Next));
+      if (next instanceof PDFArray) {
+        for (let i = next.size() - 1; i >= 0; i--) {
+          if (isScriptOrExternalAction(out, next.get(i))) {
+            next.remove(i);
+            javascript++;
+          }
+        }
+        if (next.size() === 0) dict.delete(NAMES.Next);
+      } else if (isScriptOrExternalAction(out, dict.get(NAMES.Next))) {
+        dict.delete(NAMES.Next);
+        javascript++;
       }
     }
     if (strip.pieceInfo && dict.has(NAMES.PieceInfo)) {

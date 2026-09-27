@@ -354,6 +354,118 @@ describe('Strip metadata on page and annotation level', () => {
   });
 });
 
+describe('Strip metadata: scripts and external actions', () => {
+  /**
+   * Common structures that are not actions where actions may appear (catalog /OpenAction
+   * destination array, a Measure dictionary's /A number formats, /Next arrays), plus every
+   * script or external action type.
+   */
+  async function actionsPdf(): Promise<ArrayBuffer> {
+    return makePdf([{ size: [300, 300], text: 'body' }], (doc) => {
+      const { context } = doc;
+      const page = doc.getPage(0);
+      doc.catalog.set(PDFName.of('OpenAction'), context.obj([page.ref, PDFName.of('Fit')]));
+      const numberFormat = (unit: string) =>
+        context.obj({ Type: 'NumberFormat', U: PDFString.of(unit), C: 1 });
+      page.node.set(
+        PDFName.of('VP'),
+        context.obj([
+          context.obj({
+            Type: 'Viewport',
+            BBox: [0, 0, 300, 300],
+            Measure: context.obj({
+              Type: 'Measure',
+              Subtype: 'RL',
+              R: PDFString.of('1 in = 1 ft'),
+              X: [numberFormat('ft')],
+              D: [numberFormat('ft')],
+              A: [numberFormat('sq ft')],
+            }),
+          }),
+        ]),
+      );
+      const link = (rect: number[], action: PDFDict) =>
+        context.register(context.obj({ Type: 'Annot', Subtype: 'Link', Rect: rect, A: action }));
+      const annots = [
+        link(
+          [0, 0, 20, 20],
+          context.obj({
+            S: 'URI',
+            URI: PDFString.of('https://example.org/kept'),
+            Next: [
+              context.obj({ S: 'JavaScript', JS: PDFString.of('Secret next script') }),
+              context.obj({ S: 'URI', URI: PDFString.of('https://example.org/next-kept') }),
+            ],
+          }),
+        ),
+        link([20, 0, 40, 20], context.obj({ S: 'Launch', F: PDFString.of('secret-launch.exe') })),
+        link(
+          [40, 0, 60, 20],
+          context.obj({ S: 'SubmitForm', F: PDFString.of('https://collect.example/secret') }),
+        ),
+        link([60, 0, 80, 20], context.obj({ S: 'ImportData', F: PDFString.of('secret-data.fdf') })),
+        link(
+          [80, 0, 100, 20],
+          context.obj({ S: 'Rendition', OP: 0, JS: PDFString.of('Secret rendition script') }),
+        ),
+      ];
+      page.node.set(PDFName.of('Annots'), context.obj(annots));
+    });
+  }
+
+  test('removes every script and external action and keeps other structures', async () => {
+    const SRC = sid('actions');
+    const bytes = await actionsPdf();
+    const findings = await assembler.diagnose(bytes.slice(0));
+    expect(findings.metadata.javascript).toBe(5);
+    const result = await assembler.assemble({
+      document: vdoc([vpage({ kind: 'source', source: SRC, index: 0 })], {
+        metadata: { policy: 'explicit', strip: STRIP_ALL },
+      }),
+      sources: new Map([[SRC, bytes]]),
+      blobs: new Map(),
+    });
+    for (const secret of [
+      'Secret next script',
+      'secret-launch.exe',
+      'https://collect.example/secret',
+      'secret-data.fdf',
+      'Secret rendition script',
+    ]) {
+      expect(await fileContains(result.bytes, secret), secret).toBe(false);
+    }
+    expect(await fileContains(result.bytes, 'https://example.org/kept')).toBe(true);
+    expect(await fileContains(result.bytes, 'https://example.org/next-kept')).toBe(true);
+    expect(await fileContains(result.bytes, 'sq ft')).toBe(true);
+    expect(result.report.metadataStripped?.javascript).toBe(5);
+    // Only the JavaScript entry of the /Next array went.
+    const out = await PDFDocument.load(result.bytes, { updateMetadata: false });
+    const first = out.context.lookup(
+      (out.context.lookup(out.getPage(0).node.get(PDFName.of('Annots'))) as PDFArray).get(0),
+    ) as PDFDict;
+    const action = out.context.lookup(first.get(PDFName.of('A'))) as PDFDict;
+    expect((out.context.lookup(action.get(PDFName.of('Next'))) as PDFArray).size()).toBe(1);
+  });
+
+  test('a document-level destination /OpenAction does not break stripping or counting', async () => {
+    const SRC = sid('open-action');
+    const bytes = await makePdf([{ size: [100, 100] }], (doc) => {
+      doc.catalog.set(
+        PDFName.of('OpenAction'),
+        doc.context.obj([doc.getPage(0).ref, PDFName.of('Fit')]),
+      );
+    });
+    const result = await assembler.assemble({
+      document: vdoc([vpage({ kind: 'source', source: SRC, index: 0 })], {
+        metadata: { policy: 'explicit', strip: STRIP_ALL },
+      }),
+      sources: new Map([[SRC, bytes]]),
+      blobs: new Map(),
+    });
+    expect(result.report.metadataStripped?.javascript).toBe(0);
+  });
+});
+
 describe('passwords and permissions', () => {
   const NONE: PermissionFlags = {
     print: false,

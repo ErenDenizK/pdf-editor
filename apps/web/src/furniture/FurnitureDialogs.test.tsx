@@ -7,6 +7,7 @@ import '../styles/tokens.css';
 import '../styles/reset.css';
 import '../styles/global.css';
 
+import { effectiveBates, insertBlankPage } from '@pdf-editor/document-model';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
@@ -136,8 +137,15 @@ describe('furniture dialogs', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(useFurnitureStore.getState().dialog).toBeNull());
     const ws = model().workspace;
-    expect(ws.documents[first as never]?.bates?.start).toBe(1);
-    expect(ws.documents[second as never]?.bates?.start).toBe(5);
+    expect(effectiveBates(ws, first as never)?.start).toBe(1);
+    expect(effectiveBates(ws, second as never)?.start).toBe(5);
+    // A page inserted into the first document is numbered and the second one moves on.
+    model().applyOperation(
+      (w, ids) => insertBlankPage(w, { document: first as never, index: 0 }, ids),
+      'Insert',
+    );
+    expect(effectiveBates(model().workspace, second as never)?.start).toBe(6);
+    model().undo();
     expect(model().history.present.label).toBe('Bates numbering');
     expect(lastBatesNumber('ACME')).toBe(7);
 

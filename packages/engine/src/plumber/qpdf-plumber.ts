@@ -22,6 +22,7 @@ import {
   type QpdfJobOptions,
   qpdfArgs,
   qpdfCheckArgs,
+  qpdfFailure,
 } from './qpdf-args';
 import { patchClassicTrailerSize, trailerState } from './trailer';
 
@@ -34,7 +35,17 @@ export interface QpdfPlumberOptions {
   readonly loadFactory?: () => Promise<QpdfFactory>;
 }
 
-/** Result of `QpdfPlumber.check` (`qpdf --check`). */
+export interface PlumberCheckOptions {
+  /**
+   * Password of an encrypted file. The cheap read often works without it (the xref and a
+   * page tree outside object streams are not encrypted); pass it when known.
+   */
+  readonly password?: string;
+  /** Decode every stream (`qpdf --check`); default is the cheap structural read. */
+  readonly thorough?: boolean;
+}
+
+/** Result of `QpdfPlumber.check`. */
 export interface PlumberCheckResult {
   /** No errors and no warnings. */
   readonly ok: boolean;
@@ -62,6 +73,18 @@ function omit<T extends object, K extends keyof T>(value: T, keys: readonly K[])
   return Object.fromEntries(Object.entries(value).filter(([key]) => !drop.has(key))) as Omit<T, K>;
 }
 
+interface Instance {
+  readonly qpdf: QpdfModule;
+  /** Where the instance's stdout/stderr lines go; replaced per job. */
+  sink: { stdout: string[]; stderr: string[] };
+}
+
+function removeFiles(fs: QpdfModule['FS']): void {
+  for (const path of [QPDF_INPUT, QPDF_OUTPUT]) {
+    if (fs.analyzePath(path).exists) fs.unlink(path);
+  }
+}
+
 const defaultFactory = async (): Promise<QpdfFactory> =>
   (await import('../../qpdf/dist/qpdf.mjs')).default;
 
@@ -69,6 +92,8 @@ export class QpdfPlumber implements PdfPlumber {
   private readonly wasmUrl: string;
   private readonly loadFactory: () => Promise<QpdfFactory>;
   private compiled: Promise<{ module: WebAssembly.Module; factory: QpdfFactory }> | undefined;
+  private batchDepth = 0;
+  private shared: Promise<Instance> | undefined;
 
   constructor(options: QpdfPlumberOptions) {
     this.wasmUrl = options.wasmUrl;
@@ -97,26 +122,61 @@ export class QpdfPlumber implements PdfPlumber {
     return this.compiled;
   }
 
-  /** Runs qpdf once in a fresh instance with `input` at QPDF_INPUT. */
-  private async run(input: Uint8Array, args: readonly string[]): Promise<RunOutput> {
+  private async instantiate(): Promise<Instance> {
     const { module, factory } = await this.prepare();
-    const stdout: string[] = [];
-    const stderr: string[] = [];
-    const instance = await factory({
-      print: (line) => stdout.push(line),
-      printErr: (line) => stderr.push(line),
+    const sink: Instance['sink'] = { stdout: [], stderr: [] };
+    const qpdf = await factory({
+      print: (line) => sink.stdout.push(line),
+      printErr: (line) => sink.stderr.push(line),
       instantiateWasm: (imports, receive) => {
-        void WebAssembly.instantiate(module, imports).then((inst) => receive(inst, module));
+        void WebAssembly.instantiate(module, imports).then((inst) => {
+          receive(inst, module);
+        });
         return {};
       },
     });
-    const fs = instance.FS as QpdfModule['FS'] & { mkdir?: (path: string) => void };
+    const fs = qpdf.FS as QpdfModule['FS'] & { mkdir?: (path: string) => void };
     fs.mkdir?.('/work');
+    return { qpdf, sink };
+  }
+
+  /**
+   * Runs `task` with one qpdf instance shared by every job it starts (and by concurrent
+   * batches), instead of a fresh instance per job; the instance, and the wasm memory it
+   * grew, is dropped when the last batch ends. Each job's MEMFS files are removed after
+   * it. Safe because a job (write input, `callMain`, read output) is synchronous.
+   */
+  async batch<T>(task: () => Promise<T>): Promise<T> {
+    this.batchDepth += 1;
+    try {
+      return await task();
+    } finally {
+      this.batchDepth -= 1;
+      if (this.batchDepth === 0) this.shared = undefined;
+    }
+  }
+
+  /** Runs qpdf once with `input` at QPDF_INPUT (in the batch's instance, if any). */
+  private async run(input: Uint8Array, args: readonly string[]): Promise<RunOutput> {
+    let pending: Promise<Instance>;
+    if (this.batchDepth > 0) {
+      this.shared ??= this.instantiate();
+      pending = this.shared;
+    } else {
+      pending = this.instantiate();
+    }
+    const { qpdf: instance, sink } = await pending;
+    const fs = instance.FS;
+    // From here to the end the job is synchronous: no other job can interleave.
+    sink.stdout = [];
+    sink.stderr = [];
     fs.writeFile(QPDF_INPUT, input);
     let status: number;
     try {
       status = instance.callMain([...args]);
     } catch (error) {
+      removeFiles(fs);
+      if (this.shared === pending) this.shared = undefined;
       // An abort (e.g. out of memory) throws out of callMain.
       const message = error instanceof Error ? error.message : String(error);
       if (/memory/i.test(message)) {
@@ -127,6 +187,8 @@ export class QpdfPlumber implements PdfPlumber {
       throw new EngineError('internal', `qpdf failed: ${message}`, { cause: error });
     }
     const output = fs.analyzePath(QPDF_OUTPUT).exists ? fs.readFile(QPDF_OUTPUT) : undefined;
+    removeFiles(fs);
+    const { stdout, stderr } = sink;
     return output === undefined ? { status, stdout, stderr } : { status, stdout, stderr, output };
   }
 
@@ -142,6 +204,10 @@ export class QpdfPlumber implements PdfPlumber {
 
   async process(bytes: ArrayBuffer, options: QpdfJobOptions = {}): Promise<PlumberResult> {
     const input = QpdfPlumber.guard(bytes);
+    return await this.batch(() => this.processInBatch(input, options));
+  }
+
+  private async processInBatch(input: Uint8Array, options: QpdfJobOptions): Promise<PlumberResult> {
     const first = await this.rewrite(input, options);
     const state = trailerState(first.bytes);
     if (state === 'ok') return QpdfPlumber.result(first);
@@ -191,39 +257,39 @@ export class QpdfPlumber implements PdfPlumber {
       .filter((line) => line !== '' && !line.includes('operation succeeded with warnings'));
     if (result.status === QPDF_EXIT.error || result.output === undefined) {
       const text = warnings.join('; ') || `qpdf exited with status ${result.status}`;
-      if (/invalid password/i.test(text)) {
-        throw new EngineError(
-          options.password === undefined && options.decrypt?.password === undefined
-            ? 'password-required'
-            : 'password-incorrect',
-          text,
-        );
-      }
-      throw new EngineError('corrupt', text);
+      throw qpdfFailure(text, options);
     }
     return { bytes: result.output, repaired: indicatesRepair(result.stderr), warnings };
   }
 
   /**
-   * Structural check (`qpdf --check`): what a diagnostics panel lists as structural
-   * warnings. Never rejects for damaged input; reports `unreadable` instead.
+   * Structural check for a diagnostics panel. Never rejects for damaged input; reports
+   * `unreadable` instead.
+   * - Default (cheap): qpdf reads the xref, trailer, page tree and encryption dictionary
+   *   (`--show-encryption --show-npages`), so recovery warnings and encryption show, but
+   *   no stream is decoded. `linearized` then comes from the header's /Linearized dict.
+   * - `thorough`: `qpdf --check`, which also decodes every stream (slow on large files).
    */
-  async check(bytes: ArrayBuffer, password?: string): Promise<PlumberCheckResult> {
+  async check(bytes: ArrayBuffer, options: PlumberCheckOptions = {}): Promise<PlumberCheckResult> {
     const input = QpdfPlumber.guard(bytes);
     const head = new TextDecoder('latin1').decode(input.subarray(0, 1024));
     const version = /%PDF-(\d\.\d)/.exec(head)?.[1];
-    const result = await this.run(input, qpdfCheckArgs(password));
-    const warnings = result.stderr.map(cleanWarning).filter((line) => line !== '');
+    const result = await this.run(input, qpdfCheckArgs(options));
+    const warnings = result.stderr
+      .map(cleanWarning)
+      .filter((line) => line !== '' && !line.includes('operation succeeded with warnings'));
     const text = result.stdout.join('\n');
-    const encrypted =
-      /File is (?!not encrypted)/i.test(text) && !/File is not encrypted/i.test(text);
-    const linearized = /File is linearized/i.test(text) && !/File is not linearized/i.test(text);
-    const unreadable = result.status === QPDF_EXIT.error && !/checking/i.test(text);
+    const encrypted = result.status !== QPDF_EXIT.error && !/File is not encrypted/i.test(text);
+    const linearized = options.thorough
+      ? /File is linearized/i.test(text) && !/File is not linearized/i.test(text)
+      : /\/Linearized\s+1/.test(head);
+    const unreadable =
+      result.status === QPDF_EXIT.error && (options.thorough ? !/checking/i.test(text) : true);
     return {
       ok: result.status === QPDF_EXIT.ok && warnings.length === 0,
       unreadable,
       repaired: indicatesRepair(result.stderr),
-      encrypted,
+      encrypted: unreadable ? /invalid password/i.test(warnings.join(' ')) : encrypted,
       linearized,
       warnings:
         result.status === QPDF_EXIT.error && warnings.length === 0

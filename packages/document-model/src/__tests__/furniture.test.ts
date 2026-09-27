@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { setDocumentBates, updateDocumentOverlays } from '../pages';
+import { createSequentialIdGenerator } from '../ids';
+import {
+  deletePages,
+  effectiveBates,
+  insertBlankPage,
+  setDocumentBates,
+  setDocumentFurniture,
+  updateDocumentOverlays,
+} from '../pages';
 import { deserializeWorkspace, serializeWorkspace } from '../serialize';
 import { getDocument } from '../selectors';
 import type { DocumentId, OverlayOp } from '../types';
@@ -80,5 +88,51 @@ describe('page furniture in the model', () => {
     next = check(setDocumentBates(next, a, { prefix: 'P', width: 4, start: 1, suffix: '' }));
     const restored = deserializeWorkspace(JSON.stringify(serializeWorkspace(next)));
     expect(getDocument(restored, a)).toEqual(getDocument(next, a));
+  });
+
+  it('keeps document-level furniture for pages added later, and clears it', () => {
+    const next = check(setDocumentFurniture(ws, a, [numbers, watermark]));
+    expect(getDocument(next, a).furniture).toEqual([numbers, watermark]);
+    const inserted = check(
+      insertBlankPage(next, { document: a, index: 1 }, createSequentialIdGenerator('n')),
+    );
+    // The new page has no overlays of its own: it inherits the document's furniture.
+    expect(getDocument(inserted, a).pages[1]?.overlays).toEqual([]);
+    expect(getDocument(inserted, a).furniture).toEqual([numbers, watermark]);
+    const cleared = check(setDocumentFurniture(inserted, a, []));
+    expect('furniture' in getDocument(cleared, a)).toBe(false);
+    expect(setDocumentFurniture(cleared, a, undefined)).toBe(cleared);
+    expectCode(() => setDocumentFurniture(ws, a, [{ ...numbers, opacity: 3 }]), 'invalid-argument');
+    const restored = deserializeWorkspace(JSON.stringify(serializeWorkspace(next)));
+    expect(getDocument(restored, a).furniture).toEqual([numbers, watermark]);
+  });
+
+  it('derives Bates starts of a run from the current page counts', () => {
+    const run = { id: 'run-1', documents: [a, b] };
+    const config = { prefix: 'X', width: 4, start: 10, suffix: '', run };
+    let next = check(setDocumentBates(ws, a, config));
+    next = check(setDocumentBates(next, b, config));
+    // A has 3 pages: B starts at 13.
+    expect(effectiveBates(next, a)).toEqual({ prefix: 'X', width: 4, start: 10, suffix: '' });
+    expect(effectiveBates(next, b)?.start).toBe(13);
+    // Inserting a page into A moves B on: numbers stay unique and contiguous.
+    const inserted = check(
+      insertBlankPage(next, { document: a, index: 3 }, createSequentialIdGenerator('n')),
+    );
+    expect(effectiveBates(inserted, b)?.start).toBe(14);
+    const removed = check(
+      deletePages(
+        inserted,
+        getDocument(inserted, a)
+          .pages.slice(0, 2)
+          .map((p) => p.id),
+      ),
+    );
+    expect(effectiveBates(removed, b)?.start).toBe(12);
+    // A member leaving the run (Bates removed) no longer counts.
+    expect(effectiveBates(check(setDocumentBates(next, a, undefined)), b)?.start).toBe(10);
+    expect(effectiveBates(ws, a)).toBeUndefined();
+    const restored = deserializeWorkspace(JSON.stringify(serializeWorkspace(next)));
+    expect(getDocument(restored, b).bates).toEqual(config);
   });
 });

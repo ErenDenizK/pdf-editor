@@ -181,6 +181,9 @@ function assertOverlays(overlays: readonly OverlayOp[]): void {
 }
 
 function assertBates(bates: BatesConfig): void {
+  if (bates.run !== undefined && (bates.run.id === '' || !isArrayValue(bates.run.documents))) {
+    throw new DocumentModelError('invalid-argument', 'A Bates run needs an id and documents');
+  }
   if (
     !(Number.isSafeInteger(bates.start) && bates.start >= 0) ||
     !(Number.isSafeInteger(bates.width) && bates.width >= 1 && bates.width <= 12)
@@ -365,6 +368,51 @@ export function updateDocumentOverlays(
   return withWorkspace(ws, {
     documents: putDocuments(ws.documents, [{ ...doc, pages, clean: false }]),
   });
+}
+
+/**
+ * Sets (or clears, with an empty list or undefined) the document-level furniture: overlays
+ * drawn on every page, including pages added later.
+ */
+export function setDocumentFurniture(
+  ws: Workspace,
+  documentId: DocumentId,
+  overlays: readonly OverlayOp[] | undefined,
+): Workspace {
+  const doc = requireDocument(ws, documentId);
+  if (overlays === undefined || overlays.length === 0) {
+    if (doc.furniture === undefined) return ws;
+    const { furniture: _removed, ...rest } = doc;
+    return withWorkspace(ws, {
+      documents: putDocuments(ws.documents, [{ ...rest, clean: false }]),
+    });
+  }
+  assertOverlays(overlays);
+  return withWorkspace(ws, {
+    documents: putDocuments(ws.documents, [{ ...doc, furniture: overlays, clean: false }]),
+  });
+}
+
+/**
+ * The Bates numbering in effect for a document, with `start` resolved to the number of
+ * its first page and no run: in a run, the run's start plus the current page counts of
+ * the run members before this document (members that were closed or no longer carry
+ * this run are skipped). Undefined when the document has no Bates numbering.
+ */
+export function effectiveBates(ws: Workspace, documentId: DocumentId): BatesConfig | undefined {
+  const doc = ws.documents[documentId];
+  const bates = doc?.bates;
+  if (bates === undefined) return undefined;
+  const { run, ...config } = bates;
+  if (run === undefined) return config;
+  let start = bates.start;
+  for (const id of run.documents) {
+    if (id === documentId) return { ...config, start };
+    const member = ws.documents[id];
+    if (member?.bates?.run?.id === run.id) start += member.pages.length;
+  }
+  // Not listed in its own run (e.g. copied by a structural operation): numbered alone.
+  return config;
 }
 
 /** Sets (or clears, with undefined) the document's Bates numbering. */

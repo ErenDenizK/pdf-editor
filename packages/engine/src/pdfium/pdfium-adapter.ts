@@ -82,7 +82,7 @@ import {
 } from '../types';
 import { checkXrefStructure } from '../structure/xref-check';
 import { permissionsFromP } from '../pdflib/inspect';
-import { finalizeForms } from './form-finalize';
+import { type ClearFieldsRequest, clearFields, finalizeForms } from './form-finalize';
 import {
   effectiveRect,
   followRect,
@@ -1038,18 +1038,12 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
       }
       case 'radio': {
         if (cleared || value === '') {
-          const on = targets.filter((t) => isWidgetChecked(t.widget));
-          for (const { page, widget } of on) {
-            await apply(page, widget, { kind: 'checked', checked: false });
+          // PDFium's form filler only turns radio buttons on: rewrite the PDF instead.
+          if (targets.some((t) => isWidgetChecked(t.widget))) {
+            await this.rewriteFields(id, { radiosOff: [name] }, options);
           }
-          const after = (await this.widgets(id, options)).filter(
-            (w) => w.widget.field.name === name && isWidgetChecked(w.widget),
-          );
-          if (after.length > 0) {
-            // PDFium's form filler only turns radio buttons on (NoToggleToOff behaviour).
-            throw new EngineError('unsupported', `Radio group ${name} cannot be cleared`);
-          }
-          break;
+          this.formsEdited.add(id);
+          return;
         }
         const wanted = String(value);
         const target =
@@ -1064,6 +1058,21 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
         const wanted =
           typeof value === 'object' ? (value[0] ?? '') : typeof value === 'string' ? value : '';
         const index = choices.findIndex((o) => o.label === wanted);
+        const editable = (field.flag & PDF_FORM_FIELD_FLAG.CHOICE_EDIT) !== 0;
+        if (wanted === '' && !editable) {
+          // PDFium cannot deselect a combo box: rewrite the PDF, then redraw the widgets.
+          if (choices.some((o) => o.isSelected) || field.value !== '') {
+            await this.rewriteFields(id, { choicesEmpty: [name] }, options);
+            const fresh = await this.widgets(id, options);
+            await this.regenerateAppearances(
+              this.entry(id).doc,
+              fresh.filter((w) => w.widget.field.name === name),
+              options,
+            );
+          }
+          this.formsEdited.add(id);
+          return;
+        }
         // Not an option: free text (editable combo boxes; PDFium refuses it otherwise).
         await apply(
           first.page,
@@ -1110,6 +1119,52 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     }
     this.formsEdited.add(id);
     await this.regenerateAppearances(doc, targets, options);
+  }
+
+  /**
+   * Empties fields PDFium's form filler cannot empty (form-finalize.ts `clearFields`): the
+   * open document is saved, rewritten with pdf-lib and re-opened under the same id, so
+   * rendering, listing and later saves all see the change. Annotation ids survive (the
+   * engine writes the /NM it assigns); an encrypted source continues unencrypted in memory
+   * (exports of encrypted sources remove or replace security anyway).
+   */
+  private async rewriteFields(
+    id: SourceId,
+    request: Omit<ClearFieldsRequest, 'password'>,
+    options: EngineCallOptions,
+  ): Promise<void> {
+    const engine = await this.engine();
+    const entry = this.entry(id);
+    const saved = await this.run(engine.saveAsCopy(entry.doc), options, 'save');
+    const { bytes } = await clearFields(saved, {
+      ...request,
+      ...(entry.doc.isEncrypted && entry.password !== undefined
+        ? { password: entry.password }
+        : {}),
+    });
+    throwIfAborted(options.signal, 'setFormFieldValue');
+    // EmbedPDF keys open documents by id: close first. Should the rewrite not open, the
+    // source comes back as it was (from PDFium's own copy).
+    const fallback = saved.slice(0);
+    await this.run(engine.closeDocument(entry.doc), {}, 'close').catch(() => undefined);
+    const reopen = (content: ArrayBuffer, password?: string) =>
+      this.run(
+        engine.openDocumentBuffer({ id, content }, password === undefined ? {} : { password }),
+        {},
+        { op: 'open', passwordProvided: password !== undefined },
+      );
+    try {
+      const doc = await reopen(bytes);
+      this.docs.set(id, { doc, annotations: entry.annotations });
+    } catch (error) {
+      const doc = await reopen(fallback, entry.password);
+      this.docs.set(id, { ...entry, doc });
+      throw new EngineError(
+        'internal',
+        `Emptying form fields failed: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
   }
 
   /** Regenerates the appearance streams of the given widgets (grouped per page). */
