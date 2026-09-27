@@ -15,3 +15,4 @@ only after discussion with the project owner; the discussion summary is appended
 | 0006 | Branching, versioning and commit conventions | accepted |
 | 0007 | Delivery targets: web first, desktop as escalation path | accepted |
 | 0008 | qpdf integration deferred to M3 and built from source | accepted |
+| 0009 | Headless accessibility primitives: Base UI | accepted |

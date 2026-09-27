@@ -1,7 +1,13 @@
+import { useLayoutEffect } from 'react';
+
+import { registerAppCommands } from './commands/app-commands';
+import { AppShell } from './shell/AppShell';
+
 /**
- * Application root. The shell (tab bar, rails, canvas, tool bar, status bar) is
- * implemented under `src/shell/` and mounted here.
+ * Application root. Registers the shell's commands before first paint (so keycap hints
+ * render immediately) and mounts the shell.
  */
 export function App() {
-  return <main aria-label="pdf-editor">Loading…</main>;
+  useLayoutEffect(() => registerAppCommands(), []);
+  return <AppShell />;
 }

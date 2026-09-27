@@ -1,0 +1,137 @@
+.bar {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-width: 0;
+  height: var(--statusbar-height);
+  padding: 0 var(--space-2) 0 var(--space-4);
+  border-top: 1px solid var(--border-hairline);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.left,
+.right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.left {
+  overflow: hidden;
+}
+
+.item {
+  flex: none;
+}
+
+.dot {
+  color: var(--text-tertiary);
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.privacy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 22px;
+  margin: 0 calc(var(--space-2) * -1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .privacy:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.privacy[data-popup-open] {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+/* A small filled shield-dot: success when clean, warning otherwise. Text carries meaning. */
+.privacyMark {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.privacy[data-state='external'] .privacyMark {
+  background: var(--warning);
+}
+
+.privacy[data-state='external'] {
+  color: var(--warning);
+}
+
+.zoom,
+.modes {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.small {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-1);
+}
+
+.small:disabled {
+  color: var(--text-disabled);
+}
+
+.small svg {
+  width: 14px;
+  height: 14px;
+}
+
+.zoomValue {
+  min-width: 48px;
+  height: 22px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .zoomValue:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.zoomValue[data-popup-open] {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.divider {
+  width: 1px;
+  height: 14px;
+  margin: 0 var(--space-1);
+  background: var(--border-hairline);
+}

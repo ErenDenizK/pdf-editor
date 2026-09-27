@@ -1,0 +1,88 @@
+/**
+ * Application shell (DESIGN.md §2):
+ *
+ *   title / tab bar ............................................
+ *   left rail + panel | stage (+ floating tool bar) | inspector
+ *   status bar .................................................
+ *
+ * Owns the global shortcut listener and window-wide file drops.
+ */
+import { type DragEvent, useRef, useState } from 'react';
+
+import { useShortcuts } from '../commands/use-shortcuts';
+import { dragHasFiles, filesFromDataTransfer } from '../files/open-files';
+import { openDocuments } from '../state/workspace-store';
+import { TooltipProvider } from '../ui/Tooltip';
+import { announce } from './announcer';
+import styles from './AppShell.module.css';
+import { CommandPalette } from './CommandPalette';
+import { LeftRail } from './LeftRail';
+import { LiveRegion } from './LiveRegion';
+import { RightPanel } from './RightPanel';
+import { ShortcutOverlay } from './ShortcutOverlay';
+import { Stage } from './Stage';
+import { StatusBar } from './StatusBar';
+import { TabBar } from './TabBar';
+
+export function AppShell() {
+  useShortcuts();
+  const [dragging, setDragging] = useState(false);
+  // dragenter/dragleave fire for every child crossed; count depth to avoid flicker.
+  const depth = useRef(0);
+
+  const onDragEnter = (event: DragEvent) => {
+    if (!dragHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    depth.current += 1;
+    setDragging(true);
+  };
+  const onDragOver = (event: DragEvent) => {
+    if (!dragHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+  const onDragLeave = (event: DragEvent) => {
+    if (!dragHasFiles(event.dataTransfer)) return;
+    depth.current = Math.max(0, depth.current - 1);
+    if (depth.current === 0) setDragging(false);
+  };
+  const onDrop = (event: DragEvent) => {
+    if (!dragHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    depth.current = 0;
+    setDragging(false);
+    // filesFromDataTransfer reads the items synchronously, before its first await.
+    void filesFromDataTransfer(event.dataTransfer).then((files) => {
+      if (files.length === 0) {
+        announce('No PDF files found in the drop');
+        return;
+      }
+      openDocuments(files);
+      announce(
+        files.length === 1 ? `Opened ${files[0]?.name ?? 'file'}` : `Opened ${files.length} files`,
+      );
+    });
+  };
+
+  return (
+    <TooltipProvider>
+      <div
+        className={styles.shell}
+        data-testid="app-shell"
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
+        <TabBar />
+        <LeftRail />
+        <Stage dragging={dragging} />
+        <RightPanel />
+        <StatusBar />
+      </div>
+      <CommandPalette />
+      <ShortcutOverlay />
+      <LiveRegion />
+    </TooltipProvider>
+  );
+}

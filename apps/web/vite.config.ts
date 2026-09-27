@@ -25,6 +25,10 @@ export default defineConfig({
     format: 'es',
   },
   build: {
+    // Never inline fonts or wasm as data: URLs: the CSP allows `font-src 'self'` only, and
+    // a data: font (Vite inlined a 2 KB subset once) is silently blocked.
+    assetsInlineLimit: (filePath) =>
+      /\.(woff2?|ttf|otf|wasm)$/.test(filePath) ? false : undefined,
     rolldownOptions: {
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),

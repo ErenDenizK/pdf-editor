@@ -1,0 +1,17 @@
+.note {
+  display: grid;
+  gap: 2px;
+}
+
+.title {
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+  line-height: var(--leading-base);
+}
+
+.body {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: 18px;
+  text-wrap: pretty;
+}

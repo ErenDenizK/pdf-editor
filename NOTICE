@@ -32,6 +32,22 @@ and are reproduced in the application's "About and licenses" view.
   Copyright (c) Meta Platforms, Inc. and affiliates.
   License: MIT.
 
-- Fonts
-  TODO(ui): list each bundled font family with its copyright holder and license
-  (for example SIL Open Font License 1.1).
+- Base UI (@base-ui/react)
+  Copyright (c) MUI and contributors.
+  License: MIT.
+
+- Lucide icons (lucide-react)
+  Copyright (c) Lucide Contributors; portions Copyright (c) 2013-2022 Cole Bemis (Feather).
+  License: ISC.
+
+- Zustand
+  Copyright (c) 2019 Paul Henschel.
+  License: MIT.
+
+- Inter (bundled via @fontsource-variable/inter)
+  Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter).
+  License: SIL Open Font License 1.1.
+
+- JetBrains Mono (bundled via @fontsource-variable/jetbrains-mono)
+  Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono).
+  License: SIL Open Font License 1.1.

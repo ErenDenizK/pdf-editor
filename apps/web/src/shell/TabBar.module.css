@@ -1,0 +1,207 @@
+.bar {
+  grid-area: title;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: var(--titlebar-height);
+  padding-right: var(--space-2);
+  border-bottom: 1px solid var(--border-hairline);
+  background: var(--surface-1);
+}
+
+/* The glyph sits in a column exactly as wide as the rail, so both share one axis. */
+.brand {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--rail-width);
+  height: 100%;
+  color: var(--text-secondary);
+}
+
+.tabsRegion {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tablist {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  /* Room for the focus ring, which is drawn outside the tab. */
+  padding: 4px 4px 4px 0;
+  margin: -4px 0;
+}
+
+.tablist::-webkit-scrollbar {
+  display: none;
+}
+
+.tabWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 1 200px;
+  min-width: 112px;
+  max-width: 220px;
+  height: var(--control-height);
+  border: 1px solid transparent;
+  border-radius: var(--radius-2);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .tabWrap:hover {
+    background: var(--surface-hover);
+  }
+}
+
+.tabWrap[data-selected] {
+  border-color: var(--border-hairline);
+  background: var(--surface-2);
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  /* Space for the close affordance is always reserved: no hover layout shift. */
+  padding: 0 28px 0 var(--space-3);
+  border-radius: inherit;
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+  text-align: left;
+}
+
+.tabWrap[data-selected] .tab {
+  color: var(--text-primary);
+}
+
+.tab:focus-visible {
+  outline-offset: 0;
+}
+
+.tag {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tag-color, var(--text-tertiary));
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.close {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-1);
+  color: var(--text-tertiary);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.close svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.75;
+}
+
+.tabWrap[data-selected] .close,
+.tabWrap:hover .close,
+.tabWrap:focus-within .close {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .close:hover {
+    background: var(--surface-active);
+    color: var(--text-primary);
+  }
+}
+
+@media (hover: none) {
+  .close {
+    opacity: 1;
+  }
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  padding-left: var(--space-4);
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: clamp(200px, 22vw, 280px);
+  height: var(--control-height);
+  padding: 0 5px 0 var(--space-2);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-2);
+  background: var(--surface-0);
+  color: var(--text-tertiary);
+  font-size: var(--text-md);
+  text-align: left;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.search > svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.75;
+}
+
+@media (hover: hover) {
+  .search:hover {
+    border-color: var(--border-strong);
+    color: var(--text-secondary);
+  }
+}
+
+.searchLabel {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .searchLabel {
+    display: none;
+  }
+
+  .search {
+    width: auto;
+  }
+}

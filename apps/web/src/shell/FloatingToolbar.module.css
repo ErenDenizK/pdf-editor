@@ -1,0 +1,34 @@
+/*
+ * Glass over the document. Solid fallback when backdrop-filter is unsupported or when the
+ * user prefers reduced transparency / more contrast (tokens.css swaps --glass).
+ */
+.toolbar {
+  position: absolute;
+  bottom: var(--space-5);
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-1);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-3);
+  background: var(--glass-solid);
+  transform: translateX(-50%);
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .toolbar {
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+    backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+  }
+}
+
+.divider {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 var(--space-1);
+  background: var(--border-strong);
+}

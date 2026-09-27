@@ -1,0 +1,54 @@
+.button {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--control-height);
+  height: var(--control-height);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.button[data-size='toolbar'] {
+  width: 36px;
+  height: 36px;
+}
+
+.button svg {
+  width: var(--icon-chrome);
+  height: var(--icon-chrome);
+  stroke-width: 1.5;
+}
+
+.button[data-size='toolbar'] svg {
+  width: var(--icon-toolbar);
+  height: var(--icon-toolbar);
+}
+
+@media (hover: hover) {
+  .button:hover:not([aria-disabled='true']) {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.button:active:not([aria-disabled='true']) {
+  background: var(--surface-active);
+}
+
+/* Chrome toggles are neutral; only the active tool (a selection state) uses the accent. */
+.button[aria-pressed='true'],
+.button[aria-selected='true'] {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.button[data-size='toolbar'][aria-pressed='true'] {
+  background: var(--accent-muted);
+}
+
+.button[aria-disabled='true'] {
+  color: var(--text-disabled);
+}

@@ -1,0 +1,44 @@
+/* A 7px hit area centred on the panel's hairline; the visible line thickens on hover. */
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.handle[data-direction='1'] {
+  right: -4px;
+}
+
+.handle[data-direction='-1'] {
+  left: -4px;
+}
+
+.handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .handle:hover::after {
+    background: var(--border-strong);
+  }
+}
+
+.handle:active::after,
+.handle:focus-visible::after {
+  background: var(--accent);
+}
+
+.handle:focus-visible {
+  outline: none;
+}

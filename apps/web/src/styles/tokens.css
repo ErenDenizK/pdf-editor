@@ -1,0 +1,126 @@
+/*
+ * Design tokens. Source of truth: docs/DESIGN.md §3.
+ *
+ * Only the dark theme ships in v1. The `[data-theme]` hook exists so a light theme
+ * (v1.x) can redefine the same custom properties without touching components.
+ *
+ * Refinements over the DESIGN.md draft, all for WCAG AA:
+ * - --text-tertiary #6b7078 -> #858a92: the draft measured 3.76:1 on --surface-1;
+ *   the new value is >= 4.76:1 on --surface-0..3.
+ * - --glass alpha 0.72 -> 0.86: over a white PDF page the draft blended to #535457, which
+ *   left --text-secondary at 2.4:1. At 0.86 the worst case (white page, no blur) blends to
+ *   #313336: primary 10.3:1, secondary 4.7:1. Tertiary text is not used on glass.
+ */
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Surface ladder: canvas -> panel -> raised -> overlay. Elevation is a tonal step. */
+  --surface-0: #0a0b0d;
+  --surface-1: #101215;
+  --surface-2: #16181c;
+  --surface-3: #1c1f24;
+  --surface-hover: rgb(255 255 255 / 0.045);
+  --surface-active: rgb(255 255 255 / 0.075);
+  --glass: rgb(16 18 21 / 0.86);
+  --glass-solid: #16181c;
+  --glass-blur: 16px;
+  --scrim: rgb(5 6 8 / 0.56);
+
+  --border-hairline: rgb(255 255 255 / 0.08);
+  --border-strong: rgb(255 255 255 / 0.14);
+  --border-glass: rgb(255 255 255 / 0.12);
+
+  --text-primary: #e6e7ea;
+  --text-secondary: #9a9ea6;
+  --text-tertiary: #858a92;
+  --text-disabled: #4a4e55;
+
+  /* One accent: focus, selection, primary action. Nothing else. */
+  --accent: #7c8cff;
+  --accent-muted: rgb(124 140 255 / 0.16);
+  --accent-subtle: rgb(124 140 255 / 0.08);
+  --danger: #ff6b6b;
+  --success: #5fd39a;
+  --warning: #f5c451;
+
+  /* Source-document tags on the light table: small, desaturated, always paired with a
+     file name so colour is never the only signal. Hues stay clear of the accent's. */
+  --tag-0: #7db3a4; /* sage */
+  --tag-1: #c8a46e; /* sand */
+  --tag-2: #c58b9d; /* rose */
+  --tag-3: #9aa8ba; /* steel */
+  --tag-4: #a6b27c; /* olive */
+  --tag-5: #c7967a; /* clay */
+
+  /* Pages get a hairline, never a drop shadow. The page itself is never themed. */
+  --page-shadow: 0 0 0 1px rgb(255 255 255 / 0.06);
+  --page-background: #ffffff;
+
+  --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
+  --tracking-ui: 0.01em;
+  --tracking-label: 0.04em;
+  --tracking-display: -0.011em;
+
+  --text-xs: 11px; /* labels, keycaps */
+  --text-sm: 12px; /* secondary */
+  --text-md: 13px; /* UI base */
+  --text-lg: 15px; /* empty-state heading */
+  --leading-tight: 16px;
+  --leading-base: 20px;
+
+  --radius-1: 4px;
+  --radius-2: 6px;
+  --radius-3: 10px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Shell metrics. */
+  --titlebar-height: 40px;
+  --statusbar-height: 28px;
+  --rail-width: 44px;
+  --control-height: 28px;
+  --icon-chrome: 16px;
+  --icon-toolbar: 20px;
+  --focus-ring: 2px solid var(--accent);
+  --focus-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+}
+
+/* Floating chrome falls back to a solid surface when transparency is unwelcome. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass: var(--glass-solid);
+    --glass-blur: 0px;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --glass: var(--glass-solid);
+    --glass-blur: 0px;
+    --border-hairline: rgb(255 255 255 / 0.22);
+    --border-strong: rgb(255 255 255 / 0.36);
+    --border-glass: rgb(255 255 255 / 0.36);
+    --text-secondary: #c2c5cb;
+    --text-tertiary: #a9adb4;
+  }
+}

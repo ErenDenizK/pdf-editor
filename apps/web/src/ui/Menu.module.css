@@ -1,0 +1,72 @@
+/* Menus sit one step up the ladder (surface-3) with a strong hairline; no shadow. */
+.popup {
+  min-width: 180px;
+  padding: var(--space-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  outline: none;
+  transform-origin: var(--transform-origin);
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.popup[data-starting-style],
+.popup[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.98);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+  outline: none;
+  cursor: default;
+}
+
+.item[data-highlighted] {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.item[data-disabled] {
+  color: var(--text-disabled);
+}
+
+.check {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.item[data-checked] .check::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.item[data-checked] {
+  color: var(--text-primary);
+}
+
+.label {
+  flex: 1;
+}
+
+.separator {
+  height: 1px;
+  margin: var(--space-1) calc(var(--space-1) * -1);
+  background: var(--border-hairline);
+}
