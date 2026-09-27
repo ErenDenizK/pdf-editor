@@ -58,8 +58,11 @@ import {
   type AssemblyOptions,
   type AssemblyResult,
   EngineError,
+  type InspectOptions,
   type PdfAssembler,
   type ReconciliationReport,
+  type SourceInspection,
+  type SourceInspector,
 } from '../types';
 import {
   anchorOrigin,
@@ -69,6 +72,7 @@ import {
   placeOverlay,
   tileOrigins,
 } from './overlay-geometry';
+import { inspectSource, readLanguage } from './inspect';
 import { effectiveRanges, labelForIndex, PDF_LABEL_STYLE } from './page-labels';
 
 const PRODUCER = 'pdf-editor';
@@ -121,8 +125,10 @@ interface LoadedSource {
   readonly hasStructTree: boolean;
   readonly acroForm: PDFDict | undefined;
   readonly hasXfa: boolean;
-  readonly namedLinkDestinations: number;
 }
+
+/** LINK_TAG value for a link whose destination cannot be resolved: dropped on rewrite. */
+const UNRESOLVED_LINK = -1;
 
 interface PlacedPage {
   readonly page: PDFPage;
@@ -241,7 +247,24 @@ function permissionsFor(p: PermissionFlags) {
   };
 }
 
-export class PdfLibAssembler implements PdfAssembler {
+export class PdfLibAssembler implements PdfAssembler, SourceInspector {
+  /** Page labels and /Lang (see inspect.ts). Never rejects for damaged or locked files. */
+  inspect(bytes: ArrayBuffer, options: InspectOptions = {}): Promise<SourceInspection> {
+    throwIfAborted(options.signal);
+    return inspectSource(
+      bytes,
+      options.password === undefined ? {} : { password: options.password },
+    );
+  }
+
+  /** One label per page, or undefined when the file has no /PageLabels. */
+  async getPageLabels(
+    bytes: ArrayBuffer,
+    options: InspectOptions = {},
+  ): Promise<readonly string[] | undefined> {
+    return (await this.inspect(bytes, options)).pageLabels;
+  }
+
   async assemble(input: AssemblyInput, options: AssemblyOptions = {}): Promise<AssemblyResult> {
     const { signal } = options;
     const vdoc = input.document;
@@ -346,16 +369,9 @@ export class PdfLibAssembler implements PdfAssembler {
       options.onProgress?.(placed.length, total);
     }
 
-    // 5. Links: rewrite destinations to the new page objects, drop links to removed pages.
+    // 5. Links: rewrite destinations (explicit and named, resolved in prepareSource) to the
+    // new page objects; drop links to removed pages and to names that do not resolve.
     rewriteLinks(out, placed, firstOutputIndex, counters);
-    for (const source of sources.values()) {
-      if (source.namedLinkDestinations > 0) {
-        // TODO(M1): resolve named destinations (/Dests, /Names /Dests) and rewrite them.
-        warnings.add(
-          `${source.namedLinkDestinations} link(s) in source ${source.id} use named destinations, which are not preserved yet`,
-        );
-      }
-    }
 
     // 6. Overlays.
     const labelRanges = effectiveRanges(vdoc.labels, placed.length);
@@ -385,7 +401,7 @@ export class PdfLibAssembler implements PdfAssembler {
     const pageIndexById = new Map<PageId, number>(placed.map((p, i) => [p.virtual.id, i]));
     writeOutline(out, vdoc.outline, placed, pageIndexById, counters, warnings);
     writePageLabels(out, vdoc.labels, placed.length);
-    const forms = reconcileAcroForm(out, placed, sources, vdoc, warnings);
+    const forms = reconcileAcroForm(out, placed, sources, vdoc, input.sourceNames, warnings);
     const structureTreeRemoved = [...sources.values()].some((s) => s.hasStructTree);
     out.catalog.delete(N.StructTreeRoot);
     out.catalog.delete(N.MarkInfo);
@@ -424,6 +440,7 @@ export class PdfLibAssembler implements PdfAssembler {
       linksRewritten: counters.linksRewritten,
       linksDropped: counters.linksDropped,
       formFieldsRenamed: forms.renamed,
+      formFieldsUnified: forms.unified,
       structureTreeRemoved,
       xfaRemoved: forms.xfaRemoved,
       warnings: warnings.list,
@@ -460,12 +477,70 @@ async function loadSource(sourceId: SourceId, bytes: ArrayBuffer): Promise<PDFDo
   }
 }
 
+/** Text of a name or string object (destination names can be either). */
+function nameText(value: PDFObject | undefined): string | undefined {
+  if (value instanceof PDFName) return value.decodeText();
+  if (value instanceof PDFString || value instanceof PDFHexString) return value.decodeText();
+  return undefined;
+}
+
+/** Cap on name-tree nodes visited (malformed or hostile trees). */
+const MAX_NAME_TREE_NODES = 10_000;
+
+/**
+ * Resolves named destinations (ISO 32000-2 §12.3.2.4): PDF 1.1 catalog /Dests dictionary
+ * (keys are names) and PDF 1.2+ /Names /Dests name tree (keys are strings). Values are an
+ * explicit destination array or a dictionary whose /D holds one. Both lookups are tried for
+ * either kind of name, as real files mix them up. Built lazily, once per source.
+ */
+function namedDestinationResolver(doc: PDFDocument): (name: string) => PDFArray | undefined {
+  const { context, catalog } = doc;
+  let table: Map<string, PDFObject> | undefined;
+  const build = (): Map<string, PDFObject> => {
+    const map = new Map<string, PDFObject>();
+    const names = context.lookupMaybe(catalog.get(PDFName.of('Names')), PDFDict);
+    const root = names ? context.lookupMaybe(names.get(PDFName.of('Dests')), PDFDict) : undefined;
+    const stack = root ? [root] : [];
+    const seen = new Set<PDFDict>();
+    while (stack.length > 0 && seen.size < MAX_NAME_TREE_NODES) {
+      const node = stack.pop() as PDFDict;
+      if (seen.has(node)) continue;
+      seen.add(node);
+      const pairs = context.lookupMaybe(node.get(PDFName.of('Names')), PDFArray);
+      for (let i = 0; pairs && i + 1 < pairs.size(); i += 2) {
+        const key = nameText(context.lookup(pairs.get(i)));
+        if (key !== undefined && !map.has(key)) map.set(key, pairs.get(i + 1));
+      }
+      const kids = context.lookupMaybe(node.get(N.Kids), PDFArray);
+      for (let i = 0; kids && i < kids.size(); i++) {
+        const kid = context.lookupMaybe(kids.get(i), PDFDict);
+        if (kid) stack.push(kid);
+      }
+    }
+    // The PDF 1.1 dictionary; the name tree wins when both define a name.
+    const dests = context.lookupMaybe(catalog.get(PDFName.of('Dests')), PDFDict);
+    for (const [key, value] of dests?.entries() ?? []) {
+      if (!map.has(key.decodeText())) map.set(key.decodeText(), value);
+    }
+    return map;
+  };
+  return (name) => {
+    table ??= build();
+    const value = context.lookup(table.get(name));
+    if (value instanceof PDFArray) return value;
+    if (value instanceof PDFDict) return context.lookupMaybe(value.get(N.D), PDFArray);
+    return undefined;
+  };
+}
+
 /**
  * Mutates the private source copy so that `copyPages` does not drag unrelated objects along:
  * - annotation /P (page back-pointers) would copy the referenced page and, through widgets'
  *   parent fields and their other kids, other pages;
  * - link destinations point at source pages; the page ref is replaced by null and the
- *   target index is remembered in LINK_TAG, then rewritten after placement;
+ *   target index is remembered in LINK_TAG, then rewritten after placement. Named
+ *   destinations are resolved here and replaced by an explicit copy of their array, because
+ *   the output carries no name tree; names that do not resolve are tagged for removal;
  * - /B (article beads) and structure-tree back-pointers are removed (the structure tree is
  *   not carried over).
  */
@@ -473,7 +548,7 @@ function prepareSource(id: SourceId, doc: PDFDocument): LoadedSource {
   const { context, catalog } = doc;
   const pages = doc.getPages();
   const pageIndexByRef = new Map<string, number>(pages.map((p, i) => [p.ref.toString(), i]));
-  let namedLinkDestinations = 0;
+  const resolveName = namedDestinationResolver(doc);
   for (const page of pages) {
     const node = page.node;
     node.delete(N.B);
@@ -486,27 +561,47 @@ function prepareSource(id: SourceId, doc: PDFDocument): LoadedSource {
       annot.delete(N.P);
       annot.delete(N.StructParent);
       if (annot.get(N.Subtype) !== PDFName.of('Link')) continue;
+      // Where the destination lives: the annotation's /Dest or its GoTo action's /D.
+      let holder: PDFDict | undefined;
+      let key = N.Dest;
       let destination: PDFObject | undefined = context.lookup(annot.get(N.Dest));
-      if (!destination) {
+      if (destination) {
+        holder = annot;
+      } else {
         const action = context.lookupMaybe(annot.get(N.A), PDFDict);
         if (action?.get(N.S) === PDFName.of('GoTo')) {
+          holder = action;
+          key = N.D;
           destination = context.lookup(action.get(N.D));
         }
+      }
+      if (!holder || !destination) continue;
+      const name = nameText(destination);
+      if (name !== undefined) {
+        const resolved = resolveName(name);
+        if (!resolved) {
+          annot.set(LINK_TAG, PDFNumber.of(UNRESOLVED_LINK));
+          continue;
+        }
+        // An explicit copy the rewrite can point at the new page (views may be shared).
+        destination = resolved.clone(context);
+        holder.set(key, destination);
       }
       if (destination instanceof PDFArray) {
         const target = destination.get(0);
         const targetIndex =
           target instanceof PDFRef ? pageIndexByRef.get(target.toString()) : undefined;
         if (targetIndex !== undefined) {
-          destination.set(0, PDFNull);
+          if (name === undefined) {
+            // Explicit arrays may be shared between links: give each link its own.
+            destination = destination.clone(context);
+            holder.set(key, destination);
+          }
+          (destination as PDFArray).set(0, PDFNull);
           annot.set(LINK_TAG, PDFNumber.of(targetIndex));
+        } else if (name !== undefined) {
+          annot.set(LINK_TAG, PDFNumber.of(UNRESOLVED_LINK));
         }
-      } else if (
-        destination instanceof PDFName ||
-        destination instanceof PDFString ||
-        destination instanceof PDFHexString
-      ) {
-        namedLinkDestinations++;
       }
     }
   }
@@ -517,7 +612,6 @@ function prepareSource(id: SourceId, doc: PDFDocument): LoadedSource {
     hasStructTree: catalog.get(N.StructTreeRoot) !== undefined,
     acroForm,
     hasXfa: acroForm?.get(N.XFA) !== undefined,
-    namedLinkDestinations,
   };
 }
 
@@ -607,7 +701,10 @@ function rewriteLinks(
       const tag = annot?.get(LINK_TAG);
       if (!annot || !(tag instanceof PDFNumber)) continue;
       annot.delete(LINK_TAG);
-      const targetIndex = firstOutputIndex.get(`${entry.source}#${tag.asNumber()}`);
+      const targetIndex =
+        tag.asNumber() === UNRESOLVED_LINK
+          ? undefined
+          : firstOutputIndex.get(`${entry.source}#${tag.asNumber()}`);
       const target = targetIndex === undefined ? undefined : placed[targetIndex];
       let destination = context.lookup(annot.get(N.Dest));
       if (!(destination instanceof PDFArray)) {
@@ -933,6 +1030,13 @@ function writeOutline(
 // Page labels
 // ---------------------------------------------------------------------------
 
+/**
+ * Writes exactly the ranges it is given; no ranges means no /PageLabels. The caller derives
+ * ranges that cover every page (`deriveLabelRanges`, which folds in the sources' authored
+ * labels) and passes `[]` when `needsPageLabels` is false. A /PageLabels tree must have an
+ * entry for page 0 (ISO 32000-2 §12.4.2), so if the first range starts later, the leading
+ * pages get plain decimal numbers — which is also what readers show without labels.
+ */
 function writePageLabels(
   out: PDFDocument,
   labels: readonly PageLabelRange[],
@@ -943,8 +1047,6 @@ function writePageLabels(
   const { context } = out;
   const nums = context.obj([]);
   if ((ranges[0] as PageLabelRange).startIndex > 0) {
-    // /PageLabels must cover page 0; uncovered leading pages get plain decimal numbers.
-    // TODO(M1): fall back to the source pages' authored labels instead.
     nums.push(PDFNumber.of(0));
     nums.push(context.obj({ S: 'D' }));
   }
@@ -1024,24 +1126,282 @@ function terminalNames(
   for (const kid of fieldKids) terminalNames(kid, context, name, into);
 }
 
+type PdfContext = PDFDocument['context'];
+
+/** Field-level keys moved to a new parent when a merged field/widget dict is split. */
+const FIELD_KEYS = ['FT', 'T', 'TU', 'TM', 'Ff', 'V', 'DV', 'Opt', 'TI', 'I', 'MaxLen', 'RV', 'DS'];
+const FF_RADIO = 1 << 15;
+const FF_PUSHBUTTON = 1 << 16;
+
+/** Where a field sits: the /Fields list (root) or a parent field's /Kids. */
+interface FieldContainer {
+  readonly parent: PDFRef | undefined;
+  refs(): PDFRef[];
+  add(ref: PDFRef): void;
+  replace(old: PDFRef, next: PDFRef): void;
+}
+
+function rootContainer(list: PDFRef[]): FieldContainer {
+  return {
+    parent: undefined,
+    refs: () => [...list],
+    add: (ref) => list.push(ref),
+    replace: (old, next) => {
+      const i = list.indexOf(old);
+      if (i >= 0) list[i] = next;
+    },
+  };
+}
+
+function kidsContainer(context: PdfContext, parent: PDFRef): FieldContainer {
+  const kids = (): PDFArray => {
+    const dict = context.lookup(parent, PDFDict);
+    let array = context.lookupMaybe(dict.get(N.Kids), PDFArray);
+    if (!array) {
+      array = context.obj([]);
+      dict.set(N.Kids, array);
+    }
+    return array;
+  };
+  return {
+    parent,
+    refs: () =>
+      kids()
+        .asArray()
+        .filter((k): k is PDFRef => k instanceof PDFRef),
+    add: (ref) => kids().push(ref),
+    replace: (old, next) => {
+      const array = kids();
+      for (let i = 0; i < array.size(); i++) {
+        if (array.get(i) === old) array.set(i, next);
+      }
+    },
+  };
+}
+
+/** Kids that are fields (carry /T); the others are widgets. */
+function fieldKids(context: PdfContext, dict: PDFDict): PDFRef[] {
+  const kids = context.lookupMaybe(dict.get(N.Kids), PDFArray);
+  return (kids?.asArray() ?? []).filter(
+    (k): k is PDFRef =>
+      k instanceof PDFRef && fieldName(context.lookup(k, PDFDict), context) !== undefined,
+  );
+}
+
+function fieldFlags(context: PdfContext, dict: PDFDict): number {
+  const ff = context.lookup(dict.get(PDFName.of('Ff')));
+  return ff instanceof PDFNumber ? ff.asNumber() : 0;
+}
+
+/** Same kind of terminal field: /FT and, for buttons, radio/push-button flags agree. */
+function compatibleTerminals(context: PdfContext, a: PDFDict, b: PDFDict): boolean {
+  const ftA = context.lookup(a.get(PDFName.of('FT')));
+  const ftB = context.lookup(b.get(PDFName.of('FT')));
+  if (!(ftA instanceof PDFName) || ftA !== ftB) return false;
+  const mask = FF_RADIO | FF_PUSHBUTTON;
+  return (fieldFlags(context, a) & mask) === (fieldFlags(context, b) & mask);
+}
+
+/** Smallest `${base}_${n}` (n >= 2) not in `taken`. */
+function uniqueName(base: string, taken: ReadonlySet<string>): string {
+  let n = 2;
+  while (taken.has(`${base}_${n}`)) n++;
+  return `${base}_${n}`;
+}
+
+/** A partial field name may not contain a period (ISO 32000-2 §12.7.4.2). */
+function partialName(label: string, fallback: string): string {
+  const cleaned = label.replace(/\./g, '_').trim();
+  return cleaned === '' ? fallback.replace(/\./g, '_') : cleaned;
+}
+
+interface FormMerge {
+  readonly context: PdfContext;
+  readonly renamed: { from: string; to: string }[];
+  readonly unified: Set<string>;
+  readonly warnings: Warnings;
+  /** Output widgets whose appearance no longer matches the field value. */
+  needAppearances: boolean;
+}
+
+/** Renames field `ref` (child of `parentPath`) to `name`; records every terminal rename. */
+function renameField(merge: FormMerge, ref: PDFRef, parentPath: string, name: string): void {
+  const { context } = merge;
+  const dict = context.lookup(ref, PDFDict);
+  const before: string[] = [];
+  terminalNames(ref, context, parentPath, before);
+  dict.set(N.T, PDFHexString.fromText(name));
+  const after: string[] = [];
+  terminalNames(ref, context, parentPath, after);
+  before.forEach((from, i) => merge.renamed.push({ from, to: after[i] ?? from }));
+}
+
+/** Adds `ref` to `container`, renaming it first when its name is taken there. */
+function addFieldTo(
+  merge: FormMerge,
+  container: FieldContainer,
+  ref: PDFRef,
+  parentPath: string,
+): void {
+  const { context } = merge;
+  const dict = context.lookup(ref, PDFDict);
+  const taken = new Set(
+    container.refs().flatMap((r) => fieldName(context.lookup(r, PDFDict), context) ?? []),
+  );
+  const own = fieldName(dict, context);
+  if (own !== undefined && taken.has(own)) {
+    renameField(merge, ref, parentPath, uniqueName(own, taken));
+  }
+  if (container.parent) dict.set(N.Parent, container.parent);
+  else dict.delete(N.Parent);
+  container.add(ref);
+}
+
 /**
- * Rebuilds /AcroForm from the widgets that were placed. When several sources contribute
- * fields and the policy is `namespace-by-source`, each source's root fields are wrapped in
- * a parent field named after the source (id with '.' replaced), so equal names in different
- * sources stay distinct and widgets keep working.
+ * Turns a merged field/widget dictionary into a field parent with the widget as its only
+ * kid, so more widgets can join it. The widget keeps its ref (pages point at it); the new
+ * field takes the old place in `container`. Returns the field's ref.
+ */
+function splitMergedField(context: PdfContext, ref: PDFRef, container: FieldContainer): PDFRef {
+  const widget = context.lookup(ref, PDFDict);
+  if (widget.get(N.Kids) || widget.get(N.Subtype) !== PDFName.of('Widget')) return ref;
+  const field = context.obj({});
+  for (const key of FIELD_KEYS) {
+    const value = widget.get(PDFName.of(key));
+    if (value === undefined) continue;
+    field.set(PDFName.of(key), value);
+    widget.delete(PDFName.of(key));
+  }
+  for (const key of [N.DA, PDFName.of('Q')]) {
+    const value = widget.get(key);
+    if (value !== undefined) field.set(key, value);
+  }
+  const parent = widget.get(N.Parent);
+  if (parent) field.set(N.Parent, parent);
+  const fieldRef = context.register(field);
+  field.set(N.Kids, context.obj([ref]));
+  widget.set(N.Parent, fieldRef);
+  container.replace(ref, fieldRef);
+  return fieldRef;
+}
+
+/** Widgets of a terminal field (itself when merged). */
+function widgetsOf(context: PdfContext, ref: PDFRef): PDFRef[] {
+  const dict = context.lookup(ref, PDFDict);
+  const kids = context.lookupMaybe(dict.get(N.Kids), PDFArray);
+  if (!kids) return [ref];
+  return kids.asArray().filter((k): k is PDFRef => k instanceof PDFRef);
+}
+
+/**
+ * Acrobat semantics for equal full names: one field, several widgets, one value (the first
+ * source's). `other`'s widgets join `target`; their appearance is made consistent with the
+ * shared value (buttons: /AS; text and choice: /AP removed, /NeedAppearances set).
+ */
+function unifyTerminal(
+  merge: FormMerge,
+  container: FieldContainer,
+  target: PDFRef,
+  other: PDFRef,
+  path: string,
+): void {
+  const { context } = merge;
+  const fieldRef = splitMergedField(context, target, container);
+  const field = context.lookup(fieldRef, PDFDict);
+  const otherDict = context.lookup(other, PDFDict);
+  const isButton = context.lookup(field.get(PDFName.of('FT'))) === PDFName.of('Btn');
+  const value = context.lookup(field.get(PDFName.of('V')));
+  const targetOpt = context.lookupMaybe(field.get(PDFName.of('Opt')), PDFArray);
+  const otherOpt = context.lookupMaybe(otherDict.get(PDFName.of('Opt')), PDFArray);
+  const kids = context.lookup(field.get(N.Kids), PDFArray);
+  for (const widgetRef of widgetsOf(context, other)) {
+    const widget = context.lookup(widgetRef, PDFDict);
+    if (widgetRef === other) {
+      for (const key of FIELD_KEYS) widget.delete(PDFName.of(key));
+    }
+    widget.set(N.Parent, fieldRef);
+    kids.push(widgetRef);
+    if (isButton) {
+      const normal = context.lookupMaybe(
+        context.lookupMaybe(widget.get(PDFName.of('AP')), PDFDict)?.get(PDFName.of('N')),
+        PDFDict,
+      );
+      const on = value instanceof PDFName && normal?.get(value) !== undefined;
+      widget.set(PDFName.of('AS'), on ? value : PDFName.of('Off'));
+    } else {
+      widget.delete(PDFName.of('AP'));
+      merge.needAppearances = true;
+    }
+  }
+  // Button /Opt has one entry per widget kid, in order.
+  if (targetOpt && otherOpt) {
+    for (let i = 0; i < otherOpt.size(); i++) targetOpt.push(otherOpt.get(i));
+  }
+  merge.unified.add(path);
+}
+
+/** Merges field tree `other` into `target` (same full name `path`) under `unify-same-name`. */
+function mergeSameName(
+  merge: FormMerge,
+  container: FieldContainer,
+  target: PDFRef,
+  other: PDFRef,
+  path: string,
+  parentPath: string,
+): void {
+  const { context } = merge;
+  const targetDict = context.lookup(target, PDFDict);
+  const otherDict = context.lookup(other, PDFDict);
+  const targetKids = fieldKids(context, targetDict);
+  const otherKids = fieldKids(context, otherDict);
+  if (targetKids.length === 0 && otherKids.length === 0) {
+    if (compatibleTerminals(context, targetDict, otherDict)) {
+      unifyTerminal(merge, container, target, other, path);
+      return;
+    }
+  } else if (targetKids.length > 0 && otherKids.length > 0) {
+    const inner = kidsContainer(context, target);
+    for (const kid of otherKids) {
+      const name = fieldName(context.lookup(kid, PDFDict), context) as string;
+      const match = inner
+        .refs()
+        .find((r) => fieldName(context.lookup(r, PDFDict), context) === name);
+      if (match) mergeSameName(merge, inner, match, kid, `${path}.${name}`, path);
+      else addFieldTo(merge, inner, kid, path);
+    }
+    return;
+  }
+  merge.warnings.add(
+    'Some fields with equal names differ in type and were renamed instead of joined',
+  );
+  addFieldTo(merge, container, other, parentPath);
+}
+
+/**
+ * Rebuilds /AcroForm from the widgets that were placed. Policy when several sources
+ * contribute fields (`VirtualDocument.formMergePolicy`, research 04 §1 item 4):
+ * - `namespace-by-source`: each source's root fields are wrapped in a parent field named
+ *   after the source (its name from `sourceNames`, else its id; periods replaced), so every
+ *   name stays distinct and widgets keep working;
+ * - `rename-collisions`: fields keep their names; a root field whose name an earlier source
+ *   already uses is renamed `name_2` (`name_3`, …);
+ * - `unify-same-name`: Acrobat semantics — fields with equal full names and compatible types
+ *   become one field with the first source's value; others fall back to renaming.
+ * Every rename is reported in `formFieldsRenamed`, every join in `formFieldsUnified`.
  *
- * Limits (M0): /DR fonts are merged by key (first source wins on collisions); appearance
- * streams are kept as authored (no regeneration); JavaScript that references fields by full
- * name will break after namespacing; XFA is dropped. `rename-collisions` and
- * `unify-same-name` fall back to namespacing — TODO(M1).
+ * Limits: /DR fonts are merged by key (first source wins on collisions); appearance
+ * streams are kept as authored, except that joined text/choice widgets lose theirs and
+ * /NeedAppearances is set (TODO(M2): regenerate appearances instead); JavaScript that
+ * references fields by full name breaks after renaming; XFA is dropped.
  */
 function reconcileAcroForm(
   out: PDFDocument,
   placed: readonly PlacedPage[],
   sources: ReadonlyMap<SourceId, LoadedSource>,
   vdoc: VirtualDocument,
+  sourceNames: ReadonlyMap<SourceId, string> | undefined,
   warnings: Warnings,
-): { renamed: { from: string; to: string }[]; xfaRemoved: boolean } {
+): { renamed: { from: string; to: string }[]; unified: string[]; xfaRemoved: boolean } {
   const { context } = out;
   const xfaRemoved = [...sources.values()].some((s) => s.hasXfa);
   const placedWidgets = new Set<string>();
@@ -1071,7 +1431,7 @@ function reconcileAcroForm(
   if (xfaRemoved) {
     warnings.add('XFA form data was removed; only the AcroForm fields were kept');
   }
-  if (rootsBySource.size === 0) return { renamed: [], xfaRemoved };
+  if (rootsBySource.size === 0) return { renamed: [], unified: [], xfaRemoved };
 
   // Merge /DA, /DR (fonts by key) and /NeedAppearances from contributing sources.
   const acroForm = context.obj({});
@@ -1098,40 +1458,66 @@ function reconcileAcroForm(
     if (form.get(N.NeedAppearances)?.toString() === 'true') needAppearances = true;
   }
   if (drFonts.keys().length > 0) acroForm.set(N.DR, context.obj({ Font: drFonts }));
-  if (needAppearances) acroForm.set(N.NeedAppearances, context.obj(true));
 
-  const fields = context.obj([]);
-  const renamed: { from: string; to: string }[] = [];
-  const namespace = rootsBySource.size > 1;
-  if (namespace && vdoc.formMergePolicy !== 'namespace-by-source') {
-    warnings.add(
-      `Form merge policy "${vdoc.formMergePolicy}" is not implemented yet; fields were namespaced by source`,
-    );
-  }
+  const merge: FormMerge = {
+    context,
+    renamed: [],
+    unified: new Set(),
+    warnings,
+    needAppearances,
+  };
+  const kept = new Map<SourceId, PDFRef[]>();
   for (const [sourceId, roots] of rootsBySource) {
-    const kept = [...roots.values()].filter((ref) => pruneField(ref, context, placedWidgets));
-    if (kept.length === 0) continue;
-    if (!namespace) {
-      for (const ref of kept) fields.push(ref);
-      continue;
-    }
-    const prefix = String(sourceId).replace(/\./g, '_');
-    const parentRef = context.nextRef();
-    const parent = context.obj({});
-    parent.set(N.T, PDFHexString.fromText(prefix));
-    parent.set(N.Kids, context.obj(kept));
-    context.assign(parentRef, parent);
-    for (const ref of kept) {
-      context.lookup(ref, PDFDict).set(N.Parent, parentRef);
-      const names: string[] = [];
-      terminalNames(ref, context, '', names);
-      for (const name of names) renamed.push({ from: name, to: `${prefix}.${name}` });
-    }
-    fields.push(parentRef);
+    const refs = [...roots.values()].filter((ref) => pruneField(ref, context, placedWidgets));
+    if (refs.length > 0) kept.set(sourceId, refs);
   }
-  acroForm.set(N.Fields, fields);
+  const fields: PDFRef[] = [];
+  const policy = kept.size > 1 ? vdoc.formMergePolicy : undefined;
+  if (policy === undefined) {
+    for (const refs of kept.values()) fields.push(...refs);
+  } else if (policy === 'namespace-by-source') {
+    const prefixes = new Set<string>();
+    for (const [sourceId, refs] of kept) {
+      let prefix = partialName(sourceNames?.get(sourceId) ?? '', String(sourceId));
+      if (prefixes.has(prefix)) prefix = uniqueName(prefix, prefixes);
+      prefixes.add(prefix);
+      const parentRef = context.nextRef();
+      const parent = context.obj({});
+      parent.set(N.T, PDFHexString.fromText(prefix));
+      parent.set(N.Kids, context.obj(refs));
+      context.assign(parentRef, parent);
+      for (const ref of refs) {
+        context.lookup(ref, PDFDict).set(N.Parent, parentRef);
+        const names: string[] = [];
+        terminalNames(ref, context, '', names);
+        for (const name of names) merge.renamed.push({ from: name, to: `${prefix}.${name}` });
+      }
+      fields.push(parentRef);
+    }
+  } else {
+    const root = rootContainer(fields);
+    for (const refs of kept.values()) {
+      for (const ref of refs) {
+        const name = fieldName(context.lookup(ref, PDFDict), context);
+        const existing =
+          name === undefined
+            ? undefined
+            : root.refs().find((r) => fieldName(context.lookup(r, PDFDict), context) === name);
+        if (existing && policy === 'unify-same-name') {
+          mergeSameName(merge, root, existing, ref, name as string, '');
+        } else {
+          addFieldTo(merge, root, ref, '');
+        }
+      }
+    }
+    if (merge.unified.size > 0) {
+      warnings.add('Fields with equal names were joined and now share the first file’s value');
+    }
+  }
+  if (merge.needAppearances) acroForm.set(N.NeedAppearances, context.obj(true));
+  acroForm.set(N.Fields, context.obj(fields));
   out.catalog.set(N.AcroForm, context.register(acroForm));
-  return { renamed, xfaRemoved };
+  return { renamed: merge.renamed, unified: [...merge.unified], xfaRemoved };
 }
 
 // ---------------------------------------------------------------------------
@@ -1161,7 +1547,11 @@ function applyMetadata(
     if (keywords) out.setKeywords([keywords]);
     if (creator) out.setCreator(creator);
     if (created) out.setCreationDate(created);
-    // TODO(M1): carry over the XMP metadata stream and /Lang.
+    const language = readLanguage(first);
+    if (language !== undefined && meta.language === undefined) out.setLanguage(language);
+    // The first source's XMP packet is not copied: a fresh one mirroring the Info dict is
+    // written below, so Info and XMP never disagree (research 04, pitfall 14).
+    // TODO(M2): carry over custom XMP schemas (e.g. PDF/A or rights metadata) when merging.
   }
   if (meta.title !== undefined) out.setTitle(meta.title);
   if (meta.author !== undefined) out.setAuthor(meta.author);
@@ -1179,7 +1569,97 @@ function applyMetadata(
     warnings.add(`Ignored invalid modification date "${meta.modificationDate}"`);
   }
   out.setModificationDate(modified ?? new Date());
-  // TODO(M1): regenerate the trailer /ID (pdf-lib writes one only when encrypting).
+  // A new document gets a new /ID (both halves equal, ISO 32000-2 §14.4). Encryption
+  // replaces it with its own random id later, which is equally fresh.
+  const id = PDFHexString.fromBytes(randomBytes(16));
+  out.context.trailerInfo.ID = out.context.obj([id, id]);
+  writeXmp(out);
+}
+
+function randomBytes(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return bytes;
+}
+
+/** XML 1.0 text: escaped, with the control characters XML forbids removed. */
+function escapeXml(value: string): string {
+  let out = '';
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) continue;
+    out +=
+      char === '&'
+        ? '&amp;'
+        : char === '<'
+          ? '&lt;'
+          : char === '>'
+            ? '&gt;'
+            : char === '"'
+              ? '&quot;'
+              : char;
+  }
+  return out;
+}
+
+/**
+ * Writes a fresh XMP packet (ISO 16684-1) mirroring the final Info dictionary and /Lang, as
+ * an uncompressed /Metadata stream on the catalog.
+ */
+function writeXmp(out: PDFDocument): void {
+  const props: string[] = ['<dc:format>application/pdf</dc:format>'];
+  const alt = (tag: string, value: string) =>
+    `<${tag}><rdf:Alt><rdf:li xml:lang="x-default">${escapeXml(value)}</rdf:li></rdf:Alt></${tag}>`;
+  const simple = (tag: string, value: string) => `<${tag}>${escapeXml(value)}</${tag}>`;
+  const title = out.getTitle();
+  const author = out.getAuthor();
+  const subject = out.getSubject();
+  const keywords = out.getKeywords();
+  const creator = out.getCreator();
+  const producer = out.getProducer();
+  const created = out.getCreationDate();
+  const modified = out.getModificationDate();
+  const language = readLanguage(out);
+  if (title) props.push(alt('dc:title', title));
+  if (author) {
+    props.push(`<dc:creator><rdf:Seq><rdf:li>${escapeXml(author)}</rdf:li></rdf:Seq></dc:creator>`);
+  }
+  if (subject) props.push(alt('dc:description', subject));
+  if (language) {
+    props.push(
+      `<dc:language><rdf:Bag><rdf:li>${escapeXml(language)}</rdf:li></rdf:Bag></dc:language>`,
+    );
+  }
+  if (keywords) props.push(simple('pdf:Keywords', keywords));
+  if (producer) props.push(simple('pdf:Producer', producer));
+  if (creator) props.push(simple('xmp:CreatorTool', creator));
+  if (created) props.push(simple('xmp:CreateDate', created.toISOString()));
+  if (modified) {
+    props.push(simple('xmp:ModifyDate', modified.toISOString()));
+    props.push(simple('xmp:MetadataDate', modified.toISOString()));
+  }
+  props.push(simple('xmpMM:DocumentID', `uuid:${crypto.randomUUID()}`));
+  props.push(simple('xmpMM:InstanceID', `uuid:${crypto.randomUUID()}`));
+  const packet = [
+    '<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>',
+    '<x:xmpmeta xmlns:x="adobe:ns:meta/">',
+    '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">',
+    '<rdf:Description rdf:about=""',
+    ' xmlns:dc="http://purl.org/dc/elements/1.1/"',
+    ' xmlns:pdf="http://ns.adobe.com/pdf/1.3/"',
+    ' xmlns:xmp="http://ns.adobe.com/xap/1.0/"',
+    ' xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/">',
+    ...props,
+    '</rdf:Description>',
+    '</rdf:RDF>',
+    '</x:xmpmeta>',
+    '<?xpacket end="w"?>',
+  ].join('\n');
+  const stream = out.context.stream(new TextEncoder().encode(packet), {
+    Type: 'Metadata',
+    Subtype: 'XML',
+  });
+  out.catalog.set(PDFName.of('Metadata'), out.context.register(stream));
 }
 
 /**

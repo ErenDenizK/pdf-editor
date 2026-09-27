@@ -318,11 +318,22 @@ export interface PdfEditor {
 // ---------------------------------------------------------------------------
 
 export interface AssemblyInput {
+  /**
+   * The document exactly as it should be written. The assembler writes what it is given:
+   * callers pass `labels` already derived for every page (`deriveLabelRanges` when
+   * `needsPageLabels`, else `[]` so no /PageLabels is written) and an outline without
+   * unresolved leaves (`dropUnresolved`).
+   */
   readonly document: VirtualDocument;
   /** Bytes for every source referenced by the document (already edited/saved by PdfEditor). */
   readonly sources: ReadonlyMap<SourceId, ArrayBuffer>;
   /** Image blobs referenced by image pages and overlays. */
   readonly blobs: ReadonlyMap<string, ArrayBuffer>;
+  /**
+   * Human-readable name per source (e.g. the file name without extension), used for form
+   * field namespaces. Falls back to the source id.
+   */
+  readonly sourceNames?: ReadonlyMap<SourceId, string>;
 }
 
 export interface AssemblyOptions extends EngineCallOptions {
@@ -338,6 +349,11 @@ export interface ReconciliationReport {
   readonly linksRewritten: number;
   readonly linksDropped: number;
   readonly formFieldsRenamed: readonly { readonly from: string; readonly to: string }[];
+  /**
+   * Fully-qualified names under which fields from several sources were joined into one
+   * field sharing the first source's value (`unify-same-name` policy).
+   */
+  readonly formFieldsUnified: readonly string[];
   readonly structureTreeRemoved: boolean;
   readonly xfaRemoved: boolean;
   readonly warnings: readonly string[];
@@ -350,6 +366,26 @@ export interface AssemblyResult {
 
 export interface PdfAssembler {
   assemble(input: AssemblyInput, options?: AssemblyOptions): Promise<AssemblyResult>;
+}
+
+// ---------------------------------------------------------------------------
+// Inspection: document facts the rendering engine does not report (pdf-lib adapter)
+// ---------------------------------------------------------------------------
+
+export interface SourceInspection {
+  /** One label per page when the file has /PageLabels; undefined otherwise. */
+  readonly pageLabels?: readonly string[];
+  /** Catalog /Lang, when present. */
+  readonly language?: string;
+}
+
+export interface InspectOptions extends EngineCallOptions {
+  readonly password?: string;
+}
+
+export interface SourceInspector {
+  /** Reads `bytes` without mutating them. Never rejects for damaged files; returns `{}`. */
+  inspect(bytes: ArrayBuffer, options?: InspectOptions): Promise<SourceInspection>;
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +420,19 @@ export interface VerificationExpectation {
   readonly pageSizes: readonly Size[];
   /** Regions (page index + rect) that must contain no extractable text after redaction. */
   readonly redactedRegions?: readonly { readonly pageIndex: number; readonly rect: Rect }[];
+  /** Per-page rotation (/Rotate after export), when given. */
+  readonly rotations?: readonly Rotation[];
+  /** Total number of outline items (all levels), when given. */
+  readonly outlineCount?: number;
+  /** Outline titles in pre-order (depth first), when given. */
+  readonly outlineTitles?: readonly string[];
+  /**
+   * Page label per page, when given; `null` expects no /PageLabels at all. Read through the
+   * verifier's `SourceInspector`; without one, a given expectation is reported as unverifiable.
+   */
+  readonly pageLabels?: readonly string[] | null;
+  /** Fully-qualified form field names (any order), when given. */
+  readonly formFieldNames?: readonly string[];
 }
 
 export interface VerificationResult {

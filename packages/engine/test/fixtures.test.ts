@@ -51,10 +51,10 @@ test('XFA and tagged sources are detected and reported as removed', async () => 
   expect(out.catalog.get(PDFName.of('MarkInfo'))).toBeUndefined();
 });
 
-test('PDFium opens a file with a broken xref offset', async () => {
+test('PDFium opens a file with a broken xref offset and it is flagged as repaired', async () => {
   const opened = await adapter.open(sid('broken'), await fetchBytes(brokenXrefUrl));
   expect(opened.pageCount).toBe(3);
-  // TODO(M2): PDFium repairs silently; EmbedPDF exposes no repair signal yet.
-  expect(opened.flags.repaired).toBe(false);
+  // PDFium repairs silently; the adapter's own xref check reports it (source-inspection.test).
+  expect(opened.flags.repaired).toBe(true);
   await adapter.close(sid('broken'));
 });

@@ -136,10 +136,17 @@ export function addSource(
   ws: Workspace,
   input: SourceInput,
   ids: IdGenerator,
-  options: { readonly title?: string } = {},
+  options: {
+    readonly title?: string;
+    /**
+     * Use this id instead of `ids.source()`: the engine already opened the file under an
+     * id of its own choosing (the id is the handle to its open document).
+     */
+    readonly sourceId?: SourceId;
+  } = {},
 ): AddSourceResult {
   assertSourceInput(input);
-  const sourceId = ids.source();
+  const sourceId = options.sourceId ?? ids.source();
   const documentId = ids.document();
   if (lookup(ws.sources, sourceId) !== undefined) {
     throw new DocumentModelError('duplicate-id', `Source id already in use: ${sourceId}`);

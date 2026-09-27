@@ -64,10 +64,13 @@ import {
   type RenderResult,
   type SaveOptions,
   type SearchHit,
+  type SourceInspection,
+  type SourceInspector,
   type TextRun,
   type VerificationExpectation,
   type VerificationResult,
 } from '../types';
+import { checkXrefStructure } from '../structure/xref-check';
 import { fromEmbedPdf, toEmbedPdf } from './annotation-mapping';
 import {
   deviceToUserRect,
@@ -103,6 +106,12 @@ export interface PdfiumAdapterOptions {
   readonly logger?: Logger;
   /** Override how the EmbedPDF engine is created (e.g. the direct, same-thread engine). */
   readonly engineFactory?: PdfiumEngineFactory;
+  /**
+   * Reads page labels and /Lang, which EmbedPDF does not expose (e.g. the assembly worker's
+   * `AssemblerProxy`, or a `PdfLibAssembler` in tests). Without one, `OpenedDocument` pages
+   * carry no labels and label expectations cannot be verified.
+   */
+  readonly inspector?: SourceInspector;
 }
 
 interface OpenEntry {
@@ -130,6 +139,7 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   private readonly fontFallback: FontFallbackConfig | null;
   private readonly logger: Logger | undefined;
   private readonly engineFactory: PdfiumEngineFactory;
+  private readonly inspector: SourceInspector | undefined;
   private enginePromise: Promise<PdfEngine> | undefined;
   private readonly docs = new Map<SourceId, OpenEntry>();
   private scratchCounter = 0;
@@ -139,6 +149,7 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     this.fontFallback = options.fontFallback ?? null;
     this.logger = options.logger;
     this.engineFactory = options.engineFactory ?? createPdfiumEngine;
+    this.inspector = options.inspector;
   }
 
   // -------------------------------------------------------------------------
@@ -203,6 +214,10 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     throwIfAborted(options.signal, 'open');
     const u8 = new Uint8Array(bytes);
     const heuristics = scanBytes(u8);
+    // Neither PDFium nor pdf-lib reports repairs; check the xref chain ourselves.
+    const structure = checkXrefStructure(u8);
+    // Inspect a copy in parallel with PDFium: EmbedPDF posts (detaches) the original.
+    const inspection = this.inspect(bytes, heuristics, options);
     // Hash first: EmbedPDF posts the buffer to its worker.
     const fingerprint = await sha256Hex(bytes);
     const engine = await this.engine();
@@ -222,10 +237,11 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
       options.password === undefined ? { doc } : { doc, password: options.password },
     );
     try {
-      const [metadata, bookmarks, signatures] = await Promise.all([
+      const [metadata, bookmarks, signatures, inspected] = await Promise.all([
         this.run(engine.getMetadata(doc), options, 'getMetadata'),
         this.run(engine.getBookmarks(doc), options, 'getBookmarks'),
         this.run(engine.getSignatures(doc), options, 'getSignatures'),
+        inspection,
       ]);
       const hasSignatures = signatures.length > 0;
       let hasAcroForm = heuristics.acroFormToken || hasSignatures;
@@ -238,28 +254,67 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
         encrypted: doc.isEncrypted,
         hasSignatures,
         hasAcroForm,
+        repaired: structure.repaired,
         // Byte-level heuristics: reliable when the catalog is not in an object stream.
-        // TODO(M2): read these from the catalog (EmbedPDF 2.15 exposes neither) and detect
-        // xref repair (`repaired`), e.g. through the qpdf plumber.
+        // TODO(M2): read these from the catalog (EmbedPDF 2.15 exposes neither).
         hasXfa: heuristics.xfaToken,
         tagged: heuristics.structTreeToken,
         linearized: heuristics.linearized,
       };
+      // Labels come from the inspector (pdf-lib): EmbedPDF 2.15 has no page-label API.
+      const labels =
+        inspected.pageLabels?.length === doc.pageCount ? inspected.pageLabels : undefined;
+      const mapped = mapMetadata(metadata);
       return {
         id,
         pageCount: doc.pageCount,
-        // TODO(M1): page labels. EmbedPDF 2.15 has no page-label API; read /PageLabels
-        // with pdf-lib in the assembly worker or add FPDF_GetPageLabel upstream.
-        pages: doc.pages.map((p) => ({ size: unrotatedSize(p), rotation: rotationDegrees(p) })),
+        pages: doc.pages.map((p, index) => {
+          const label = labels?.[index];
+          return {
+            size: unrotatedSize(p),
+            rotation: rotationDegrees(p),
+            ...(label === undefined ? {} : { label }),
+          };
+        }),
         fingerprint,
         flags,
-        metadata: mapMetadata(metadata),
+        metadata:
+          inspected.language === undefined ? mapped : { ...mapped, language: inspected.language },
         outline: bookmarks.bookmarks.map(mapBookmark),
       };
     } catch (error) {
       await this.close(id).catch(() => undefined);
       throw error;
     }
+  }
+
+  /**
+   * Runs the inspector on a copy of `bytes` when the file may carry what it reads (page
+   * labels, /Lang; both can hide in compressed object streams). Inspection problems never
+   * fail an open: they only cost the labels.
+   */
+  private inspect(
+    bytes: ArrayBuffer,
+    heuristics: ByteHeuristics,
+    options: OpenOptions,
+  ): Promise<SourceInspection> {
+    const inspector = this.inspector;
+    if (
+      !inspector ||
+      !(heuristics.pageLabelsToken || heuristics.langToken || heuristics.objectStreams)
+    ) {
+      return Promise.resolve({});
+    }
+    const copy = bytes.slice(0);
+    return inspector
+      .inspect(copy, {
+        ...(options.password === undefined ? {} : { password: options.password }),
+        ...(options.signal ? { signal: options.signal } : {}),
+      })
+      .catch((error: unknown) => {
+        this.logger?.warn(LOG_SOURCE, 'Inspect', 'source inspection failed', error);
+        return {};
+      });
   }
 
   private async hasWidgets(
@@ -807,6 +862,40 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
           );
         }
       });
+      if (expectation.rotations) {
+        expectation.rotations.forEach((expected, index) => {
+          const actual = opened.pages[index]?.rotation;
+          if (actual !== undefined && actual !== expected) {
+            problems.push(`Page ${index + 1} is rotated ${actual}°, expected ${expected}°`);
+          }
+        });
+      }
+      if (expectation.outlineCount !== undefined || expectation.outlineTitles) {
+        const titles = flattenTitles(opened.outline);
+        if (expectation.outlineCount !== undefined && titles.length !== expectation.outlineCount) {
+          problems.push(`Outline has ${titles.length} items, expected ${expectation.outlineCount}`);
+        }
+        if (expectation.outlineTitles) {
+          const missing = expectation.outlineTitles.filter((t, i) => titles[i] !== t);
+          if (missing.length > 0 || titles.length !== expectation.outlineTitles.length) {
+            problems.push(
+              `Outline titles differ: got ${JSON.stringify(titles)}, expected ${JSON.stringify(expectation.outlineTitles)}`,
+            );
+          }
+        }
+      }
+      if (expectation.pageLabels !== undefined) {
+        this.checkLabels(opened, expectation.pageLabels, problems);
+      }
+      if (expectation.formFieldNames) {
+        const names = (await this.listFormFields(scratchId, options)).map((f) => f.name).sort();
+        const expected = [...expectation.formFieldNames].sort();
+        if (JSON.stringify(names) !== JSON.stringify(expected)) {
+          problems.push(
+            `Form fields differ: got ${JSON.stringify(names)}, expected ${JSON.stringify(expected)}`,
+          );
+        }
+      }
       for (const region of expectation.redactedRegions ?? []) {
         if (region.pageIndex >= opened.pageCount) continue;
         const runs = await this.getPageText(scratchId, region.pageIndex, options);
@@ -826,6 +915,33 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     }
     return { ok: problems.length === 0, problems };
   }
+
+  private checkLabels(
+    opened: OpenedDocument,
+    expected: readonly string[] | null,
+    problems: string[],
+  ): void {
+    if (!this.inspector) {
+      problems.push('Page labels cannot be verified: no source inspector is configured');
+      return;
+    }
+    const actual = opened.pages.map((p) => p.label);
+    const hasLabels = actual.some((label) => label !== undefined);
+    if (expected === null) {
+      if (hasLabels) problems.push('Output has page labels, expected none');
+      return;
+    }
+    if (!hasLabels) {
+      problems.push('Output has no page labels');
+      return;
+    }
+    const wrong = expected.flatMap((label, index) =>
+      actual[index] === label ? [] : [`page ${index + 1} "${actual[index] ?? ''}" ≠ "${label}"`],
+    );
+    if (wrong.length > 0) {
+      problems.push(`Page labels differ: ${wrong.slice(0, 5).join(', ')}`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -841,6 +957,14 @@ const FIELD_KINDS: Partial<Record<PDF_FORM_FIELD_TYPE, FormFieldKind>> = {
   [PDF_FORM_FIELD_TYPE.PUSHBUTTON]: 'button',
   [PDF_FORM_FIELD_TYPE.SIGNATURE]: 'signature',
 };
+
+function flattenTitles(nodes: readonly EngineOutlineNode[], into: string[] = []): string[] {
+  for (const node of nodes) {
+    into.push(node.title);
+    flattenTitles(node.children, into);
+  }
+  return into;
+}
 
 function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
@@ -869,6 +993,8 @@ interface ByteHeuristics {
   readonly structTreeToken: boolean;
   readonly linearized: boolean;
   readonly objectStreams: boolean;
+  readonly pageLabelsToken: boolean;
+  readonly langToken: boolean;
 }
 
 function indexOfAscii(haystack: Uint8Array, needle: string, limit = haystack.length): number {
@@ -897,6 +1023,8 @@ function scanBytes(bytes: Uint8Array): ByteHeuristics {
     structTreeToken: indexOfAscii(bytes, '/StructTreeRoot') !== -1,
     linearized: indexOfAscii(bytes, '/Linearized', 1024) !== -1,
     objectStreams: indexOfAscii(bytes, '/ObjStm') !== -1,
+    pageLabelsToken: indexOfAscii(bytes, '/PageLabels') !== -1,
+    langToken: indexOfAscii(bytes, '/Lang') !== -1,
   };
 }
 
@@ -912,7 +1040,7 @@ function mapMetadata(m: PdfMetadataObject): DocumentMetadata {
   if (m.producer) out.producer = m.producer;
   if (m.creationDate instanceof Date) out.creationDate = m.creationDate.toISOString();
   if (m.modificationDate instanceof Date) out.modificationDate = m.modificationDate.toISOString();
-  // TODO(M1): /Lang is not exposed by EmbedPDF's getMetadata.
+  // /Lang is not exposed by EmbedPDF's getMetadata; `open` adds it from the inspector.
   return out;
 }
 

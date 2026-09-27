@@ -139,6 +139,20 @@ describe('addSource', () => {
     );
   });
 
+  it('uses a caller-provided source id (the engine handle) when given', () => {
+    const ids = createSequentialIdGenerator('t');
+    const { workspace, sourceId: id } = addSource(createWorkspace(), sourceInput('A', 2), ids, {
+      sourceId: sourceId('engine-7'),
+    });
+    expect(id).toBe('engine-7');
+    expect(Object.keys(workspace.sources)).toEqual(['engine-7']);
+    check(workspace);
+    expectCode(
+      () => addSource(workspace, sourceInput('B', 1), ids, { sourceId: sourceId('engine-7') }),
+      'duplicate-id',
+    );
+  });
+
   it('rejects colliding ids from a misbehaving generator', () => {
     const ids = { ...createSequentialIdGenerator('t'), source: () => sourceId('same') };
     const first = addSource(createWorkspace(), sourceInput('A', 1), ids).workspace;

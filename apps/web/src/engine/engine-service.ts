@@ -9,13 +9,30 @@
  * - Caches `ImageBitmap`s in a byte-budgeted LRU (`bitmap-cache.ts`).
  * - Never rejects: every public method resolves to an `EngineResult`.
  * - Password-protected files call back into the UI through `setPasswordPrompt`.
+ * - Keeps a copy of every open source's original bytes (a Blob, which the browser may page
+ *   to disk) because the adapter transfers the buffer to PDFium's worker; export reads it
+ *   back with `sourceBytes`. The copy is dropped on `close`.
+ * - Page labels and /Lang are read by the assembly worker (`assembler-client.ts`), which
+ *   the adapter uses as its inspector.
  *
  * Render timings are recorded in development with `performance.mark`/`measure` only
  * (entries named `render …`, `open …`).
  */
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
 import { createRandomIdGenerator, type Rotation, type SourceId } from '@pdf-editor/document-model';
-import type { EngineErrorCode, OpenedDocument, PdfRenderer, TextRun } from '@pdf-editor/engine';
+import type {
+  EngineErrorCode,
+  OpenedDocument,
+  PdfEditor,
+  PdfRenderer,
+  PdfVerifier,
+  SaveOptions,
+  TextRun,
+  VerificationExpectation,
+  VerificationResult,
+} from '@pdf-editor/engine';
+
+import { getAssembler } from './assembler-client';
 
 import { BitmapCache, type CachedBitmap, bitmapKey, pageKey } from './bitmap-cache';
 
@@ -154,9 +171,11 @@ export interface OpenedSource {
 }
 
 /** The adapter surface the service needs; tests pass a mock. */
-export type RendererLike = Pick<PdfRenderer, 'open' | 'close' | 'renderPage' | 'getPageText'> & {
-  destroy?: () => Promise<void>;
-};
+export type RendererLike = Pick<PdfRenderer, 'open' | 'close' | 'renderPage' | 'getPageText'> &
+  Partial<Pick<PdfEditor, 'save'>> &
+  Partial<PdfVerifier> & {
+    destroy?: () => Promise<void>;
+  };
 
 export interface EngineServiceOptions {
   /** Called once, on first use; may load the adapter lazily. */
@@ -177,6 +196,8 @@ export class EngineService {
   private readonly newSourceId: () => SourceId;
   private readonly timings: boolean;
   private readonly jobs = new Map<string, Job>();
+  /** Original bytes of every open source (see the module comment). */
+  private readonly retained = new Map<SourceId, Blob>();
   private running = 0;
   private seq = 0;
   private passwordPrompt: PasswordPrompt | undefined;
@@ -229,12 +250,15 @@ export class EngineService {
         return fail('read-failed', `Could not read ${file.name}: ${toFailure(error).message}`);
       }
       const started = this.mark(`open-start:${id}`);
+      // Copy before the adapter detaches the buffer.
+      const retained = new Blob([bytes], { type: 'application/pdf' });
       try {
         const document = await (await this.engine()).open(
           id,
           bytes,
           attempt === undefined ? {} : { password: attempt },
         );
+        this.retained.set(id, retained);
         this.measure(`open ${file.name}`, started);
         return ok({
           id,
@@ -270,10 +294,51 @@ export class EngineService {
       if (job.key.startsWith(prefix)) this.cancel(job, 'Source closed');
     }
     this.cache.removeSource(sourceId);
+    this.retained.delete(sourceId);
     if (this.renderer === undefined) return ok(undefined);
     try {
       await (await this.renderer).close(sourceId);
       return ok(undefined);
+    } catch (error) {
+      return { ok: false, error: toFailure(error) };
+    }
+  }
+
+  /** A fresh copy of a source's original bytes (the caller may transfer it). */
+  async sourceBytes(sourceId: SourceId): Promise<EngineResult<ArrayBuffer>> {
+    const blob = this.retained.get(sourceId);
+    if (blob === undefined) return fail('internal', `Source ${sourceId} is not open`);
+    try {
+      return ok(await blob.arrayBuffer());
+    } catch (error) {
+      return fail('read-failed', `Could not read the kept copy: ${toFailure(error).message}`);
+    }
+  }
+
+  /** Serializes a source through the engine (edits applied, e.g. decrypted). */
+  async saveSource(
+    sourceId: SourceId,
+    options: SaveOptions = {},
+  ): Promise<EngineResult<ArrayBuffer>> {
+    try {
+      const engine = await this.engine();
+      if (!engine.save) return fail('unsupported', 'The engine cannot save sources');
+      return ok(await engine.save(sourceId, options));
+    } catch (error) {
+      return { ok: false, error: toFailure(error) };
+    }
+  }
+
+  /** Re-opens `bytes` in PDFium and checks them against `expectation` (export step 5). */
+  async verify(
+    bytes: ArrayBuffer,
+    expectation: VerificationExpectation,
+    signal?: AbortSignal,
+  ): Promise<EngineResult<VerificationResult>> {
+    try {
+      const engine = await this.engine();
+      if (!engine.verify) return fail('unsupported', 'The engine cannot verify output');
+      return ok(await engine.verify(bytes, expectation, signal === undefined ? {} : { signal }));
     } catch (error) {
       return { ok: false, error: toFailure(error) };
     }
@@ -462,6 +527,7 @@ export class EngineService {
   async destroy(): Promise<void> {
     for (const job of [...this.jobs.values()]) this.cancel(job, 'Engine destroyed');
     this.cache.clear();
+    this.retained.clear();
     const renderer = this.renderer;
     this.renderer = undefined;
     try {
@@ -481,8 +547,11 @@ let instance: EngineService | undefined;
 export function getEngineService(): EngineService {
   instance ??= new EngineService({
     createRenderer: async () => {
-      const { PdfiumAdapter } = await import('@pdf-editor/engine');
-      return new PdfiumAdapter({ wasmUrl, fontFallback: null });
+      const [{ PdfiumAdapter }, inspector] = await Promise.all([
+        import('@pdf-editor/engine'),
+        getAssembler(),
+      ]);
+      return new PdfiumAdapter({ wasmUrl, fontFallback: null, inspector });
     },
   });
   return instance;

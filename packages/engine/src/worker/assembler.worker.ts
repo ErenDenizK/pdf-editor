@@ -53,6 +53,9 @@ const api: AssemblerWorkerApi = {
       abortPort?.close();
     }
   },
+  inspect(bytes: ArrayBuffer, password?: string) {
+    return assembler.inspect(bytes, password === undefined ? {} : { password });
+  },
 };
 
 expose(api);

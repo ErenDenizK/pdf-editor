@@ -30,6 +30,16 @@ const { bitmap } = await pdfium.renderPage(sourceId, 0, { scale: devicePixelRati
   `{ baseUrl: '/fonts/', fonts: { [FontCharset.SHIFTJIS]: 'NotoSansJP-Regular.otf' } }`.
   The config is posted to the worker, so use URLs, not a `fontLoader` function.
 - The engine starts lazily on the first call; `destroy()` terminates its worker.
+- **Page labels and /Lang**: EmbedPDF has no API for them (PDFium's `FPDF_GetPageLabel` is
+  exported by `@embedpdf/pdfium` but unreachable inside EmbedPDF's blob: worker). Pass an
+  `inspector` (the assembler proxy, or a `PdfLibAssembler`): `open` then inspects a copy of
+  the bytes with pdf-lib in parallel and fills `pages[].label` and `metadata.language`.
+- **`flags.repaired`**: PDFium and pdf-lib repair silently, so `open` runs
+  `checkXrefStructure` (pure, header + tail + xref sections only): header at byte 0,
+  `startxref` → `xref` table with a trailer or an xref stream, valid `/Prev` chain, sampled
+  entry offsets. Any failure means the reader reconstructed the file.
+- **Verification** (`verify`) checks page count and sizes, and optionally rotations,
+  outline count/titles, page labels (needs the inspector) and form field names.
 - All geometry is PDF user space (unrotated, origin bottom-left). `renderPage` returns a
   fresh `ImageBitmap`; if you put the adapter behind Comlink, transfer the bitmap.
 - Every call accepts an `AbortSignal`; aborting rejects with `EngineError('aborted')`.
@@ -45,6 +55,15 @@ const { bytes, report } = await assembler.assemble({ document, sources, blobs },
 ```
 
 Source and blob `ArrayBuffer`s are transferred to the worker (detached for the caller).
+`assembler.inspect(bytes)` / `getPageLabels(bytes)` read labels and /Lang in the same worker.
+
+`planExport(workspace, documentId)` derives the assembly document (label ranges via
+`deriveLabelRanges` only when `needsPageLabels`, outline via `dropUnresolved`), the source
+names used for form namespaces, and the `VerificationExpectation` for the output. The
+assembler writes exactly the labels it is given. Reconciliation covers: outlines (explicit
+and named destinations resolved on open), links (explicit and named, rewritten or dropped
+and counted), AcroForm (`namespace-by-source`, `rename-collisions`, `unify-same-name`),
+/PageLabels, structure tree removal, XFA removal, fresh /ID and XMP, /Lang passthrough.
 `PdfLibAssembler` can also be used directly on the main thread.
 
 Overlay placement: anchors and offsets refer to the visible page (CropBox after /Rotate);

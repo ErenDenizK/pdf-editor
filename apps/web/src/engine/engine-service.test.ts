@@ -348,4 +348,34 @@ describe('EngineService open', () => {
     expect(await service.open(file())).toMatchObject({ ok: false, error: { code: 'corrupt' } });
     expect(prompt).not.toHaveBeenCalled();
   });
+
+  it('keeps a copy of the original bytes for export and drops it on close', async () => {
+    const detaching: RendererLike['open'] = (_id, bytes) => {
+      // Like the real adapter: the buffer is transferred to a worker.
+      const channel = new MessageChannel();
+      channel.port1.postMessage(bytes, [bytes]);
+      channel.port1.close();
+      return Promise.resolve(opened);
+    };
+    const { renderer } = mockRenderer(detaching);
+    const service = new EngineService({ createRenderer: () => renderer, timings: false });
+    const result = await service.open(file());
+    if (!result.ok) throw new Error(result.error.message);
+    const kept = await service.sourceBytes(result.value.id);
+    expect(kept.ok && [...new Uint8Array(kept.value)]).toEqual([37, 80, 68, 70]);
+    await service.close(result.value.id);
+    expect(await service.sourceBytes(result.value.id)).toMatchObject({ ok: false });
+  });
+
+  it('reports missing save/verify support instead of throwing', async () => {
+    const { renderer } = mockRenderer();
+    const service = new EngineService({ createRenderer: () => renderer, timings: false });
+    expect(await service.saveSource(SRC)).toMatchObject({
+      ok: false,
+      error: { code: 'unsupported' },
+    });
+    expect(await service.verify(new ArrayBuffer(0), { pageCount: 0, pageSizes: [] })).toMatchObject(
+      { ok: false, error: { code: 'unsupported' } },
+    );
+  });
 });

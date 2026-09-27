@@ -10,6 +10,7 @@ import type {
   AssemblyResult,
   EngineErrorCode,
   ProgressCallback,
+  SourceInspection,
 } from '../types';
 
 /** AssemblyOptions minus the parts that cannot cross a thread boundary. */
@@ -22,6 +23,8 @@ export interface AssemblerWorkerApi {
     onProgress?: ProgressCallback,
     abortPort?: MessagePort,
   ): Promise<WireResult>;
+  /** Reads page labels and /Lang from (transferred) bytes. Never rejects. */
+  inspect(bytes: ArrayBuffer, password?: string): Promise<SourceInspection>;
 }
 
 /**

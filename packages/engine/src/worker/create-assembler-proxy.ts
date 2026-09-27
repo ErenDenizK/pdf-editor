@@ -12,7 +12,10 @@ import {
   type AssemblyOptions,
   type AssemblyResult,
   EngineError,
+  type InspectOptions,
   type PdfAssembler,
+  type SourceInspection,
+  type SourceInspector,
 } from '../types';
 import {
   ABORT_MESSAGE,
@@ -20,7 +23,12 @@ import {
   type WireAssemblyOptions,
 } from './assembler-protocol';
 
-export interface AssemblerProxy extends PdfAssembler {
+export interface AssemblerProxy extends PdfAssembler, SourceInspector {
+  /** One label per page, or undefined when the file has no /PageLabels. */
+  getPageLabels(
+    bytes: ArrayBuffer,
+    options?: InspectOptions,
+  ): Promise<readonly string[] | undefined>;
   /** Releases the Comlink proxy and terminates the worker. */
   dispose(): void;
 }
@@ -60,6 +68,16 @@ export function createAssemblerProxy(worker: Worker): AssemblerProxy {
         if (onAbort) signal?.removeEventListener('abort', onAbort);
         channel?.port1.close();
       }
+    },
+    /** `bytes` are transferred (detached in the caller). */
+    async inspect(bytes: ArrayBuffer, options: InspectOptions = {}): Promise<SourceInspection> {
+      if (options.signal?.aborted) {
+        throw new EngineError('aborted', 'inspect aborted', { cause: options.signal.reason });
+      }
+      return remote.inspect(transfer(bytes, [bytes]), options.password);
+    },
+    async getPageLabels(bytes: ArrayBuffer, options: InspectOptions = {}) {
+      return (await this.inspect(bytes, options)).pageLabels;
     },
     dispose(): void {
       remote[releaseProxy]();
