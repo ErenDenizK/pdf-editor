@@ -76,11 +76,14 @@ popups" (on). Verification adds an annotation count check per page against the m
 
 ## 7. Cross-viewer conformance
 
-A manual matrix in `docs/qa/annotations-matrix.md` records for each kind: renders in Acrobat
-Reader, Chrome (PDFium), Firefox (pdf.js), Preview (macOS), Edge. M2 exits only when every
-kind renders in all five and the note text is visible in each viewer's comment UI.
-The PDFium and pdf.js columns are automated (`pnpm --filter @pdf-editor/qa-tool matrix`);
-Acrobat, Preview and Edge get an optional manual spot check.
+`docs/qa/annotations-matrix.md` records for each kind whether it renders correctly (presence,
+colour, translucency, stroke position, placement on rotated pages) and whether its text
+reaches the comment UI, in two independent renderers run headlessly: our PDFium build
+(Chrome-class viewers) and pdf.js (Firefox). The table and the contact sheets are written
+by `pnpm --filter @pdf-editor/qa-tool matrix`, which fails on any `fail` cell and runs in
+CI. M2 exits when that matrix is green. Acrobat Reader, Preview (macOS) and Edge get an
+optional five-minute manual spot check against the contact sheets; they are not a gate
+(owner decision 2026-09-27, `DISCUSSION.md` #13).
 
 ## 8. Performance and limits
 

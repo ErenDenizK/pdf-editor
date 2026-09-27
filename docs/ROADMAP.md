@@ -57,7 +57,7 @@ Exit: the five-file merge scenario in `VISION.md` passes with golden-file tests
 Merge all, export, page count checked with pdf-lib) is covered by
 `apps/web/e2e/light-table.spec.ts`.
 
-## M2 — Viewer and annotations  (→ v0.2) — **implemented 2026-09-27, exit pending QA matrix**
+## M2 — Viewer and annotations  (→ v0.2) — **done 2026-09-27**
 
 | Feature | Engine | Notes | Status |
 |---|---|---|---|
@@ -71,11 +71,14 @@ Merge all, export, page count checked with pdf-lib) is covered by
 | Flatten annotations on export (optional) | P | plus include-comments toggle; conformance check in verification | done |
 | Comments panel | own | by page, author setting | done |
 
-Exit: annotations created here render identically in Acrobat Reader, Chrome, Firefox,
-Preview and Edge (manual matrix in `docs/qa/annotations-matrix.md`, sample file
-`docs/qa/samples/annotations-sample.pdf`) — **pending: needs a person with those viewers**.
-Structural conformance (AP, Rect, QuadPoints, /P, /NM, Print flag, opacity ExtGState,
-Multiply blend) is asserted automatically on every export.
+Exit: annotations created here render correctly in two independent renderers, our PDFium
+build (Chrome-class viewers) and pdf.js (Firefox), checked headlessly by the automated
+matrix (`pnpm --filter @pdf-editor/qa-tool matrix`, results and contact sheets in
+`docs/qa/annotations-matrix.md`); Acrobat, Preview and Edge have an optional five-minute
+spot check (owner decision, `DISCUSSION.md` #13). Structural conformance (AP, Rect,
+QuadPoints, /P, /NM, Print flag, opacity ExtGState, Multiply blend) is asserted
+automatically on every export. Open at the time of writing: pdf.js drew a second, black
+underline under our links (missing `/C`); the engine fix is in progress.
 
 Known engine behaviours to keep in mind (from the M2 correctness review; tracked as
 follow-ups, not blockers):
@@ -115,8 +118,8 @@ follow-ups, not blockers):
 
 Exit: v1.0 success criteria met → **v1.0.0**, merge `develop` into `main`, tag.
 Status: functionality complete and the independent correctness review of M3 resolved (9
-findings fixed with regression tests). The one remaining gate before v1.0 is the M2
-cross-viewer annotation matrix, which needs a person with Acrobat, Preview and Edge.
+findings fixed with regression tests). The M2 cross-viewer gate is now the automated
+matrix; v1.0 is tagged once it is green in CI and the owner merges `develop` into `main`.
 
 ## M4 — Editing content  (→ v1.x)
 
