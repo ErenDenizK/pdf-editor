@@ -7,23 +7,12 @@ import { readFile } from 'node:fs/promises';
 import { PDFDocument } from '@cantoo/pdf-lib';
 import { expect, test } from '@playwright/test';
 
-const FIXTURES = new URL('../../../test/fixtures/', import.meta.url);
+import { openFixtures, useFileInputPicker } from './helpers';
+
 const EXPECTED: Readonly<Record<string, { pages: number; rotations: readonly number[] }>> = {
   'simple-text': { pages: 3, rotations: [0, 0, 0] },
   'rotated-pages': { pages: 4, rotations: [0, 90, 180, 270] },
 };
-
-/** Dispatches a file drop on the shell, as a browser does for dragged files. */
-const DROP_FILES = `(list) => {
-  const transfer = new DataTransfer();
-  for (const file of list) {
-    transfer.items.add(new File([new Uint8Array(file.data)], file.name, { type: 'application/pdf' }));
-  }
-  const shell = document.querySelector('[data-testid="app-shell"]');
-  for (const type of ['dragenter', 'dragover', 'drop']) {
-    shell.dispatchEvent(new DragEvent(type, { dataTransfer: transfer, bubbles: true, cancelable: true }));
-  }
-}`;
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'Download flow is verified on Chromium');
 
@@ -33,17 +22,14 @@ test('drop two files, rotate a page, export and download a verified PDF', async 
     content:
       "Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });",
   });
+  await useFileInputPicker(page);
   await page.goto('./');
   await expect(page.getByTestId('app-shell')).toBeVisible();
 
-  const files = await Promise.all(
-    Object.keys(EXPECTED).map(async (name) => ({
-      name: `${name}.pdf`,
-      data: [...(await readFile(new URL(`${name}.pdf`, FIXTURES)))],
-    })),
+  await openFixtures(
+    page,
+    Object.keys(EXPECTED).map((name) => `${name}.pdf`),
   );
-  // Runs in the page (DOM types are not available to this Node-side file).
-  await page.evaluate(`(${DROP_FILES})(${JSON.stringify(files)})`);
   const documentTabs = page.getByRole('tablist', { name: 'Open documents' }).getByRole('tab');
   await expect(documentTabs).toHaveCount(2);
 

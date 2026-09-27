@@ -140,7 +140,16 @@ function pickWithInput(acceptList: string, accept: (file: NamedFile) => boolean)
 
 /** True while dragging something that contains files (not text or links). */
 export function dragHasFiles(dataTransfer: DataTransfer | null): boolean {
-  return dataTransfer ? Array.from(dataTransfer.types).includes('Files') : false;
+  if (!dataTransfer) return false;
+  if (Array.from(dataTransfer.types).includes('Files')) return true;
+  // Some engines expose file items without the "Files" type (script-built transfers, some
+  // WebKit drops); the item kinds and the file list are the second and third opinion.
+  try {
+    if (Array.from(dataTransfer.items ?? []).some((item) => item.kind === 'file')) return true;
+    return (dataTransfer.files?.length ?? 0) > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** Calls `fn`, mapping a throw to null (some engines throw on unsupported item kinds). */

@@ -5,11 +5,10 @@
  * off still loads the shell and opens a PDF. Also checks that the worker scope and the
  * manifest's scope / start_url / id follow the deployment base path (VITE_BASE_PATH).
  */
-import { readFile } from 'node:fs/promises';
+import { expect, test } from '@playwright/test';
 
-import { expect, type Page, test } from '@playwright/test';
+import { openFixtures, useFileInputPicker } from './helpers';
 
-const FIXTURE = new URL('../../../test/fixtures/simple-text.pdf', import.meta.url);
 const BASE_PATH = process.env.VITE_BASE_PATH ?? '/';
 
 test.skip(
@@ -17,23 +16,8 @@ test.skip(
   'Service worker + offline emulation is verified on Chromium',
 );
 
-async function dropFixture(page: Page): Promise<void> {
-  const data = [...(await readFile(FIXTURE))];
-  await page.evaluate((bytes) => {
-    const transfer = new DataTransfer();
-    transfer.items.add(
-      new File([new Uint8Array(bytes)], 'simple-text.pdf', { type: 'application/pdf' }),
-    );
-    const shell = document.querySelector('[data-testid="app-shell"]');
-    for (const type of ['dragenter', 'dragover', 'drop']) {
-      shell?.dispatchEvent(
-        new DragEvent(type, { dataTransfer: transfer, bubbles: true, cancelable: true }),
-      );
-    }
-  }, data);
-}
-
 test('the shell and the engine work offline after one visit', async ({ page, context }) => {
+  await useFileInputPicker(page);
   await page.goto('./');
   await expect(page.getByTestId('app-shell')).toBeVisible();
 
@@ -86,7 +70,7 @@ test('the shell and the engine work offline after one visit', async ({ page, con
   );
   expect(reachable).toBe(false);
 
-  await dropFixture(page);
+  await openFixtures(page, ['simple-text.pdf']);
   await expect(page.getByRole('tab', { name: 'simple-text', selected: true })).toBeVisible();
   await expect(page.getByTestId('status-pages')).toHaveText('Page 1 of 3');
   // A page actually rendered through PDFium (wasm from the cache).

@@ -4,38 +4,16 @@
  * document and exporting the result, and screenshots for the design review
  * (`CAPTURE_SCREENSHOTS=1`, written to docs/design/screenshots/).
  */
-import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { PDFDocument } from '@cantoo/pdf-lib';
 import { expect, type Page, test } from '@playwright/test';
 
-const fixtures = new URL('../../../test/fixtures/', import.meta.url);
+import { openFixtures, useFileInputPicker } from './helpers';
+
 const screenshots = new URL('../../../docs/design/screenshots/', import.meta.url);
 const capture = Boolean(process.env.CAPTURE_SCREENSHOTS);
-
-/** Opens fixtures the way a user drops files on the window. */
-async function openFixtures(page: Page, names: readonly string[]): Promise<void> {
-  const files = names.map((name) => ({
-    name,
-    bytes: [...readFileSync(fileURLToPath(new URL(name, fixtures)))],
-  }));
-  // In-page code as a string: the e2e project has no DOM typings (it runs in Node).
-  const dataTransfer = await page.evaluateHandle(`(() => {
-    const transfer = new DataTransfer();
-    for (const file of ${JSON.stringify(files)}) {
-      transfer.items.add(
-        new File([new Uint8Array(file.bytes)], file.name, { type: 'application/pdf' }),
-      );
-    }
-    return transfer;
-  })()`);
-  await page.dispatchEvent('[data-testid="app-shell"]', 'drop', { dataTransfer });
-  for (const name of names) {
-    await expect(page.getByRole('tab', { name: name.replace(/\.pdf$/, '') })).toBeVisible();
-  }
-}
 
 /** Shows every open document in Arrange through the tab context menu. */
 async function showBothInArrange(page: Page, second: string): Promise<void> {
@@ -57,6 +35,10 @@ function grid(page: Page, name: string) {
 
 test.describe('light table', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
+
+  test.beforeEach(async ({ page }) => {
+    await useFileInputPicker(page);
+  });
 
   test('drags a page from one document into another', async ({ page }) => {
     await page.goto('./');

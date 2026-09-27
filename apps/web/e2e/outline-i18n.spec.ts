@@ -3,31 +3,17 @@
  * Outline panel on a real PDF (nested bookmarks, authored open/closed state, navigation to
  * pages) and the UI language: `?lang=` override, the Language command, persistence.
  */
-import { readFile } from 'node:fs/promises';
+import { expect, test } from '@playwright/test';
 
-import { expect, type Page, test } from '@playwright/test';
+import { openFixtures, useFileInputPicker } from './helpers';
 
-const FIXTURE = new URL('../../../test/fixtures/outline-named-dests.pdf', import.meta.url);
-
-async function dropFixture(page: Page): Promise<void> {
-  const data = [...(await readFile(FIXTURE))];
-  await page.evaluate((bytes) => {
-    const transfer = new DataTransfer();
-    transfer.items.add(
-      new File([new Uint8Array(bytes)], 'outline-named-dests.pdf', { type: 'application/pdf' }),
-    );
-    const shell = document.querySelector('[data-testid="app-shell"]');
-    for (const type of ['dragenter', 'dragover', 'drop']) {
-      shell?.dispatchEvent(
-        new DragEvent(type, { dataTransfer: transfer, bubbles: true, cancelable: true }),
-      );
-    }
-  }, data);
-}
+test.beforeEach(async ({ page }) => {
+  await useFileInputPicker(page);
+});
 
 test('the outline panel shows the bookmarks and navigates Read mode', async ({ page }) => {
   await page.goto('./?lang=en');
-  await dropFixture(page);
+  await openFixtures(page, ['outline-named-dests.pdf']);
   await expect(page.getByTestId('status-pages')).toHaveText('Page 1 of 6');
 
   await page.getByRole('tab', { name: 'Outline', exact: true }).click();
