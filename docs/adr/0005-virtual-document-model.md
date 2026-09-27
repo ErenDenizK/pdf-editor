@@ -17,9 +17,14 @@ inside an engine instance, while structural edits are pure data.
 - Structural operations mutate only this model; bytes are produced once at export.
 - Content operations are commands executed in the source's PDFium worker with inverse
   commands recorded; they join the same history stack.
-- History is a persistent stack of workspace snapshots with structural sharing (Immer);
-  coalescing for drags and property tweaks; capped by memory not count; persisted with
-  source bytes to IndexedDB/OPFS for crash recovery.
+- History is a persistent stack of workspace snapshots with hand-written structural
+  sharing (no Immer dependency; the model is small immutable data); coalescing for drags
+  and property tweaks; capped by entry count (default 200) since entries share almost all
+  structure; persisted with source bytes to IndexedDB/OPFS for crash recovery.
+- Interleave, split and merge consume their input documents so that every PageId lives in
+  exactly one document and outline targets stay valid. Pages that leave a document leave
+  their outline nodes behind as `unresolved` (with the previous target remembered so a
+  move back restores them).
 - Export reconciles document-level structures explicitly (ARCHITECTURE.md §4) and
   verifies the output by re-parsing before download.
 - Incremental (append-only) saving is used only for annotate/fill/sign of a single,

@@ -126,9 +126,15 @@ export interface ImageOverlay {
 export type OverlayOp = TextOverlay | ImageOverlay;
 
 export type Anchor =
-  | 'top-left' | 'top-center' | 'top-right'
-  | 'middle-left' | 'center' | 'middle-right'
-  | 'bottom-left' | 'bottom-center' | 'bottom-right';
+  | 'top-left'
+  | 'top-center'
+  | 'top-right'
+  | 'middle-left'
+  | 'center'
+  | 'middle-right'
+  | 'bottom-left'
+  | 'bottom-center'
+  | 'bottom-right';
 
 export interface FontSpec {
   /** Family key resolved by the assembler to an embedded font (bundled, subset). */
@@ -151,7 +157,16 @@ export interface RgbColor {
 export type Destination =
   | { readonly kind: 'page'; readonly page: PageId; readonly view?: DestinationView }
   | { readonly kind: 'uri'; readonly uri: string }
-  | { readonly kind: 'unresolved'; readonly reason: string };
+  | {
+      readonly kind: 'unresolved';
+      readonly reason: string;
+      /**
+       * Last page target before the destination became unresolved (its page left the
+       * document). When that page returns (moved back, or merged with the document it went
+       * to), the outline helpers restore the destination instead of losing it.
+       */
+      readonly previous?: { readonly page: PageId; readonly view?: DestinationView };
+    };
 
 export interface DestinationView {
   readonly fit: 'xyz' | 'fit' | 'fit-h' | 'fit-v' | 'fit-r';
@@ -170,7 +185,13 @@ export interface OutlineNode {
   readonly origin?: { readonly source: SourceId };
 }
 
-export type PageLabelStyle = 'decimal' | 'roman-upper' | 'roman-lower' | 'alpha-upper' | 'alpha-lower' | 'none';
+export type PageLabelStyle =
+  | 'decimal'
+  | 'roman-upper'
+  | 'roman-lower'
+  | 'alpha-upper'
+  | 'alpha-lower'
+  | 'none';
 
 export interface PageLabelRange {
   /** Index of the first page (in VirtualDocument.pages) this range applies to. */
@@ -219,7 +240,14 @@ export interface VirtualDocument {
   readonly id: DocumentId;
   readonly title: string;
   readonly pages: readonly VirtualPage[];
+  /** Destinations of kind 'page' always target pages of this document. */
   readonly outline: readonly OutlineNode[];
+  /**
+   * Explicit page-label ranges, sorted by strictly increasing startIndex. Each range covers
+   * the pages from its startIndex up to the next range. Pages not covered by any range
+   * (before the first one, or all pages when empty) fall back to the source page's
+   * authored label, then to the 1-based position. See labels.ts.
+   */
   readonly labels: readonly PageLabelRange[];
   readonly metadata: DocumentMetadata;
   readonly security?: SecurityPolicy;
@@ -241,8 +269,13 @@ export interface EngineEdit {
   readonly id: string;
   readonly source: SourceId;
   readonly pageIndex: number;
-  readonly kind: 'annotation.create' | 'annotation.update' | 'annotation.delete'
-    | 'form.set-value' | 'redaction.mark' | 'redaction.apply';
+  readonly kind:
+    | 'annotation.create'
+    | 'annotation.update'
+    | 'annotation.delete'
+    | 'form.set-value'
+    | 'redaction.mark'
+    | 'redaction.apply';
   readonly payload: unknown;
   readonly inverse?: EngineEdit;
 }

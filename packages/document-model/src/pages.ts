@@ -1,0 +1,635 @@
+/**
+ * Structural operations. Each takes a Workspace and returns a new one (or the same one
+ * when the operation is a no-op), validates its inputs, and throws DocumentModelError on
+ * misuse. Page ids are stable: moving a page keeps its id, so outline destinations follow
+ * it; duplicates get fresh ids.
+ *
+ * Operations that build a new document from existing ones (interleave, split, merge)
+ * consume their inputs: the pages move into the result, which keeps the invariant that
+ * every PageId lives in exactly one document. The result becomes the active document.
+ */
+import { DocumentModelError } from './errors';
+import type { IdGenerator } from './ids';
+import {
+  assertInsertIndex,
+  assertRect,
+  assertSize,
+  assertTitle,
+  isArrayValue,
+  locatePages,
+  normalizeRotation,
+  omitKeys,
+  putDocuments,
+  requireDocument,
+  sameElements,
+  withWorkspace,
+  type LocatedPage,
+} from './internal';
+import {
+  deriveRangesFromLabels,
+  effectiveLabels,
+  shiftLabelsForInsertion,
+  shiftLabelsForRemoval,
+  sliceLabels,
+} from './labels';
+import { pruneOutline, restrictOutline, wrapOutline } from './outline';
+import { pageDisplaySize } from './selectors';
+import type {
+  BlobId,
+  DocumentId,
+  OutlineNode,
+  OverlayOp,
+  PageId,
+  PageLabelRange,
+  Rect,
+  Size,
+  VirtualDocument,
+  VirtualPage,
+  Workspace,
+} from './types';
+
+/** A gap position in a document: insert before the page currently at `index`. */
+export interface PageTarget {
+  readonly document: DocumentId;
+  readonly index: number;
+}
+
+/** ISO A4 in points; used for blank pages when there is no neighbour to copy. */
+export const DEFAULT_PAGE_SIZE: Size = { width: 595.28, height: 841.89 };
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Rebuilds a document after its page list changed; prunes/restores outline targets. */
+function withPages(
+  doc: VirtualDocument,
+  pages: readonly VirtualPage[],
+  labels: readonly PageLabelRange[],
+): VirtualDocument {
+  const live = new Set(pages.map((p) => p.id));
+  return {
+    ...doc,
+    pages,
+    labels: pages.length === 0 ? [] : labels,
+    outline: pruneOutline(doc.outline, live),
+    clean: false,
+  };
+}
+
+function groupByDocument(located: readonly LocatedPage[]): Map<DocumentId, Set<number>> {
+  const groups = new Map<DocumentId, Set<number>>();
+  for (const page of located) {
+    let set = groups.get(page.document);
+    if (set === undefined) {
+      set = new Set();
+      groups.set(page.document, set);
+    }
+    set.add(page.index);
+  }
+  return groups;
+}
+
+function pagesOf(ws: Workspace, located: readonly LocatedPage[]): VirtualPage[] {
+  return located.map((loc) => {
+    const page = requireDocument(ws, loc.document).pages[loc.index];
+    if (page === undefined) throw new DocumentModelError('unknown-page', String(loc.id));
+    return page;
+  });
+}
+
+function insertAt<T>(items: readonly T[], index: number, inserted: readonly T[]): T[] {
+  return [...items.slice(0, index), ...inserted, ...items.slice(index)];
+}
+
+/** Applies `fn` to the selected pages; documents with no actual change are shared. */
+function updatePages(
+  ws: Workspace,
+  pageIds: readonly PageId[],
+  fn: (page: VirtualPage) => VirtualPage,
+): Workspace {
+  const groups = groupByDocument(locatePages(ws, pageIds));
+  const updated: VirtualDocument[] = [];
+  for (const [docId, indices] of groups) {
+    const doc = requireDocument(ws, docId);
+    const pages = doc.pages.map((page, i) => (indices.has(i) ? fn(page) : page));
+    if (!sameElements(pages, doc.pages)) updated.push({ ...doc, pages, clean: false });
+  }
+  return updated.length === 0
+    ? ws
+    : withWorkspace(ws, { documents: putDocuments(ws.documents, updated) });
+}
+
+/**
+ * Replaces `removed` documents with `added` ones. The added documents take the tab
+ * position of `anchor` (defaults to the first removed document), in the given order.
+ */
+function replaceDocumentsInOrder(
+  ws: Workspace,
+  removed: readonly DocumentId[],
+  added: readonly VirtualDocument[],
+  anchor: DocumentId,
+  keepAnchor = false,
+): Workspace {
+  const removedSet = new Set(removed);
+  const order: DocumentId[] = [];
+  for (const id of ws.documentOrder) {
+    if (id === anchor) {
+      if (keepAnchor) order.push(id);
+      order.push(...added.map((d) => d.id));
+    }
+    if (!removedSet.has(id) && !(id === anchor && keepAnchor)) order.push(id);
+  }
+  const documents = putDocuments(omitKeys(ws.documents, removedSet), added);
+  return withWorkspace(ws, {
+    documents,
+    documentOrder: order,
+    activeDocument: added[0]?.id ?? null,
+  });
+}
+
+function assertOverlays(overlays: readonly OverlayOp[]): void {
+  if (!isArrayValue(overlays)) {
+    throw new DocumentModelError('invalid-argument', 'Overlays must be an array');
+  }
+  for (const overlay of overlays) {
+    if (overlay.kind !== 'text' && overlay.kind !== 'image') {
+      throw new DocumentModelError('invalid-argument', 'Unknown overlay kind');
+    }
+    if (!(overlay.opacity >= 0 && overlay.opacity <= 1)) {
+      throw new DocumentModelError('invalid-argument', 'Overlay opacity must be within 0…1');
+    }
+    if (overlay.kind === 'image' && !(overlay.scale > 0 && Number.isFinite(overlay.scale))) {
+      throw new DocumentModelError('invalid-argument', 'Image overlay scale must be positive');
+    }
+    if (overlay.kind === 'text' && !(overlay.font.size > 0 && Number.isFinite(overlay.font.size))) {
+      throw new DocumentModelError('invalid-argument', 'Text overlay font size must be positive');
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Move, delete, duplicate
+// ---------------------------------------------------------------------------
+
+/**
+ * Moves pages to `target`, within one document or across documents. `target.index` is a
+ * gap position in the target document *before* the moved pages are removed, i.e. what
+ * the user sees when dropping. Moved pages keep their relative order (tab order, then
+ * page order) regardless of the order of `pageIds`.
+ */
+export function movePages(
+  ws: Workspace,
+  args: { readonly pageIds: readonly PageId[]; readonly target: PageTarget },
+): Workspace {
+  const { target } = args;
+  const targetDoc = requireDocument(ws, target.document);
+  assertInsertIndex(target.index, targetDoc.pages.length);
+  const located = locatePages(ws, args.pageIds);
+  const moved = pagesOf(ws, located);
+  const removedBeforeTarget = located.filter(
+    (loc) => loc.document === target.document && loc.index < target.index,
+  ).length;
+  const insertIndex = target.index - removedBeforeTarget;
+
+  const updated: VirtualDocument[] = [];
+  let targetPages = targetDoc.pages;
+  let targetLabels = targetDoc.labels;
+  for (const [docId, removed] of groupByDocument(located)) {
+    const doc = requireDocument(ws, docId);
+    const pages = doc.pages.filter((_, i) => !removed.has(i));
+    const labels = shiftLabelsForRemoval(doc.labels, removed, pages.length);
+    if (docId === target.document) {
+      targetPages = pages;
+      targetLabels = labels;
+    } else {
+      updated.push(withPages(doc, pages, labels));
+    }
+  }
+  const finalPages = insertAt(targetPages, insertIndex, moved);
+  if (updated.length === 0 && sameElements(finalPages, targetDoc.pages)) return ws;
+  const finalLabels = shiftLabelsForInsertion(targetLabels, insertIndex, moved.length);
+  updated.push(withPages(targetDoc, finalPages, finalLabels));
+  return withWorkspace(ws, { documents: putDocuments(ws.documents, updated) });
+}
+
+/** Removes pages. Documents may become empty; they are not closed. */
+export function deletePages(ws: Workspace, pageIds: readonly PageId[]): Workspace {
+  const groups = groupByDocument(locatePages(ws, pageIds));
+  const updated: VirtualDocument[] = [];
+  for (const [docId, removed] of groups) {
+    const doc = requireDocument(ws, docId);
+    const pages = doc.pages.filter((_, i) => !removed.has(i));
+    updated.push(withPages(doc, pages, shiftLabelsForRemoval(doc.labels, removed, pages.length)));
+  }
+  return withWorkspace(ws, { documents: putDocuments(ws.documents, updated) });
+}
+
+/**
+ * Duplicates pages with fresh ids and the same reference, rotation, crop and overlays.
+ * Without a target each copy goes right after its original; with a target all copies
+ * are inserted there in relative order.
+ */
+export function duplicatePages(
+  ws: Workspace,
+  pageIds: readonly PageId[],
+  ids: IdGenerator,
+  options: { readonly target?: PageTarget } = {},
+): Workspace {
+  const located = locatePages(ws, pageIds);
+  const copy = (page: VirtualPage): VirtualPage => ({ ...page, id: ids.page() });
+
+  if (options.target !== undefined) {
+    const { target } = options;
+    const targetDoc = requireDocument(ws, target.document);
+    assertInsertIndex(target.index, targetDoc.pages.length);
+    const copies = pagesOf(ws, located).map(copy);
+    const pages = insertAt(targetDoc.pages, target.index, copies);
+    const labels = shiftLabelsForInsertion(targetDoc.labels, target.index, copies.length);
+    return withWorkspace(ws, {
+      documents: putDocuments(ws.documents, [withPages(targetDoc, pages, labels)]),
+    });
+  }
+
+  const updated: VirtualDocument[] = [];
+  for (const [docId, indices] of groupByDocument(located)) {
+    const doc = requireDocument(ws, docId);
+    const pages = doc.pages.flatMap((page, i) => (indices.has(i) ? [page, copy(page)] : [page]));
+    let labels = doc.labels;
+    const descending = [...indices].sort((a, b) => b - a);
+    for (const index of descending) labels = shiftLabelsForInsertion(labels, index + 1, 1);
+    updated.push(withPages(doc, pages, labels));
+  }
+  return withWorkspace(ws, { documents: putDocuments(ws.documents, updated) });
+}
+
+// ---------------------------------------------------------------------------
+// Page properties
+// ---------------------------------------------------------------------------
+
+/** Adds `delta` degrees (any multiple of 90, negative allowed) to each page's rotation. */
+export function rotatePages(ws: Workspace, pageIds: readonly PageId[], delta: number): Workspace {
+  const normalizedDelta = normalizeRotation(delta);
+  locatePages(ws, pageIds);
+  if (normalizedDelta === 0) return ws;
+  return updatePages(ws, pageIds, (page) => ({
+    ...page,
+    rotation: normalizeRotation(page.rotation + normalizedDelta),
+  }));
+}
+
+/** Sets (or clears, with undefined) the CropBox override, in unrotated user space. */
+export function setPageCropBox(
+  ws: Workspace,
+  pageId: PageId,
+  cropBox: Rect | undefined,
+): Workspace {
+  if (cropBox !== undefined) assertRect(cropBox, 'Crop box');
+  return updatePages(ws, [pageId], (page) => {
+    if (cropBox === undefined) {
+      if (page.cropBox === undefined) return page;
+      const { cropBox: _removed, ...rest } = page;
+      return rest;
+    }
+    return { ...page, cropBox };
+  });
+}
+
+/** Replaces the overlays of the selected pages. */
+export function setPageOverlays(
+  ws: Workspace,
+  pageIds: readonly PageId[],
+  overlays: readonly OverlayOp[],
+): Workspace {
+  assertOverlays(overlays);
+  return updatePages(ws, pageIds, (page) => ({ ...page, overlays }));
+}
+
+/** Replaces the overlays of every page of a document (page numbers, watermark, …). */
+export function setDocumentOverlays(
+  ws: Workspace,
+  documentId: DocumentId,
+  overlays: readonly OverlayOp[],
+): Workspace {
+  assertOverlays(overlays);
+  const doc = requireDocument(ws, documentId);
+  if (doc.pages.length === 0) return ws;
+  return setPageOverlays(
+    ws,
+    doc.pages.map((p) => p.id),
+    overlays,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Insertion
+// ---------------------------------------------------------------------------
+
+function insertNewPage(ws: Workspace, target: PageTarget, page: VirtualPage): Workspace {
+  const doc = requireDocument(ws, target.document);
+  const pages = insertAt(doc.pages, target.index, [page]);
+  const labels = shiftLabelsForInsertion(doc.labels, target.index, 1);
+  return withWorkspace(ws, {
+    documents: putDocuments(ws.documents, [withPages(doc, pages, labels)]),
+  });
+}
+
+function neighbourSize(ws: Workspace, target: PageTarget): Size {
+  const doc = requireDocument(ws, target.document);
+  const neighbour = doc.pages[target.index - 1] ?? doc.pages[target.index];
+  return neighbour === undefined ? DEFAULT_PAGE_SIZE : pageDisplaySize(ws, neighbour);
+}
+
+/** Inserts a blank page. Size defaults to the displayed size of the preceding page. */
+export function insertBlankPage(
+  ws: Workspace,
+  args: PageTarget & { readonly size?: Size },
+  ids: IdGenerator,
+): Workspace {
+  const doc = requireDocument(ws, args.document);
+  assertInsertIndex(args.index, doc.pages.length);
+  const size = args.size ?? neighbourSize(ws, args);
+  assertSize(size, 'Blank page size');
+  return insertNewPage(ws, args, {
+    id: ids.page(),
+    ref: { kind: 'blank', size },
+    rotation: 0,
+    overlays: [],
+  });
+}
+
+/** Inserts a page showing an image blob (stored by the app, referenced by BlobId). */
+export function insertImagePage(
+  ws: Workspace,
+  args: PageTarget & { readonly blob: BlobId; readonly size: Size },
+  ids: IdGenerator,
+): Workspace {
+  const doc = requireDocument(ws, args.document);
+  assertInsertIndex(args.index, doc.pages.length);
+  assertSize(args.size, 'Image page size');
+  if (typeof args.blob !== 'string' || args.blob.length === 0) {
+    throw new DocumentModelError('invalid-argument', 'Image page needs a blob id');
+  }
+  return insertNewPage(ws, args, {
+    id: ids.page(),
+    ref: { kind: 'image', blob: args.blob, size: args.size },
+    rotation: 0,
+    overlays: [],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Whole-document reshaping
+// ---------------------------------------------------------------------------
+
+/** Reverses page order. Explicit label ranges are positional and stay where they are. */
+export function reversePages(ws: Workspace, documentId: DocumentId): Workspace {
+  const doc = requireDocument(ws, documentId);
+  if (doc.pages.length < 2) return ws;
+  const next: VirtualDocument = { ...doc, pages: [...doc.pages].reverse(), clean: false };
+  return withWorkspace(ws, { documents: putDocuments(ws.documents, [next]) });
+}
+
+export type InterleaveMode = 'alternate' | 'duplex-reverse-b';
+
+/**
+ * Interleaves two documents into a new one (a1, b1, a2, b2, …; leftovers appended).
+ * 'duplex-reverse-b' reverses b first — the order a scanner produces when the stack is
+ * flipped to scan back sides. Both inputs are consumed; the result takes a's tab slot.
+ */
+export function interleave(
+  ws: Workspace,
+  args: {
+    readonly a: DocumentId;
+    readonly b: DocumentId;
+    readonly mode: InterleaveMode;
+    readonly title?: string;
+  },
+  ids: IdGenerator,
+): Workspace {
+  if (args.mode !== 'alternate' && args.mode !== 'duplex-reverse-b') {
+    throw new DocumentModelError(
+      'invalid-argument',
+      `Unknown interleave mode: ${String(args.mode)}`,
+    );
+  }
+  if (args.a === args.b) {
+    throw new DocumentModelError('invalid-argument', 'Cannot interleave a document with itself');
+  }
+  const a = requireDocument(ws, args.a);
+  const b = requireDocument(ws, args.b);
+  const title = assertTitle(args.title ?? `${a.title} + ${b.title}`);
+  const bPages = args.mode === 'duplex-reverse-b' ? [...b.pages].reverse() : b.pages;
+  const pages: VirtualPage[] = [];
+  for (let i = 0; i < Math.max(a.pages.length, bPages.length); i++) {
+    const fromA = a.pages[i];
+    const fromB = bPages[i];
+    if (fromA !== undefined) pages.push(fromA);
+    if (fromB !== undefined) pages.push(fromB);
+  }
+  // Interleaved pages come from unrelated sequences; any existing labels would read as
+  // "1, 1, 2, 2", so labels restart as plain decimal when either input carried any.
+  const hadLabels =
+    a.labels.length > 0 ||
+    b.labels.length > 0 ||
+    [a, b].some((doc) => effectiveLabels(ws, doc).some((label, i) => label !== String(i + 1)));
+  const doc: VirtualDocument = {
+    ...a,
+    id: ids.document(),
+    title,
+    pages,
+    outline: pruneOutline([...a.outline, ...b.outline], new Set(pages.map((p) => p.id))),
+    labels:
+      hadLabels && pages.length > 0 ? [{ startIndex: 0, style: 'decimal', firstNumber: 1 }] : [],
+    clean: false,
+  };
+  return replaceDocumentsInOrder(ws, [a.id, b.id], [doc], a.id);
+}
+
+export type SplitSpec =
+  /** 0-based inclusive [start, end] ranges; each becomes a document. Must not overlap. */
+  | { readonly mode: 'ranges'; readonly ranges: readonly (readonly [number, number])[] }
+  /** Chunks of n pages. */
+  | { readonly mode: 'every'; readonly n: number }
+  /** Each listed page starts a new part. */
+  | { readonly mode: 'at-pages'; readonly pageIds: readonly PageId[] };
+
+function splitParts(doc: VirtualDocument, spec: SplitSpec): (readonly [number, number])[] {
+  const length = doc.pages.length;
+  switch (spec.mode) {
+    case 'ranges': {
+      if (!isArrayValue(spec.ranges) || spec.ranges.length === 0) {
+        throw new DocumentModelError('invalid-range', 'At least one range is required');
+      }
+      const parts = spec.ranges.map(([start, end]) => {
+        if (
+          !Number.isInteger(start) ||
+          !Number.isInteger(end) ||
+          start < 0 ||
+          end < start ||
+          end >= length
+        ) {
+          throw new DocumentModelError(
+            'invalid-range',
+            `Invalid range [${start}, ${end}] for ${length} pages`,
+          );
+        }
+        return [start, end + 1] as const;
+      });
+      const sorted = [...parts].sort((x, y) => x[0] - y[0]);
+      for (let i = 1; i < sorted.length; i++) {
+        if ((sorted[i]?.[0] ?? 0) < (sorted[i - 1]?.[1] ?? 0)) {
+          throw new DocumentModelError('invalid-range', 'Split ranges must not overlap');
+        }
+      }
+      return parts;
+    }
+    case 'every': {
+      if (!Number.isInteger(spec.n) || spec.n < 1) {
+        throw new DocumentModelError('invalid-argument', 'Split size must be a positive integer');
+      }
+      const parts: (readonly [number, number])[] = [];
+      for (let start = 0; start < length; start += spec.n) {
+        parts.push([start, Math.min(start + spec.n, length)]);
+      }
+      if (parts.length < 2) {
+        throw new DocumentModelError('invalid-argument', 'Split would produce a single part');
+      }
+      return parts;
+    }
+    case 'at-pages': {
+      const indexOf = new Map(doc.pages.map((p, i) => [p.id, i] as const));
+      const cuts = new Set<number>();
+      for (const id of spec.pageIds) {
+        const index = indexOf.get(id);
+        if (index === undefined) {
+          throw new DocumentModelError(
+            'unknown-page',
+            `Page ${String(id)} is not in this document`,
+          );
+        }
+        if (index > 0) cuts.add(index);
+      }
+      if (cuts.size === 0) {
+        throw new DocumentModelError('invalid-argument', 'Split would produce a single part');
+      }
+      const bounds = [0, ...[...cuts].sort((x, y) => x - y), length];
+      return bounds.slice(1).map((end, i) => [bounds[i] ?? 0, end] as const);
+    }
+    default:
+      throw new DocumentModelError('invalid-argument', 'Unknown split mode');
+  }
+}
+
+/**
+ * Splits a document into new documents titled "<title> (k of n)". Each part keeps the
+ * outline nodes that land in it and its label strings. With 'ranges', pages outside all
+ * ranges stay in the original document (which then keeps its tab, parts follow it);
+ * otherwise the original is replaced by the parts. The first part becomes active.
+ */
+export function splitDocument(
+  ws: Workspace,
+  documentId: DocumentId,
+  spec: SplitSpec,
+  ids: IdGenerator,
+): Workspace {
+  const doc = requireDocument(ws, documentId);
+  if (doc.pages.length === 0) {
+    throw new DocumentModelError('invalid-argument', 'Cannot split an empty document');
+  }
+  const parts = splitParts(doc, spec);
+  const covered = new Set<number>();
+  for (const [start, end] of parts) for (let i = start; i < end; i++) covered.add(i);
+  const hasLeftovers = covered.size < doc.pages.length;
+
+  const newDocs = parts.map(([start, end], k): VirtualDocument => {
+    const pages = doc.pages.slice(start, end);
+    const pageSet = new Set(pages.map((p) => p.id));
+    const outline = restrictOutline(doc.outline, pageSet, k === 0 && !hasLeftovers);
+    return {
+      ...doc,
+      id: ids.document(),
+      title: `${doc.title} (${k + 1} of ${parts.length})`,
+      pages,
+      labels: sliceLabels(doc.labels, start, end),
+      outline: pruneOutline(outline, pageSet),
+      clean: false,
+    };
+  });
+
+  if (!hasLeftovers) return replaceDocumentsInOrder(ws, [doc.id], newDocs, doc.id);
+
+  const remaining = doc.pages.filter((_, i) => !covered.has(i));
+  const rest = withPages(
+    doc,
+    remaining,
+    shiftLabelsForRemoval(doc.labels, covered, remaining.length),
+  );
+  const withRest = withWorkspace(ws, { documents: putDocuments(ws.documents, [rest]) });
+  return replaceDocumentsInOrder(withRest, [], newDocs, doc.id, true);
+}
+
+/**
+ * Concatenates documents (in the given order) into a new one. Each input's outline is
+ * wrapped under a node titled with the input's title and pointing at its first page.
+ * Labels: if no input has explicit ranges, none are set (authored labels and positions
+ * flow through); otherwise each input's effective labels are frozen into ranges so every
+ * page keeps the label it showed before. Inputs are consumed; the result takes the first
+ * input's tab slot and its metadata, security and form policy.
+ */
+export function mergeDocuments(
+  ws: Workspace,
+  args: { readonly documentIds: readonly DocumentId[]; readonly title: string },
+  ids: IdGenerator,
+): Workspace {
+  const title = assertTitle(args.title);
+  if (!isArrayValue(args.documentIds) || args.documentIds.length < 2) {
+    throw new DocumentModelError('invalid-argument', 'Merge needs at least two documents');
+  }
+  if (new Set(args.documentIds).size !== args.documentIds.length) {
+    throw new DocumentModelError('duplicate-id', 'A document is listed twice');
+  }
+  const docs = args.documentIds.map((id) => requireDocument(ws, id));
+  const first = docs[0];
+  if (first === undefined) throw new DocumentModelError('invalid-argument', 'Nothing to merge');
+
+  const pages = docs.flatMap((d) => d.pages);
+  const outline: OutlineNode[] = [];
+  for (const d of docs) {
+    const firstPage = d.pages[0];
+    if (firstPage === undefined && d.outline.length === 0) continue;
+    outline.push(
+      wrapOutline(
+        d.title,
+        d.outline,
+        firstPage === undefined ? {} : { destination: { kind: 'page', page: firstPage.id } },
+      ),
+    );
+  }
+  const labels: PageLabelRange[] = [];
+  if (docs.some((d) => d.labels.length > 0)) {
+    let offset = 0;
+    for (const d of docs) {
+      for (const range of deriveRangesFromLabels(effectiveLabels(ws, d))) {
+        labels.push({ ...range, startIndex: range.startIndex + offset });
+      }
+      offset += d.pages.length;
+    }
+  }
+  const merged: VirtualDocument = {
+    ...first,
+    id: ids.document(),
+    title,
+    pages,
+    // Nodes that went unresolved when pages left one input may point into another.
+    outline: pruneOutline(outline, new Set(pages.map((p) => p.id))),
+    labels,
+    clean: false,
+  };
+  return replaceDocumentsInOrder(
+    ws,
+    docs.map((d) => d.id),
+    [merged],
+    first.id,
+  );
+}
