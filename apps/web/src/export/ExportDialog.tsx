@@ -269,7 +269,7 @@ function ReviewStep({
   readonly onBack: () => void;
   readonly onSave: () => void;
 }) {
-  const items = summarizeReport(prepared.report);
+  const items = summarizeReport(prepared.report, prepared.sourceNotes);
   const seconds = (prepared.durationMs / 1000).toFixed(1);
   return (
     <div className={styles.body}>

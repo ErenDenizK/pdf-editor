@@ -1,6 +1,7 @@
 import type { ReconciliationReport } from '@pdf-editor/engine';
 import { describe, expect, it } from 'vitest';
 
+import { sourceNoteWarnings } from './export-service';
 import { summarizeReport } from './summary';
 
 const empty: ReconciliationReport = {
@@ -49,6 +50,38 @@ describe('summarizeReport', () => {
     );
     expect(items[2]?.details).toEqual(['name → forms-b.name']);
     expect(items[5]?.text).toBe('Some overlay characters are not supported');
+  });
+
+  it('says when password protection was removed and files were repaired, once each', () => {
+    const notes = { securityRemoved: ['locked.pdf', 'owner.pdf'], repaired: ['broken.pdf'] };
+    const warnings = sourceNoteWarnings(notes);
+    expect(warnings).toEqual([
+      'Password protection from 2 files was removed; set a new password in Export options',
+      '1 file had to be repaired when opened; the output was built from the repaired copy',
+    ]);
+    const items = summarizeReport({ ...empty, warnings }, notes);
+    expect(items).toEqual([
+      {
+        id: 'security',
+        tone: 'changed',
+        text: 'Password protection from 2 files was removed; set a new password in Export options.',
+        details: ['locked.pdf', 'owner.pdf'],
+      },
+      {
+        id: 'repaired',
+        tone: 'changed',
+        text: '1 damaged file was repaired when opened; the output is built from the repaired copy.',
+        details: ['broken.pdf'],
+      },
+    ]);
+    expect(
+      summarizeReport(
+        { ...empty, warnings: sourceNoteWarnings({ securityRemoved: ['a.pdf'], repaired: [] }) },
+        { securityRemoved: ['a.pdf'], repaired: [] },
+      ).map((i) => i.text),
+    ).toEqual([
+      'Password protection from 1 file was removed; set a new password in Export options.',
+    ]);
   });
 
   it('marks a clean outline as kept', () => {

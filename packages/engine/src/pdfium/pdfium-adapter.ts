@@ -839,7 +839,13 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     const problems: string[] = [];
     let opened: OpenedDocument;
     try {
-      opened = await this.open(scratchId, bytes, options);
+      opened = await this.open(
+        scratchId,
+        bytes,
+        expectation.password === undefined
+          ? options
+          : { ...options, password: expectation.password },
+      );
     } catch (error) {
       if (error instanceof EngineError && error.code === 'aborted') throw error;
       const message = error instanceof Error ? error.message : String(error);

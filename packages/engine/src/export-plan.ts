@@ -8,6 +8,8 @@
  *   otherwise no ranges, so no /PageLabels is written.
  * - Outline: `dropUnresolved` (unresolved leaves dropped, unresolved parents kept as
  *   headings), the same rule the assembler applies.
+ * - Security: the effective policy's user password goes into the expectation, so an
+ *   encrypted output can be re-opened by the verifier.
  */
 
 import {
@@ -21,6 +23,7 @@ import {
   needsPageLabels,
   type OutlineNode,
   pageTotalRotation,
+  type SecurityPolicy,
   pageUnrotatedSize,
   type SourceId,
   type VirtualDocument,
@@ -39,6 +42,16 @@ export interface ExportPlan {
   readonly sourceNames: ReadonlyMap<SourceId, string>;
   /** What the output must look like when re-opened. */
   readonly expectation: VerificationExpectation;
+  /**
+   * Encryption the assembler applies (`AssemblyOptions.security`, else the document's own
+   * policy); its user password is in `expectation.password` so verification can open it.
+   */
+  readonly security?: SecurityPolicy;
+}
+
+export interface ExportPlanOptions {
+  /** Overrides the document's security policy, as `AssemblyOptions.security` does. */
+  readonly security?: SecurityPolicy;
 }
 
 function outlineTitles(nodes: readonly OutlineNode[]): string[] {
@@ -47,8 +60,14 @@ function outlineTitles(nodes: readonly OutlineNode[]): string[] {
   return titles;
 }
 
-export function planExport(ws: Workspace, documentId: DocumentId): ExportPlan {
+export function planExport(
+  ws: Workspace,
+  documentId: DocumentId,
+  options: ExportPlanOptions = {},
+): ExportPlan {
   const doc = getDocument(ws, documentId);
+  const security = options.security ?? doc.security;
+  const password = security?.userPassword;
   const labeled = needsPageLabels(ws, doc);
   const outline = dropUnresolved(doc.outline);
   const document: VirtualDocument = {
@@ -71,6 +90,7 @@ export function planExport(ws: Workspace, documentId: DocumentId): ExportPlan {
     document,
     sources,
     sourceNames,
+    ...(security === undefined ? {} : { security }),
     expectation: {
       pageCount: doc.pages.length,
       pageSizes: doc.pages.map((page) => pageUnrotatedSize(ws, page)),
@@ -78,6 +98,7 @@ export function planExport(ws: Workspace, documentId: DocumentId): ExportPlan {
       outlineCount: countNodes(outline),
       outlineTitles: outlineTitles(outline),
       pageLabels: labeled ? effectiveLabels(ws, doc) : null,
+      ...(password ? { password } : {}),
     },
   };
 }

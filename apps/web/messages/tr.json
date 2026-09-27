@@ -319,6 +319,9 @@
   "announce_inserted_pages": "{from} kaynağından {pages}, {title} belgesinde {position}. konuma eklendi",
   "announce_skipped_files": "Atlananlar: {names}",
   "announce_images_failed": "Görsel olarak okunamadı: {names}",
+  "bookmarks_count": "{count} yer imi",
+  "announce_inserted_pages_bookmarks": "{from} kaynağından {pages} ve {bookmarks}, {title} belgesinde {position}. konuma eklendi",
+  "announce_opened_instead": "Dosyalar açılırken bölüm kapandı; {from} yeni sekmelerde açıldı",
   "cmd_cut_pages": "Sayfaları kes",
   "cmd_cut_pages_note": "Sıralama modu. Odaktaki sayfanın arkasına Mod+V ile yapıştırın; başka bir belgede de olur.",
   "cmd_copy_pages": "Sayfaları kopyala",
@@ -459,5 +462,7 @@
   "summary_fields_unified": "Form alanları: aynı adlı {count} alan birleştirildi; ilk dosyanın değerini paylaşırlar.",
   "summary_tags_removed": "Erişilebilirlik etiketleri kaldırıldı: bozulmadan korunamadıkları için çıktı etiketsiz.",
   "summary_xfa_removed": "XFA form verileri kaldırıldı; normal form alanları korundu.",
+  "summary_security_removed": "{count} dosyanın parola koruması kaldırıldı; Dışa aktarma seçeneklerinden yeni bir parola belirleyin.",
+  "summary_repaired": "Hasarlı {count} dosya açılırken onarıldı; çıktı onarılmış kopyadan oluşturuldu.",
   "status_documents_shown": "{count} belge gösteriliyor"
 }

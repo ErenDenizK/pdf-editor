@@ -469,6 +469,18 @@
   "announce_inserted_pages": "Inserted {pages} from {from} at position {position} in {title}",
   "announce_skipped_files": "Skipped {names}",
   "announce_images_failed": "Could not read as images: {names}",
+  "bookmarks_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} bookmark",
+        "countPlural=*": "{count} bookmarks"
+      }
+    }
+  ],
+  "announce_inserted_pages_bookmarks": "Inserted {pages} and {bookmarks} from {from} at position {position} in {title}",
+  "announce_opened_instead": "The section closed while the files were opening; opened {from} in new tabs",
   "cmd_cut_pages": "Cut pages",
   "cmd_cut_pages_note": "Arrange mode. Paste after the focused page with Mod+V, also in another document.",
   "cmd_copy_pages": "Copy pages",
@@ -726,6 +738,26 @@
   ],
   "summary_tags_removed": "Accessibility tags removed: they could not stay intact, so the output is not tagged.",
   "summary_xfa_removed": "XFA form data removed; the regular form fields are kept.",
+  "summary_security_removed": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Password protection from {count} file was removed; set a new password in Export options.",
+        "countPlural=*": "Password protection from {count} files was removed; set a new password in Export options."
+      }
+    }
+  ],
+  "summary_repaired": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} damaged file was repaired when opened; the output is built from the repaired copy.",
+        "countPlural=*": "{count} damaged files were repaired when opened; the output is built from the repaired copy."
+      }
+    }
+  ],
   "status_documents_shown": [
     {
       "declarations": ["input count", "local countPlural = count: plural"],

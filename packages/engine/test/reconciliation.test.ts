@@ -282,6 +282,39 @@ describe('metadata', () => {
   });
 });
 
+describe('modification date', () => {
+  test('stamps the export time unless the document sets a date explicitly', async () => {
+    const S = sid('dated');
+    const source = await fetchBytes(metadataUrl); // ModDate 2024-01-01
+    const assemble = async (modificationDate?: string) => {
+      const result = await assembler.assemble({
+        document: vdoc([vpage({ kind: 'source', source: S, index: 0 })], {
+          metadata: {
+            policy: 'inherit-first-source',
+            ...(modificationDate === undefined ? {} : { modificationDate }),
+          },
+        }),
+        sources: new Map([[S, source.slice(0)]]),
+        blobs: new Map(),
+      });
+      const out = await PDFDocument.load(result.bytes, { updateMetadata: false });
+      const xmp = new TextDecoder().decode(
+        decodePDFRawStream(out.catalog.lookup(PDFName.of('Metadata')) as PDFRawStream).decode(),
+      );
+      return { modified: out.getModificationDate(), xmp };
+    };
+    const before = Date.now();
+    const stamped = await assemble();
+    expect(stamped.modified?.getTime()).toBeGreaterThanOrEqual(Math.floor(before / 1000) * 1000);
+    expect(stamped.xmp).toContain(
+      `<xmp:ModifyDate>${stamped.modified?.toISOString()}</xmp:ModifyDate>`,
+    );
+    const explicit = await assemble('2011-12-13T14:15:16.000Z');
+    expect(explicit.modified?.toISOString()).toBe('2011-12-13T14:15:16.000Z');
+    expect(explicit.xmp).toContain('<xmp:MetadataDate>2011-12-13T14:15:16.000Z</xmp:MetadataDate>');
+  });
+});
+
 describe('verification expectations', () => {
   test('outline, labels, rotations and field names are checked', async () => {
     const A = sid('va');

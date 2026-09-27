@@ -86,6 +86,7 @@ const N = {
   Annots: PDFName.of('Annots'),
   B: PDFName.of('B'),
   Count: PDFName.of('Count'),
+  CropBox: PDFName.of('CropBox'),
   D: PDFName.of('D'),
   DA: PDFName.of('DA'),
   Dest: PDFName.of('Dest'),
@@ -103,6 +104,7 @@ const N = {
   Outlines: PDFName.of('Outlines'),
   P: PDFName.of('P'),
   PageLabels: PDFName.of('PageLabels'),
+  Rotate: PDFName.of('Rotate'),
   Parent: PDFName.of('Parent'),
   Popup: PDFName.of('Popup'),
   Prev: PDFName.of('Prev'),
@@ -312,10 +314,14 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
     // 3. Copy pages: one copyPages call per source so shared resources are copied once.
     const out = await PDFDocument.create({ updateMetadata: false });
     const copied = new Map<SourceId, Map<number, PDFPage>>();
+    // Each copied page's own /Rotate and /CropBox before placement mutates them: repeated
+    // occurrences of a source page start from these, not from the first occurrence's edits.
+    const pristine = new Map<PDFPage, PristineBoxes>();
     for (const [sourceId, indices] of needed) {
       throwIfAborted(signal);
       const source = sources.get(sourceId) as LoadedSource;
       const pages = await out.copyPages(source.doc, indices);
+      for (const page of pages) pristine.set(page, snapshotBoxes(page));
       copied.set(sourceId, new Map(indices.map((index, i) => [index, pages[i] as PDFPage])));
     }
 
@@ -333,7 +339,7 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
         const original = copied.get(ref.source)?.get(ref.index) as PDFPage;
         let page = original;
         if (used.has(key)) {
-          page = duplicatePage(out, original, warnings);
+          page = duplicatePage(out, original, pristine.get(original), warnings);
         }
         used.add(key);
         out.addPage(page);
@@ -625,18 +631,70 @@ function setAnnotationParents(page: PDFPage): void {
   }
 }
 
+/** A copied page's own /Rotate and /CropBox (copyPages flattens inherited ones). */
+interface PristineBoxes {
+  readonly rotate: PDFObject | undefined;
+  readonly cropBox: PDFObject | undefined;
+}
+
+function snapshotBoxes(page: PDFPage): PristineBoxes {
+  const { node } = page;
+  return {
+    rotate: deepCloneDirect(node.get(N.Rotate)),
+    cropBox: deepCloneDirect(node.get(N.CropBox)),
+  };
+}
+
 /**
- * A second occurrence of the same source page. The copied page dict is cloned so each
- * occurrence has its own dict and contents array (overlays differ per occurrence), while
- * content streams and resources stay shared. Widgets are dropped from the duplicate: a field
- * widget can only live on one page. Other annotations are cloned shallowly.
+ * Copies direct containers (dictionaries and arrays) recursively; indirect references and
+ * immutable scalars are shared. Strings are encrypted with their holding object's key (see
+ * `encryptStrings`), so a direct object shared by two holders cannot decrypt for both.
  */
-function duplicatePage(out: PDFDocument, original: PDFPage, warnings: Warnings): PDFPage {
+function deepCloneDirect<T extends PDFObject | undefined>(value: T): T {
+  // `clone()` is shallow and keeps the subclass (a page leaf stays a PDFPageLeaf).
+  if (value instanceof PDFDict) {
+    const copy = value.clone();
+    for (const [key, child] of value.entries()) copy.set(key, deepCloneDirect(child));
+    return copy as unknown as T;
+  }
+  if (value instanceof PDFArray) {
+    const copy = value.clone();
+    for (let i = 0; i < value.size(); i++) copy.set(i, deepCloneDirect(value.get(i)));
+    return copy as unknown as T;
+  }
+  return value;
+}
+
+/**
+ * A second occurrence of the same source page. The copied page dict is deep-cloned (direct
+ * objects only) so each occurrence has its own dict, contents array and direct resources
+ * (overlays differ per occurrence), while content streams and indirect resources stay
+ * shared. /Rotate and /CropBox come from the pristine snapshot, not from the first
+ * occurrence, which may already be rotated or cropped. Widgets are dropped from the
+ * duplicate: a field widget can only live on one page. Other annotations are cloned with
+ * their direct objects (actions, borders, colors).
+ */
+function duplicatePage(
+  out: PDFDocument,
+  original: PDFPage,
+  pristine: PristineBoxes | undefined,
+  warnings: Warnings,
+): PDFPage {
   const { context } = out;
-  const leaf = original.node.clone();
+  const leaf = deepCloneDirect(original.node);
   const contents = context.lookup(leaf.get(PDFName.of('Contents')));
   if (contents instanceof PDFArray) {
+    // Possibly an indirect array: overlays wrap it, so each occurrence needs its own.
     leaf.set(PDFName.of('Contents'), contents.clone());
+  }
+  if (pristine) {
+    for (const [key, value] of [
+      [N.Rotate, pristine.rotate],
+      [N.CropBox, pristine.cropBox],
+    ] as const) {
+      if (value === undefined) leaf.delete(key);
+      else leaf.set(key, deepCloneDirect(value));
+    }
   }
   const annots = context.lookupMaybe(leaf.get(N.Annots), PDFArray);
   if (annots) {
@@ -648,7 +706,7 @@ function duplicatePage(out: PDFDocument, original: PDFPage, warnings: Warnings):
         warnings.add('Form fields on duplicated pages were kept on the first occurrence only');
         continue;
       }
-      const copy = annot.clone();
+      const copy = deepCloneDirect(annot);
       copy.delete(N.Popup);
       copy.delete(N.IRT);
       cloned.push(context.register(copy));
@@ -1686,20 +1744,28 @@ async function applySecurity(out: PDFDocument, security: SecurityPolicy): Promis
 
 /**
  * Encrypts every string of every indirect object (except /Encrypt itself) with that
- * object's key. Trailer strings (/ID) are direct objects of the trailer and stay clear, as
- * the spec requires. Must run after `encrypt()` and after the last object was created.
+ * object's key, visiting each container once. Trailer strings (/ID) are direct objects of
+ * the trailer and stay clear, as the spec requires. Must run after `encrypt()` and after
+ * the last object was created.
  */
 export function encryptStrings(doc: PDFDocument): void {
   const { context } = doc;
   const security = context.security;
   if (!security) return;
   const encryptRef = context.trailerInfo.Encrypt;
+  // A direct container reachable from two indirect objects (a bug elsewhere, but cheap to
+  // guard) must not be encrypted twice: the second pass would turn it into garbage.
+  const visited = new Set<PDFDict | PDFArray>();
   for (const [ref, object] of context.enumerateIndirectObjects()) {
     if (encryptRef instanceof PDFRef && ref === encryptRef) continue;
     const encryptFn = security.getEncryptFn(ref.objectNumber, ref.generationNumber);
     const transform = (value: PDFObject): PDFObject | undefined => {
       if (value instanceof PDFString || value instanceof PDFHexString) {
         return PDFHexString.fromBytes(encryptFn(value.asBytes()));
+      }
+      if (value instanceof PDFDict || value instanceof PDFArray) {
+        if (visited.has(value)) return undefined;
+        visited.add(value);
       }
       if (value instanceof PDFDict) {
         for (const [key, child] of value.entries()) {

@@ -20,7 +20,9 @@ import {
 import { PdfiumAdapter, PdfLibAssembler } from '@pdf-editor/engine';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import brokenXrefUrl from '../../../../test/fixtures/broken-xref.pdf?url';
 import encryptedUrl from '../../../../test/fixtures/encrypted-aes-256.pdf?url';
+import ownerOnlyUrl from '../../../../test/fixtures/encrypted-owner-only-aes-256.pdf?url';
 import pageLabelsUrl from '../../../../test/fixtures/page-labels.pdf?url';
 import rotatedUrl from '../../../../test/fixtures/rotated-pages.pdf?url';
 import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
@@ -151,9 +153,72 @@ describe('prepareExport', () => {
       {},
       deps(opened.ws, { saveSource, sourceBytes }),
     );
-    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
     expect(saveSource).toHaveBeenCalledWith(sourceId('locked'), { removeSecurity: true });
     expect(sourceBytes).not.toHaveBeenCalled();
+    // Never silent (ARCHITECTURE.md §5): the summary and the report say so.
+    expect(result.value.sourceNotes).toEqual({ securityRemoved: ['locked.pdf'], repaired: [] });
+    expect(result.value.report.warnings).toContain(
+      'Password protection from 1 file was removed; set a new password in Export options',
+    );
+  });
+
+  it('reports removed protection for owner-password-only sources too', async () => {
+    const opened = await openInto(createWorkspace(), 'owner', ownerOnlyUrl, 'owner-only.pdf');
+    expect(opened.ws.sources[sourceId('owner')]?.flags.encrypted).toBe(true);
+    const result = await prepareExport(opened.doc, {}, deps(opened.ws));
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.sourceNotes.securityRemoved).toEqual(['owner-only.pdf']);
+    expect(result.value.verification.ok).toBe(true);
+  });
+
+  it('encrypts the output when asked and verifies it with the user password', async () => {
+    const opened = await openInto(createWorkspace(), 'locked2', encryptedUrl, 'l.pdf', 'user');
+    const all = {
+      print: true,
+      printHighQuality: true,
+      modify: true,
+      copy: true,
+      annotate: true,
+      fillForms: true,
+      accessibility: true,
+      assemble: true,
+    };
+    const result = await prepareExport(
+      opened.doc,
+      { security: { algorithm: 'aes-256', userPassword: 'new-pw', permissions: all } },
+      deps(opened.ws),
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.verification).toEqual({ ok: true, problems: [] });
+    // The old protection was replaced by the new one, not dropped.
+    expect(result.value.sourceNotes.securityRemoved).toEqual([]);
+    await expect(
+      adapter.open(sourceId('reenc'), result.value.bytes.slice(0)),
+    ).rejects.toMatchObject({ code: 'password-required' });
+  });
+
+  it('exports repaired sources from the engine’s repaired copy and says so', async () => {
+    const opened = await openInto(createWorkspace(), 'broken', brokenXrefUrl, 'broken.pdf');
+    expect(opened.ws.sources[sourceId('broken')]?.flags.repaired).toBe(true);
+    const saveSource = vi.fn<ExportDependencies['engine']['saveSource']>(async (id, options) => ({
+      ok: true,
+      value: await adapter.save(id, options),
+    }));
+    const sourceBytes = vi.fn<ExportDependencies['engine']['sourceBytes']>();
+    const result = await prepareExport(
+      opened.doc,
+      {},
+      deps(opened.ws, { saveSource, sourceBytes }),
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    expect(saveSource).toHaveBeenCalledWith(sourceId('broken'), { removeSecurity: false });
+    expect(sourceBytes).not.toHaveBeenCalled();
+    expect(result.value.verification.ok).toBe(true);
+    expect(result.value.sourceNotes).toEqual({ securityRemoved: [], repaired: ['broken.pdf'] });
+    expect(result.value.report.warnings).toContain(
+      '1 file had to be repaired when opened; the output was built from the repaired copy',
+    );
   });
 
   it('never offers unverified bytes and reports failures as values', async () => {

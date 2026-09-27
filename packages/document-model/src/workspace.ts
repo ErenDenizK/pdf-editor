@@ -15,6 +15,7 @@ import {
   requireSource,
   withWorkspace,
 } from './internal';
+import { pruneOutline } from './outline';
 import { isSourceReferenced } from './selectors';
 import type {
   Destination,
@@ -169,6 +170,9 @@ export function addSource(
     rotation: 0,
     overlays: [],
   }));
+  // The source's modification date is not carried: an export is a new modification, and
+  // the assembler stamps the export time unless the user sets a date explicitly.
+  const { modificationDate: _sourceModified, ...metadata } = input.metadata;
   const document: VirtualDocument = {
     id: documentId,
     title: assertTitle(options.title ?? documentTitleFromName(input.name)),
@@ -179,7 +183,7 @@ export function addSource(
       sourceId,
     ),
     labels: [],
-    metadata: { ...input.metadata, policy: 'inherit-first-source' },
+    metadata: { ...metadata, policy: 'inherit-first-source' },
     formMergePolicy: 'namespace-by-source',
     clean: true,
   };
@@ -291,6 +295,29 @@ export function renameDocument(ws: Workspace, documentId: DocumentId, title: str
   if (trimmed === doc.title) return ws;
   return withWorkspace(ws, {
     documents: putDocuments(ws.documents, [{ ...doc, title: trimmed, clean: false }]),
+  });
+}
+
+/**
+ * Appends outline nodes after a document's existing top-level nodes (e.g. the bookmarks of
+ * a file whose pages were inserted). Page destinations must target pages of the document;
+ * any that do not are kept as `unresolved`, like after a move. Returns the workspace
+ * unchanged when `nodes` is empty.
+ */
+export function appendOutline(
+  ws: Workspace,
+  documentId: DocumentId,
+  nodes: readonly OutlineNode[],
+): Workspace {
+  const doc = requireDocument(ws, documentId);
+  if (!isArrayValue(nodes)) {
+    throw new DocumentModelError('invalid-argument', 'Outline nodes must be an array');
+  }
+  if (nodes.length === 0) return ws;
+  const live = new Set(doc.pages.map((p) => p.id));
+  const outline = [...doc.outline, ...pruneOutline(nodes, live)];
+  return withWorkspace(ws, {
+    documents: putDocuments(ws.documents, [{ ...doc, outline, clean: false }]),
   });
 }
 

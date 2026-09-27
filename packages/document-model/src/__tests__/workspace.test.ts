@@ -12,8 +12,10 @@ import {
   sourceReferences,
 } from '../selectors';
 import type { DocumentId, EngineEdit, PageId, SourceId } from '../types';
+import { wrapOutline } from '../outline';
 import {
   addSource,
+  appendOutline,
   closeDocument,
   createWorkspace,
   markDocumentClean,
@@ -25,7 +27,16 @@ import {
   type SourceOutlineNode,
 } from '../workspace';
 import { movePages } from '../pages';
-import { check, expectCode, open, pageIds, sourceInput, must } from './fixtures';
+import {
+  check,
+  expectCode,
+  open,
+  outlineTitles,
+  pageIds,
+  pageOutline,
+  sourceInput,
+  must,
+} from './fixtures';
 
 describe('ids', () => {
   it('generates deterministic sequential ids per kind', () => {
@@ -139,6 +150,26 @@ describe('addSource', () => {
     );
   });
 
+  it('keeps the source creation date but not its modification date', () => {
+    const input = sourceInput('Dated', 1);
+    const { workspace, documentId } = addSource(
+      createWorkspace(),
+      {
+        ...input,
+        metadata: {
+          ...input.metadata,
+          creationDate: '2001-02-03T04:05:06.000Z',
+          modificationDate: '2002-03-04T05:06:07.000Z',
+        },
+      },
+      createSequentialIdGenerator('t'),
+    );
+    const { metadata } = getDocument(workspace, documentId);
+    expect(metadata.creationDate).toBe('2001-02-03T04:05:06.000Z');
+    // The export stamps its own time; a stale source date would be written back otherwise.
+    expect(metadata).not.toHaveProperty('modificationDate');
+  });
+
   it('uses a caller-provided source id (the engine handle) when given', () => {
     const ids = createSequentialIdGenerator('t');
     const { workspace, sourceId: id } = addSource(createWorkspace(), sourceInput('A', 2), ids, {
@@ -233,6 +264,42 @@ describe('document lifecycle', () => {
     expect(getDocument(workspace, documentId).pages).toEqual([]);
     expect(workspace.activeDocument).toBe(documentId);
     expectCode(() => newEmptyDocument(ws, ids, { index: 9 }), 'invalid-index');
+  });
+});
+
+describe('appendOutline', () => {
+  const { ws, docs } = open(
+    ['A', 2, { outline: pageOutline('A', 1) }],
+    ['B', 2, { outline: pageOutline('B', 2) }],
+  );
+  const [a, b] = docs as [DocumentId, DocumentId];
+
+  it("appends a file's bookmarks after its pages were moved in (drop into a section)", () => {
+    const moved = pageIds(ws, b);
+    const carried = getDocument(ws, b).outline;
+    const inserted = closeDocument(
+      movePages(ws, { pageIds: moved, target: { document: a, index: 1 } }),
+      b,
+    );
+    const first = must(moved[0]);
+    const next = check(
+      appendOutline(inserted, a, [
+        wrapOutline('B.pdf', carried, { destination: { kind: 'page', page: first } }),
+      ]),
+    );
+    expect(outlineTitles(next, a)).toEqual(['A p1', 'B.pdf', '  B p1', '  B p2']);
+    expect(getDocument(next, a).outline[1]?.destination).toEqual({ kind: 'page', page: first });
+    expect(getDocument(next, a).clean).toBe(false);
+  });
+
+  it('keeps nodes whose pages are not in the document as unresolved', () => {
+    const next = check(appendOutline(ws, a, getDocument(ws, b).outline));
+    expect(outlineTitles(next, a)).toEqual(['A p1', 'B p1 (unresolved)', 'B p2 (unresolved)']);
+  });
+
+  it('changes nothing for no nodes and rejects unknown documents', () => {
+    expect(appendOutline(ws, a, [])).toBe(ws);
+    expectCode(() => appendOutline(ws, 'x' as DocumentId, []), 'unknown-document');
   });
 });
 

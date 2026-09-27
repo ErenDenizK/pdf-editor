@@ -433,6 +433,8 @@ export interface VerificationExpectation {
   readonly pageLabels?: readonly string[] | null;
   /** Fully-qualified form field names (any order), when given. */
   readonly formFieldNames?: readonly string[];
+  /** User (open) password of an encrypted output; the verifier opens it with this. */
+  readonly password?: string;
 }
 
 export interface VerificationResult {

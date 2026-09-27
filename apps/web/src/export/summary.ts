@@ -1,11 +1,13 @@
 /**
  * The reconciliation summary shown before download: what the export kept, changed or
- * removed, in plain sentences (VISION.md principle 5, "honest UI"). Engine warnings not
- * covered by a dedicated line are shown as the engine wrote them (English).
+ * removed, in plain sentences (VISION.md principle 5, "honest UI"). Source notes (password
+ * protection removed, damaged files repaired) come first. Engine warnings not covered by a
+ * dedicated line are shown as the engine wrote them (English).
  */
 import type { ReconciliationReport } from '@pdf-editor/engine';
 
 import { m } from '../i18n';
+import type { SourceNotes } from './export-service';
 
 export interface SummaryItem {
   readonly id: string;
@@ -21,10 +23,33 @@ const COVERED = [
   /^Tagged PDF structure was removed/,
   /^XFA form data was removed/,
   /^Fields with equal names were joined/,
+  /^Password protection from \d+ files? was removed/,
+  /^\d+ files? had to be repaired when opened/,
 ];
 
-export function summarizeReport(report: ReconciliationReport): SummaryItem[] {
+const NO_NOTES: SourceNotes = { securityRemoved: [], repaired: [] };
+
+export function summarizeReport(
+  report: ReconciliationReport,
+  notes: SourceNotes = NO_NOTES,
+): SummaryItem[] {
   const items: SummaryItem[] = [];
+  if (notes.securityRemoved.length > 0) {
+    items.push({
+      id: 'security',
+      tone: 'changed',
+      text: m.summary_security_removed({ count: notes.securityRemoved.length }),
+      details: notes.securityRemoved,
+    });
+  }
+  if (notes.repaired.length > 0) {
+    items.push({
+      id: 'repaired',
+      tone: 'changed',
+      text: m.summary_repaired({ count: notes.repaired.length }),
+      details: notes.repaired,
+    });
+  }
   const { outlineNodesKept: kept, outlineNodesDropped: dropped } = report;
   if (kept > 0 || dropped > 0) {
     items.push({

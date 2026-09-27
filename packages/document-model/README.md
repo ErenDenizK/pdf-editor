@@ -53,6 +53,8 @@ browser, in workers, in Node and in a future desktop shell.
   `pageIds`. `target.index` is the gap the user sees before the moved pages are removed.
 - **Outlines.** Bookmarks stay in their document when their page leaves (as `unresolved`
   with `previous`) and are restored if the page returns, including through merge.
+  `appendOutline` adds nodes after a document's own (e.g. the bookmarks of a file whose
+  pages were inserted into it); page targets outside the document arrive `unresolved`.
 - **Return values.** `addSource` and `newEmptyDocument` return `{ workspace, …ids }`;
   operations in `pages.ts` return only the `Workspace` and activate any new document, so
   callers read the new id from `activeDocument` (first part for split).
