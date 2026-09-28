@@ -299,11 +299,15 @@ export function addLoadedSource(
 
 const blobCache = new WeakMap<VirtualDocument, readonly BlobId[]>();
 
-/** Blob ids referenced by a document's image pages and image overlays (memoized). */
+/**
+ * Blob ids referenced by a document: its image pages, its pages' image overlays and its
+ * document-level furniture (an image watermark is drawn on every page from here; memoized).
+ */
 function documentBlobs(doc: VirtualDocument): readonly BlobId[] {
   let found = blobCache.get(doc);
   if (found === undefined) {
     const set = new Set<BlobId>();
+    for (const overlay of doc.furniture ?? []) if (overlay.kind === 'image') set.add(overlay.blob);
     for (const page of doc.pages) {
       if (page.ref.kind === 'image') set.add(page.ref.blob);
       for (const overlay of page.overlays) if (overlay.kind === 'image') set.add(overlay.blob);

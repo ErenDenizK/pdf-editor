@@ -17,9 +17,9 @@
  * | export | `prepareExport` options, or images (`rasterizeWorkspaceDocument`) |
  * | ocr, export markdown/text | not runnable in this build (`recipeStepAvailability`) |
  *
- * An image watermark goes on the pages rather than into the document's furniture: the
- * export collects image bytes from page overlays only (`blobsOfDocument`), and a batch
- * file gains no pages later, so both draw the same.
+ * An image watermark goes on the pages rather than into the document's furniture: a batch
+ * file gains no pages later, so both draw the same, and the page form keeps every overlay
+ * of a page in one place.
  */
 import {
   type BlobId,

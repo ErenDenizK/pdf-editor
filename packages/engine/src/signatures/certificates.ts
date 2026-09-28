@@ -219,7 +219,7 @@ export function validityCheck(leaf: pkijs.Certificate, claimed: Date | undefined
   return {
     id: 'validity',
     outcome: now && atClaim !== false ? 'pass' : 'fail',
-    detail: `Signer certificate valid ${period}; the claimed signing time is ${
+    detail: `Signer certificate period ${period}; the claimed signing time is ${
       atClaim === undefined ? 'absent' : atClaim ? 'inside' : 'outside'
     } it and today is ${now ? 'inside' : 'outside'} it.`,
   };

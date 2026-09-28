@@ -5,8 +5,13 @@
  */
 import {
   type BlobId,
+  createSequentialIdGenerator,
+  createWorkspace,
+  getDocument,
+  type ImageOverlay,
   insertImagePage,
   newEmptyDocument,
+  setDocumentFurniture,
   type SourceId,
 } from '@pdf-editor/document-model';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,7 +20,7 @@ import outlineUrl from '../../../../test/fixtures/outline-named-dests.pdf?url';
 import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
 import { deferred, fixtureFile, gateEngine, pngBlob } from '../../test/store-harness';
 import { getEngineService, RENDER_PRIORITY } from '../engine/engine-service';
-import { resetWorkspace, useWorkspaceStore } from './workspace-store';
+import { blobsOfDocument, resetWorkspace, useWorkspaceStore } from './workspace-store';
 
 const model = () => useWorkspaceStore.getState();
 const fileNames = () => Object.values(model().files).map((f) => f.name);
@@ -149,5 +154,37 @@ describe('workspace store: protection of work in progress', () => {
     expect(committed).toBe(false);
     expect(stored).toBeDefined();
     expect(model().blobs).toEqual({});
+  });
+});
+
+describe('blobs a document needs at export', () => {
+  it('include an image watermark in the document-level furniture', () => {
+    const ids = createSequentialIdGenerator('t');
+    const made = newEmptyDocument(createWorkspace(), ids, { title: 'stamped' });
+    const withPage = insertImagePage(
+      made.workspace,
+      {
+        document: made.documentId,
+        index: 0,
+        blob: 'page-blob' as BlobId,
+        size: { width: 120, height: 80 },
+      },
+      ids,
+    );
+    const watermark: ImageOverlay = {
+      kind: 'image',
+      layer: 'over',
+      blob: 'watermark-blob' as BlobId,
+      anchor: 'center',
+      offset: { x: 0, y: 0 },
+      scale: 0.5,
+      opacity: 0.3,
+      role: 'watermark',
+    };
+    const ws = setDocumentFurniture(withPage, made.documentId, [watermark]);
+    expect([...blobsOfDocument(getDocument(ws, made.documentId))].sort()).toEqual([
+      'page-blob',
+      'watermark-blob',
+    ]);
   });
 });
