@@ -1,0 +1,39 @@
+/*
+ * MOCK ONLY: the translucency proposal of docs/design/audit/translucency.md, injected into
+ * the running app (Playwright page.addStyleTag, or paste into DevTools). CSS-module class
+ * names are hashed per build; these selectors match the build of commit 9b46d12. The real
+ * change is tokens.css plus one shared glass rule that each floating surface composes.
+ */
+:root {
+  --glass: rgb(24 26 31 / 0.5);
+  --glass-filter: blur(24px) saturate(1.8) brightness(0.4);
+  --glass-solid: #16181c;
+  --border-glass: rgb(255 255 255 / 0.1);
+  --glass-text-secondary: #b4b8bf;
+  --glass-danger: #ff8a8a;
+  --glass-text-disabled: #6f737b;
+}
+
+/* Floating surfaces: tool bar, annotation / image / Arrange contextual bars, crop banner,
+   command palette, menus, popovers, text-edit header, note popup, form notice. */
+[class*="_toolbar_jssel_"],
+[class*="_bar_106ew_"],
+[class*="_bar_1jrkk_"],
+[class*="_contextBar_1o8j2_"],
+[class*="_banner_i65ia_"],
+[class*="_popup_ewuyi_"],
+[class*="_popup_ejbcg_"],
+[class*="_popup_1thbq_"],
+[class*="_panel_qu0ng_"],
+[class*="_notePopup_106ew_"],
+[class*="_notice_1c50x_"] {
+  /* Text on glass: two steps only, both AA over a white page (see the contrast table). */
+  --text-secondary: var(--glass-text-secondary);
+  --text-tertiary: var(--glass-text-secondary);
+  --danger: var(--glass-danger);
+  --text-disabled: var(--glass-text-disabled);
+  border-color: var(--border-glass) !important;
+  background: var(--glass) !important;
+  -webkit-backdrop-filter: var(--glass-filter) !important;
+  backdrop-filter: var(--glass-filter) !important;
+}
