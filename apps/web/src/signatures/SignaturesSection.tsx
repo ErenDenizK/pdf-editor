@@ -216,6 +216,13 @@ function SignatureCard({
             {report.laterChanges.map((change) => (
               <li key={`${change.revision}-${change.kind}`}>{changeLine(change)}</li>
             ))}
+            {report.visuallyChangedPages && report.visuallyChangedPages.length > 0 ? (
+              <li data-testid="signature-visual-changes">
+                {m.signature_visual_changes({
+                  pages: report.visuallyChangedPages.map((p) => formatNumber(p + 1)).join(', '),
+                })}
+              </li>
+            ) : null}
           </ul>
         </>
       ) : null}

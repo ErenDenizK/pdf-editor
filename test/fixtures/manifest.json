@@ -4731,6 +4731,440 @@
         "fileIdDeterministic": true
       },
       "derivedFrom": "simple-text.pdf"
+    },
+    {
+      "file": "signed-dup-object.pdf",
+      "bytes": 20910,
+      "sha256": "a71a86ada06ab18890dfd3a440a04c69385f17655a6f93ac241a06f954793427",
+      "pageCount": 3,
+      "tags": ["signatures", "pades", "incremental-update", "attack"],
+      "summary": "signed-approval.pdf plus a third revision that defines page 1's content stream twice: first \"PAY 1,000,000 TO MALLORY\", then a byte-identical copy of the signed stream; its xref points at the first (M5 review finding 1a).",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 3,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 2 OF simple-text"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 3 OF simple-text"]
+          }
+        ],
+        "info": {
+          "Title": "Simple text fixture"
+        },
+        "signatures": [
+          {
+            "field": "Approval",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "changed-after-signing",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "ETSI.CAdES.detached",
+            "revision": 2,
+            "byteRange": [0, 3335, 19721, 552],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3356,
+            "coversWholeFile": false,
+            "digestAlgorithm": "SHA-256",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest", "signingCertificateV2"],
+            "claimedTime": "2024-01-01T00:00:00.000Z",
+            "reason": "Approved (pdf-editor test fixture)",
+            "signer": {
+              "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "3001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "pass",
+              "signature": "pass",
+              "signingCertificate": "pass",
+              "chain": "pass"
+            },
+            "laterChanges": [
+              {
+                "revision": 3,
+                "kind": "content",
+                "pages": [1],
+                "objects": ["6 0 R"]
+              },
+              {
+                "revision": 3,
+                "kind": "other",
+                "pages": [],
+                "objects": ["6 0 R"]
+              }
+            ]
+          }
+        ],
+        "revisions": {
+          "count": 3,
+          "startxrefs": [2500, 19999, 20724],
+          "ends": [2878, 20273, 20910]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true,
+        "attack": {
+          "technique": "duplicate-definition",
+          "object": "6 0 R",
+          "resolvedContent": "BT /Helvetica-7098480789 24 Tf 72 700 Td (PAY 1,000,000 TO MALLORY) Tj ET"
+        }
+      },
+      "derivedFrom": "signed-approval.pdf"
+    },
+    {
+      "file": "signed-freed-content.pdf",
+      "bytes": 20459,
+      "sha256": "74023bb7277b21e34e20990015fda7d53a629e324150d6b550273cf87efdac6f",
+      "pageCount": 3,
+      "tags": ["signatures", "pades", "incremental-update", "attack"],
+      "summary": "signed-approval.pdf plus a third revision that is only an xref section marking page 1's content stream free (M5 review finding 1b).",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 3,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 2 OF simple-text"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 3 OF simple-text"]
+          }
+        ],
+        "info": {
+          "Title": "Simple text fixture"
+        },
+        "signatures": [
+          {
+            "field": "Approval",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "changed-after-signing",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "ETSI.CAdES.detached",
+            "revision": 2,
+            "byteRange": [0, 3335, 19721, 552],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3356,
+            "coversWholeFile": false,
+            "digestAlgorithm": "SHA-256",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest", "signingCertificateV2"],
+            "claimedTime": "2024-01-01T00:00:00.000Z",
+            "reason": "Approved (pdf-editor test fixture)",
+            "signer": {
+              "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "3001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "pass",
+              "signature": "pass",
+              "signingCertificate": "pass",
+              "chain": "pass"
+            },
+            "laterChanges": [
+              {
+                "revision": 3,
+                "kind": "content",
+                "pages": [1],
+                "objects": ["6 0 R"]
+              }
+            ]
+          }
+        ],
+        "revisions": {
+          "count": 3,
+          "startxrefs": [2500, 19999, 20273],
+          "ends": [2878, 20273, 20459]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true,
+        "attack": {
+          "technique": "free-entry",
+          "object": "6 0 R",
+          "resolvedContent": null
+        }
+      },
+      "derivedFrom": "signed-approval.pdf"
+    },
+    {
+      "file": "signed-no-eof.pdf",
+      "bytes": 20576,
+      "sha256": "7f2ca26d0b36dcc3c281f13b554de7a929e6d4d5e6eaca81d0132e5cfde2e297",
+      "pageCount": 3,
+      "tags": ["signatures", "pades", "incremental-update", "attack"],
+      "summary": "signed-approval.pdf plus a third revision that replaces page 1's content stream (\"PAY 1,000,000 TO MALLORY\") and ends at `startxref N` without %%EOF (M5 review finding 1c).",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 3,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 2 OF simple-text"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 3 OF simple-text"]
+          }
+        ],
+        "info": {
+          "Title": "Simple text fixture"
+        },
+        "signatures": [
+          {
+            "field": "Approval",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "changed-after-signing",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "ETSI.CAdES.detached",
+            "revision": 2,
+            "byteRange": [0, 3335, 19721, 552],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3356,
+            "coversWholeFile": false,
+            "digestAlgorithm": "SHA-256",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest", "signingCertificateV2"],
+            "claimedTime": "2024-01-01T00:00:00.000Z",
+            "reason": "Approved (pdf-editor test fixture)",
+            "signer": {
+              "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "3001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "pass",
+              "signature": "pass",
+              "signingCertificate": "pass",
+              "chain": "pass"
+            },
+            "laterChanges": [
+              {
+                "revision": 3,
+                "kind": "content",
+                "pages": [1],
+                "objects": ["6 0 R"]
+              }
+            ]
+          }
+        ],
+        "revisions": {
+          "count": 3,
+          "startxrefs": [2500, 19999, 20396],
+          "ends": [2878, 20273, 20576]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true,
+        "attack": {
+          "technique": "no-eof",
+          "object": "6 0 R",
+          "resolvedContent": "BT /Helvetica-7098480789 24 Tf 72 700 Td (PAY 1,000,000 TO MALLORY) Tj ET"
+        }
+      },
+      "derivedFrom": "signed-approval.pdf"
+    },
+    {
+      "file": "signed-doctimestamp.pdf",
+      "bytes": 37497,
+      "sha256": "419da73e3d32fd846ceffaef7d28b1467988fc4eaeeb475a4909545acc6dcaff",
+      "pageCount": 3,
+      "tags": ["signatures", "pades", "incremental-update", "timestamp"],
+      "summary": "signed-approval.pdf plus a third revision with a document timestamp: field \"Timestamp\", /Type /DocTimeStamp, /SubFilter /ETSI.RFC3161, an RFC 3161 token (SHA-256 imprint of the byte ranges, genTime 2024-01-03) by the test TSA (timeStamping EKU) covering the whole file.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 3,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 1 OF simple-text"]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 2 OF simple-text"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 3 OF simple-text"]
+          }
+        ],
+        "info": {
+          "Title": "Simple text fixture"
+        },
+        "signatures": [
+          {
+            "field": "Approval",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "intact-changed-later",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "ETSI.CAdES.detached",
+            "revision": 2,
+            "byteRange": [0, 3335, 19721, 552],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3356,
+            "coversWholeFile": false,
+            "digestAlgorithm": "SHA-256",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest", "signingCertificateV2"],
+            "claimedTime": "2024-01-01T00:00:00.000Z",
+            "reason": "Approved (pdf-editor test fixture)",
+            "signer": {
+              "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "3001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "pass",
+              "signature": "pass",
+              "signingCertificate": "pass",
+              "chain": "pass"
+            },
+            "laterChanges": [
+              {
+                "revision": 3,
+                "kind": "signature",
+                "pages": [1],
+                "objects": ["13 0 R", "14 0 R", "15 0 R", "5 0 R"]
+              }
+            ]
+          },
+          {
+            "field": "Timestamp",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "intact",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "ETSI.RFC3161",
+            "revision": 3,
+            "byteRange": [0, 20731, 37117, 380],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3464,
+            "coversWholeFile": true,
+            "digestAlgorithm": "SHA-256",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest", "signingCertificateV2"],
+            "signer": {
+              "subject": "CN=pdf-editor Test TSA,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "4001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test TSA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "pass",
+              "signature": "pass",
+              "signingCertificate": "pass",
+              "chain": "pass"
+            },
+            "timestamp": {
+              "time": "2024-01-03T00:00:00.000Z",
+              "tsa": "CN=pdf-editor Test TSA,O=pdf-editor test PKI (not trusted)"
+            }
+          }
+        ],
+        "revisions": {
+          "count": 3,
+          "startxrefs": [2500, 19999, 37246],
+          "ends": [2878, 20273, 37497]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      },
+      "derivedFrom": "signed-approval.pdf"
     }
   ],
   "pki": {
@@ -4772,6 +5206,15 @@
         "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
         "serial": "3002",
         "keyType": "EC P-256"
+      },
+      {
+        "file": "pki/tsa.cert.pem",
+        "sha256": "cc24fedd02365600fc7f478fc04265851a06d2c1d81262710847b2c603336366",
+        "kind": "certificate",
+        "subject": "CN=pdf-editor Test TSA,O=pdf-editor test PKI (not trusted)",
+        "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+        "serial": "4001",
+        "keyType": "RSA-2048"
       },
       {
         "file": "pki/chain.pem",

@@ -3,15 +3,29 @@
  * (from 0, the gap exactly the /Contents hex string read from the raw bytes, ending at a
  * revision end), the digest of the ranges against the CMS, the CMS signature over the signed
  * attributes with the signer's key (WebCrypto), the signing-certificate(-v2) attribute, the
- * chain as embedded, validity and key usage as facts, and what later revisions changed.
- * Nothing is fetched and nothing is trusted: the best status is "Intact", never "valid".
+ * chain as embedded (CMS and /DSS), validity and key usage as facts, what later revisions
+ * changed (read through their cross-reference chain, later.ts) and, when a renderer is
+ * configured, which pages look different from the signed version (visual.ts). Nothing is
+ * fetched and nothing is trusted: the best status is "Intact", never "valid".
+ *
+ * Document timestamps (`/SubFilter /ETSI.RFC3161`) are validated the same way with the RFC
+ * 3161 digest step (timestamp.ts); other unknown SubFilters are Cannot check before any
+ * integrity decision, so a format we do not understand is never called Broken.
  *
  * Signature dictionaries are found three ways, so damage cannot hide one: the AcroForm field
  * tree (and /Perms), every indirect object pdf-lib reads that is a signature dictionary, and a
  * raw scan for /ByteRange (for what pdf-lib cannot parse). No signatures → an empty list.
  */
 import type { PDFDocument } from '@cantoo/pdf-lib';
-import { PDFDict, PDFName, type PDFObject, type PDFRef } from '@cantoo/pdf-lib';
+import {
+  decodePDFRawStream,
+  PDFArray,
+  PDFDict,
+  PDFName,
+  type PDFObject,
+  PDFRawStream,
+  type PDFRef,
+} from '@cantoo/pdf-lib';
 import * as asn1js from 'asn1js';
 import * as pkijs from 'pkijs';
 
@@ -32,8 +46,6 @@ import {
   certificateFacts,
   certificatesOf,
   keyUsageCheck,
-  nameDer,
-  rsaBits,
   validityCheck,
 } from './certificates';
 import {
@@ -44,16 +56,17 @@ import {
   type SignatureDictionary,
   type SignatureFieldInfo,
 } from './fields';
-import {
-  ATTRIBUTE_NAMES,
-  BROKEN_DIGESTS,
-  CURVES,
-  DIGESTS,
-  type HashName,
-  OID,
-  SIGNATURE_ALGORITHMS,
-} from './oids';
+import { ATTRIBUTE_NAMES, BROKEN_DIGESTS, DIGESTS, OID } from './oids';
 import { allowedKinds, classifyLaterChanges } from './revisions';
+import {
+  embeddedTimestamp,
+  OID_TST_INFO,
+  timeStampingUsage,
+  timestampFacts,
+  tstDigestCheck,
+} from './timestamp';
+import { digest, findLeaf, octets, signingCertificateCheck, verifySignature } from './verify';
+import { VISUAL_DPI, VisualComparer } from './visual';
 import { type RevisionEnd, revisionEndingAt, revisionEnds } from './xref';
 
 /**
@@ -62,11 +75,14 @@ import { type RevisionEnd, revisionEndingAt, revisionEnds } from './xref';
  */
 const SIGNATURE_TOKENS = ['/ByteRange', '/Sig', '/DocTimeStamp', '/ObjStm'];
 
+/** SubFilters of approval and certification signatures (a detached or SHA-1 CMS). */
 const SUPPORTED_SUBFILTERS = new Set([
   'ETSI.CAdES.detached',
   'adbe.pkcs7.detached',
   'adbe.pkcs7.sha1',
 ]);
+/** A document timestamp (ISO 32000-2 §12.8.5): an RFC 3161 token over the byte ranges. */
+const DOC_TIMESTAMP = 'ETSI.RFC3161';
 
 function throwIfAborted(options: EngineCallOptions | undefined): void {
   if (options?.signal?.aborted) {
@@ -91,446 +107,250 @@ interface Context {
   readonly doc: PDFDocument | undefined;
   readonly password: string | undefined;
   readonly before: Map<number, Promise<PDFDocument>>;
-}
-
-function octets(value: asn1js.OctetString): Uint8Array {
-  if (!value.idBlock.isConstructed) return value.valueBlock.valueHexView;
-  const parts = value.valueBlock.value.map((p) => octets(p as asn1js.OctetString));
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let at = 0;
-  for (const p of parts) {
-    out.set(p, at);
-    at += p.length;
-  }
-  return out;
-}
-
-async function digest(hash: HashName, data: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest(hash, data.slice()));
-}
-
-/** DER ECDSA-Sig-Value → IEEE P1363 r||s, which WebCrypto verifies. */
-function ecdsaRaw(signature: Uint8Array, size: number): Uint8Array {
-  const parsed = asn1js.fromBER(signature.slice().buffer);
-  if (parsed.offset === -1 || !(parsed.result instanceof asn1js.Sequence)) {
-    throw new Error('ECDSA signature is not a DER sequence');
-  }
-  const out = new Uint8Array(2 * size);
-  parsed.result.valueBlock.value.slice(0, 2).forEach((part, i) => {
-    let v = (part as asn1js.Integer).valueBlock.valueHexView;
-    while (v.length > size && v[0] === 0) v = v.subarray(1);
-    if (v.length > size) throw new Error('ECDSA integer too long');
-    out.set(v, i * size + size - v.length);
-  });
-  return out;
-}
-
-const CURVE_BYTES = { 'P-256': 32, 'P-384': 48, 'P-521': 66 } as const;
-
-interface SignatureOutcome {
-  readonly check: SignatureCheck;
-  readonly algorithm?: string;
-}
-
-async function verifySignature(
-  signer: pkijs.SignerInfo,
-  leaf: pkijs.Certificate,
-  data: Uint8Array,
-  digestHash: HashName,
-  weakReasons: string[],
-): Promise<SignatureOutcome> {
-  const sigOid = signer.signatureAlgorithm.algorithmId;
-  const known = SIGNATURE_ALGORITHMS[sigOid];
-  if (!known) {
-    return {
-      check: {
-        id: 'signature',
-        outcome: 'unsupported',
-        detail: `Signature algorithm ${sigOid} is not supported.`,
-      },
-    };
-  }
-  if (known.hash === 'MD5') {
-    return {
-      check: {
-        id: 'signature',
-        outcome: 'unsupported',
-        detail: 'MD5 signatures cannot be checked.',
-      },
-    };
-  }
-  const spki = leaf.subjectPublicKeyInfo;
-  const keyOid = spki.algorithm.algorithmId;
-  let signature = signer.signature.valueBlock.valueHexView;
-  let importParams: RsaHashedImportParams | EcKeyImportParams;
-  let verifyParams: AlgorithmIdentifier | RsaPssParams | EcdsaParams;
-  let algorithm: string;
-  let hash: HashName = known.hash ?? digestHash;
-  try {
-    if (known.family === 'RSA-PSS') {
-      const pss = new pkijs.RSASSAPSSParams({ schema: signer.signatureAlgorithm.algorithmParams });
-      const pssHash = DIGESTS[pss.hashAlgorithm.algorithmId];
-      if (!pssHash) {
-        return {
-          check: { id: 'signature', outcome: 'unsupported', detail: 'RSA-PSS hash not supported.' },
-        };
-      }
-      hash = pssHash;
-      importParams = { name: 'RSA-PSS', hash };
-      verifyParams = { name: 'RSA-PSS', saltLength: pss.saltLength };
-      algorithm = 'RSA-PSS';
-    } else if (known.family === 'RSA') {
-      if (keyOid !== OID.rsaEncryption) {
-        return {
-          check: {
-            id: 'signature',
-            outcome: 'unsupported',
-            detail: `An RSA signature with a ${keyOid} key.`,
-          },
-        };
-      }
-      importParams = { name: 'RSASSA-PKCS1-v1_5', hash };
-      verifyParams = { name: 'RSASSA-PKCS1-v1_5' };
-      algorithm = 'RSASSA-PKCS1-v1_5';
-    } else {
-      if (keyOid !== OID.ecPublicKey) {
-        return {
-          check: {
-            id: 'signature',
-            outcome: 'unsupported',
-            detail: `An ECDSA signature with a ${keyOid} key.`,
-          },
-        };
-      }
-      const params = spki.algorithm.algorithmParams as unknown;
-      const curveOid =
-        params instanceof asn1js.ObjectIdentifier ? params.valueBlock.toString() : '';
-      const curve = CURVES[curveOid];
-      if (!curve) {
-        return {
-          check: {
-            id: 'signature',
-            outcome: 'unsupported',
-            detail: `Curve ${curveOid || 'unknown'} is not supported.`,
-          },
-        };
-      }
-      importParams = { name: 'ECDSA', namedCurve: curve };
-      verifyParams = { name: 'ECDSA', hash };
-      algorithm = `ECDSA ${curve}`;
-      signature = ecdsaRaw(signature, CURVE_BYTES[curve]);
-    }
-  } catch (error) {
-    return {
-      check: {
-        id: 'signature',
-        outcome: 'fail',
-        detail: `The signature value cannot be read (${error instanceof Error ? error.message : String(error)}).`,
-      },
-    };
-  }
-  if (hash === 'SHA-1' && !weakReasons.some((r) => r.includes('signature'))) {
-    weakReasons.push('The signature uses SHA-1, which is weak.');
-  }
-  if (algorithm.startsWith('RSA')) {
-    const bits = rsaBits(leaf);
-    if (bits !== undefined && bits < 2048) weakReasons.push(`The RSA key has only ${bits} bits.`);
-  }
-  let key: CryptoKey;
-  try {
-    key = await crypto.subtle.importKey('spki', spki.toSchema().toBER(), importParams, false, [
-      'verify',
-    ]);
-  } catch {
-    return {
-      check: {
-        id: 'signature',
-        outcome: 'unsupported',
-        detail: `The signer's ${algorithm} key cannot be used here.`,
-      },
-      algorithm,
-    };
-  }
-  const ok = await crypto.subtle
-    .verify(verifyParams, key, signature.slice(), data.slice())
-    .catch(() => false);
-  return {
-    check: {
-      id: 'signature',
-      outcome: ok ? 'pass' : 'fail',
-      detail: `${algorithm} with ${hash} ${ok ? 'verifies' : 'does not verify'} with the signer certificate's key.`,
-    },
-    algorithm,
-  };
-}
-
-function findLeaf(
-  signer: pkijs.SignerInfo,
-  certs: readonly pkijs.Certificate[],
-): pkijs.Certificate | undefined {
-  // pkijs types `sid` as any: IssuerAndSerialNumber or a [0] subjectKeyIdentifier.
-  const sid = signer.sid as unknown;
-  if (sid instanceof pkijs.IssuerAndSerialNumber) {
-    const issuer = nameDer(sid.issuer);
-    return certs.find(
-      (c) => equalBytes(nameDer(c.issuer), issuer) && c.serialNumber.isEqual(sid.serialNumber),
-    );
-  }
-  const view = (sid as { valueBlock?: { valueHexView?: Uint8Array } } | undefined)?.valueBlock
-    ?.valueHexView;
-  if (!view) return undefined;
-  return certs.find((c) => {
-    const ski = c.extensions?.find((e) => e.extnID === '2.5.29.14')?.parsedValue as unknown;
-    return ski instanceof asn1js.OctetString && equalBytes(ski.valueBlock.valueHexView, view);
-  });
-}
-
-async function signingCertificateCheck(
-  signer: pkijs.SignerInfo,
-  leaf: pkijs.Certificate,
-  subFilter: string,
-): Promise<SignatureCheck> {
-  const attrs = signer.signedAttrs?.attributes ?? [];
-  const v2 = attrs.find((a) => a.type === OID.signingCertificateV2);
-  const v1 = attrs.find((a) => a.type === OID.signingCertificate);
-  const attr = v2 ?? v1;
-  if (!attr) {
-    return subFilter === 'ETSI.CAdES.detached'
-      ? {
-          id: 'signing-certificate',
-          outcome: 'fail',
-          detail: 'The signingCertificateV2 attribute PAdES requires is absent.',
-        }
-      : {
-          id: 'signing-certificate',
-          outcome: 'not-checked',
-          detail: `Not required for ${subFilter || 'this SubFilter'}.`,
-        };
-  }
-  try {
-    // SigningCertificate(V2) ::= SEQUENCE { certs SEQUENCE OF ESSCertID(v2), ... }
-    const certs = (attr.values[0] as asn1js.Sequence).valueBlock.value[0] as asn1js.Sequence;
-    const first = certs.valueBlock.value[0] as asn1js.Sequence;
-    let hashName: HashName | undefined = v2 ? 'SHA-256' : 'SHA-1';
-    let idx = 0;
-    const head = first.valueBlock.value[0];
-    if (v2 && head instanceof asn1js.Sequence) {
-      hashName = DIGESTS[new pkijs.AlgorithmIdentifier({ schema: head }).algorithmId];
-      idx = 1;
-    }
-    if (!hashName) {
-      return {
-        id: 'signing-certificate',
-        outcome: 'unsupported',
-        detail: 'The certificate hash algorithm is not supported.',
-      };
-    }
-    const certHash = (first.valueBlock.value[idx] as asn1js.OctetString).valueBlock.valueHexView;
-    const actual = await digest(hashName, new Uint8Array(leaf.toSchema().toBER()));
-    const ok = equalBytes(certHash, actual);
-    return {
-      id: 'signing-certificate',
-      outcome: ok ? 'pass' : 'fail',
-      detail: `${v2 ? 'signingCertificateV2' : 'signingCertificate'} (${hashName}) ${ok ? 'matches' : 'does not match'} the signer certificate.`,
-    };
-  } catch {
-    return {
-      id: 'signing-certificate',
-      outcome: 'fail',
-      detail: 'The signing-certificate attribute cannot be read.',
-    };
-  }
+  /** Certificates of the document security store (`/DSS /Certs`), for chain building. */
+  readonly dss: readonly pkijs.Certificate[];
+  readonly visual: VisualComparer | undefined;
+  readonly dpi: number;
 }
 
 function isoOrUndefined(m: string | undefined): string | undefined {
   return parsePdfDate(m)?.toISOString();
 }
 
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** The certificates in `/DSS /Certs` (streams of DER); unreadable entries are skipped. */
+function dssCertificates(doc: PDFDocument | undefined): pkijs.Certificate[] {
+  const out: pkijs.Certificate[] = [];
+  try {
+    const dss = doc?.catalog.lookup(PDFName.of('DSS'));
+    const certs = dss instanceof PDFDict ? dss.lookup(PDFName.of('Certs')) : undefined;
+    if (!(certs instanceof PDFArray)) return out;
+    for (let i = 0; i < certs.size(); i++) {
+      try {
+        const stream = certs.lookup(i);
+        if (!(stream instanceof PDFRawStream)) continue;
+        out.push(pkijs.Certificate.fromBER(decodePDFRawStream(stream).decode().slice().buffer));
+      } catch {
+        // Not a certificate: nothing to build with.
+      }
+    }
+  } catch {
+    // A damaged /DSS: the CMS certificates alone.
+  }
+  return out;
+}
+
+const pageList = (pages: readonly number[]) =>
+  `page${pages.length === 1 ? '' : 's'} ${pages.map((p) => p + 1).join(', ')}`;
+
 async function laterChanges(
   ctx: Context,
   end: number,
+  signedRevision: number,
   docMdp: 1 | 2 | 3 | undefined,
-): Promise<{ check: SignatureCheck; changes: RevisionChange[]; allowed: boolean }> {
+): Promise<{
+  check: SignatureCheck;
+  changes: RevisionChange[];
+  allowed: boolean;
+  visuallyChangedPages?: number[];
+}> {
   const fail = (detail: string) => ({
     check: { id: 'later-changes' as const, outcome: 'fail' as const, detail },
     changes: [] as RevisionChange[],
     allowed: false,
   });
-  if (!ctx.doc) return fail('The later revisions cannot be read, so what they change is unknown.');
+  const cut = ctx.bytes.subarray(0, end);
   let before = ctx.before.get(end);
   if (!before) {
-    before = loadForSignatures(ctx.bytes.subarray(0, end), ctx.password).then((r) => r.doc);
+    before = loadForSignatures(cut, ctx.password).then((r) => r.doc);
     ctx.before.set(end, before);
   }
+  let changes: RevisionChange[];
+  let notes: readonly string[];
+  let lastRevision: number;
   try {
-    const { changes } = await classifyLaterChanges(ctx.bytes, end, ctx.ends, await before, ctx.doc);
-    const allowedSet = allowedKinds(docMdp);
-    const allowed = changes.every((c) => allowedSet.has(c.kind));
-    const listed =
-      changes
-        .map((c) => `revision ${c.revision}: ${c.kind} (${c.objects.join(', ')})`)
-        .join('; ') || 'they change nothing a reader shows';
-    return {
-      check: {
-        id: 'later-changes',
-        outcome: allowed ? 'pass' : 'fail',
-        detail: `Later revisions: ${listed}.${docMdp ? ` DocMDP permissions ${docMdp} decide what is allowed.` : ''}`,
-      },
-      changes,
-      allowed,
-    };
-  } catch (error) {
-    return fail(
-      `The later revisions cannot be read (${error instanceof Error ? error.message : String(error)}).`,
+    // A second copy of the signed revision becomes the file as a reader resolves it.
+    const afterCopy = (await loadForSignatures(cut, ctx.password)).doc;
+    const later = await classifyLaterChanges(
+      ctx.bytes,
+      ctx.text,
+      end,
+      signedRevision,
+      await before,
+      afterCopy,
     );
+    ({ changes, notes, lastRevision } = later);
+  } catch (error) {
+    return fail(`The later revisions cannot be read (${errorText(error)}).`);
   }
+  // Defence in depth: a page that looks different must be explained by a listed change.
+  let visuallyChangedPages: number[] | undefined;
+  let visualNote = '';
+  if (ctx.visual) {
+    try {
+      visuallyChangedPages = await ctx.visual.changedPages(end);
+      const unexplained = visuallyChangedPages.filter(
+        (p) => !changes.some((c) => c.pages.includes(p)),
+      );
+      visualNote = ` Compared with the signed version at ${ctx.dpi} dpi, ${
+        visuallyChangedPages.length === 0
+          ? 'no page looks different'
+          : `${pageList(visuallyChangedPages)} look${visuallyChangedPages.length === 1 ? 's' : ''} different`
+      }.`;
+      if (unexplained.length > 0) {
+        visualNote += ` No listed change explains ${pageList(unexplained)}, so ${unexplained.length === 1 ? 'it counts' : 'they count'} as changed content.`;
+        const existing = changes.find((c) => c.revision === lastRevision && c.kind === 'content');
+        const merged: RevisionChange = {
+          revision: lastRevision,
+          kind: 'content',
+          pages: [...new Set([...(existing?.pages ?? []), ...unexplained])].sort((a, b) => a - b),
+          objects: existing?.objects ?? [],
+        };
+        changes = [...changes.filter((c) => c !== existing), merged].sort(
+          (a, b) => a.revision - b.revision || a.kind.localeCompare(b.kind),
+        );
+      }
+    } catch (error) {
+      if (error instanceof EngineError && error.code === 'aborted') throw error;
+      visualNote = ` The signed version could not be compared visually (${errorText(error)}).`;
+    }
+  }
+  const allowedSet = allowedKinds(docMdp);
+  const allowed = changes.every((c) => allowedSet.has(c.kind));
+  const listed =
+    changes
+      .map(
+        (c) =>
+          `revision ${c.revision}: ${c.kind}${c.objects.length > 0 ? ` (${c.objects.join(', ')})` : ''}${c.pages.length > 0 ? ` on ${pageList(c.pages)}` : ''}`,
+      )
+      .join('; ') || 'they change nothing a reader shows';
+  const why = notes.length > 0 ? ` ${notes.join(' ')}` : '';
+  return {
+    check: {
+      id: 'later-changes',
+      outcome: allowed ? 'pass' : 'fail',
+      detail: `Later revisions: ${listed}.${why}${docMdp ? ` DocMDP permissions ${docMdp} decide what is allowed.` : ''}${visualNote}`,
+    },
+    changes,
+    allowed,
+    ...(visuallyChangedPages ? { visuallyChangedPages } : {}),
+  };
 }
 
-async function validateOne(ctx: Context, candidate: Candidate): Promise<SignatureReport> {
-  const { bytes } = ctx;
-  const sig = candidate.sig;
+/**
+ * How the CMS digests the document: `detached` (messageDigest of the byte ranges), `sha1`
+ * (adbe.pkcs7.sha1: the SHA-1 of the ranges encapsulated as content) or `tst` (an RFC 3161
+ * TSTInfo whose imprint is the digest of the ranges). A known SubFilter decides; for another
+ * one the CMS shape does, and `undefined` means a shape this validator does not know.
+ */
+type DigestMode = 'detached' | 'sha1' | 'tst';
+
+function digestMode(subFilter: string, signedData: pkijs.SignedData): DigestMode | undefined {
+  if (subFilter === DOC_TIMESTAMP) return 'tst';
+  if (subFilter === 'adbe.pkcs7.sha1') return 'sha1';
+  if (SUPPORTED_SUBFILTERS.has(subFilter)) return 'detached';
+  const { eContentType, eContent } = signedData.encapContentInfo;
+  const content = eContent ? octets(eContent) : new Uint8Array();
+  if (content.length === 0) return 'detached';
+  if (eContentType === OID_TST_INFO) return 'tst';
+  if (eContentType === OID.data && content.length === 20) return 'sha1';
+  return undefined;
+}
+
+/** What checking one SignerInfo found (a PDF signature has exactly one; see validateOne). */
+interface SignerOutcome {
+  /** digest, signature, signing-certificate, then chain, validity, key-usage, timestamp. */
+  readonly checks: SignatureCheck[];
+  readonly integrity: 'ok' | 'broken' | 'unsupported';
+  readonly signer?: SignerFacts;
+  readonly chain: SignerFacts[];
+  readonly digestAlgorithm?: string;
+  readonly signatureAlgorithm?: string;
+  readonly signedAttributes: string[];
+  readonly weakReasons: string[];
+  readonly timestamp?: { readonly time: string; readonly tsa: string };
+}
+
+/**
+ * Steps 2–5 of spec §3.1 for one SignerInfo: digest (detached, SHA-1 encapsulated, or the
+ * RFC 3161 imprint for a document timestamp), the signature over the signed attributes, the
+ * signing-certificate attribute, and the certificate facts.
+ */
+async function checkSigner(
+  ctx: Context,
+  sig: SignatureDictionary,
+  mode: DigestMode,
+  signedData: pkijs.SignedData,
+  signer: pkijs.SignerInfo,
+  ranges: Uint8Array,
+): Promise<SignerOutcome> {
   const checks: SignatureCheck[] = [];
   const weakReasons: string[] = [];
-  const claimedTime = isoOrUndefined(sig.m);
-  let signerFacts: SignerFacts | undefined;
-  let chain: SignerFacts[] = [];
-  let digestAlgorithm: string | undefined = undefined;
-  let signatureAlgorithm: string | undefined;
-  let signedAttributes: string[] = [];
-  let changes: RevisionChange[] = [];
-  let revision: number | undefined;
-  let coversWholeFile = false;
-
-  const report = (status: SignatureStatus): SignatureReport => ({
-    fieldName: candidate.fieldName,
-    ...(candidate.pageIndex === undefined ? {} : { pageIndex: candidate.pageIndex }),
-    ...(candidate.rect === undefined ? {} : { rect: candidate.rect }),
-    ...(sig.filter === undefined ? {} : { filter: sig.filter }),
-    subFilter: sig.subFilter,
-    byteRange: sig.byteRange,
-    ...(revision === undefined ? {} : { revision }),
-    revisionCount: ctx.ends.length,
-    coversWholeFile,
-    status,
-    honesty: SIGNATURE_HONESTY_LINE,
-    checks,
-    laterChanges: changes,
-    ...(signerFacts ? { signer: signerFacts } : {}),
-    chain,
-    ...(claimedTime === undefined ? {} : { claimedTime }),
-    ...(sig.reason === undefined ? {} : { reason: sig.reason }),
-    ...(sig.location === undefined ? {} : { location: sig.location }),
-    ...(sig.contactInfo === undefined ? {} : { contactInfo: sig.contactInfo }),
-    ...(sig.name === undefined ? {} : { signerName: sig.name }),
-    ...(digestAlgorithm === undefined ? {} : { digestAlgorithm }),
-    ...(signatureAlgorithm === undefined ? {} : { signatureAlgorithm }),
-    signedAttributes,
-    weak: weakReasons.length > 0,
-    weakReasons,
-    ...(sig.docMdp === undefined ? {} : { docMdpPermissions: sig.docMdp }),
-  });
-
-  // 1. Byte range: [0 b c d], the gap exactly the hex string, inside the file, at a revision end.
-  const range = sig.byteRange;
-  const [a = -1, b = -1, c = -1, d = -1] = range;
-  const wellFormed =
-    range.length === 4 &&
-    range.every((n) => Number.isInteger(n)) &&
-    a === 0 &&
-    b > 0 &&
-    c > b + 1 &&
-    d >= 0 &&
-    c + d <= bytes.length;
-  const gap = wellFormed ? ctx.text.slice(b, c) : '';
-  const hexGap = /^<[0-9A-Fa-f]*>$/.test(gap);
-  const end = c + d;
-  // Only end-of-line or other whitespace after the range (e.g. the EOL after %%EOF): whole file.
-  coversWholeFile = wellFormed && /^[\t\n\f\r \0]*$/.test(ctx.text.slice(end));
-  const atRevision = wellFormed ? revisionEndingAt(ctx.ends, end) : undefined;
-  if (atRevision) revision = atRevision.revision;
-  else if (coversWholeFile) revision = ctx.ends.length || undefined;
-  const padded = hexGap ? fromHex(gap.slice(1, -1)) : new Uint8Array();
-  const gapIsThisContents = sig.contents === undefined || equalBytes(sig.contents, padded);
-  if (!wellFormed || !hexGap || !gapIsThisContents || (!coversWholeFile && !atRevision)) {
-    checks.push({
-      id: 'byte-range',
-      outcome: 'fail',
-      detail: !wellFormed
-        ? `The byte range [${range.join(' ')}] is malformed or outside the file.`
-        : !hexGap
-          ? 'The gap in the byte range is not exactly the /Contents hex string.'
-          : !gapIsThisContents
-            ? 'The gap in the byte range is not this signature’s /Contents.'
-            : `The byte range ends at ${end}, which is not the end of a revision.`,
-    });
-    return report('broken');
-  }
-  checks.push({
-    id: 'byte-range',
-    outcome: 'pass',
-    detail: coversWholeFile
-      ? 'Covers the whole file except the signature value.'
-      : `Covers revision ${revision ?? '?'} of ${ctx.ends.length} (bytes 0–${end}) except the signature value.`,
-  });
-
-  // 2. The CMS.
-  const subFilterSupported = SUPPORTED_SUBFILTERS.has(sig.subFilter);
-  let signedData: pkijs.SignedData;
-  try {
-    const der = padded.subarray(0, derLength(padded) ?? padded.length);
-    const asn = asn1js.fromBER(der.slice().buffer);
-    if (asn.offset === -1) throw new Error(asn.result.error);
-    const info = new pkijs.ContentInfo({ schema: asn.result });
-    if (info.contentType !== OID.signedData) throw new Error(`content type ${info.contentType}`);
-    signedData = new pkijs.SignedData({ schema: info.content });
-  } catch (error) {
-    checks.push({
-      id: 'digest',
-      outcome: 'unsupported',
-      detail: subFilterSupported
-        ? `The CMS cannot be read (${error instanceof Error ? error.message : String(error)}).`
-        : `SubFilter ${sig.subFilter || '(none)'} is not supported.`,
-    });
-    return report('cannot-check');
-  }
-  const certs = certificatesOf(signedData);
-  const signer = signedData.signerInfos[0];
-  if (!signer) {
-    checks.push({ id: 'digest', outcome: 'unsupported', detail: 'The CMS names no signer.' });
-    return report('cannot-check');
-  }
-  signedAttributes = (signer.signedAttrs?.attributes ?? []).map(
+  const isTimestamp = mode === 'tst';
+  const cmsCerts = certificatesOf(signedData);
+  const der = (c: pkijs.Certificate) => new Uint8Array(c.toSchema().toBER());
+  const cmsDer = cmsCerts.map(der);
+  const pool = [...cmsCerts, ...ctx.dss.filter((d) => !cmsDer.some((c) => equalBytes(c, der(d))))];
+  const signedAttributes = (signer.signedAttrs?.attributes ?? []).map(
     (x) => ATTRIBUTE_NAMES[x.type] ?? x.type,
   );
-  const leaf = findLeaf(signer, certs);
-  // Facts about the signer; appended after the integrity checks, never change the status.
-  let deferredChecks: SignatureCheck[] = [];
-  if (leaf) {
-    signerFacts = await certificateFacts(leaf);
-    const built = await buildChain(leaf, certs);
-    chain = await Promise.all(built.path.map(certificateFacts));
-    const embeddedTst = signer.unsignedAttrs?.attributes.some((x) => x.type === OID.timeStampToken);
-    deferredChecks = [
-      built.check,
-      validityCheck(leaf, parsePdfDate(sig.m)),
-      keyUsageCheck(leaf),
-      {
-        id: 'timestamp',
-        outcome: 'not-checked',
-        detail: embeddedTst
-          ? 'A timestamp token is embedded; it is not evaluated, and the timestamp authority is not trusted.'
-          : 'No timestamp: the signing time is only claimed by the signer.',
-      },
-    ];
-  }
+  const leaf = findLeaf(signer, pool);
+  let signerFacts: SignerFacts | undefined;
+  let chain: SignerFacts[] = [];
+  let signatureAlgorithm: string | undefined;
+  let timestamp: SignerOutcome['timestamp'];
+  const outcome = (integrity: SignerOutcome['integrity'], extra: SignatureCheck[] = []) => {
+    checks.push(...extra);
+    return {
+      checks,
+      integrity,
+      ...(signerFacts ? { signer: signerFacts } : {}),
+      chain,
+      ...(digestHash ? { digestAlgorithm: digestHash } : {}),
+      ...(signatureAlgorithm ? { signatureAlgorithm } : {}),
+      signedAttributes,
+      weakReasons,
+      ...(timestamp ? { timestamp } : {}),
+    };
+  };
 
   const digestOid = signer.digestAlgorithm.algorithmId;
   const digestHash = DIGESTS[digestOid];
-  const broken = BROKEN_DIGESTS[digestOid];
-  const unsupported: string[] = [];
-  if (!subFilterSupported)
-    unsupported.push(`SubFilter ${sig.subFilter || '(none)'} is not supported.`);
+  // The document timestamp's TSTInfo (its genTime is the time the validity facts use).
+  const tst =
+    isTimestamp && digestHash
+      ? await tstDigestCheck(signedData, signer, digestHash, ranges, 'the byte ranges')
+      : undefined;
+
+  // Facts about the signer; appended after the integrity checks, never change the status.
+  let deferred: SignatureCheck[] = [];
+  if (leaf) {
+    signerFacts = await certificateFacts(leaf);
+    const built = await buildChain(leaf, pool, new Set(pool.filter((c) => !cmsCerts.includes(c))));
+    chain = await Promise.all(built.path.map(certificateFacts));
+    const issuers = built.path.slice(1);
+    if (isTimestamp) {
+      const genTime = tst?.tst?.genTime;
+      deferred = [
+        built.check,
+        validityCheck(leaf, genTime, issuers, 'the timestamp time'),
+        timeStampingUsage(leaf),
+      ];
+    } else {
+      const embedded = await embeddedTimestamp(signer, pool);
+      if (embedded.timestamp) timestamp = embedded.timestamp;
+      deferred = [
+        built.check,
+        validityCheck(leaf, parsePdfDate(sig.m), issuers),
+        keyUsageCheck(leaf),
+        embedded.check,
+      ];
+    }
+  }
+
   if (!digestHash) {
+    const broken = BROKEN_DIGESTS[digestOid];
     checks.push({
       id: 'digest',
       outcome: 'unsupported',
@@ -538,14 +358,11 @@ async function validateOne(ctx: Context, candidate: Candidate): Promise<Signatur
         ? `${broken} digests cannot be checked.`
         : `Digest algorithm ${digestOid} is not supported.`,
     });
-    checks.push(...deferredChecks);
-    return report('cannot-check');
+    return outcome('unsupported', deferred);
   }
-  digestAlgorithm = digestHash;
   if (digestHash === 'SHA-1') weakReasons.push('The document digest is SHA-1, which is weak.');
 
   // 3. Digest of the byte ranges.
-  const ranges = signedBytes(bytes, range);
   const messageDigestAttr = signer.signedAttrs?.attributes.find(
     (x) => x.type === OID.messageDigest,
   );
@@ -556,7 +373,13 @@ async function validateOne(ctx: Context, candidate: Candidate): Promise<Signatur
   let digestOk: boolean | undefined;
   let signedContent: Uint8Array;
   const eContent = signedData.encapContentInfo.eContent;
-  if (sig.subFilter === 'adbe.pkcs7.sha1') {
+  if (tst) {
+    checks.push(tst.check);
+    if (tst.check.outcome === 'unsupported') return outcome('unsupported', deferred);
+    digestOk = tst.check.outcome === 'pass';
+    signedContent = eContent ? octets(eContent) : new Uint8Array();
+    if (!signer.signedAttrs) digestOk = false; // RFC 3161 §2.4.2: signed attributes are required.
+  } else if (mode === 'sha1') {
     const inner = eContent ? octets(eContent) : undefined;
     const sha1 = await digest('SHA-1', ranges);
     const innerOk = inner !== undefined && equalBytes(inner, sha1);
@@ -616,12 +439,12 @@ async function validateOne(ctx: Context, candidate: Candidate): Promise<Signatur
     const data = signer.signedAttrs
       ? new Uint8Array(signer.signedAttrs.encodedValue)
       : signedContent;
-    const outcome = await verifySignature(signer, leaf, data, digestHash, weakReasons);
-    checks.push(outcome.check);
-    if (outcome.algorithm) signatureAlgorithm = outcome.algorithm;
-    sigOk = outcome.check.outcome === 'pass';
-    sigUnsupported = outcome.check.outcome === 'unsupported';
-    if (!signer.signedAttrs && outcome.check.outcome === 'fail') {
+    const verified = await verifySignature(signer, leaf, data, digestHash, weakReasons);
+    checks.push(verified.check);
+    if (verified.algorithm) signatureAlgorithm = verified.algorithm;
+    sigOk = verified.check.outcome === 'pass';
+    sigUnsupported = verified.check.outcome === 'unsupported';
+    if (!signer.signedAttrs && verified.check.outcome === 'fail') {
       // Without signed attributes a changed document shows up here.
       digestOk = false;
     }
@@ -633,24 +456,203 @@ async function validateOne(ctx: Context, candidate: Candidate): Promise<Signatur
       (signer.signedAttrs?.attributes ?? []).some(
         (x) => x.type === OID.signingCertificateV2 || x.type === OID.signingCertificate,
       );
-    checks.push(...deferredChecks);
   }
-  if (digestOk === false || (sigOk === false && !sigUnsupported) || certMismatch)
+  const broken = digestOk === false || (sigOk === false && !sigUnsupported) || certMismatch;
+  if (isTimestamp && tst?.tst && !broken && !sigUnsupported) {
+    timestamp = timestampFacts(tst.tst, leaf);
+    deferred.push({
+      id: 'timestamp',
+      outcome: 'pass',
+      detail: `Document timestamp ${timestamp.time} by ${timestamp.tsa}; the timestamp authority is not trusted.`,
+    });
+  }
+  return outcome(broken ? 'broken' : sigUnsupported ? 'unsupported' : 'ok', deferred);
+}
+
+async function validateOne(ctx: Context, candidate: Candidate): Promise<SignatureReport> {
+  const { bytes } = ctx;
+  const sig = candidate.sig;
+  const checks: SignatureCheck[] = [];
+  let weakReasons: string[] = [];
+  const claimedTime = isoOrUndefined(sig.m);
+  let signerFacts: SignerFacts | undefined;
+  let chain: SignerFacts[] = [];
+  let digestAlgorithm: string | undefined = undefined;
+  let signatureAlgorithm: string | undefined = undefined;
+  let signedAttributes: string[] = [];
+  let changes: RevisionChange[] = [];
+  let revision: number | undefined;
+  let coversWholeFile = false;
+  let timestamp: SignerOutcome['timestamp'] = undefined;
+  let visuallyChangedPages: number[] | undefined = undefined;
+
+  const report = (status: SignatureStatus): SignatureReport => ({
+    fieldName: candidate.fieldName,
+    ...(candidate.pageIndex === undefined ? {} : { pageIndex: candidate.pageIndex }),
+    ...(candidate.rect === undefined ? {} : { rect: candidate.rect }),
+    ...(sig.filter === undefined ? {} : { filter: sig.filter }),
+    subFilter: sig.subFilter,
+    byteRange: sig.byteRange,
+    ...(revision === undefined ? {} : { revision }),
+    revisionCount: ctx.ends.length,
+    coversWholeFile,
+    status,
+    honesty: SIGNATURE_HONESTY_LINE,
+    checks,
+    laterChanges: changes,
+    ...(signerFacts ? { signer: signerFacts } : {}),
+    chain,
+    ...(claimedTime === undefined ? {} : { claimedTime }),
+    ...(sig.reason === undefined ? {} : { reason: sig.reason }),
+    ...(sig.location === undefined ? {} : { location: sig.location }),
+    ...(sig.contactInfo === undefined ? {} : { contactInfo: sig.contactInfo }),
+    ...(sig.name === undefined ? {} : { signerName: sig.name }),
+    ...(digestAlgorithm === undefined ? {} : { digestAlgorithm }),
+    ...(signatureAlgorithm === undefined ? {} : { signatureAlgorithm }),
+    signedAttributes,
+    weak: weakReasons.length > 0,
+    weakReasons,
+    ...(sig.docMdp === undefined ? {} : { docMdpPermissions: sig.docMdp }),
+    ...(timestamp ? { timestamp } : {}),
+    ...(visuallyChangedPages ? { visuallyChangedPages } : {}),
+  });
+
+  // 1. Byte range: [0 b c d], the gap exactly the hex string, inside the file, at a revision end.
+  const range = sig.byteRange;
+  const [a = -1, b = -1, c = -1, d = -1] = range;
+  const wellFormed =
+    range.length === 4 &&
+    range.every((n) => Number.isInteger(n)) &&
+    a === 0 &&
+    b > 0 &&
+    c > b + 1 &&
+    d >= 0 &&
+    c + d <= bytes.length;
+  const gap = wellFormed ? ctx.text.slice(b, c) : '';
+  const hexGap = /^<[0-9A-Fa-f]*>$/.test(gap);
+  const end = c + d;
+  // Only end-of-line or other whitespace after the range (e.g. the EOL after %%EOF): whole file.
+  coversWholeFile = wellFormed && /^[\t\n\f\r \0]*$/.test(ctx.text.slice(end));
+  const atRevision = wellFormed ? revisionEndingAt(ctx.ends, end) : undefined;
+  if (atRevision) revision = atRevision.revision;
+  else if (coversWholeFile) revision = ctx.ends.length || undefined;
+  const padded = hexGap ? fromHex(gap.slice(1, -1)) : new Uint8Array();
+  const gapIsThisContents = sig.contents === undefined || equalBytes(sig.contents, padded);
+  if (!wellFormed || !hexGap || !gapIsThisContents || (!coversWholeFile && !atRevision)) {
+    checks.push({
+      id: 'byte-range',
+      outcome: 'fail',
+      detail: !wellFormed
+        ? `The byte range [${range.join(' ')}] is malformed or outside the file.`
+        : !hexGap
+          ? 'The gap in the byte range is not exactly the /Contents hex string.'
+          : !gapIsThisContents
+            ? 'The gap in the byte range is not this signature’s /Contents.'
+            : `The byte range ends at ${end}, which is not the end of a revision.`,
+    });
     return report('broken');
-  if (unsupported.length > 0 || sigUnsupported) {
-    if (unsupported.length > 0)
-      checks.push({ id: 'later-changes', outcome: 'not-checked', detail: unsupported.join(' ') });
+  }
+  checks.push({
+    id: 'byte-range',
+    outcome: 'pass',
+    detail: coversWholeFile
+      ? 'Covers the whole file except the signature value.'
+      : `Covers revision ${revision ?? '?'} of ${ctx.ends.length} (bytes 0–${end}) except the signature value.`,
+  });
+
+  // 2. The CMS.
+  const isTimestamp = sig.subFilter === DOC_TIMESTAMP;
+  const subFilterSupported = isTimestamp || SUPPORTED_SUBFILTERS.has(sig.subFilter);
+  let signedData: pkijs.SignedData;
+  try {
+    const der = padded.subarray(0, derLength(padded) ?? padded.length);
+    const asn = asn1js.fromBER(der.slice().buffer);
+    if (asn.offset === -1) throw new Error(asn.result.error);
+    const info = new pkijs.ContentInfo({ schema: asn.result });
+    if (info.contentType !== OID.signedData) throw new Error(`content type ${info.contentType}`);
+    signedData = new pkijs.SignedData({ schema: info.content });
+  } catch (error) {
+    checks.push({
+      id: 'digest',
+      outcome: 'unsupported',
+      detail: subFilterSupported
+        ? `The CMS cannot be read (${errorText(error)}).`
+        : `SubFilter ${sig.subFilter || '(none)'} is not supported.`,
+    });
+    return report('cannot-check');
+  }
+  const signers = signedData.signerInfos;
+  const first = signers[0];
+  if (!first) {
+    checks.push({ id: 'digest', outcome: 'unsupported', detail: 'The CMS names no signer.' });
+    return report('cannot-check');
+  }
+  const mode = digestMode(sig.subFilter, signedData);
+  if (!mode) {
+    // A CMS shape we do not know under a SubFilter we do not know (content of its own that is
+    // neither a TSTInfo nor a SHA-1 digest): what it covers is unknown, so it is never judged.
+    const leaf = findLeaf(first, certificatesOf(signedData));
+    if (leaf) signerFacts = await certificateFacts(leaf);
+    checks.push({
+      id: 'digest',
+      outcome: 'unsupported',
+      detail: `SubFilter ${sig.subFilter || '(none)'} is not supported and its CMS signs content of its own, so the signature is not checked.`,
+    });
     return report('cannot-check');
   }
 
-  // 5. Later revisions.
+  // 3–5. Each SignerInfo. A PDF signature has exactly one (ISO 32000-2 §12.8.3.3.1); more is
+  // never Intact: Broken when any of them fails, Cannot check otherwise.
+  const ranges = signedBytes(bytes, range);
+  const outcomes: SignerOutcome[] = [];
+  for (const signer of signers) {
+    outcomes.push(await checkSigner(ctx, sig, mode, signedData, signer, ranges));
+  }
+  const primary = outcomes[0] as SignerOutcome;
+  checks.push(...primary.checks);
+  signerFacts = primary.signer;
+  chain = primary.chain;
+  digestAlgorithm = primary.digestAlgorithm;
+  signatureAlgorithm = primary.signatureAlgorithm;
+  signedAttributes = primary.signedAttributes;
+  weakReasons = [...new Set(outcomes.flatMap((o) => o.weakReasons))];
+  timestamp = primary.timestamp;
+  if (outcomes.length > 1) {
+    const worst = outcomes.findIndex((o) => o.integrity === 'broken');
+    checks.push({
+      id: 'signature',
+      outcome: worst >= 0 ? 'fail' : 'unsupported',
+      detail: `The CMS has ${outcomes.length} signers; a PDF signature has exactly one (ISO 32000-2 §12.8.3.3.1). ${
+        worst >= 0
+          ? `Signer ${worst + 1} does not verify.`
+          : 'Each verifies, but which one signed is ambiguous, so the signature is not judged.'
+      }`,
+    });
+    return report(worst >= 0 ? 'broken' : 'cannot-check');
+  }
+  if (primary.integrity === 'broken') return report('broken');
+  if (primary.integrity === 'unsupported') return report('cannot-check');
+  if (!subFilterSupported) {
+    // A CMS of a shape we know whose digest and signature match, under a SubFilter we do not
+    // know. (A mismatch above is Broken under that shape's reading whatever the name says, so
+    // a byte flipped in the /SubFilter name stays Broken.)
+    checks.push({
+      id: 'later-changes',
+      outcome: 'not-checked',
+      detail: `SubFilter ${sig.subFilter || '(none)'} is not supported.`,
+    });
+    return report('cannot-check');
+  }
+
+  // 6. Later revisions.
   if (coversWholeFile) {
     checks.push({ id: 'later-changes', outcome: 'pass', detail: 'No later revisions.' });
     return report('intact');
   }
-  const later = await laterChanges(ctx, end, sig.docMdp);
+  const later = await laterChanges(ctx, end, revision ?? 1, sig.docMdp);
   checks.push(later.check);
   changes = later.changes;
+  visuallyChangedPages = later.visuallyChangedPages;
   return report(later.allowed ? 'intact-changed-later' : 'changed-after-signing');
 }
 
@@ -798,6 +800,7 @@ export async function validateSignatures(
   throwIfAborted(options);
   const found = candidates(doc, decrypted, text);
   if (found.length === 0) return [];
+  const dpi = options.visual?.dpi ?? VISUAL_DPI;
   const ctx: Context = {
     bytes,
     text,
@@ -805,6 +808,16 @@ export async function validateSignatures(
     doc,
     password: options.password,
     before: new Map(),
+    dss: dssCertificates(doc),
+    visual: options.visual
+      ? new VisualComparer(bytes, {
+          pdfiumWasm: options.visual.pdfiumWasm,
+          dpi,
+          ...(options.password === undefined ? {} : { password: options.password }),
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      : undefined,
+    dpi,
   };
   const reports: SignatureReport[] = [];
   for (const candidate of found) {
@@ -812,6 +825,7 @@ export async function validateSignatures(
     try {
       reports.push(await validateOne(ctx, candidate));
     } catch (error) {
+      if (error instanceof EngineError && error.code === 'aborted') throw error;
       reports.push(unexpectedFailure(ctx, candidate, error));
     }
   }

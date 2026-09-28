@@ -1042,7 +1042,9 @@ export async function createSignatureWorker(): Promise<SignatureProxy> {
   const worker = new SignatureWorker({ name: 'pdf-editor signature' });
   try {
     const { createSignatureProxy } = await import('@pdf-editor/engine');
-    return createSignatureProxy(worker);
+    // The self-hosted PDFium lets the worker compare the signed revision's pages with the
+    // file's (spec §3.1 step 6): a page that looks different is never "changed nothing".
+    return createSignatureProxy(worker, { pdfiumWasmUrl: wasmUrl });
   } catch (error) {
     worker.terminate();
     throw error;

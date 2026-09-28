@@ -63,7 +63,28 @@ function badPassword(cause?: unknown): SigningError {
   );
 }
 
+/**
+ * Opens a PKCS#12 file with `password`. The key material this function holds in JavaScript
+ * memory — the password bytes, the decrypted PKCS#8 plaintext and the DER handed to
+ * `importKey` — is zeroed before it returns, whatever the outcome (M5 review finding 7); the
+ * caller zeroes the file bytes (signature.worker.ts). What remains is the non-extractable key.
+ */
 export async function loadPkcs12(bytes: ArrayBuffer, password: string): Promise<SigningIdentity> {
+  const secrets: Uint8Array[] = [];
+  const pwdBytes = new TextEncoder().encode(password);
+  secrets.push(pwdBytes);
+  try {
+    return await openPkcs12(bytes, pwdBytes.buffer, secrets);
+  } finally {
+    for (const secret of secrets) secret.fill(0);
+  }
+}
+
+async function openPkcs12(
+  bytes: ArrayBuffer,
+  pwd: ArrayBuffer,
+  secrets: Uint8Array[],
+): Promise<SigningIdentity> {
   const asn = asn1js.fromBER(bytes);
   if (asn.offset === -1) throw malformed();
   let pfx: pkijs.PFX;
@@ -72,7 +93,6 @@ export async function loadPkcs12(bytes: ArrayBuffer, password: string): Promise<
   } catch (error) {
     throw malformed(error);
   }
-  const pwd = new TextEncoder().encode(password).buffer;
   try {
     await pfx.parseInternalValues({ password: pwd, checkIntegrity: pfx.macData !== undefined });
   } catch (error) {
@@ -113,7 +133,9 @@ export async function loadPkcs12(bytes: ArrayBuffer, password: string): Promise<
           }),
         });
         try {
-          keyInfo = pkijs.PrivateKeyInfo.fromBER(await encrypted.decrypt({ password: pwd }));
+          const plain = await encrypted.decrypt({ password: pwd });
+          secrets.push(new Uint8Array(plain));
+          keyInfo = pkijs.PrivateKeyInfo.fromBER(plain);
         } catch (error) {
           throw badPassword(error);
         }
@@ -150,9 +172,9 @@ export async function loadPkcs12(bytes: ArrayBuffer, password: string): Promise<
   let key: CryptoKey;
   try {
     // Non-extractable: the key can sign, never leave WebCrypto.
-    key = await crypto.subtle.importKey('pkcs8', keyInfo.toSchema().toBER(), algorithm, false, [
-      'sign',
-    ]);
+    const der = keyInfo.toSchema().toBER();
+    secrets.push(new Uint8Array(der));
+    key = await crypto.subtle.importKey('pkcs8', der, algorithm, false, ['sign']);
   } catch (error) {
     throw new SigningError('unsupported-key', 'The private key could not be imported.', {
       cause: error,

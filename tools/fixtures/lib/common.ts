@@ -394,6 +394,26 @@ export interface SignatureTruth {
     chain: 'pass' | 'fail';
   };
   laterChanges?: LaterChangeTruth[];
+  /** A document timestamp (/ETSI.RFC3161): the TSTInfo genTime and the TSA's subject. */
+  timestamp?: { time: string; tsa: string };
+}
+
+/**
+ * M5 review finding 1: an incremental update crafted so that a text scan (or pdf-lib, which
+ * ignores the cross-reference) sees the signed page while a reader that follows the xref
+ * does not. The validator must say "Changed after signing".
+ */
+export interface AttackTruth {
+  /**
+   * `duplicate-definition`: the object defined twice, the xref pointing at the first (new)
+   * one; `free-entry`: a free xref entry for it; `no-eof`: a replacement whose revision ends
+   * at `startxref N` without %%EOF.
+   */
+  technique: 'duplicate-definition' | 'free-entry' | 'no-eof';
+  /** The target, page 1's content stream. */
+  object: string;
+  /** Page 1's content as the xref chain resolves it (`null`: the object is free). */
+  resolvedContent: string | null;
 }
 
 export interface RevisionsTruth {
@@ -517,6 +537,8 @@ export interface Expectations {
   signatures?: SignatureTruth[];
   revisions?: RevisionsTruth;
   tamper?: TamperTruth;
+  /** M5: an incremental-update attack on a signed file (review finding 1). */
+  attack?: AttackTruth;
   /** M5: expected differences between compare-a.pdf and compare-b.pdf. */
   compare?: CompareTruth;
   /** M5: expected PDF -> Markdown conversion. */

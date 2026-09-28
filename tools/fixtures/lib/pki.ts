@@ -28,6 +28,7 @@ import {
   compareBytes,
   ctx,
   ctxPrim,
+  generalizedTime,
   int,
   nul,
   octets,
@@ -59,13 +60,18 @@ export const OID = {
   keyUsage: '2.5.29.15',
   basicConstraints: '2.5.29.19',
   authorityKeyIdentifier: '2.5.29.35',
+  extKeyUsage: '2.5.29.37',
+  timeStamping: '1.3.6.1.5.5.7.3.8',
+  tstInfo: '1.2.840.113549.1.9.16.1.4',
+  /** Timestamp policy of the test TSA: under 2.999, the ITU-T/ISO arc for examples. */
+  tsaPolicy: '2.999.1',
 } as const;
 
 export const KEYS_DIR = join(TOOL_DIR, 'keys');
 export const PKI_ORG = 'pdf-editor test PKI (not trusted)';
 const NOT_BEFORE = new Date('2023-01-01T00:00:00Z');
 
-export type PartyId = 'root-ca' | 'intermediate-ca' | 'signer-rsa' | 'signer-p256';
+export type PartyId = 'root-ca' | 'intermediate-ca' | 'signer-rsa' | 'signer-p256' | 'tsa';
 
 interface PartySpec {
   id: PartyId;
@@ -73,7 +79,7 @@ interface PartySpec {
   serial: number;
   notAfter: Date;
   issuer: PartyId | null;
-  kind: 'root' | 'intermediate' | 'signer';
+  kind: 'root' | 'intermediate' | 'signer' | 'tsa';
 }
 
 const PARTIES: readonly PartySpec[] = [
@@ -111,6 +117,16 @@ const PARTIES: readonly PartySpec[] = [
     notAfter: new Date('2036-01-01T00:00:00Z'),
     issuer: 'intermediate-ca',
     kind: 'signer',
+  },
+  {
+    // Timestamp authority for the document timestamp fixture (RFC 3161 §2.3: the only
+    // extended key usage is timeStamping, marked critical).
+    id: 'tsa',
+    commonName: 'pdf-editor Test TSA',
+    serial: 0x4001,
+    notAfter: new Date('2036-01-01T00:00:00Z'),
+    issuer: 'intermediate-ca',
+    kind: 'tsa',
   },
 ];
 
@@ -167,7 +183,7 @@ function buildParties(): Map<PartyId, Party> {
       extension(
         OID.basicConstraints,
         true,
-        spec.kind === 'signer'
+        spec.kind === 'signer' || spec.kind === 'tsa'
           ? seq()
           : spec.kind === 'intermediate'
             ? seq(bool(true), int(0))
@@ -176,12 +192,14 @@ function buildParties(): Map<PartyId, Party> {
       extension(
         OID.keyUsage,
         true,
-        spec.kind === 'signer'
+        spec.kind === 'signer' || spec.kind === 'tsa'
           ? bits(Uint8Array.of(0xc0), 6) // digitalSignature, nonRepudiation
           : bits(Uint8Array.of(0x06), 1), // keyCertSign, cRLSign
       ),
       extension(OID.subjectKeyIdentifier, false, octets(ski)),
     ];
+    if (spec.kind === 'tsa')
+      extensions.push(extension(OID.extKeyUsage, true, seq(oid(OID.timeStamping))));
     if (issuer) {
       const issuerSpki = new Uint8Array(
         createPublicKey(issuer.key).export({ type: 'spki', format: 'der' }),
@@ -298,6 +316,62 @@ export function buildCms(signed: Uint8Array, mode: CmsMode): Uint8Array {
   return seq(oid(OID.signedData), ctx(0, signedData));
 }
 
+/** The test TSA and its issuers: the certificates embedded in its timestamp tokens. */
+export function tsaChain(): Party[] {
+  return [party('tsa'), party('intermediate-ca'), party('root-ca')];
+}
+
+/**
+ * DER TimeStampToken (RFC 3161 §2.4.2): ContentInfo(SignedData) whose encapsulated content
+ * is a TSTInfo with the SHA-256 `imprint` of `stamped`, signed by the test TSA with signed
+ * attributes contentType (id-ct-TSTInfo), messageDigest (of the TSTInfo) and
+ * signingCertificateV2. Deterministic: fixed serial, time and policy, no nonce.
+ */
+export function buildTimestampToken(
+  stamped: Uint8Array,
+  genTime: Date,
+  serial: number,
+): Uint8Array {
+  const [tsa, ...rest] = tsaChain();
+  if (!tsa) throw new Error('no TSA');
+  const imprint = new Uint8Array(createHash('sha256').update(stamped).digest());
+  const tstInfo = seq(
+    int(1),
+    oid(OID.tsaPolicy),
+    seq(algId(OID.sha256, false), octets(imprint)),
+    int(serial),
+    generalizedTime(genTime),
+  );
+  const certHash = new Uint8Array(createHash('sha256').update(tsa.cert).digest());
+  const issuerSerial = seq(seq(ctx(4, tsa.issuerName)), tsa.serialDer);
+  const attrs = [
+    attribute(OID.contentType, oid(OID.tstInfo)),
+    attribute(
+      OID.messageDigest,
+      octets(new Uint8Array(createHash('sha256').update(tstInfo).digest())),
+    ),
+    attribute(OID.signingCertificateV2, seq(seq(seq(octets(certHash), issuerSerial)))),
+  ].sort(compareBytes);
+  const signature = new Uint8Array(sign('sha256', tlv(TAG.set, ...attrs), tsa.key));
+  const signerInfo = seq(
+    int(1),
+    seq(tsa.issuerName, tsa.serialDer),
+    algId(OID.sha256, false),
+    tlv(0xa0, ...attrs),
+    algId(OID.rsaEncryption),
+    octets(signature),
+  );
+  const certs = [tsa, ...rest].map((p) => p.cert).sort(compareBytes);
+  const signedData = seq(
+    int(3), // eContentType other than id-data (RFC 5652 §5.1)
+    setOf(algId(OID.sha256, false)),
+    seq(oid(OID.tstInfo), ctx(0, octets(tstInfo))),
+    tlv(0xa0, ...certs),
+    setOf(signerInfo),
+  );
+  return seq(oid(OID.signedData), ctx(0, signedData));
+}
+
 // ---------------------------------------------------------------------------
 // Reading a CMS signature back (verify.ts)
 // ---------------------------------------------------------------------------
@@ -362,6 +436,7 @@ export function checkCms(der: Uint8Array, signed: Uint8Array): CmsCheck {
   }));
   const attr = (type: string) => attrList.find((a) => a.type === type)?.value;
   const md = attr(OID.messageDigest)?.content;
+  const eContentType = readOid(child(encap, 0));
   const eContentWrapper = children(encap)[1];
   const eContent = eContentWrapper ? child(eContentWrapper, 0).content : undefined;
   const rangeDigest = new Uint8Array(createHash(hash).update(signed).digest());
@@ -420,7 +495,20 @@ export function checkCms(der: Uint8Array, signed: Uint8Array): CmsCheck {
     certificates: certificates.length,
     chainValid,
   };
-  if (eContent) result.encapsulatedDigestMatches = compareBytes(eContent, rangeDigest) === 0;
+  if (eContent && eContentType === OID.tstInfo) {
+    // A timestamp token: the TSTInfo's messageImprint (SHA-256 here) names the signed bytes.
+    const imprint = child(readTlv(eContent), 2);
+    const imprintOid = readOid(child(child(imprint, 0), 0));
+    const imprintHash = HASH_NAMES[imprintOid];
+    result.encapsulatedDigestMatches =
+      !!imprintHash &&
+      compareBytes(
+        child(imprint, 1).content,
+        new Uint8Array(createHash(imprintHash).update(signed).digest()),
+      ) === 0;
+  } else if (eContent) {
+    result.encapsulatedDigestMatches = compareBytes(eContent, rangeDigest) === 0;
+  }
   if (signingCertificateMatches !== undefined)
     result.signingCertificateMatches = signingCertificateMatches;
   return result;

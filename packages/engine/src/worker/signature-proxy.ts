@@ -75,8 +75,28 @@ function abortChannel(signal: AbortSignal | undefined): {
   };
 }
 
-export function createSignatureProxy(worker: Worker): SignatureProxy {
+export interface SignatureProxyConfig {
+  /**
+   * The app's self-hosted `pdfium.wasm` (as for the PDFium worker). When set, validation also
+   * renders each signed revision and the whole file and reports `visuallyChangedPages`
+   * (spec §3.1 step 6); a per-call `ValidateSignaturesOptions.visual` wins.
+   */
+  readonly pdfiumWasmUrl?: string;
+  /** Resolution of that comparison (default 50 dpi). */
+  readonly visualDpi?: number;
+}
+
+export function createSignatureProxy(
+  worker: Worker,
+  config: SignatureProxyConfig = {},
+): SignatureProxy {
   const remote = wrap<SignatureWorkerApi>(worker);
+  const defaultVisual: ValidateSignaturesOptions['visual'] = config.pdfiumWasmUrl
+    ? {
+        pdfiumWasm: config.pdfiumWasmUrl,
+        ...(config.visualDpi === undefined ? {} : { dpi: config.visualDpi }),
+      }
+    : undefined;
   return {
     async validateSignatures(bytes, options = {}) {
       checkAborted(options, 'Signature validation');
@@ -85,7 +105,12 @@ export function createSignatureProxy(worker: Worker): SignatureProxy {
         const transferables: Transferable[] = [bytes];
         if (abort.port) transferables.push(abort.port);
         return unwrap(
-          await remote.validate(transfer(bytes, transferables), options.password, abort.port),
+          await remote.validate(
+            transfer(bytes, transferables),
+            options.password,
+            abort.port,
+            options.visual ?? defaultVisual,
+          ),
         );
       } finally {
         abort.dispose();

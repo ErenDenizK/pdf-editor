@@ -10,10 +10,11 @@ corpus.**
 | `intermediate-ca.key.pem` | RSA-2048, PKCS#8 | "pdf-editor Test Intermediate CA", issued by the root |
 | `signer-rsa.key.pem` | RSA-2048, PKCS#8 | "pdf-editor Test Signer", issued by the intermediate |
 | `signer-p256.key.pem` | EC P-256, PKCS#8 | "pdf-editor Test Signer P-256", issued by the intermediate |
+| `tsa.key.pem` | RSA-2048, PKCS#8 | "pdf-editor Test TSA" (extended key usage timeStamping), issued by the intermediate; signs the document timestamp of `signed-doctimestamp.pdf` |
 
 All subjects carry `O=pdf-editor test PKI (not trusted)`.
 
-- The keys were generated once (2026-09-28) with
+- The keys were generated once (2026-09-28; `tsa.key.pem` later the same day) with
   `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048` (and
   `-algorithm EC -pkeyopt ec_paramgen_curve:P-256`) and committed so that the
   corpus is reproducible. Nothing regenerates them.

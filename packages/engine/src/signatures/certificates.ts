@@ -156,32 +156,60 @@ export async function certificateFacts(cert: pkijs.Certificate): Promise<SignerF
   };
 }
 
+/** basicConstraints cA and, when keyUsage is present, keyCertSign: may issue certificates. */
+function caProblem(cert: pkijs.Certificate): string | undefined {
+  const bc: unknown = cert.extensions?.find((e) => e.extnID === OID.basicConstraints)?.parsedValue;
+  const isCa = bc instanceof pkijs.BasicConstraints && bc.cA;
+  const usage = keyUsage(cert);
+  const name = commonName(cert.subject) ?? formatName(cert.subject);
+  if (!isCa)
+    return `"${name}" issues a certificate but is not a CA (basicConstraints cA is not set).`;
+  if (usage !== undefined && !usage.includes('keyCertSign')) {
+    return `"${name}" issues a certificate but its keyUsage lacks keyCertSign.`;
+  }
+  return undefined;
+}
+
 /**
- * Builds the path from `leaf` through the embedded certificates. Each link's signature is
- * verified; the best outcome is "complete to a root included in the file" (never trusted).
+ * Builds the path from `leaf` through the embedded certificates: the CMS's first, then the
+ * document security store's (`/DSS /Certs`, spec §3.1 step 4). Each link's signature is
+ * verified and each issuer must be a CA allowed to sign certificates (basicConstraints,
+ * keyCertSign); the best outcome is "complete to a root included in the file" (never
+ * trusted).
  */
 export async function buildChain(
   leaf: pkijs.Certificate,
   pool: readonly pkijs.Certificate[],
+  fromDss: ReadonlySet<pkijs.Certificate> = new Set(),
 ): Promise<{ readonly path: pkijs.Certificate[]; readonly check: SignatureCheck }> {
   const path = [leaf];
   let current = leaf;
+  const dssNote = () => {
+    const n = path.filter((c) => fromDss.has(c)).length;
+    return n > 0 ? ` ${n} of them from the document security store (/DSS).` : '';
+  };
   for (let i = 0; i < 12; i++) {
     if (sameName(current.issuer, current.subject)) {
       const selfOk = await current.verify().catch(() => false);
+      const notCa = path
+        .slice(1)
+        .map(caProblem)
+        .find((p) => p !== undefined);
       return {
         path,
-        check: selfOk
+        check: !selfOk
           ? {
-              id: 'chain',
-              outcome: 'pass',
-              detail: `Complete to a root included in the file (${path.length} certificate${path.length === 1 ? '' : 's'}); the root is not trusted by this check.`,
-            }
-          : {
               id: 'chain',
               outcome: 'fail',
               detail: 'The root certificate’s self-signature does not verify.',
-            },
+            }
+          : notCa
+            ? { id: 'chain', outcome: 'fail', detail: notCa }
+            : {
+                id: 'chain',
+                outcome: 'pass',
+                detail: `Complete to a root included in the file (${path.length} certificate${path.length === 1 ? '' : 's'}); the root is not trusted by this check.${dssNote()}`,
+              },
       };
     }
     const candidates = pool.filter((c) => !path.includes(c) && sameName(c.subject, current.issuer));
@@ -201,7 +229,7 @@ export async function buildChain(
           detail:
             candidates.length > 0
               ? `"${commonName(current.subject) ?? formatName(current.subject)}" is not signed by the issuer certificate in the file.`
-              : `Incomplete: the issuer of "${commonName(current.subject) ?? formatName(current.subject)}" is not in the file (${path.length} certificate${path.length === 1 ? '' : 's'} found).`,
+              : `Incomplete: the issuer of "${commonName(current.subject) ?? formatName(current.subject)}" is not in the file (${path.length} certificate${path.length === 1 ? '' : 's'} found).${dssNote()}`,
         },
       };
     }
@@ -211,17 +239,36 @@ export async function buildChain(
   return { path, check: { id: 'chain', outcome: 'fail', detail: 'The path is too long.' } };
 }
 
-export function validityCheck(leaf: pkijs.Certificate, claimed: Date | undefined): SignatureCheck {
-  const inside = (d: Date): boolean => d >= leaf.notBefore.value && d <= leaf.notAfter.value;
-  const now = inside(new Date());
-  const atClaim = claimed ? inside(claimed) : undefined;
+/**
+ * Validity of the signer certificate (and of each issuer on the path) at the claimed time
+ * and today, as a fact. `what` names the claimed time (the signer's /M, or a timestamp's
+ * genTime).
+ */
+export function validityCheck(
+  leaf: pkijs.Certificate,
+  claimed: Date | undefined,
+  issuers: readonly pkijs.Certificate[] = [],
+  what = 'the claimed signing time',
+): SignatureCheck {
+  const inside = (c: pkijs.Certificate, d: Date): boolean =>
+    d >= c.notBefore.value && d <= c.notAfter.value;
+  const today = new Date();
+  const now = inside(leaf, today);
+  const atClaim = claimed ? inside(leaf, claimed) : undefined;
   const period = `${leaf.notBefore.value.toISOString().slice(0, 10)} to ${leaf.notAfter.value.toISOString().slice(0, 10)}`;
+  const outside = issuers.filter((c) => !inside(c, today) || (claimed && !inside(c, claimed)));
+  const issuerNote =
+    issuers.length === 0
+      ? ''
+      : outside.length === 0
+        ? ` Its issuer certificate${issuers.length === 1 ? ' is' : 's are'} valid at both times.`
+        : ` Outside its period at ${what} or today: ${outside.map((c) => `"${commonName(c.subject) ?? formatName(c.subject)}"`).join(', ')}.`;
   return {
     id: 'validity',
-    outcome: now && atClaim !== false ? 'pass' : 'fail',
-    detail: `Signer certificate period ${period}; the claimed signing time is ${
+    outcome: now && atClaim !== false && outside.length === 0 ? 'pass' : 'fail',
+    detail: `Signer certificate period ${period}; ${what} is ${
       atClaim === undefined ? 'absent' : atClaim ? 'inside' : 'outside'
-    } it and today is ${now ? 'inside' : 'outside'} it.`,
+    } it and today is ${now ? 'inside' : 'outside'} it.${issuerNote}`,
   };
 }
 

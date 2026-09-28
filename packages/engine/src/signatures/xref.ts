@@ -28,6 +28,12 @@ export interface XrefSection {
   readonly streamObject?: number;
 }
 
+/** An indirect reference `/Key n g R` in a dictionary's raw text. */
+export function dictRef(dict: string, key: string): { num: number; gen: number } | undefined {
+  const m = new RegExp(`/${key}\\s+(\\d+)\\s+(\\d+)\\s+R`).exec(dict);
+  return m ? { num: Number(m[1]), gen: Number(m[2]) } : undefined;
+}
+
 export function dictInt(dict: string, key: string): number | undefined {
   const m = new RegExp(`/${key}\\s+(\\d+)(?!\\s+\\d+\\s+R)`).exec(dict);
   return m ? Number(m[1]) : undefined;
@@ -254,7 +260,9 @@ export interface RevisionEnd {
 /**
  * Every `startxref N %%EOF` trailer in the file, in order: the revision ends. A `%%EOF` not
  * preceded by `startxref` (e.g. inside a stream) is not one. A signer may cover the EOL after
- * `%%EOF` or not, so both ends are kept.
+ * `%%EOF` or not, so both ends are kept. A last `startxref N` without `%%EOF` at the very end
+ * of the file ends a revision too: readers find it by searching back from the end, so an
+ * update written that way is part of the file (M5 review finding 1c).
  */
 export function revisionEnds(bytes: Uint8Array): RevisionEnd[] {
   const text = latin1(bytes);
@@ -266,6 +274,20 @@ export function revisionEnds(bytes: Uint8Array): RevisionEnd[] {
     if (text[end] === '\r') end++;
     if (text[end] === '\n') end++;
     out.push({ revision: out.length + 1, startxref: Number(m[1]), endWithoutEol, end });
+  }
+  const last = out[out.length - 1]?.end ?? 0;
+  const tail = /startxref\s+(\d+)[\t\n\f\r \0]*$/.exec(
+    text.slice(Math.max(last, text.length - 2048)),
+  );
+  if (tail && text.slice(last).trim().length > 0) {
+    const at = text.length - tail[0].length;
+    const endWithoutEol = at + tail[0].trimEnd().length;
+    out.push({
+      revision: out.length + 1,
+      startxref: Number(tail[1]),
+      endWithoutEol,
+      end: text.length,
+    });
   }
   return out;
 }

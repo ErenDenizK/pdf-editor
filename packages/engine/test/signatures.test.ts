@@ -69,6 +69,7 @@ interface ManifestSignature {
     readonly objects: readonly string[];
   }[];
   readonly weakDigest?: boolean;
+  readonly timestamp?: { readonly time: string; readonly tsa: string };
 }
 interface ManifestFixture {
   readonly file: string;
@@ -185,6 +186,7 @@ describe('validator on the signed fixtures', () => {
           expect(outcome(r, CHECK_IDS[key] ?? key), `${want.field} ${key}`).toBe(value);
         }
         expect(r.weak).toBe(want.weakDigest === true);
+        expect(r.timestamp).toEqual(want.timestamp);
         const later = want.laterChanges ?? [];
         expect(
           r.laterChanges.map((c) => ({

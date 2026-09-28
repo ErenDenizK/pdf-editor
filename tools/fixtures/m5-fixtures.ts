@@ -35,6 +35,7 @@ import {
   str,
 } from './lib/build.ts';
 import {
+  type AttackTruth,
   type Box,
   type CertificateTruth,
   type CompareChangeTruth,
@@ -66,10 +67,12 @@ import {
   KEYS_DIR,
   type Party,
   buildCms,
+  buildTimestampToken,
   chain,
   checkCms,
   party,
   pem,
+  tsaChain,
 } from './lib/pki.ts';
 import { Canvas, type PathCommand } from './lib/raster.ts';
 
@@ -1184,9 +1187,13 @@ function signatureTruth(file: string, bytes: Uint8Array, s: SignedSpec): Signatu
   return truth;
 }
 
+/** Revision ends: each `startxref N %%EOF`, and a last `startxref N` at the end of the file. */
 function revisionsOf(text: string): RevisionsTruth {
-  const startxrefs = [...text.matchAll(/startxref\s+(\d+)\s+%%EOF\n/g)].map((m) => Number(m[1]));
+  const startxrefs = [...text.matchAll(/startxref\s+(\d+)\s+(?:%%EOF\n|$)/g)].map((m) =>
+    Number(m[1]),
+  );
   const ends = [...text.matchAll(/%%EOF\n/g)].map((m) => (m.index ?? 0) + m[0].length);
+  if (!text.endsWith('%%EOF\n')) ends.push(text.length);
   return { count: ends.length, startxrefs, ends };
 }
 
@@ -1598,6 +1605,246 @@ async function buildSignedTampered(built: Map<string, Uint8Array>): Promise<Buil
   };
 }
 
+// ---------------------------------------------------------------------------
+// Incremental-update attacks (M5 review finding 1) and a document timestamp
+// (finding 2), all over signed-approval.pdf
+// ---------------------------------------------------------------------------
+
+const MALLORY = 'PAY 1,000,000 TO MALLORY';
+const pad10 = (n: number) => String(n).padStart(10, '0');
+
+/** Page 1's replacement content: one line in page 1's own Helvetica resource. */
+function malloryContent(ap: Approval): string {
+  const font = /\/Font <<\s*\/(\S+) /.exec(objectBody(ap.base.text, ap.base.page))?.[1];
+  if (!font) throw new Error('page 1 font resource not found');
+  return `BT /${font} 24 Tf 72 700 Td ${lit(MALLORY)} Tj ET`;
+}
+
+/** Revision 3's trailer as appendRevision writes it, up to `startxref N` (no %%EOF). */
+function attackTrailer(ap: Approval, file: string, xrefAt: number): string {
+  const prev = Number(/startxref\s+(\d+)\s+%%EOF\s*$/.exec(ap.text)?.[1]);
+  const size = Number(/\/Size (\d+)/.exec(ap.text.slice(ap.text.lastIndexOf('trailer')))?.[1]);
+  if (!prev || !size) throw new Error(`${file}: previous trailer not found`);
+  return (
+    `trailer\n<<\n/Size ${size}\n/Root ${ref(ap.base.root)}\n/Info ${ap.base.info}\n` +
+    `/ID [${ap.base.id0} ${hexId(fileIdFor(`${file}#revision-3`))}]\n/Prev ${prev}\n>>\n` +
+    `startxref\n${xrefAt}\n`
+  );
+}
+
+function attackExpect(
+  file: string,
+  bytes: Uint8Array,
+  ap: Approval,
+  attack: AttackTruth,
+  laterChanges: LaterChangeTruth[],
+): Built['expect'] {
+  return {
+    ...signedExpect(bytes, [
+      signatureTruth(file, bytes, {
+        field: 'Approval',
+        mode: 'cades-detached',
+        revision: 2,
+        byteRange: ap.byteRange,
+        cms: ap.cms,
+        when: SIGNED_1,
+        status: 'changed-after-signing',
+        laterChanges,
+      }),
+    ]),
+    // Page 1's text depends on the reader (the point of the attack): no marker for it.
+    pages: [pageExpect(1), ...SIMPLE_PAGES.slice(1)],
+    attack,
+  };
+}
+
+/**
+ * Revision 3 defines page 1's content stream twice: first the replacement, then a
+ * byte-identical copy of the signed one; its xref points at the first. A reader shows the
+ * replacement; a scan that keeps the last definition sees the signed page.
+ */
+async function buildSignedDupObject(built: Map<string, Uint8Array>): Promise<Built> {
+  const file = 'signed-dup-object.pdf';
+  const ap = await approvalFor(built);
+  const c = ap.base.content;
+  const evil = malloryContent(ap);
+  let text = ap.text;
+  const evilAt = text.length;
+  text += `${c} 0 obj\n<<\n/Length ${evil.length}\n>>\nstream\n${evil}\nendstream\nendobj\n`;
+  text += `${c} 0 obj\n${objectBody(ap.base.text, c)}\nendobj\n`;
+  const xrefAt = text.length;
+  text += `xref\n${c} 1\n${pad10(evilAt)} 00000 n \n${attackTrailer(ap, file, xrefAt)}%%EOF\n`;
+  const bytes = bytesOf(text);
+  return {
+    bytes,
+    expect: attackExpect(
+      file,
+      bytes,
+      ap,
+      { technique: 'duplicate-definition', object: ref(c), resolvedContent: evil },
+      [
+        { revision: 3, kind: 'content', pages: [1], objects: [ref(c)] },
+        { revision: 3, kind: 'other', pages: [], objects: [ref(c)] },
+      ],
+    ),
+  };
+}
+
+/** Revision 3 is only an xref section that frees page 1's content stream. */
+async function buildSignedFreedContent(built: Map<string, Uint8Array>): Promise<Built> {
+  const file = 'signed-freed-content.pdf';
+  const ap = await approvalFor(built);
+  const c = ap.base.content;
+  const xrefAt = ap.text.length;
+  const text = `${ap.text}xref\n${c} 1\n${pad10(0)} 00001 f \n${attackTrailer(ap, file, xrefAt)}%%EOF\n`;
+  const bytes = bytesOf(text);
+  return {
+    bytes,
+    expect: attackExpect(
+      file,
+      bytes,
+      ap,
+      { technique: 'free-entry', object: ref(c), resolvedContent: null },
+      [{ revision: 3, kind: 'content', pages: [1], objects: [ref(c)] }],
+    ),
+  };
+}
+
+/** Revision 3 replaces page 1's content stream and ends at `startxref N` without %%EOF. */
+async function buildSignedNoEof(built: Map<string, Uint8Array>): Promise<Built> {
+  const file = 'signed-no-eof.pdf';
+  const ap = await approvalFor(built);
+  const c = ap.base.content;
+  const evil = malloryContent(ap);
+  let text = ap.text;
+  const evilAt = text.length;
+  text += `${c} 0 obj\n<<\n/Length ${evil.length}\n>>\nstream\n${evil}\nendstream\nendobj\n`;
+  const xrefAt = text.length;
+  text += `xref\n${c} 1\n${pad10(evilAt)} 00000 n \n${attackTrailer(ap, file, xrefAt)}`;
+  const bytes = bytesOf(text);
+  return {
+    bytes,
+    expect: attackExpect(
+      file,
+      bytes,
+      ap,
+      { technique: 'no-eof', object: ref(c), resolvedContent: evil },
+      [{ revision: 3, kind: 'content', pages: [1], objects: [ref(c)] }],
+    ),
+  };
+}
+
+const TIMESTAMP_TIME = new Date('2024-01-03T00:00:00Z');
+const TIMESTAMP_SERIAL = 0x5001;
+
+/**
+ * Revision 3 adds a document timestamp (ISO 32000-2 §12.8.5): a /DocTimeStamp dictionary
+ * with /SubFilter /ETSI.RFC3161 in a new invisible signature field, whose /Contents is an
+ * RFC 3161 token by the test TSA over the byte ranges (lib/pki.ts).
+ */
+async function buildSignedDocTimestamp(built: Map<string, Uint8Array>): Promise<Built> {
+  const file = 'signed-doctimestamp.pdf';
+  const ap = await approvalFor(built);
+  const [ts, wid] = [ap.base.size + 3, ap.base.size + 4];
+  const dict = [
+    '<<',
+    '/Type /DocTimeStamp',
+    '/Filter /Adobe.PPKLite',
+    '/SubFilter /ETSI.RFC3161',
+    `/ByteRange ${BYTE_RANGE_PLACEHOLDER}`,
+    `/Contents <${'0'.repeat(SIG_HEX)}>`,
+    '>>',
+  ].join('\n');
+  const rev = appendRevision(
+    ap.base,
+    ap.text,
+    [
+      { num: ts, body: dict },
+      { num: wid, body: widget('Timestamp', ap.base.page, ts) },
+      { num: ap.acroForm, body: `<<\n/Fields [${ref(ap.widget)} ${ref(wid)}]\n/SigFlags 3\n>>` },
+      {
+        num: ap.base.page,
+        body: withKey(
+          objectBody(ap.base.text, ap.base.page),
+          'Annots',
+          `[${ref(ap.widget)} ${ref(wid)}]`,
+        ),
+      },
+    ],
+    file,
+    3,
+  );
+  // Byte range and token, as sign() does for signatures.
+  const objStart = rev.text.lastIndexOf(`\n${ts} 0 obj\n`);
+  const brAt = rev.text.indexOf('/ByteRange [', objStart) + '/ByteRange '.length;
+  const a = rev.text.indexOf('/Contents <', objStart) + '/Contents '.length;
+  const b = a + SIG_HEX + 2;
+  const byteRange: [number, number, number, number] = [0, a, b, rev.text.length - b];
+  const brText = `[${byteRange.join(' ')}]`.padEnd(BYTE_RANGE_PLACEHOLDER.length, ' ');
+  let text =
+    rev.text.slice(0, brAt) + brText + rev.text.slice(brAt + BYTE_RANGE_PLACEHOLDER.length);
+  const raw = Buffer.from(text, 'latin1');
+  const stamped = new Uint8Array(Buffer.concat([raw.subarray(0, a), raw.subarray(b)]));
+  const token = buildTimestampToken(stamped, TIMESTAMP_TIME, TIMESTAMP_SERIAL);
+  const hex = Buffer.from(token).toString('hex').toUpperCase();
+  if (hex.length > SIG_HEX) throw new Error(`${file}: token does not fit the placeholder`);
+  text = text.slice(0, a + 1) + hex.padEnd(SIG_HEX, '0') + text.slice(a + 1 + SIG_HEX);
+  const bytes = bytesOf(text);
+  const check = checkCms(token, stamped);
+  if (
+    !check.digestMatches ||
+    !check.encapsulatedDigestMatches ||
+    !check.signatureValid ||
+    !check.chainValid
+  )
+    throw new Error(`${file}: timestamp self-check ${JSON.stringify(check)}`);
+  const tsa = party('tsa');
+  const objects = [ap.acroForm, ap.base.page, ts, wid].map(ref).sort();
+  const timestamp: SignatureTruth = {
+    field: 'Timestamp',
+    page: 1,
+    rect: [0, 0, 0, 0],
+    signed: true,
+    status: 'intact',
+    filter: 'Adobe.PPKLite',
+    subFilter: 'ETSI.RFC3161',
+    revision: 3,
+    byteRange,
+    contentsHexLength: SIG_HEX,
+    cmsBytes: token.length,
+    coversWholeFile: true,
+    digestAlgorithm: 'SHA-256',
+    signatureAlgorithm: 'RSASSA-PKCS1-v1_5',
+    signedAttributes: ['contentType', 'messageDigest', 'signingCertificateV2'],
+    signer: certTruth(tsa),
+    chain: tsaChain().map((p) => p.subject),
+    checks: {
+      byteRange: 'pass',
+      digest: 'pass',
+      signature: 'pass',
+      signingCertificate: 'pass',
+      chain: 'pass',
+    },
+    timestamp: { time: TIMESTAMP_TIME.toISOString(), tsa: tsa.subject },
+  };
+  return {
+    bytes,
+    expect: signedExpect(bytes, [
+      signatureTruth(file, bytes, {
+        field: 'Approval',
+        mode: 'cades-detached',
+        revision: 2,
+        byteRange: ap.byteRange,
+        cms: ap.cms,
+        when: SIGNED_1,
+        status: 'intact-changed-later',
+        laterChanges: [{ revision: 3, kind: 'signature', pages: [1], objects }],
+      }),
+      timestamp,
+    ]),
+  };
+}
+
 export const P12_PASSWORD = 'test-only';
 
 /**
@@ -1620,6 +1867,7 @@ export function pkiOutputs(): { files: Map<string, string | Uint8Array>; truth: 
     party('intermediate-ca'),
     party('signer-rsa'),
     party('signer-p256'),
+    party('tsa'),
   ];
   for (const p of all)
     add(`${p.id}.cert.pem`, pem('CERTIFICATE', p.cert), {
@@ -1887,6 +2135,50 @@ export const M5_FIXTURES: FixtureDef[] = [
     howGenerated: SIGNED_HOW,
     derivedFrom: 'simple-text.pdf',
     build: buildSignedEmptyField,
+  },
+  {
+    file: 'signed-dup-object.pdf',
+    tags: ['signatures', 'pades', 'incremental-update', 'attack'],
+    summary:
+      'signed-approval.pdf plus a third revision that defines page 1\'s content stream twice: first "PAY 1,000,000 TO MALLORY", then a byte-identical copy of the signed stream; its xref points at the first (M5 review finding 1a).',
+    behavior:
+      'Status "Changed after signing": the xref resolves page 1\'s content to the new stream (content, page 1), and the unreferenced second definition is a structural change (other). PDFium and pdf.js show MALLORY; pdf-lib, which ignores the xref, sees the signed page.',
+    howGenerated: `${SIGNED_HOW}; revision 3 written by hand`,
+    derivedFrom: 'signed-approval.pdf',
+    build: buildSignedDupObject,
+  },
+  {
+    file: 'signed-freed-content.pdf',
+    tags: ['signatures', 'pades', 'incremental-update', 'attack'],
+    summary:
+      "signed-approval.pdf plus a third revision that is only an xref section marking page 1's content stream free (M5 review finding 1b).",
+    behavior:
+      'Status "Changed after signing" (content, page 1): a reference to a free object reads as null. pdf.js shows page 1 blank; PDFium still draws the signed stream.',
+    howGenerated: `${SIGNED_HOW}; revision 3 written by hand`,
+    derivedFrom: 'signed-approval.pdf',
+    build: buildSignedFreedContent,
+  },
+  {
+    file: 'signed-no-eof.pdf',
+    tags: ['signatures', 'pades', 'incremental-update', 'attack'],
+    summary:
+      'signed-approval.pdf plus a third revision that replaces page 1\'s content stream ("PAY 1,000,000 TO MALLORY") and ends at `startxref N` without %%EOF (M5 review finding 1c).',
+    behavior:
+      'Status "Changed after signing" (content, page 1); the file has three revisions. pdf.js shows MALLORY; PDFium, which wants %%EOF, falls back to the signed revision.',
+    howGenerated: `${SIGNED_HOW}; revision 3 written by hand`,
+    derivedFrom: 'signed-approval.pdf',
+    build: buildSignedNoEof,
+  },
+  {
+    file: 'signed-doctimestamp.pdf',
+    tags: ['signatures', 'pades', 'incremental-update', 'timestamp'],
+    summary:
+      'signed-approval.pdf plus a third revision with a document timestamp: field "Timestamp", /Type /DocTimeStamp, /SubFilter /ETSI.RFC3161, an RFC 3161 token (SHA-256 imprint of the byte ranges, genTime 2024-01-03) by the test TSA (timeStamping EKU) covering the whole file.',
+    behavior:
+      'Approval "Intact, changed later" (a signature was added); Timestamp Intact with timestamp time and authority reported; never Broken because its CMS carries a TSTInfo (M5 review finding 2).',
+    howGenerated: `${SIGNED_HOW}; token from lib/pki.ts buildTimestampToken`,
+    derivedFrom: 'signed-approval.pdf',
+    build: buildSignedDocTimestamp,
   },
 ];
 

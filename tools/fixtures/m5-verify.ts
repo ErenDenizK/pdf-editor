@@ -264,9 +264,13 @@ async function checkSignatures(
   const latin = Buffer.from(bytes).toString('latin1');
   const revs = e.revisions;
   if (revs) {
-    const startxrefs = [...latin.matchAll(/startxref\s+(\d+)\s+%%EOF\n/g)].map((m) => Number(m[1]));
+    // A last revision may end at `startxref N` without %%EOF (signed-no-eof.pdf).
+    const startxrefs = [...latin.matchAll(/startxref\s+(\d+)\s+(?:%%EOF\n|$)/g)].map((m) =>
+      Number(m[1]),
+    );
     c.eq(startxrefs, revs.startxrefs, 'startxref chain');
     const ends = [...latin.matchAll(/%%EOF\n/g)].map((m) => (m.index ?? 0) + m[0].length);
+    if (!latin.endsWith('%%EOF\n')) ends.push(latin.length);
     c.eq(ends, revs.ends, 'revision ends');
     c.eq(ends.length, revs.count, 'revision count');
     c.eq(ends.at(-1), bytes.length, 'last revision ends at EOF');
@@ -336,7 +340,12 @@ async function checkSignature(
 ): Promise<void> {
   const label = `signature ${truth.field}`;
   const latin = Buffer.from(bytes).toString('latin1');
-  c.eq(nameOf(doc, v.get(N('Type'))), 'Sig', `${label}: /Type /Sig`);
+  const docTimestamp = truth.subFilter === 'ETSI.RFC3161';
+  c.eq(
+    nameOf(doc, v.get(N('Type'))),
+    docTimestamp ? 'DocTimeStamp' : 'Sig',
+    `${label}: /Type /${docTimestamp ? 'DocTimeStamp' : 'Sig'}`,
+  );
   c.eq(nameOf(doc, v.get(N('Filter'))), truth.filter, `${label}: /Filter`);
   c.eq(nameOf(doc, v.get(N('SubFilter'))), truth.subFilter, `${label}: /SubFilter`);
   c.ok(v.has(N('Contents')), `${label}: /Contents present`);
@@ -410,14 +419,18 @@ async function checkSignature(
   const revs = entry.expect.revisions;
   const later = truth.laterChanges ?? [];
   c.eq(
-    later.map((l) => l.revision),
+    [...new Set(later.map((l) => l.revision))],
     Array.from(
       { length: (revs?.count ?? 0) - (truth.revision ?? 0) },
       (_, i) => (truth.revision ?? 0) + i + 1,
     ),
     `${label}: every later revision classified`,
   );
-  for (const l of later) {
+  if (entry.expect.attack) {
+    // pdf-lib (and so classifyRevision) ignores the xref, which is what the attack exploits.
+    checkAttack(entry, bytes, c);
+  }
+  for (const l of entry.expect.attack ? [] : later) {
     const x = revs?.startxrefs[l.revision - 1] ?? 0;
     const objects = xrefObjects(latin, x);
     c.eq(objects, l.objects, `${label}: revision ${l.revision} objects`);
@@ -437,6 +450,53 @@ async function checkSignature(
         ? 'intact-changed-later'
         : 'changed-after-signing';
   c.eq(truth.status, derived, `${label}: status follows from the checks`);
+}
+
+/**
+ * The incremental-update attacks (M5 review finding 1), checked on the raw bytes: the last
+ * revision's xref entry for the target, where it points, and what else the revision holds.
+ */
+function checkAttack(entry: ManifestEntry, bytes: Uint8Array, c: Check): void {
+  const attack = entry.expect.attack;
+  const revs = entry.expect.revisions;
+  if (!attack || !revs) return;
+  const latin = Buffer.from(bytes).toString('latin1');
+  const signedEnd = revs.ends[revs.ends.length - 2] ?? 0;
+  const xrefAt = revs.startxrefs[revs.startxrefs.length - 1] ?? 0;
+  const region = latin.slice(signedEnd, xrefAt);
+  const [num = 0] = attack.object.split(' ').map(Number);
+  const table = latin.slice(xrefAt, latin.indexOf('trailer', xrefAt));
+  const entryLine = new RegExp(`\\n${num} 1\\n(\\d{10}) (\\d{5}) ([nf])`).exec(table);
+  c.ok(!!entryLine, `${attack.technique}: the last xref has one entry for ${attack.object}`);
+  const headers = [...region.matchAll(new RegExp(`(?:^|\\n)${num} 0 obj\\n`, 'g'))].map(
+    (m) => signedEnd + (m.index ?? 0) + (m[0].startsWith('\n') ? 1 : 0),
+  );
+  const streamAt = (at: number) => {
+    const start = latin.indexOf('stream\n', at) + 'stream\n'.length;
+    return latin.slice(start, latin.indexOf('\nendstream', start));
+  };
+  if (attack.technique === 'free-entry') {
+    c.eq(entryLine?.[3], 'f', 'the entry is free');
+    c.eq(headers.length, 0, 'the revision defines no object');
+    c.eq(attack.resolvedContent, null, 'resolved content is none');
+  } else {
+    c.eq(entryLine?.[3], 'n', 'the entry is in use');
+    const offset = Number(entryLine?.[1]);
+    c.eq(offset, headers[0], 'the entry points at the first definition');
+    c.eq(streamAt(offset), attack.resolvedContent, 'the xref resolves to the new content');
+    if (attack.technique === 'duplicate-definition') {
+      c.eq(headers.length, 2, 'two definitions');
+      const signed = latin.slice(0, signedEnd);
+      const original = signed.slice(signed.lastIndexOf(`\n${num} 0 obj\n`) + 1);
+      const second = latin.slice(headers[1] ?? 0);
+      const body = (s: string) => s.slice(0, s.indexOf('\nendobj') + 7);
+      c.eq(body(second), body(original), 'the second definition is the signed one, byte for byte');
+    } else {
+      c.eq(headers.length, 1, 'one definition');
+      c.ok(!latin.slice(xrefAt).includes('%%EOF'), 'no %%EOF after the last xref');
+      c.ok(/startxref\n\d+\n$/.test(latin), 'the file ends at startxref N');
+    }
+  }
 }
 
 /**
@@ -474,6 +534,7 @@ async function classifyRevision(
       pages.add(pageIndex + 1);
     } else if (
       type === 'Sig' ||
+      type === 'DocTimeStamp' ||
       (type === 'Annot' && nameOf(after, dict?.get(N('FT'))) === 'Sig')
     ) {
       kinds.add('signature');

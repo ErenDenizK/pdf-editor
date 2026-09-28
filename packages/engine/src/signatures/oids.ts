@@ -20,6 +20,7 @@ export const OID = {
   rsaPss: '1.2.840.113549.1.1.10',
   ecPublicKey: '1.2.840.10045.2.1',
   keyUsage: '2.5.29.15',
+  basicConstraints: '2.5.29.19',
   pbes2: '1.2.840.113549.1.5.13',
 } as const;
 

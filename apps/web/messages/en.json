@@ -341,6 +341,7 @@
   "signature_checks": "Checks",
   "signature_check_line": "{check}: {outcome}",
   "signature_later_changes": "Later changes",
+  "signature_visual_changes": "Pages that look different from the signed version: {pages}.",
   "signature_view_signed": "View signed version",
   "signature_view_failed": "Could not open the signed version: {reason}",
   "signature_version_file": "{name} (signed version, revision {revision})",

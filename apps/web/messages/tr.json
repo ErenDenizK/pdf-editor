@@ -266,6 +266,7 @@
   "signature_checks": "Denetimler",
   "signature_check_line": "{check}: {outcome}",
   "signature_later_changes": "Sonraki değişiklikler",
+  "signature_visual_changes": "İmzalı sürümden farklı görünen sayfalar: {pages}.",
   "signature_view_signed": "İmzalanan sürümü görüntüle",
   "signature_view_failed": "İmzalanan sürüm açılamadı: {reason}",
   "signature_version_file": "{name} (imzalanan sürüm, sürüm {revision})",

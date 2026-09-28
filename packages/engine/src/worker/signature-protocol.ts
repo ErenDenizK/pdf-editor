@@ -11,6 +11,7 @@ import type {
   SigningFailureReason,
   SignRequest,
   SignResult,
+  ValidateSignaturesOptions,
 } from '../types';
 
 export type SignatureWire<T> =
@@ -24,11 +25,15 @@ export type SignatureWire<T> =
     };
 
 export interface SignatureWorkerApi {
-  /** Validates (transferred) bytes. Never fails for damaged files; only on abort. */
+  /**
+   * Validates (transferred) bytes. Never fails for damaged files; only on abort. With
+   * `visual`, the signed revisions are also compared page by page with the whole file.
+   */
   validate(
     bytes: ArrayBuffer,
     password: string | undefined,
     abortPort?: MessagePort,
+    visual?: ValidateSignaturesOptions['visual'],
   ): Promise<SignatureWire<readonly SignatureReport[]>>;
   /** The file cut at the end of `revision` (1-based), transferred back. */
   revisionBytes(bytes: ArrayBuffer, revision: number): Promise<SignatureWire<ArrayBuffer>>;

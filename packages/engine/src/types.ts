@@ -1768,6 +1768,19 @@ export interface SignatureReport {
   readonly weakReasons: readonly string[];
   /** DocMDP /P when this is a certification signature (1 no changes, 2 forms, 3 annots). */
   readonly docMdpPermissions?: 1 | 2 | 3;
+  /**
+   * The time a timestamp authority vouches for (spec §3.3): a document timestamp's own
+   * `TSTInfo` (`/SubFilter /ETSI.RFC3161`), or the signature timestamp token embedded in the
+   * CMS when its imprint and signature check out. The authority is named, never trusted.
+   */
+  readonly timestamp?: { readonly time: string; readonly tsa: string };
+  /**
+   * 0-based page indices whose rendering differs between the signed revision and the whole
+   * file (spec §3.1 step 6, §3.3), including indices only one of them has. Absent when the
+   * range covers the file, the signature did not verify, or no renderer was configured
+   * (`ValidateSignaturesOptions.visual`).
+   */
+  readonly visuallyChangedPages?: readonly number[];
 }
 
 /** Spec §3.3 name for `SignatureReport`. */
@@ -1776,6 +1789,12 @@ export type SignatureValidation = SignatureReport;
 export interface ValidateSignaturesOptions extends EngineCallOptions {
   /** For encrypted files: decrypts /M, /Reason and field names (the check itself needs none). */
   readonly password?: string;
+  /**
+   * Renders the signed revision and the whole file with a private PDFium and compares the
+   * pages (spec §3.1 step 6): `pdfiumWasm` is the self-hosted `pdfium.wasm` (URL or bytes),
+   * `dpi` defaults to 50. Without it, `visuallyChangedPages` is absent.
+   */
+  readonly visual?: { readonly pdfiumWasm: string | ArrayBuffer; readonly dpi?: number };
 }
 
 /** A PAdES-B approval signature to add (spec §3.2). */

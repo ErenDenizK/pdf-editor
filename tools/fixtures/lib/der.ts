@@ -108,6 +108,12 @@ export function utcTime(date: Date): Uint8Array {
   return tlv(TAG.utcTime, new Uint8Array(Buffer.from(text, 'latin1')));
 }
 
+/** GeneralizedTime as YYYYMMDDHHMMSSZ (RFC 5280 §4.1.2.5.2; TSTInfo genTime, RFC 3161). */
+export function generalizedTime(date: Date): Uint8Array {
+  const text = `${date.toISOString().replace(/[-:T]/g, '').slice(0, 14)}Z`;
+  return tlv(TAG.generalizedTime, new Uint8Array(Buffer.from(text, 'latin1')));
+}
+
 // ---------------------------------------------------------------------------
 // Reader
 // ---------------------------------------------------------------------------
