@@ -158,6 +158,10 @@ async function photoPdf(): Promise<Uint8Array> {
 }
 
 test('compress dialog result with compare (design screenshot)', async ({ page }, testInfo) => {
+  test.skip(
+    !process.env.CAPTURE_SCREENSHOTS,
+    'Set CAPTURE_SCREENSHOTS=1 to write docs/design/screenshots/.',
+  );
   await page.setViewportSize({ width: 1440, height: 900 });
   await useFileInputPicker(page);
   await page.goto('./');
