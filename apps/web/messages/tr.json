@@ -1945,7 +1945,6 @@
   "convert_note_dropped": "{count} üst bilgi, alt bilgi veya sayfa numarası satırı çıkarıldı.",
   "convert_note_without_text": "Çıkarılabilir metni olmayan sayfalar (taramalar): {pages}. Bunları eklemek için önce OCR çalıştırın.",
   "convert_ocr_first": "Önce OCR",
-  "convert_ocr_unavailable": "Metin tanıma (OCR) henüz kullanılamıyor.",
   "convert_output": "İndirilecek dosya: {name}",
   "convert_download": "İndir",
   "convert_failed": "Dönüştürme başarısız oldu: {reason}",

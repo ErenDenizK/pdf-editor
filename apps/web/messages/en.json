@@ -2732,7 +2732,6 @@
   ],
   "convert_note_without_text": "Pages without extractable text (scans): {pages}. Run OCR first to include them.",
   "convert_ocr_first": "OCR first",
-  "convert_ocr_unavailable": "Text recognition (OCR) is not available yet.",
   "convert_output": "Downloads {name}",
   "convert_download": "Download",
   "convert_failed": "The conversion failed: {reason}",

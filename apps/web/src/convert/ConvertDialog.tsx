@@ -17,6 +17,7 @@ import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import overlay from '../shell/ShortcutOverlay.module.css';
 import { useViewStore } from '../state/view-store';
+import { openOcrDialog } from '../ocr/ocr-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { deliverFile } from '../tools/deliver-file';
 import toolStyles from '../tools/ToolDialog.module.css';
@@ -335,14 +336,14 @@ function ConvertFlow({ documentId }: { readonly documentId: DocumentId }) {
                   <button
                     type="button"
                     className={toolStyles.secondary}
-                    disabled
-                    aria-describedby="convert-ocr-hint"
+                    onClick={() => {
+                      // The OCR dialog takes over; converting again afterwards sees the layer.
+                      closeToolDialog();
+                      openOcrDialog(documentId);
+                    }}
                   >
                     {m.convert_ocr_first()}
                   </button>
-                  <span id="convert-ocr-hint" className={toolStyles.hint}>
-                    {m.convert_ocr_unavailable()}
-                  </span>
                 </div>
               ) : null}
             </div>
