@@ -146,6 +146,8 @@ test('runs a Markdown recipe over dropped files and downloads the text', async (
 
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByRole('combobox', { name: 'Search commands' }).fill('batch');
+  // The list filters on a deferred value: wait for the row before Enter runs the active one.
+  await expect(page.getByRole('option', { name: /Batch…/, selected: true })).toBeVisible();
   await page.keyboard.press('Enter');
   const dialog = page.getByTestId('batch-dialog');
   await expect(dialog).toBeVisible();
