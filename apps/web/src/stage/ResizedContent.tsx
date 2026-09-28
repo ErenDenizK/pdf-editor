@@ -9,6 +9,10 @@
  * Any surface that draws page bitmaps (Arrange cells, the resize dialog preview; Read mode
  * and the Pages panel can adopt it) wraps its `PageCanvas` in `ResizedContent` and passes
  * the canvas the content size from `contentFrame` so the bitmap scale is chosen for it.
+ *
+ * A cropped page (`VirtualPage.cropBox`, crop/display.ts) is placed the same way: the
+ * engine renders the whole page box, which `contentFrame` places relative to the crop
+ * (composed with the resize placement when the page is also resized), and the sheet clips.
  */
 import {
   pageContentPlacement,
@@ -20,6 +24,8 @@ import {
 } from '@pdf-editor/document-model';
 import type { ReactNode } from 'react';
 
+import { cropFrame } from '../crop/display';
+import { composePlacement } from '../crop/geometry';
 import styles from './ResizedContent.module.css';
 
 /** Where a resized page's content shows, plus the content's displayed size in points. */
@@ -28,12 +34,21 @@ export interface ContentFrame extends ContentPlacement {
   readonly heightPt: number;
 }
 
-/** The content frame of a resized page; undefined for pages without a resize. Never throws. */
+/**
+ * The content frame of a resized or cropped page: where the page bitmap goes on the sheet
+ * and the size in points the bitmap covers; undefined for pages without either. Never
+ * throws.
+ */
 export function contentFrame(ws: Workspace, page: VirtualPage): ContentFrame | undefined {
-  if (page.resize === undefined) return undefined;
+  const cropped = cropFrame(ws, page);
+  if (page.resize === undefined) return cropped;
   try {
     const placement = pageContentPlacement(ws, page);
-    if (placement === undefined) return undefined;
+    if (placement === undefined) return cropped;
+    if (cropped !== undefined) {
+      const { widthPt, heightPt, ...inner } = cropped;
+      return { ...composePlacement(placement, inner), widthPt, heightPt };
+    }
     const content = pageContentSize(ws, page);
     const rotation = pageTotalRotation(ws, page);
     const quarter = rotation === 90 || rotation === 270;

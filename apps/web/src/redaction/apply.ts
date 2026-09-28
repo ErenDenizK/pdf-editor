@@ -341,21 +341,100 @@ export function isApplying(): boolean {
   return applying;
 }
 
+/** One source to redact inside an action: its marks, which of them apply, and the plan. */
+interface RedactionJob extends SourceJob {
+  readonly plan: RedactionPlan;
+  readonly captureStrings: boolean;
+}
+
+type Blocked = Extract<ApplyOutcome, { kind: 'blocked' }>;
+
 /**
- * Applies every ticked mark of the workspace (see the module comment). Never rejects.
+ * Redacts one source inside the runner's action (steps 1–3 of the module comment): deletes
+ * every /Redact mark of the source, runs `redaction.apply` with the job's plan and creates
+ * the marks that were not ticked again. The recorded edits are appended to `edits`.
  */
-export async function applyTickedRedactions(choices: ApplyChoices): Promise<ApplyOutcome> {
+async function redactSource(
+  ctx: EngineContext,
+  job: RedactionJob,
+  edits: EngineEdit[],
+): Promise<SourceRedaction | Blocked> {
+  const recreate: EngineEdit[] = [];
+  for (const mark of job.all) {
+    const deleted = await executeEdit(ctx, {
+      id: globalThis.crypto.randomUUID(),
+      source: job.source,
+      pageIndex: mark.pageIndex,
+      kind: 'annotation.delete',
+      payload: { annotationId: mark.id },
+    });
+    edits.push(deleted.recorded);
+    const ticked = job.ticked.some((t) => t.id === mark.id);
+    // The delete's inverse is the create that restores the mark exactly.
+    if (!ticked && deleted.recorded.inverse) {
+      recreate.push({
+        id: globalThis.crypto.randomUUID(),
+        source: job.source,
+        pageIndex: mark.pageIndex,
+        kind: 'annotation.create',
+        payload: deleted.recorded.inverse.payload,
+      });
+    }
+  }
+  const { plan } = job;
+  const capture = capturing(ctx);
+  let applied;
+  try {
+    applied = await executeEdit(capture.ctx, {
+      id: globalThis.crypto.randomUUID(),
+      source: job.source,
+      pageIndex: plan.areas[0]?.pageIndex ?? 0,
+      kind: 'redaction.apply',
+      payload: { plan, captureStrings: job.captureStrings },
+    });
+  } catch (error) {
+    if (!isRedactionFailure(error)) throw error;
+    return {
+      kind: 'blocked',
+      source: job.source,
+      name: job.name,
+      stage: error.stage,
+      message: error.message,
+      failure: error.failure,
+    };
+  }
+  edits.push(applied.recorded);
+  for (const edit of recreate) edits.push((await executeEdit(ctx, edit)).recorded);
+  const result = capture.result();
+  if (!result) throw new Error('The engine returned no redaction result');
+  const { bytes, ...reports } = result;
+  return {
+    source: job.source,
+    name: job.name,
+    marks: job.ticked.length,
+    keptMarks: recreate.length,
+    byteLength: bytes.byteLength,
+    result: reports,
+  };
+}
+
+/**
+ * Runs the jobs `plan` returns as one action and one history entry labelled `label(done)`
+ * (with `coalesceKey`, so a caller can join a model change to the entry), then scrubs the
+ * redacted strings from the model and announces the label. Never rejects.
+ */
+async function runRedactions(
+  plan: (ctx: EngineContext) => Promise<readonly RedactionJob[]>,
+  label: (done: readonly SourceRedaction[]) => string,
+  coalesceKey: string,
+): Promise<ApplyOutcome> {
   if (applying) return { kind: 'error', message: m.redaction_apply_busy() };
   applying = true;
   // Set inside the action (a holder, so control flow does not narrow them away).
-  const status: { blocked?: Extract<ApplyOutcome, { kind: 'blocked' }>; nothing: boolean } = {
-    nothing: false,
-  };
-  // Joins the model scrub below to the engine edits' history entry.
-  const coalesceKey = `redaction.apply:${globalThis.crypto.randomUUID()}`;
+  const status: { blocked?: Blocked; nothing: boolean } = { nothing: false };
   try {
     const sources = await runAction(async (ctx) => {
-      const jobs = await jobsOf(ctx);
+      const jobs = await plan(ctx);
       if (jobs.length === 0) {
         status.nothing = true;
         return undefined;
@@ -363,68 +442,15 @@ export async function applyTickedRedactions(choices: ApplyChoices): Promise<Appl
       const edits: EngineEdit[] = [];
       const done: SourceRedaction[] = [];
       for (const job of jobs) {
-        const recreate: EngineEdit[] = [];
-        for (const mark of job.all) {
-          const deleted = await executeEdit(ctx, {
-            id: globalThis.crypto.randomUUID(),
-            source: job.source,
-            pageIndex: mark.pageIndex,
-            kind: 'annotation.delete',
-            payload: { annotationId: mark.id },
-          });
-          edits.push(deleted.recorded);
-          const ticked = job.ticked.some((t) => t.id === mark.id);
-          // The delete's inverse is the create that restores the mark exactly.
-          if (!ticked && deleted.recorded.inverse) {
-            recreate.push({
-              id: globalThis.crypto.randomUUID(),
-              source: job.source,
-              pageIndex: mark.pageIndex,
-              kind: 'annotation.create',
-              payload: deleted.recorded.inverse.payload,
-            });
-          }
-        }
-        const plan = planForMarks(job.ticked, choices);
-        const capture = capturing(ctx);
-        let applied;
-        try {
-          applied = await executeEdit(capture.ctx, {
-            id: globalThis.crypto.randomUUID(),
-            source: job.source,
-            pageIndex: plan.areas[0]?.pageIndex ?? 0,
-            kind: 'redaction.apply',
-            payload: { plan, captureStrings: !choices.areaOnly },
-          });
-        } catch (error) {
-          if (!isRedactionFailure(error)) throw error;
-          status.blocked = {
-            kind: 'blocked',
-            source: job.source,
-            name: job.name,
-            stage: error.stage,
-            message: error.message,
-            failure: error.failure,
-          };
+        const outcome = await redactSource(ctx, job, edits);
+        if ('kind' in outcome) {
+          status.blocked = outcome;
           // Nothing is committed; the runner reverts what this action executed.
           return undefined;
         }
-        edits.push(applied.recorded);
-        for (const edit of recreate) edits.push((await executeEdit(ctx, edit)).recorded);
-        const result = capture.result();
-        if (!result) throw new Error('The engine returned no redaction result');
-        const { bytes, ...reports } = result;
-        done.push({
-          source: job.source,
-          name: job.name,
-          marks: job.ticked.length,
-          keptMarks: recreate.length,
-          byteLength: bytes.byteLength,
-          result: reports,
-        });
+        done.push(outcome);
       }
-      const label = m.history_redactions_applied({ count: appliedAreas(done) });
-      return { edits, label, coalesceKey, value: done };
+      return { edits, label: label(done), coalesceKey, value: done };
     });
     if (status.blocked) return status.blocked;
     if (!sources) {
@@ -432,7 +458,7 @@ export async function applyTickedRedactions(choices: ApplyChoices): Promise<Appl
         ? { kind: 'nothing' }
         : { kind: 'error', message: m.redaction_apply_failed() };
     }
-    const label = m.history_redactions_applied({ count: appliedAreas(sources) });
+    const text = label(sources);
     const strings = sources.flatMap((s) => s.result.plan.strings);
     if (strings.length > 0) {
       const { RedactedStringMatcher } = await import('@pdf-editor/engine');
@@ -441,12 +467,12 @@ export async function applyTickedRedactions(choices: ApplyChoices): Promise<Appl
       const redacted = new Set(sources.map((s) => s.source));
       useWorkspaceStore
         .getState()
-        .applyOperation((ws) => scrubModelStrings(ws, redacted, matcher, placeholder), label, {
+        .applyOperation((ws) => scrubModelStrings(ws, redacted, matcher, placeholder), text, {
           coalesceKey,
         });
     }
-    announce(label);
-    return { kind: 'applied', label, sources };
+    announce(text);
+    return { kind: 'applied', label: text, sources };
   } catch (error) {
     console.warn('Applying redactions failed', error);
     return {
@@ -456,6 +482,77 @@ export async function applyTickedRedactions(choices: ApplyChoices): Promise<Appl
   } finally {
     applying = false;
   }
+}
+
+/**
+ * Applies every ticked mark of the workspace (see the module comment). Never rejects.
+ */
+export async function applyTickedRedactions(choices: ApplyChoices): Promise<ApplyOutcome> {
+  return runRedactions(
+    async (ctx) =>
+      (await jobsOf(ctx)).map((job) => ({
+        ...job,
+        plan: planForMarks(job.ticked, choices),
+        captureStrings: !choices.areaOnly,
+      })),
+    (done) => m.history_redactions_applied({ count: appliedAreas(done) }),
+    // Joins the model scrub to the engine edits' history entry.
+    `redaction.apply:${globalThis.crypto.randomUUID()}`,
+  );
+}
+
+/** A plan a caller built for one source (areas in the source's page indices). */
+export interface PlannedRedaction {
+  readonly source: SourceId;
+  readonly plan: RedactionPlan;
+}
+
+/**
+ * Applies plans built elsewhere (crop and discard, crop/actions.ts) through the same
+ * pipeline as ticked marks: per source every /Redact mark is set aside and created again
+ * afterwards (none of them is applied), the plan runs with its gate and self-check, and
+ * the edits commit as one history entry labelled `options.label` under
+ * `options.coalesceKey`, so the caller can join its model change to the same entry
+ * (`applyOperation` with that key, right after). Plans without areas are skipped; the
+ * outcome is 'nothing' when none has any. Never rejects.
+ */
+export async function applyRedactionPlans(
+  plans: readonly PlannedRedaction[],
+  options: {
+    readonly label: string;
+    readonly coalesceKey: string;
+    /** Add the glyph text under the areas to the searched strings (see `ApplyChoices`). */
+    readonly captureStrings: boolean;
+  },
+): Promise<ApplyOutcome> {
+  return runRedactions(
+    async (ctx) => {
+      const ws = useWorkspaceStore.getState().workspace;
+      const jobs: RedactionJob[] = [];
+      for (const { source, plan } of plans) {
+        const info = ws.sources[source];
+        if (!info || plan.areas.length === 0) continue;
+        const all: RedactMark[] = [];
+        for (let pageIndex = 0; pageIndex < info.pageCount; pageIndex++) {
+          const marks = (await readAnnotations(source, pageIndex, ctx)).filter(
+            (a): a is RedactMark => isRedactMark(a) && !a.flags?.hidden,
+          );
+          all.push(...marks);
+        }
+        jobs.push({
+          source,
+          name: info.name,
+          all,
+          ticked: [],
+          plan,
+          captureStrings: options.captureStrings,
+        });
+      }
+      return jobs;
+    },
+    () => options.label,
+    options.coalesceKey,
+  );
 }
 
 // ---------------------------------------------------------------------------

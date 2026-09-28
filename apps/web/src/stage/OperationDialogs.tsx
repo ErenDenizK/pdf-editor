@@ -1,9 +1,9 @@
 /**
  * Dialogs for the section operations (spec §5): Split…, Merge into…, Merge all open
- * documents, Interleave with…, Resize pages… (ResizeDialog.tsx), and the image-size
- * question for "Insert images". Styled as the export dialog (ShortcutOverlay popup +
- * ExportDialog form parts, see OperationDialogFrame.tsx). Every dialog shows a live preview
- * of what it will create, and commits one history entry.
+ * documents, Interleave with…, Resize pages… (ResizeDialog.tsx), Crop pages… (crop/), and
+ * the image-size question for "Insert images". Styled as the export dialog (ShortcutOverlay
+ * popup + ExportDialog form parts, see OperationDialogFrame.tsx). Every dialog shows a live
+ * preview of what it will create, and commits one history entry.
  */
 import { Dialog } from '@base-ui/react/dialog';
 import type { DocumentId, InterleaveMode, SplitSpec } from '@pdf-editor/document-model';
@@ -51,6 +51,7 @@ import {
   splitSection,
   titleProblemMessage,
 } from './section-operations';
+import { CropDialog, CropDrawBanner } from '../crop';
 import { ResizeDialog } from './ResizeDialog';
 
 export function OperationDialogs() {
@@ -71,6 +72,7 @@ export function OperationDialogs() {
         <Dialog.Backdrop className={overlay.backdrop} />
         {shown === null ? null : <DialogContent key={dialogKey(shown)} dialog={shown} />}
       </Dialog.Portal>
+      <CropDrawBanner />
     </Dialog.Root>
   );
 }
@@ -91,6 +93,8 @@ function DialogContent({ dialog }: { readonly dialog: OperationDialog }) {
       return <InterleaveDialog documentId={dialog.documentId} />;
     case 'resize':
       return <ResizeDialog documentId={dialog.documentId} pageIds={dialog.pageIds} />;
+    case 'crop':
+      return <CropDialog documentId={dialog.documentId} pageIds={dialog.pageIds} />;
     case 'image-size':
       return <ImageSizeDialog count={dialog.count} largest={dialog.largest} />;
   }

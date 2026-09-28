@@ -247,7 +247,8 @@ function ApplyFlow({ onClose }: { readonly onClose: () => void }) {
   );
 }
 
-function Outcome({ outcome }: { readonly outcome: ApplyOutcome }) {
+/** The result sheet of an apply (also shown by "Crop pages…" with discard, crop/). */
+export function Outcome({ outcome }: { readonly outcome: ApplyOutcome }) {
   if (outcome.kind === 'applied') {
     return (
       <div className={styles.stack} data-testid="redaction-result">

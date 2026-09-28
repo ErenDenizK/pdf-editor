@@ -104,6 +104,7 @@ function MenuItems({
       <CommandItem command="pages.copyToNew" label={m.action_copy_to_new_document()} />
       <CommandItem command="pages.insertBlank" label={m.action_insert_blank_after()} />
       <CommandItem command="pages.resize" label={m.action_resize_pages()} />
+      <CommandItem command="pages.crop" label={m.action_crop_pages()} />
       <ContextMenu.SubmenuRoot>
         <ContextMenu.SubmenuTrigger className={menuStyles.item} disabled={!hasSelection}>
           <span className={menuStyles.label}>{m.action_move_to()}</span>

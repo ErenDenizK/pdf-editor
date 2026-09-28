@@ -1,5 +1,6 @@
 /**
- * Which section-operation dialog is open (split, merge, interleave, resize, image sizing).
+ * Which section-operation dialog is open (split, merge, interleave, resize, crop, image
+ * sizing).
  * One dialog at a time; `OperationDialogs` renders it. The image-sizing dialog is a
  * question: `askImageSizing` resolves when the user answers (undefined when cancelled).
  */
@@ -15,6 +16,13 @@ export type OperationDialog =
   | { readonly kind: 'merge-all' }
   | {
       readonly kind: 'resize';
+      /** The document the dialog was opened for (the section, else the first page's). */
+      readonly documentId: DocumentId;
+      /** The selected pages, in document order; empty when opened for a whole document. */
+      readonly pageIds: readonly PageId[];
+    }
+  | {
+      readonly kind: 'crop';
       /** The document the dialog was opened for (the section, else the first page's). */
       readonly documentId: DocumentId;
       /** The selected pages, in document order; empty when opened for a whole document. */

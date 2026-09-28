@@ -1899,5 +1899,70 @@
   "resize_confirm": "Resize",
   "history_resize": "Resize {pages}",
   "announce_resized": "Resized {pages} to {size}",
-  "announce_resize_cleared": "{pages} back to their original size"
+  "announce_resize_cleared": "{pages} back to their original size",
+  "cmd_crop_pages": "Crop pages…",
+  "cmd_crop_document_pages": "Crop the document’s pages…",
+  "action_crop_pages": "Crop pages…",
+  "section_crop": "Crop pages…",
+  "crop_title": "Crop pages",
+  "crop_notice": "A crop hides what lies outside the rectangle. The content stays in the file, and any PDF viewer can show it again.",
+  "crop_margins_label": "Margins to crop, from the page as shown",
+  "crop_margin_top": "Top",
+  "crop_margin_right": "Right",
+  "crop_margin_bottom": "Bottom",
+  "crop_margin_left": "Left",
+  "crop_edge_label": "{side} edge of the crop",
+  "crop_error_invalid": "Enter margins of zero or more.",
+  "crop_error_too_small": "These margins leave too little of the page.",
+  "crop_draw": "Draw crop area",
+  "crop_reset": "Reset crop",
+  "crop_nothing": "No pages to crop.",
+  "crop_preview": "{pages} will be cropped, the first to {size}",
+  "crop_preview_reset": "{pages} will show their whole page again",
+  "crop_preview_none": "Set the margins, drag the edges of the preview or draw a crop area on the page.",
+  "crop_skipped_not_pdf": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} blank or image page is left as it is.",
+        "countPlural=*": "{count} blank or image pages are left as they are."
+      }
+    }
+  ],
+  "crop_skipped_too_small": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} page is too small for these margins and is left as it is.",
+        "countPlural=*": "{count} pages are too small for these margins and are left as they are."
+      }
+    }
+  ],
+  "crop_discard": "Also remove the content outside the crop (irreversible after export)",
+  "crop_discard_hint": "Uses the redaction pipeline: text, images, drawings, links and notes outside the crop are removed from the file and the area is painted white, then a self-check verifies nothing is left there.",
+  "crop_discard_warning": "You can undo this while the document is open. Once the document is exported, the removed content is not in the file and cannot be brought back.",
+  "crop_discard_shared": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "On {count} page, content that another page of the workspace still shows is kept.",
+        "countPlural=*": "On {count} pages, content that other pages of the workspace still show is kept."
+      }
+    }
+  ],
+  "crop_confirm": "Crop",
+  "crop_confirm_reset": "Remove crop",
+  "crop_confirm_discard": "Crop and remove",
+  "crop_removing": "Removing the content outside the crop and checking the result…",
+  "crop_draw_layer": "Draw the crop area on page {page}",
+  "crop_draw_hint": "Drag a rectangle on a page to set the crop area. Esc cancels.",
+  "crop_draw_started": "Drawing a crop area. Drag a rectangle on a page, or press Escape to go back.",
+  "history_crop": "Crop {pages}",
+  "history_crop_reset": "Reset the crop of {pages}",
+  "history_crop_discard": "Crop {pages} and remove the content outside",
+  "announce_cropped": "Cropped {pages}",
+  "announce_crop_reset": "{pages} show their whole page again"
 }

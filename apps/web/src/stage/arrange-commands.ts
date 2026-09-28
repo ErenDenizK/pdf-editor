@@ -76,6 +76,15 @@ export function provideArrangeColumns(provider: () => number): () => void {
  * pages (of the invoking section, when a section menu ran it), else the whole document.
  */
 function openResizeDialog(): void {
+  openPagesDialog('resize');
+}
+
+/** "Crop pages…" (crop/): the same pages as "Resize pages…". */
+function openCropDialog(): void {
+  openPagesDialog('crop');
+}
+
+function openPagesDialog(kind: 'resize' | 'crop'): void {
   const ws = model().workspace;
   const fromSection = sectionCommandTarget();
   let pages: PageId[] = targetPages();
@@ -87,7 +96,7 @@ function openResizeDialog(): void {
     (pages[0] === undefined ? undefined : findPageLocation(ws, pages[0])?.document) ??
     ws.activeDocument;
   if (documentId === undefined || ws.documents[documentId] === undefined) return;
-  openOperationDialog({ kind: 'resize', documentId, pageIds: pages });
+  openOperationDialog({ kind, documentId, pageIds: pages });
 }
 
 /** Other open documents as "Merge into…" submenu entries, in tab order. */
@@ -113,6 +122,7 @@ export function registerArrangeCommands(registry: CommandRegistry = commandRegis
   const disposers = [
     provideMergeTargets(mergeTargetEntries),
     registerSectionMenuItem({ command: 'section.resize', label: m.section_resize, group: 'pages' }),
+    registerSectionMenuItem({ command: 'section.crop', label: m.section_crop, group: 'pages' }),
     registry.register({
       id: 'pages.cut',
       title: m.cmd_cut_pages(),
@@ -199,6 +209,14 @@ export function registerArrangeCommands(registry: CommandRegistry = commandRegis
       keywords: ['page size', 'scale', 'fit', 'canvas', 'a4', 'letter', 'paper', 'dimensions'],
       when: () => hasTargets() || (getActiveDocument(model().workspace)?.pages.length ?? 0) > 0,
       run: openResizeDialog,
+    }),
+    registry.register({
+      id: 'pages.crop',
+      title: m.cmd_crop_pages(),
+      group: pages,
+      keywords: ['cropbox', 'trim', 'margins', 'cut', 'discard', 'remove content'],
+      when: () => hasTargets() || (getActiveDocument(model().workspace)?.pages.length ?? 0) > 0,
+      run: openCropDialog,
     }),
     registry.register({
       id: 'pages.moveToRowStart',
@@ -371,6 +389,16 @@ export function registerArrangeCommands(registry: CommandRegistry = commandRegis
       keywords: ['page size', 'scale', 'fit', 'canvas', 'a4', 'letter', 'paper', 'dimensions'],
       when: () => (sectionDocument()?.pages.length ?? 0) > 0,
       run: openResizeDialog,
+    }),
+    registry.register({
+      id: 'section.crop',
+      title: m.cmd_crop_document_pages(),
+      group: documents,
+      // The section and tab menus run it; the palette has "Crop pages…" (pages.crop).
+      hiddenInPalette: true,
+      keywords: ['cropbox', 'trim', 'margins', 'cut', 'discard', 'remove content'],
+      when: () => (sectionDocument()?.pages.length ?? 0) > 0,
+      run: openCropDialog,
     }),
     registry.register({
       id: 'section.rename',

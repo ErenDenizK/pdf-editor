@@ -86,10 +86,12 @@ export function pageFrame(input: {
     input.sourceId === undefined
       ? undefined
       : getEngineService().pageCropBox(input.sourceId, input.sourceIndex);
+  // A crop the model sets (`VirtualPage.cropBox`) moves the origin like a source CropBox.
+  const origin = input.page?.cropBox ?? crop;
   return {
     size,
-    originX: crop?.x ?? 0,
-    originY: crop?.y ?? 0,
+    originX: origin?.x ?? 0,
+    originY: origin?.y ?? 0,
     rotation: input.rotation,
     scale: input.cssScale,
     ...intrinsic,
