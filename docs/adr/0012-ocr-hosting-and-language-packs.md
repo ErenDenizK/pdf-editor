@@ -2,13 +2,12 @@
 
 **Status:** accepted · **Date:** 2026-09-28
 
- ## Context
+## Context
 
- M5 OCR (spec §1) must run offline under ADR-0004's CSP.
+M5 OCR (spec §1) must run offline under ADR-0004's CSP.
 tesseract.js 7 defaults to jsDelivr and a `blob:` worker; its worker cannot take our pack bytes
 without a one-token fix; Emscripten finds the `.wasm` beside the worker; a meta CSP does not
 bind the worker (research 07).
-
 
 ## Decision
 
@@ -35,14 +34,12 @@ bind the worker (research 07).
 7. Guarantee: an e2e test with a Playwright request log asserts zero non-self requests
    during OCR, and offline OCR after "Keep available offline".
 
-
 ## Consequences
 
  First use downloads ~3.1 MB (one language, compressed host); each further
 language ~2 MB. A patched third-party file is kept until upstream releases a fix. Accuracy on
 degraded scans is limited (≈ 90% at scan150 quality) and shown as Review/Poor. Revisit best_int
 only if F's real scans show ≥ 2 points.
-
 
 ## Alternatives considered
 
