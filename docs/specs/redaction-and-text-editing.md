@@ -105,6 +105,26 @@ Deviations from and additions to §1.2–§1.4, found while wiring the apply flo
 - **Undo** is reopen + replay, as for text edits (`redaction.apply` inverse is
   replay-required); the edit runner treats `redaction.apply` like `text.edit`.
 
+Amendments after the independent M4 review (2026-09-28):
+
+- **Attachments** are removed through every channel when "Remove attachments" is on: the
+  `/EmbeddedFiles` name tree, `/AF`, every `/EF` entry, GoToE and GoToR actions that embed
+  a file (the link stays and does nothing), the catalog `/Collection`, RichMedia
+  annotations and any remaining embedded-file stream. The self-check lists every remaining
+  embedded-file stream as unverified and fails when attachments were meant to be removed.
+  At export, attachments brought in by other sources are listed as unverified rather than
+  blocking the export.
+- **Content-text check.** A content-stream lexer reads the text shown by `Tj`, `TJ`, `'`
+  and `"` (escapes, hex with whitespace, kerning arrays joined) in page content, Form
+  XObjects, annotation appearances, tiling patterns and Type3 glyph procedures anywhere in
+  the document; an annotation whose appearance shows a redacted string is deleted, and any
+  other stream still showing one fails the apply. Custom font encodings inside streams
+  that are never drawn are not decoded; page text is covered by the extraction checks.
+- **Page-text match** also runs on the normalised text of every page, with zero-width
+  and directional format characters stripped.
+- **Predictors.** Flate streams with PNG or TIFF predictors are decoded before the byte
+  grep; streams that cannot be decoded are listed under "not searched" with the reason.
+
 ## 2. Text editing
 
 ### 2.1 Tiers (docs/research/04 §5)

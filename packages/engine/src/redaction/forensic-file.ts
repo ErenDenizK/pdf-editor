@@ -13,6 +13,7 @@ import { unzlibSync } from 'fflate';
 
 import type { ForensicFinding } from '../types';
 import { type ByteVariant, grepBytes } from './byte-grep';
+import { undoPredictor } from './pdf-util';
 
 export interface RawFile {
   readonly bytes: Uint8Array;
@@ -116,7 +117,31 @@ export interface GrepTarget {
   readonly variants: readonly ByteVariant[];
 }
 
-/** Check 6: the raw bytes, then every inflated stream payload. */
+/**
+ * Predictor parameters written directly in the dictionary of the stream whose payload
+ * starts at `start` (`/DecodeParms << /Predictor 12 /Columns 4 >>`), if any. Parameters
+ * behind a reference or in an array are left to check 5, which reads the parsed dictionary.
+ */
+function payloadPredictor(file: RawFile, start: number) {
+  const before = file.skeleton.slice(Math.max(0, start - 4096), start);
+  const dict = before.slice(before.lastIndexOf('obj') + 1);
+  const parms = /\/DecodeParms\s*<<([^>]*)>>/.exec(dict)?.[1];
+  if (parms === undefined) return undefined;
+  const num = (key: string, fallback: number) => {
+    const m = new RegExp(`/${key}\\s+(\\d+)`).exec(parms);
+    return m ? Number(m[1]) : fallback;
+  };
+  const predictor = num('Predictor', 1);
+  if (predictor <= 1) return undefined;
+  return {
+    predictor,
+    colors: num('Colors', 1),
+    bitsPerComponent: num('BitsPerComponent', 8),
+    columns: num('Columns', 1),
+  };
+}
+
+/** Check 6: the raw bytes, then every inflated stream payload (predictors undone). */
 export function byteGrepFindings(file: RawFile, targets: readonly GrepTarget[]): ForensicFinding[] {
   const findings: ForensicFinding[] = [];
   for (const target of targets) {
@@ -136,6 +161,17 @@ export function byteGrepFindings(file: RawFile, targets: readonly GrepTarget[]):
       data = unzlibSync(file.bytes.subarray(start, end));
     } catch {
       continue; // not zlib data: already covered by the raw grep
+    }
+    const predictor = payloadPredictor(file, start);
+    if (predictor) {
+      // Search the rows as stored too: an undone predictor must not hide what was there.
+      const undone = undoPredictor(data, predictor);
+      if ('data' in undone) {
+        const both = new Uint8Array(data.length + 1 + undone.data.length);
+        both.set(data);
+        both.set(undone.data, data.length + 1);
+        data = both;
+      }
     }
     for (const target of targets) {
       for (const hit of grepBytes(data, target.variants)) {

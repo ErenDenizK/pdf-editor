@@ -37,6 +37,18 @@ describe('normalizeForMatch', () => {
     expect(normalizeForMatch('\ufeffSECRET-7731')).toBe('secret-7731');
   });
 
+  test('drops joiners, invisible operators and directional marks (a copy with one inside)', () => {
+    for (const cp of [0x200c, 0x200d, 0x2060, 0x034f, 0x2062, 0x200e, 0x202c, 0x2066]) {
+      expect(normalizeForMatch(`SECRET-77${String.fromCodePoint(cp)}31`)).toBe('secret-7731');
+    }
+  });
+
+  test('the ASCII fast path agrees with the general normalisation', () => {
+    for (const s of ['  Secret -\t7731\n', 'A\x0bB\x0cC', 'MiXeD CaSe 123 !?', '']) {
+      expect(normalizeForMatch(s)).toBe(normalizeForMatch(`${s}\u200b`));
+    }
+  });
+
   test('applies NFKC, so compatibility forms match', () => {
     expect(normalizeForMatch('ＳＥＣＲＥＴ－７７３１')).toBe('secret-7731');
     expect(normalizeForMatch('ﬁle')).toBe('file');

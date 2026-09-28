@@ -1,7 +1,8 @@
 /**
  * Forensic checks on the parsed object graph (research 06 §4 checks 2, 5 and 7):
- * reachability, a walk over every string, name and decodable stream of every object, and
- * annotations left in an area.
+ * reachability, a walk over every string, name and decodable stream of every object (the
+ * shown text of content streams read with the lexer of `content-text.ts`; embedded files
+ * that should have been removed), and annotations left in an area.
  */
 
 import {
@@ -26,12 +27,14 @@ import {
 } from '../pdflib/metadata-walk';
 import type { ForensicFinding } from '../types';
 import { grepBytes } from './byte-grep';
+import { type ContentStreamKind, contentStreams, normalizedShownText } from './content-text';
 import type { GrepTarget } from './forensic-file';
 import {
   annotationInAreas,
-  decodeStream,
-  filterNames,
+  decodeStreamOutcome,
+  embeddedFileStreams,
   isStructuralStream,
+  otherEmbeddedFiles,
   reachableRefs,
   refKey,
   sortedObjects,
@@ -80,14 +83,34 @@ export interface StringWalkResult {
   readonly notSearched: string[];
 }
 
-/** Check 5: every string, name (keys included) and decodable stream of every object. */
+/** Options of check 5 beyond the strings. */
+export interface StringWalkOptions {
+  /**
+   * Normalised redacted strings (`normalizeForMatch`) by plan index, looked for in the
+   * shown text of content streams.
+   */
+  readonly needles?: readonly { readonly stringIndex: number; readonly needle: string }[];
+  /** Attachments were kept; otherwise any embedded file stream left is a finding. */
+  readonly keepAttachments?: boolean;
+}
+
+/**
+ * Check 5: every string, name (keys included) and decodable stream of every object; the
+ * shown text of every content stream (page contents, Form XObjects and appearances,
+ * tiling patterns, Type3 glyph procedures); and, unless attachments were kept, every
+ * embedded file stream still in the file.
+ */
 export function objectStringFindings(
   doc: PDFDocument,
   matcher: RedactedStringMatcher,
   targets: readonly GrepTarget[],
+  options: StringWalkOptions = {},
 ): StringWalkResult {
   const findings: ForensicFinding[] = [];
   const notSearched: string[] = [];
+  const needles = options.needles ?? [];
+  const content: ReadonlyMap<PDFStream, ContentStreamKind> =
+    needles.length > 0 ? contentStreams(doc) : new Map();
   const bytesHit = (bytes: Uint8Array) =>
     targets.flatMap((t) =>
       grepBytes(bytes, t.variants).map((h) => `${h.variant} (string ${t.stringIndex})`),
@@ -133,15 +156,27 @@ export function objectStringFindings(
       }
       seen.add(value);
       if (value instanceof PDFStream) {
-        const data = decodeStream(doc.context, value);
-        if (data) {
-          const variants = bytesHit(data);
-          if (variants.length > 0)
+        const decoded = decodeStreamOutcome(doc.context, value);
+        if ('data' in decoded) {
+          const variants = bytesHit(decoded.data);
+          if (variants.length > 0) {
             hit(`${path} (stream data)`.trim(), 'stream', variants.join(', '));
+          } else {
+            const kind = content.get(value);
+            if (kind !== undefined) {
+              const texts = normalizedShownText(decoded.data);
+              const shown = needles.filter((t) => texts.some((x) => x.includes(t.needle)));
+              if (shown.length > 0) {
+                hit(
+                  `${path} (shown text)`.trim(),
+                  'content text',
+                  `${kind}: ${shown.map((t) => `redacted string ${t.stringIndex}`).join(', ')}`,
+                );
+              }
+            }
+          }
         } else {
-          notSearched.push(
-            `object ${n} (${filterNames(doc.context, value).join(', ') || 'unreadable'})`,
-          );
+          notSearched.push(`object ${n} (${decoded.reason})`);
         }
         stack.push({ value: value.dict, path, depth: depth + 1 });
       } else if (value instanceof PDFDict) {
@@ -157,6 +192,16 @@ export function objectStringFindings(
           stack.push({ value: value.get(i), path: `${path}[${i}]`, depth: depth + 1 });
         }
       }
+    }
+  }
+  if (options.keepAttachments !== true) {
+    for (const { ref, name } of embeddedFileStreams(doc)) {
+      findings.push({
+        where: `object ${ref.objectNumber}`,
+        objectNumber: ref.objectNumber,
+        channel: 'embedded file',
+        detail: `${name === undefined ? 'an embedded file' : `embedded file "${name}"`} is left although attachments were to be removed`,
+      });
     }
   }
   return { findings, notSearched };
@@ -190,7 +235,10 @@ export function annotationFindings(
   return findings;
 }
 
-/** Names of embedded files and file attachment annotations in the output. */
+/**
+ * Names of embedded files and file attachment annotations in the output: the
+ * /EmbeddedFiles tree, FileAttachment annotations, then every other embedded file stream.
+ */
 export function attachmentNames(doc: PDFDocument): string[] {
   const names: string[] = [];
   const tree = catalogNameTree(doc, NAMES.EmbeddedFiles);
@@ -203,5 +251,6 @@ export function attachmentNames(doc: PDFDocument): string[] {
       }
     }
   }
+  names.push(...otherEmbeddedFiles(doc));
   return names;
 }

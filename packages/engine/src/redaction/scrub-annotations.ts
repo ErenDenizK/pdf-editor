@@ -2,8 +2,10 @@
  * Scrub steps 1 and 2 (research 06 §3 step 4.1–4.2): annotations and form fields.
  *
  * An annotation is removed when its /Rect or any /QuadPoints quad intersects an area of its
- * page, when it carries a redacted string (any string, or its appearance streams), when it
- * is a leftover /Redact mark, or (unless attachments are kept) when it is a FileAttachment.
+ * page, when it carries a redacted string (any string, or its appearance streams, whose
+ * shown text is read with the content lexer of `content-text.ts`), when it is a leftover
+ * /Redact mark, or (unless attachments are kept) when it is a FileAttachment or a
+ * RichMedia annotation (whose assets are embedded files).
  * Removal cascades to its /Popup, to popups whose /Parent is removed and to /IRT replies.
  *
  * Widgets removed that way clear their field: /V, /DV, /RV and /I go from the field and its
@@ -56,6 +58,11 @@ const N = {
 export interface CarryTest {
   text(value: string): boolean;
   bytes(value: Uint8Array): boolean;
+  /**
+   * The decoded content stream `stream` shows a redacted string as text (kerned TJ arrays,
+   * escapes, spaced hex); false for streams that are not content streams.
+   */
+  shows?(stream: PDFStream, data: Uint8Array): boolean;
   /** Decoded data of a stream, `undefined` when not decodable. */
   decode(stream: PDFStream): Uint8Array | undefined;
 }
@@ -109,7 +116,7 @@ export function objectCarries(
     }
     if (v instanceof PDFStream) {
       const data = test.decode(v);
-      if (data && test.bytes(data)) return true;
+      if (data && (test.bytes(data) || test.shows?.(v, data) === true)) return true;
       stack.push({ value: v.dict, depth: item.depth + 1 });
     } else if (v instanceof PDFDict) {
       for (const [key, child] of v.entries()) {
@@ -185,7 +192,8 @@ export function scrubAnnotations(
       if (
         (areas.length > 0 && annotationInAreas(context, annot, areas)) ||
         subtype === 'Redact' ||
-        (subtype === 'FileAttachment' && options.removeFileAttachments) ||
+        ((subtype === 'FileAttachment' || subtype === 'RichMedia') &&
+          options.removeFileAttachments) ||
         objectCarries(context, annot, options.carries, skip)
       ) {
         doomed.add(annot);
@@ -238,7 +246,9 @@ export function scrubAnnotations(
       result.annotationsRemoved++;
       if (subtype === 'Link') result.linksRemoved++;
       if (subtype === 'Redact') result.pendingMarksRemoved++;
-      if (subtype === 'FileAttachment') result.fileAttachmentsRemoved++;
+      if (subtype === 'FileAttachment' || subtype === 'RichMedia') {
+        result.fileAttachmentsRemoved++;
+      }
     }
   }
 

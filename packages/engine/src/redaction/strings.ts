@@ -3,16 +3,39 @@
  * whitespace-insensitive, so "Secret 7731" in an outline title matches the redacted
  * "SECRET-7731 " only when the characters agree once case and whitespace are ignored.
  *
- * Normalisation, per code point: NFKC, then lower case; whitespace, zero-width characters,
- * the soft hyphen and the byte-order mark are dropped. Matches are mapped back to ranges of
- * the original text so replacement keeps everything around them.
+ * Normalisation, per code point: NFKC, then lower case; whitespace, zero-width characters
+ * and joiners (U+200B–U+200D, U+2060, U+034F), invisible operators (U+2061–U+2064),
+ * directional marks and isolates, the soft hyphen and the byte-order mark are dropped.
+ * Matches are mapped back to ranges of the original text so replacement keeps everything
+ * around them.
  */
 
+/** Invisible formatting code points ignored when matching, as inclusive ranges. */
+const INVISIBLE: readonly (readonly [number, number])[] = [
+  [0x00ad, 0x00ad], // soft hyphen
+  [0x034f, 0x034f], // combining grapheme joiner
+  [0x061c, 0x061c], // Arabic letter mark
+  [0x180e, 0x180e], // Mongolian vowel separator
+  [0x200b, 0x200f], // zero-width space, non-joiner, joiner; LRM, RLM
+  [0x202a, 0x202e], // directional embeddings and overrides
+  [0x2060, 0x2064], // word joiner, invisible operators
+  [0x2066, 0x206f], // directional isolates, deprecated format characters
+  [0xfeff, 0xfeff], // byte-order mark / zero-width no-break space
+];
+
 /** Code points ignored when matching (whitespace and invisible formatting characters). */
-const IGNORED = new RegExp('^[\\s\\u00ad\\u180e\\u200b-\\u200d\\u2060\\ufeff]$', 'u');
+function ignored(char: string): boolean {
+  if (/^\s$/u.test(char)) return true;
+  const cp = char.codePointAt(0) ?? 0;
+  return INVISIBLE.some(([from, to]) => cp >= from && cp <= to);
+}
+
+/** Printable ASCII and ASCII whitespace: NFKC is the identity, only whitespace is ignored. */
+const ASCII = /^[\t\n\v\f\r -~]*$/;
 
 /** The normalised form of `text` used for matching. */
 export function normalizeForMatch(text: string): string {
+  if (ASCII.test(text)) return text.replace(/\s+/g, '').toLowerCase();
   return normalizeWithMap(text).text;
 }
 
@@ -31,10 +54,10 @@ function normalizeWithMap(text: string): Normalized {
   let index = 0;
   for (const char of text) {
     const end = index + char.length;
-    if (!IGNORED.test(char)) {
+    if (!ignored(char)) {
       const folded = char.normalize('NFKC').toLowerCase();
       for (const part of folded) {
-        if (IGNORED.test(part)) continue;
+        if (ignored(part)) continue;
         out += part;
         const units = part.length;
         for (let k = 0; k < units; k++) {

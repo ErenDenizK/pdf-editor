@@ -7,6 +7,10 @@
  * each group runs once, with every plan-level overlay text moved onto its areas. Redacted
  * strings are document-wide, so they are checked once, with the first group. The reports
  * are merged check by check: a check passes when it passed in every run.
+ *
+ * Attachment removal is enforced when a redaction is applied; at export, embedded files
+ * (which other sources of the output may bring) are listed as unverified, never a failure,
+ * so the runs keep attachments.
  */
 
 import type {
@@ -83,10 +87,11 @@ export async function verifyRedactedOutput(
   const runs: RedactionPlan[] = [...groups.values()].map(({ plan, areas }, index) => ({
     areas,
     strings: index === 0 ? strings : [],
+    keepAttachments: true,
     ...(plan.fillColor === undefined ? {} : { fillColor: plan.fillColor }),
     ...(plan.overlayColor === undefined ? {} : { overlayColor: plan.overlayColor }),
   }));
-  if (runs.length === 0) runs.push({ areas: [], strings });
+  if (runs.length === 0) runs.push({ areas: [], strings, keepAttachments: true });
   const reports: ForensicReport[] = [];
   for (const run of runs) reports.push(await forensicCheck(finalBytes, run, deps, options));
   return mergeForensicReports(reports);

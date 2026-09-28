@@ -11,10 +11,15 @@
  *   text drawn there (`deps.getPageText`; boxes are whole points, so a glyph must overlap
  *   the area by more than 1 pt);
  * - `no-search-hits` (4): searching the whole document for each redacted string finds
- *   nothing (`deps.search`);
- * - `object-strings` (5): no decoded string, name or decodable stream of any object
- *   contains a redacted string;
- * - `byte-grep` (6): nor do the raw bytes or any inflated stream, in every encoding of
+ *   nothing (`deps.search`), and neither does matching the normalised text of each page
+ *   (`deps.getPageText`, `normalizeForMatch`: a copy with a zero-width character inside);
+ * - `object-strings` (5): no decoded string, name or decodable stream (predictors undone)
+ *   of any object contains a redacted string, no content stream shows one as text (the
+ *   lexer of `content-text.ts`: kerned TJ arrays, escapes, spaced hex), and, unless the
+ *   plan keeps attachments, no embedded file stream is left; streams that cannot be decoded
+ *   are listed in `notSearched` with the reason;
+ * - `byte-grep` (6): nor do the raw bytes or any inflated stream (PNG and TIFF predictors
+ *   undone when the stream dictionary gives them directly), in every encoding of
  *   `byte-grep.ts`;
  * - `no-annotations-in-areas` (7): no annotation or widget intersects an area, and no
  *   /Redact mark is left;
@@ -240,12 +245,14 @@ export async function forensicCheck(
     }),
   );
 
-  // 4. Search.
+  // 4. Search, then the normalised text of every page.
   checks.push(
     await guarded('no-search-hits', async () => {
       const findings: ForensicFinding[] = [];
+      const found = new Set<string>();
       for (const [stringIndex, s] of strings.entries()) {
         for (const hit of await deps.search(s)) {
+          found.add(`${stringIndex}:${hit.pageIndex}`);
           findings.push({
             where: `page ${hit.pageIndex + 1}`,
             pageIndex: hit.pageIndex,
@@ -253,6 +260,21 @@ export async function forensicCheck(
             detail: `redacted string ${stringIndex}`,
           });
         }
+      }
+      const needles = strings.map(normalizeForMatch);
+      for (let pageIndex = 0; doc && needles.length > 0 && pageIndex < pageCount; pageIndex++) {
+        const text = normalizeForMatch(
+          (await deps.getPageText(pageIndex)).map((run) => run.text).join(''),
+        );
+        needles.forEach((needle, stringIndex) => {
+          if (!text.includes(needle) || found.has(`${stringIndex}:${pageIndex}`)) return;
+          findings.push({
+            where: `page ${pageIndex + 1}`,
+            pageIndex,
+            channel: 'page text',
+            detail: `redacted string ${stringIndex} (normalised page text)`,
+          });
+        });
       }
       return result(
         'no-search-hits',
@@ -266,7 +288,12 @@ export async function forensicCheck(
   checks.push(
     await guarded('object-strings', () => {
       if (!doc) return notParsed('object-strings');
-      const walk = objectStringFindings(doc, matcher, targets);
+      const walk = objectStringFindings(doc, matcher, targets, {
+        needles: plan.strings
+          .map((s, stringIndex) => ({ stringIndex, needle: normalizeForMatch(s) }))
+          .filter((t) => t.needle !== ''),
+        keepAttachments: plan.keepAttachments === true,
+      });
       notSearched = walk.notSearched;
       unverified = attachmentNames(doc);
       const note =

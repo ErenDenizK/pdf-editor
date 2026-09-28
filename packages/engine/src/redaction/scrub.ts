@@ -6,7 +6,8 @@
  *
  * Steps, in order:
  * 1–2. annotations in areas or carrying a redacted string (popups, replies), widgets and
- *      their field values, /XFA (`scrub-annotations.ts`);
+ *      their field values, /XFA (`scrub-annotations.ts`); an appearance stream carries a
+ *      string when its bytes or its shown text (`content-text.ts`) contain it;
  * 3.   redacted strings in every string object and name-tree key (`scrub-strings.ts`);
  * 4.   metadata: XMP regenerated from the scrubbed Info, per-object /Metadata, /PieceInfo,
  *      /Thumb, scripts (`scrub-metadata.ts`); structure tree pruned (`scrub-structure.ts`);
@@ -15,11 +16,17 @@
  * 7.   garbage collection (`dropUnreachable`, which also removes the engine's in-session
  *      orphans), a new /ID, and a full save with object streams, as the assembler does.
  *
+ * A content stream still showing a redacted string after these steps (a Form XObject,
+ * tiling pattern or Type3 glyph procedure anywhere in the file, or the content of a page)
+ * is not changed: it is drawn outside the areas, like an unmarked copy of the text on a
+ * page, so the scrub only warns and the forensic self-check (object-strings) stops the
+ * apply.
+ *
  * Areas are in unrotated user space, whatever the page's /Rotate. Throws `EngineError`
  * when the bytes cannot be parsed or are encrypted (the engine pass decrypts).
  */
 
-import { PDFDocument, PDFHexString } from '@cantoo/pdf-lib';
+import { PDFDocument, PDFHexString, type PDFStream } from '@cantoo/pdf-lib';
 import type { Rect } from '@pdf-editor/document-model';
 
 import { dropUnreachable } from '../pdflib/metadata';
@@ -30,6 +37,7 @@ import {
   type RedactionReport,
 } from '../types';
 import { byteVariants, grepBytes } from './byte-grep';
+import { type ContentStreamKind, contentStreams, normalizedShownText } from './content-text';
 import { drawFills } from './fill';
 import {
   BLACK,
@@ -133,9 +141,24 @@ export async function scrubRedactedDocument(
     warnings.push('The placeholder contains a redacted string; a neutral one was used');
   }
   const variants = plan.strings.flatMap((s) => byteVariants(s));
+  const content: ReadonlyMap<PDFStream, ContentStreamKind> = matcher.empty
+    ? new Map()
+    : contentStreams(doc);
+  const shown = new Map<PDFStream, boolean>();
+  const shows = (stream: PDFStream, data: Uint8Array): boolean => {
+    if (matcher.empty || !content.has(stream)) return false;
+    let hit = shown.get(stream);
+    if (hit === undefined) {
+      const texts = normalizedShownText(data);
+      hit = matcher.needles.some((needle) => texts.some((t) => t.includes(needle)));
+      shown.set(stream, hit);
+    }
+    return hit;
+  };
   const carries: CarryTest = {
     text: (value) => matcher.matches(value),
     bytes: (value) => variants.length > 0 && grepBytes(value, variants).length > 0,
+    shows,
     decode: (stream) => decodeStream(context, stream),
   };
   const keepAttachments = plan.keepAttachments === true || skip.has('attachments');
@@ -183,6 +206,16 @@ export async function scrubRedactedDocument(
       }
     }
     dropUnreachable(doc);
+  }
+  if (!matcher.empty) {
+    for (const [stream, kind] of contentStreams(doc)) {
+      const data = decodeStream(context, stream);
+      if (!data || !(carries.bytes(data) || shows(stream, data))) continue;
+      const ref = context.getObjectRef(stream);
+      warnings.push(
+        `${ref ? `Object ${ref.objectNumber}` : 'A stream'} (${kind}) still shows a redacted string outside the areas`,
+      );
+    }
   }
   const id = PDFHexString.fromBytes(crypto.getRandomValues(new Uint8Array(16)));
   context.trailerInfo.ID = context.obj([id, id]);

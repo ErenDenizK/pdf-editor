@@ -21,7 +21,9 @@ export const NAMES = {
   AA: PDFName.of('AA'),
   AF: PDFName.of('AF'),
   Annots: PDFName.of('Annots'),
+  Collection: PDFName.of('Collection'),
   CreationDate: PDFName.of('CreationDate'),
+  EF: PDFName.of('EF'),
   EmbeddedFiles: PDFName.of('EmbeddedFiles'),
   F: PDFName.of('F'),
   FS: PDFName.of('FS'),
@@ -147,6 +149,26 @@ export function isScriptOrExternalActionDict(doc: PDFDocument, dict: PDFDict): b
 export function isScriptOrExternalAction(doc: PDFDocument, value: PDFObject | undefined): boolean {
   const resolved = doc.context.lookup(value);
   return resolved instanceof PDFDict && isScriptOrExternalActionDict(doc, resolved);
+}
+
+/**
+ * An action that opens an embedded file: /GoToE (its target is always embedded), or /GoToR
+ * whose /F file specification carries the file itself (/EF). Used by redaction's
+ * "Remove attachments"; "Strip metadata" keeps these actions.
+ */
+export function isEmbeddedFileActionDict(doc: PDFDocument, dict: PDFDict): boolean {
+  const { context } = doc;
+  const type = context.lookup(dict.get(NAMES.S));
+  if (type === PDFName.of('GoToE')) return true;
+  if (type !== PDFName.of('GoToR')) return false;
+  const spec = context.lookup(dict.get(NAMES.F));
+  return spec instanceof PDFDict && spec.has(NAMES.EF);
+}
+
+/** `isEmbeddedFileActionDict` for any value (direct or indirect, not always a dictionary). */
+export function isEmbeddedFileAction(doc: PDFDocument, value: PDFObject | undefined): boolean {
+  const resolved = doc.context.lookup(value);
+  return resolved instanceof PDFDict && isEmbeddedFileActionDict(doc, resolved);
 }
 
 /** Annotation /Subtype of a dictionary that is an annotation, else undefined. */
