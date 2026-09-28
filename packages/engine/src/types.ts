@@ -741,6 +741,32 @@ export interface VerificationExpectation {
    * (`name_2`, `name_3`, …; see `ReconciliationReport.formFieldsRenamed`).
    */
   readonly createdFields?: readonly CreatedFieldExpectation[];
+  /**
+   * Words of the OCR layers the output carries (spec recognize-and-compare §1.3), per output
+   * page: each must come back from PDFium's page text (`locateWords`, the layer's own
+   * verification rule) and, when the word has a `rect`, lie within `OCR_RECT_TOLERANCE` of
+   * it on every edge. The layer is page content, not an annotation, so flattening,
+   * compression and encryption keep it; pages not listed are not checked.
+   */
+  readonly ocrWords?: readonly OcrWordsExpectation[];
+}
+
+/** The OCR words one output page must yield through PDFium. */
+export interface OcrWordsExpectation {
+  /** Output page index. */
+  readonly pageIndex: number;
+  readonly words: readonly OcrExpectedWord[];
+}
+
+/** One written OCR word, as the verification pass must find it. */
+export interface OcrExpectedWord {
+  readonly text: string;
+  /**
+   * The box the word was written to (`layerWordRect`), in the output page's user space.
+   * Absent when the export moved the content in a way the plan does not map (a resized
+   * page): the word is then checked by its text only.
+   */
+  readonly rect?: Rect;
 }
 
 /** A form field created in the app, as the verification pass must find it. */

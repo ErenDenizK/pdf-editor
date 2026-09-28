@@ -62,6 +62,7 @@ import {
   type FormFieldWidget,
   type Glyph,
   type NewAnnotation,
+  type OcrWordsExpectation,
   type OpenedDocument,
   type OpenOptions,
   type PdfEditor,
@@ -105,6 +106,8 @@ import {
   userToDeviceRect,
 } from './coords';
 import { type ErrorContext, runTask, throwIfAborted } from './task-bridge';
+import { edgeDeviation, locateWords, OCR_RECT_TOLERANCE } from '../ocr/verify';
+import type { PageChar } from '../redaction/engine-session';
 
 export type { FontFallbackConfig };
 
@@ -1523,6 +1526,11 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
           );
         }
       }
+      for (const page of expectation.ocrWords ?? []) {
+        if (page.pageIndex >= opened.pageCount || page.words.length === 0) continue;
+        const chars = await this.pageChars(scratchId, page.pageIndex, options);
+        problems.push(...ocrWordProblems(page, chars));
+      }
       for (const region of expectation.redactedRegions ?? []) {
         if (region.pageIndex >= opened.pageCount) continue;
         const runs = await this.getPageText(scratchId, region.pageIndex, options);
@@ -1541,6 +1549,43 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
       await this.close(scratchId).catch(() => undefined);
     }
     return { ok: problems.length === 0, problems };
+  }
+
+  /**
+   * Every character of a page in content order, generated ones (synthesized spaces, line
+   * breaks) without a box: what `ScratchDocument.chars` gives the OCR layer's own
+   * verification, so `locateWords` sees the same text here.
+   */
+  private async pageChars(
+    id: SourceId,
+    pageIndex: number,
+    options: EngineCallOptions,
+  ): Promise<PageChar[]> {
+    const engine = await this.engine();
+    const { doc, page } = this.page(id, pageIndex);
+    const glyphs = await this.run(engine.getPageGlyphs(doc, page), options, 'getPageText');
+    if (glyphs.length === 0) return [];
+    const texts = await this.run(
+      engine.getTextSlices(
+        doc,
+        glyphs.map((_, charIndex) => ({ pageIndex, charIndex, charCount: 1 })),
+      ),
+      options,
+      'getPageText',
+    );
+    const g = pageGeometry(page);
+    // The glyph array is sparse (generated characters have no entry): index, not map.
+    const out: PageChar[] = [];
+    for (let i = 0; i < glyphs.length; i++) {
+      const box = glyphs[i];
+      const text = texts[i] ?? '';
+      out.push(
+        !box || box.isEmpty
+          ? { text }
+          : { text, rect: deviceToUserRect(g, { origin: box.origin, size: box.size }) },
+      );
+    }
+    return out;
   }
 
   private checkLabels(
@@ -1723,6 +1768,57 @@ export function createdFieldProblems(
       candidates.length === 0
         ? `Created form field "${want.name}" is missing`
         : `Created form field "${want.name}" is not a ${want.kind} field with widgets on page ${pages}`,
+    );
+  }
+  return problems;
+}
+
+/**
+ * What an output page's OCR words lack (spec recognize-and-compare §1.3), by the rule of the
+ * layer's own verification (`verifyOcrLayer`): every word must be found in the page text in
+ * order (`locateWords`), and every word with a `rect` must lie within `OCR_RECT_TOLERANCE`
+ * of it on every edge. No share below all of them passes: the export copies the verified
+ * layer unchanged, so a word it loses or moves is a defect of the export, not of recognition.
+ */
+export function ocrWordProblems(
+  expected: OcrWordsExpectation,
+  chars: readonly PageChar[],
+): string[] {
+  const { pageIndex, words } = expected;
+  const located = locateWords(
+    chars,
+    words.map((w) => w.text),
+  );
+  const missing: string[] = [];
+  let placed = 0;
+  let displaced = 0;
+  let worst = 0;
+  located.forEach((rect, i) => {
+    const word = words[i];
+    if (!word) return;
+    if (!rect) {
+      missing.push(word.text);
+      return;
+    }
+    if (!word.rect) return;
+    placed++;
+    const deviation = edgeDeviation(rect, word.rect);
+    if (deviation > OCR_RECT_TOLERANCE) {
+      displaced++;
+      worst = Math.max(worst, deviation);
+    }
+  });
+  const problems: string[] = [];
+  if (missing.length > 0) {
+    problems.push(
+      `Page ${pageIndex + 1}: ${missing.length} of ${words.length} OCR word${words.length === 1 ? '' : 's'} not found in the text ` +
+        `(${missing.slice(0, 5).join(', ')})`,
+    );
+  }
+  if (displaced > 0) {
+    problems.push(
+      `Page ${pageIndex + 1}: ${displaced} of ${placed} OCR word${placed === 1 ? '' : 's'} more than ${OCR_RECT_TOLERANCE} pt ` +
+        `from their place (worst ${worst.toFixed(2)} pt)`,
     );
   }
   return problems;

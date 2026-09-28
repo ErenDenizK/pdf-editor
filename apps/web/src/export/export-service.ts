@@ -36,7 +36,10 @@
  *    redactions, the redaction self-check (`verifyRedactedOutput` in the PDFium worker) runs
  *    on the exact final bytes (after assembly, compression and encryption, with the user
  *    password) against every plan mapped to output pages; a failing check fails
- *    verification with the check's findings. Only verified bytes are offered.
+ *    verification with the check's findings. Pages with OCR layers (`ocr.apply`) must
+ *    yield their recognised words through PDFium (`ocrWords`, spec recognize-and-compare
+ *    §1.3), read from the payloads the engine holds and mapped to output pages
+ *    (`ocrWordsExpectation`). Only verified bytes are offered.
  *
  * 5. Signatures (spec recognize-and-compare §3.2, ADR-0013): the assembler writes a new
  *    file, so a signed source's signatures could not survive; `stripSignatures` removes their
@@ -65,6 +68,11 @@ import {
 import type {
   CompressionSettings,
   ForensicReport,
+  OcrApplyPayload,
+  OcrExpectedWord,
+  OcrLayerPlan,
+  OcrLayerWord,
+  OcrWordsExpectation,
   PdfAssembler,
   PdfEditor,
   PdfRedactor,
@@ -397,6 +405,73 @@ async function expectedAnnotationCounts(
   return any ? counts : undefined;
 }
 
+/** The engine functions `ocrWordsExpectation` reads OCR payloads with (the engine is lazy). */
+export interface OcrExpectationHelpers {
+  readonly readOcrApplyPayload: (payload: unknown) => OcrApplyPayload;
+  readonly ocrLayerPlanOf: (payload: OcrApplyPayload) => OcrLayerPlan;
+  readonly writableWord: (word: OcrLayerWord) => boolean;
+  readonly layerWordRect: (word: OcrLayerWord) => Rect;
+  readonly isReplayRequired: (edit: EngineEdit) => boolean;
+}
+
+/**
+ * The OCR words each output page must yield through PDFium (`VerificationExpectation.ocrWords`,
+ * spec recognize-and-compare §1.3), from the `ocr.apply` edits the engine holds (`heldOf`):
+ *
+ * - Per source page, the words of the last run that covered it, as the layer writer wrote
+ *   them (`writableWord`, boxes by `layerWordRect`). A re-run with `replace: 'ours'` swaps the
+ *   layer; with `'none'` the older layer stays as well, and checking the newest words alone
+ *   is still sound.
+ * - A `redaction.apply` after a run clears that source's words: it removes text inside its
+ *   areas and its strings document-wide, so which recognised words survive is not known here;
+ *   the redaction self-check (`verifyRedactedOutput`) covers those pages instead.
+ * - Output pages are `doc.pages` in order: a deleted source page is never listed, a
+ *   duplicated one expects its words on every occurrence.
+ * - Rotation and crop leave user space as it was (only /Rotate and /CropBox change), so the
+ *   written boxes stand. A resized page's content goes through the assembler's matrix from
+ *   the old visible box, whose origin (the source CropBox) the model does not record, so its
+ *   words are checked by text only, as `redactionExportPlan` leaves resized pages unmapped.
+ */
+export function ocrWordsExpectation(
+  doc: VirtualDocument,
+  heldOf: (source: SourceId) => readonly EngineEdit[],
+  helpers: OcrExpectationHelpers,
+): OcrWordsExpectation[] | undefined {
+  const bySource = new Map<SourceId, ReadonlyMap<number, readonly OcrExpectedWord[]>>();
+  const wordsOf = (source: SourceId): ReadonlyMap<number, readonly OcrExpectedWord[]> => {
+    const known = bySource.get(source);
+    if (known) return known;
+    const pages = new Map<number, readonly OcrExpectedWord[]>();
+    for (const edit of heldOf(source)) {
+      if (helpers.isReplayRequired(edit)) continue;
+      if (edit.kind === 'redaction.apply') pages.clear();
+      if (edit.kind !== 'ocr.apply') continue;
+      const plan = helpers.ocrLayerPlanOf(helpers.readOcrApplyPayload(edit.payload));
+      for (const page of plan.pages) {
+        pages.set(
+          page.pageIndex,
+          page.words
+            .filter(helpers.writableWord)
+            .map((word) => ({ text: word.text, rect: helpers.layerWordRect(word) })),
+        );
+      }
+    }
+    bySource.set(source, pages);
+    return pages;
+  };
+  const expected: OcrWordsExpectation[] = [];
+  doc.pages.forEach((page, pageIndex) => {
+    if (page.ref.kind !== 'source') return;
+    const words = wordsOf(page.ref.source).get(page.ref.index);
+    if (!words || words.length === 0) return;
+    expected.push({
+      pageIndex,
+      words: page.resize === undefined ? words : words.map(({ text }) => ({ text })),
+    });
+  });
+  return expected.length > 0 ? expected : undefined;
+}
+
 /** Edits that rewrite page content and cannot be undone in place (replayed after a reopen). */
 function isContentEdit(edit: EngineEdit): boolean {
   return (
@@ -517,8 +592,9 @@ async function prepareExportNow(
   if (doc === undefined) return failed(m.export_error_closed());
   if (doc.pages.length === 0) return failed(m.export_error_no_pages());
   try {
+    const engineModule = await import('@pdf-editor/engine');
     const { annotationIdsOfEdits, planExport, OCR_LOW_CONFIDENCE, OCR_QUALITY_THRESHOLDS } =
-      await import('@pdf-editor/engine');
+      engineModule;
     const plan = planExport(ws, documentId, {
       ...(options.security === undefined ? {} : { security: options.security }),
       // Flattened created fields are not expected in the output.
@@ -574,9 +650,12 @@ async function prepareExportNow(
           .flatMap(([, ids]) => [...ids]),
       ),
     ];
+    // The OCR layers are page content: flattening, compression and encryption keep them.
+    const ocrWords = ocrWordsExpectation(doc, heldOf, engineModule);
     const expectation: VerificationExpectation = {
       ...plan.expectation,
       ...(annotationCounts ? { annotationCounts } : {}),
+      ...(ocrWords ? { ocrWords } : {}),
       // Conformance covers the annotations this app wrote (sources keep their own).
       ...(edited.size > 0 && !flatten ? { checkAnnotations: true, annotationIds: writtenIds } : {}),
     };
