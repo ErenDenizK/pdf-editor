@@ -151,7 +151,10 @@ export function anchorLabel(anchor: Anchor): string {
 }
 
 export function waitingForLabel(waiting: RecipeWaitingFor): string {
-  return waiting === 'ocr' ? m.batch_waiting_ocr() : m.batch_waiting_convert();
+  switch (waiting) {
+    case 'ocr':
+      return m.batch_waiting_ocr();
+  }
 }
 
 function fact(summary: RecipeStepSummary, key: string): unknown {
@@ -251,8 +254,17 @@ export function stepDetail(summary: RecipeStepSummary): string {
       const languages = fact(summary, 'languages');
       return Array.isArray(languages) ? languages.join(', ') : '';
     }
-    case 'export':
-      return outputFormatLabel(String(fact(summary, 'format')));
+    case 'export': {
+      const breaks = fact(summary, 'pageBreaks');
+      // The options that differ from the export dialog's defaults.
+      return join([
+        outputFormatLabel(String(fact(summary, 'format'))),
+        breaks === 'rule' || breaks === 'comment' ? pageBreaksLabel(breaks) : '',
+        fact(summary, 'keepHeadersFooters') === true ? m.batch_detail_headers_kept() : '',
+        fact(summary, 'joinHyphens') === false ? m.batch_detail_hyphens_kept() : '',
+        fact(summary, 'images') === false ? m.batch_detail_no_images() : '',
+      ]);
+    }
   }
 }
 
@@ -266,6 +278,18 @@ export function compressPresetLabel(preset: string): string {
       return m.compress_preset_print();
     default:
       return m.compress_preset_custom();
+  }
+}
+
+/** The export dialog's words for the page breaks between converted pages. */
+export function pageBreaksLabel(breaks: 'none' | 'rule' | 'comment'): string {
+  switch (breaks) {
+    case 'none':
+      return m.convert_break_none();
+    case 'rule':
+      return m.convert_break_rule();
+    case 'comment':
+      return m.convert_break_comment();
   }
 }
 

@@ -3,8 +3,10 @@
  * (`compare/document-pages.ts`: text runs, URI links and images from the PDFium worker) and
  * lays it out in the analysis worker (`AnalysisProxy.convert`). The dialog's choices map to
  * the engine's `ConvertOptions` here; `outputFile` names the download.
+ * `convertWorkspaceDocument` does the same for a document of a private workspace (the batch
+ * runner's, spec §5), whose sources are not tabs.
  */
-import type { DocumentId } from '@pdf-editor/document-model';
+import type { DocumentId, Workspace } from '@pdf-editor/document-model';
 import type {
   ConvertOptions,
   ConvertPageBreak,
@@ -15,11 +17,14 @@ import type {
 import {
   documentPages,
   pageAt,
+  type PageEngine,
   pageEngine,
   pageGeometry,
   pageImages,
   pageLinks,
   pageText,
+  type WorkspacePagesDependencies,
+  workspaceDocumentPages,
 } from '../compare/document-pages';
 import { getAnalysisWorkers } from '../engine/engine-service';
 import { exportFileName } from '../export/filename';
@@ -140,6 +145,69 @@ export async function convertDocumentPages(
         {
           ...convertOptions(choice),
           pages,
+          ...(signal ? { signal } : {}),
+          ...(onProgress ? { onProgress } : {}),
+        },
+      );
+    } finally {
+      await side.dispose().catch(() => undefined);
+    }
+  } finally {
+    lease.release();
+  }
+}
+
+/** What `convertWorkspaceDocument` needs besides the workspace (see `workspaceDocumentPages`). */
+export interface WorkspaceConvertDependencies extends WorkspacePagesDependencies {
+  /** The PDFium proxy that has the workspace's sources open (the app's, by default). */
+  readonly engine?: PageEngine;
+  /** Read the assembled document even when its pages are plain source pages. */
+  readonly assemble?: boolean;
+}
+
+/**
+ * Converts every page of a document of `ws` in the analysis worker: any workspace, such as
+ * the batch runner's private one, whose sources are open in the engine. Text is read from
+ * the engine directly: the engine service's text cache is keyed by the tabs' sources and
+ * would keep a private source's pages after its owner closed it.
+ */
+export async function convertWorkspaceDocument(
+  ws: Workspace,
+  documentId: DocumentId,
+  choice: ConvertChoice,
+  deps: WorkspaceConvertDependencies,
+  control: {
+    readonly signal?: AbortSignal;
+    readonly onProgress?: (done: number, total: number) => void;
+  } = {},
+): Promise<ConvertResult> {
+  const { signal, onProgress } = control;
+  const lease = await getAnalysisWorkers().acquire();
+  try {
+    const engine = deps.engine ?? (await pageEngine());
+    const side = await workspaceDocumentPages(ws, documentId, deps, {
+      ...(signal ? { signal } : {}),
+      ...(deps.assemble === true ? { assemble: true } : {}),
+    });
+    try {
+      const call = (options: EngineCallOptions): EngineCallOptions => ({
+        ...options,
+        priority: 'low',
+      });
+      return await lease.proxy.convert(
+        {
+          pageCount: side.pages.length,
+          geometry: (index) => pageGeometry(pageAt(side, index)),
+          text: (index, options) => {
+            const page = pageAt(side, index);
+            return engine.getPageText(page.sourceId, page.index, call(options));
+          },
+          links: (index, options) => pageLinks(engine, pageAt(side, index), call(options)),
+          images: (index, options) => pageImages(engine, pageAt(side, index), call(options)),
+        },
+        {
+          ...convertOptions(choice),
+          pages: side.pages.map((_, i) => i),
           ...(signal ? { signal } : {}),
           ...(onProgress ? { onProgress } : {}),
         },

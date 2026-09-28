@@ -800,8 +800,9 @@ function phaseText(state: BatchFileState, plan: RecipeRunPlan): string {
       });
     }
     case 'exporting':
-      return state.exportPhase === 'verifying'
-        ? m.batch_phase_verifying()
+      if (state.exportPhase === 'verifying') return m.batch_phase_verifying();
+      return plan.output.format === 'markdown' || plan.output.format === 'text'
+        ? m.batch_phase_converting()
         : m.batch_phase_exporting();
     case 'done':
       return m.batch_phase_done();

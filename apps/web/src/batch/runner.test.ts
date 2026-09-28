@@ -2,8 +2,9 @@
  * The batch runner against the real engines (PDFium worker, assembler worker, compressor)
  * on corpus files: built-in recipes produce verified outputs, notices are collected, an
  * encrypted input asks its password once, a failing file never stops the batch, cancel
- * stops between files, continuous Bates numbers run across files, and the output password
- * never reaches the report.
+ * stops between files, continuous Bates numbers run across files, the output password
+ * never reaches the report, and Markdown / text outputs come from the analysis worker with
+ * the conversion's honesty notes.
  */
 import {
   assertNoSecrets,
@@ -18,17 +19,33 @@ import {
 } from '@pdf-editor/document-model';
 import type { PdfRenderer } from '@pdf-editor/engine';
 import { PDFDocument } from '@cantoo/pdf-lib';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 import encryptedUrl from '../../../../test/fixtures/encrypted-aes-128.pdf?url';
 import formsUrl from '../../../../test/fixtures/forms-a.pdf?url';
 import imagesUrl from '../../../../test/fixtures/images.pdf?url';
+import manifest from '../../../../test/fixtures/manifest.json';
+import markdownUrl from '../../../../test/fixtures/markdown-source.pdf?url';
 import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
 import truncatedUrl from '../../../../test/fixtures/truncated.pdf?url';
 import { fixtureFile, pngBlob } from '../../test/store-harness';
-import { getEngineService } from '../engine/engine-service';
+import { convertWorkspaceDocument } from '../convert/convert-run';
+import { getAnalysisWorkers, getEngineService } from '../engine/engine-service';
 import { appBatchEngine } from './private-source';
-import { type BatchFileState, type BatchRunResult, runRecipe } from './runner';
+import {
+  type BatchFileState,
+  type BatchRunResult,
+  defaultBatchDependencies,
+  runRecipe,
+} from './runner';
+
+const golden = (
+  manifest.fixtures.find((f) => f.file === 'markdown-source.pdf')?.expect as unknown as {
+    markdown: { golden: string };
+  }
+).markdown.golden;
+
+afterAll(() => getAnalysisWorkers().terminate());
 
 function builtIn(id: string): Recipe {
   const found = BUILT_IN_RECIPES.find((b) => b.id === id);
@@ -64,6 +81,34 @@ async function pageText(bytes: ArrayBuffer, pageIndex: number, password?: string
   } finally {
     await engine.close(id);
   }
+}
+
+/** The entries of a ZIP (stored or deflated, sizes in the local headers), by path. */
+async function unzip(bytes: ArrayBuffer): Promise<Map<string, Uint8Array>> {
+  const view = new DataView(bytes);
+  const entries = new Map<string, Uint8Array>();
+  let offset = 0;
+  while (offset + 30 <= bytes.byteLength && view.getUint32(offset, true) === 0x04034b50) {
+    const method = view.getUint16(offset + 8, true);
+    const size = view.getUint32(offset + 18, true);
+    const nameLength = view.getUint16(offset + 26, true);
+    const extraLength = view.getUint16(offset + 28, true);
+    const name = new TextDecoder().decode(new Uint8Array(bytes, offset + 30, nameLength));
+    const start = offset + 30 + nameLength + extraLength;
+    const data = new Uint8Array(bytes.slice(start, start + size));
+    entries.set(
+      name,
+      method === 0
+        ? data
+        : new Uint8Array(
+            await new Response(
+              new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw')),
+            ).arrayBuffer(),
+          ),
+    );
+    offset = start + size;
+  }
+  return entries;
 }
 
 async function outputBytes(result: BatchRunResult, index: number): Promise<ArrayBuffer> {
@@ -442,4 +487,175 @@ describe('other outputs and steps', () => {
       failure: { reason: 'step', stepIndex: 0 },
     });
   });
+
+  it('converts each file to Markdown, images in a ZIP, with the dialog’s honesty notes', async () => {
+    const files = [await fixtureFile(markdownUrl, 'markdown-source.pdf')];
+    const markdown = recipe('Notes', [
+      { kind: 'remove-password', options: {} },
+      { kind: 'export', options: { format: 'markdown' } },
+    ]);
+    const plan = planFor(markdown, files);
+    expect(plan.runnable).toBe(true);
+    const states: BatchFileState[] = [];
+    const result = await runRecipe(plan, files, { onFile: (state) => states.push(state) });
+
+    const outcome = result.report.files[0];
+    expect(outcome?.status).toBe('done-with-notes');
+    expect(outcome?.outputName).toBe('markdown-source-Notes.zip');
+    expect(outcome?.notices.map((n) => n.code)).toEqual([
+      'export.text-ignored',
+      'convert.reading-order',
+      'convert.tables',
+      'convert.dropped',
+    ]);
+    expect(outcome?.notices[1]?.message).toMatch(/^Reading order and headings are reconstructed/);
+    expect(outcome?.notices[3]?.message).toBe(
+      '4 running header, footer or page-number lines left out.',
+    );
+    const output = result.outputs[0];
+    expect(output).toMatchObject({ name: 'markdown-source-Notes.zip', type: 'application/zip' });
+    const zip = await unzip(await outputBytes(result, 0));
+    expect([...zip.keys()]).toEqual(['document.md', 'images/p1-1.png']);
+    expect(new TextDecoder().decode(zip.get('document.md'))).toBe(golden);
+    expect([...(zip.get('images/p1-1.png') ?? new Uint8Array()).subarray(0, 4)]).toEqual([
+      0x89, 0x50, 0x4e, 0x47,
+    ]);
+    // No tab was involved: the file went through the private steps and the conversion.
+    expect(states.some((s) => s.phase === 'exporting')).toBe(true);
+  }, 60_000);
+
+  it('converts to plain text after the steps, page breaks marked as asked', async () => {
+    const files = [
+      await fixtureFile(simpleUrl, 'simple-text.pdf'),
+      await fixtureFile(markdownUrl, 'markdown-source.pdf'),
+    ];
+    const text = recipe('Text', [
+      { kind: 'delete-pages', options: { pages: 'last' } },
+      { kind: 'export', options: { format: 'text', pageBreaks: 'comment' } },
+    ]);
+    const result = await runRecipe(planFor(text, files), files);
+    expect(result.report.totals.failed).toBe(0);
+    expect(result.outputs.map((o) => [o.name, o.type])).toEqual([
+      ['simple-text-Text.txt', 'text/plain'],
+      ['markdown-source-Text.txt', 'text/plain'],
+    ]);
+    const body = (n: number) =>
+      `This is page ${n} of a three-page US Letter document set in Helvetica. The quick brown fox jumps over the lazy dog.`;
+    // Page 3 was deleted; the break between the two pages left is marked, and the running
+    // "PAGE n OF simple-text" line is left out (with its notice).
+    expect(new TextDecoder().decode(await outputBytes(result, 0))).toBe(
+      `${body(1)}\n\n[page 2]\n\n${body(2)}\n`,
+    );
+    expect(result.report.files[0]?.notices.map((n) => n.code)).toContain('convert.dropped');
+    const second = new TextDecoder().decode(await outputBytes(result, 1));
+    expect(second).toContain('Working with PDF Fixtures');
+    expect(second).not.toContain('Two columns');
+    expect(second).not.toContain('![');
+    expect(result.report.files[1]?.notices.map((n) => n.code)).toContain('convert.reading-order');
+  }, 60_000);
+
+  it('keeps running lines and line-end hyphens when the step asks', async () => {
+    const files = [await fixtureFile(markdownUrl, 'markdown-source.pdf')];
+    const keep = recipe('Keep', [
+      {
+        kind: 'export',
+        options: { format: 'text', keepHeadersFooters: true, joinHyphens: false },
+      },
+    ]);
+    const choices: unknown[] = [];
+    const result = await runRecipe(
+      planFor(keep, files),
+      files,
+      {},
+      {
+        ...defaultBatchDependencies(),
+        convert: (ws, documentId, choice, deps, control) => {
+          choices.push(choice);
+          return convertWorkspaceDocument(ws, documentId, choice, deps, control);
+        },
+      },
+    );
+    expect(choices).toEqual([
+      expect.objectContaining({
+        format: 'text',
+        keepHeadersFooters: true,
+        joinHyphens: false,
+        images: false,
+      }),
+    ]);
+    const content = new TextDecoder().decode(await outputBytes(result, 0));
+    // The golden (defaults) drops "Fixture Handbook" and joins "gener-" + "ated".
+    expect(content).toContain('Fixture Handbook');
+    expect(content).toContain('gener-');
+    expect(content).not.toContain('is generated by');
+    expect(result.report.files[0]?.notices.map((n) => n.code)).not.toContain('convert.dropped');
+  }, 60_000);
+
+  it('converts the pages as the PDF would draw them when the steps add furniture', async () => {
+    const files = [await fixtureFile(simpleUrl, 'simple-text.pdf')];
+    const stamped = recipe('Stamped text', [
+      {
+        kind: 'watermark',
+        options: {
+          mode: 'text',
+          text: 'CONFIDENTIAL',
+          style: {
+            family: 'Inter',
+            size: 40,
+            bold: false,
+            italic: false,
+            color: '#808080',
+            opacity: 0.3,
+          },
+          scale: 1,
+          rotate: 0,
+          tile: false,
+          gapX: 72,
+          gapY: 72,
+          layer: 'over',
+          range: { mode: 'custom', from: 1, to: 1 },
+        },
+      },
+      { kind: 'export', options: { format: 'text' } },
+    ]);
+    const result = await runRecipe(planFor(stamped, files), files);
+    expect(result.report.files[0]?.status).toBe('done-with-notes');
+    const content = new TextDecoder().decode(await outputBytes(result, 0));
+    // Page 1 only carries the watermark, drawn by the assembled copy.
+    expect(content.split('\n\n')).toEqual([
+      expect.stringMatching(/^This is page 1 /),
+      'CONFIDENTIAL',
+      expect.stringMatching(/^This is page 2 /),
+      expect.stringMatching(/^This is page 3 /),
+    ]);
+  }, 60_000);
+
+  it('stops a conversion when the run is cancelled', async () => {
+    const files = [await fixtureFile(markdownUrl, 'markdown-source.pdf')];
+    const markdown = recipe('Cancelled', [{ kind: 'export', options: { format: 'markdown' } }]);
+    const controller = new AbortController();
+    const signals: (AbortSignal | undefined)[] = [];
+    const result = await runRecipe(
+      planFor(markdown, files),
+      files,
+      { signal: controller.signal },
+      {
+        ...defaultBatchDependencies(),
+        // Cancel once the conversion is under way (the real one, in the analysis worker).
+        convert: (ws, documentId, choice, deps, control) => {
+          signals.push(control?.signal);
+          const running = convertWorkspaceDocument(ws, documentId, choice, deps, control);
+          controller.abort();
+          return running;
+        },
+      },
+    );
+    expect(signals).toEqual([controller.signal]);
+    expect(result.report.cancelled).toBe(true);
+    expect(result.report.files[0]).toMatchObject({
+      status: 'failed',
+      failure: { reason: 'aborted' },
+    });
+    expect(result.outputs).toHaveLength(0);
+  }, 60_000);
 });

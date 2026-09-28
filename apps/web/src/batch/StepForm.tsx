@@ -13,6 +13,7 @@ import {
   type PaperSizeId,
   RECIPE_FONT_FAMILIES,
   RECIPE_SLOTS,
+  type RecipeConvertCommon,
   type RecipeFontFamily,
   type RecipePageSelection,
   type RecipeRange,
@@ -1046,6 +1047,15 @@ function MetadataSetForm({
   );
 }
 
+/** The options Markdown and text outputs share (kept when switching between them). */
+function convertCommon(o: RecipeConvertCommon): RecipeConvertCommon {
+  return {
+    ...(o.pageBreaks === undefined ? {} : { pageBreaks: o.pageBreaks }),
+    ...(o.keepHeadersFooters === undefined ? {} : { keepHeadersFooters: o.keepHeadersFooters }),
+    ...(o.joinHyphens === undefined ? {} : { joinHyphens: o.joinHyphens }),
+  };
+}
+
 function ExportForm({
   step,
   onChange,
@@ -1073,7 +1083,11 @@ function ExportForm({
                 ? { format }
                 : format === 'images'
                   ? { format, imageFormat: 'png', dpi: 150, quality: 90, background: 'white' }
-                  : { format },
+                  : // Markdown ↔ text keeps the shared options; only Markdown has images.
+                    {
+                      format,
+                      ...(o.format === 'markdown' || o.format === 'text' ? convertCommon(o) : {}),
+                    },
             )
           }
         />
@@ -1134,7 +1148,45 @@ function ExportForm({
         </Row>
       ) : null}
       {o.format === 'markdown' || o.format === 'text' ? (
-        <p className={styles.notice}>{m.batch_waiting_convert()}</p>
+        <>
+          <Row>
+            <SelectField<'none' | 'rule' | 'comment'>
+              label={m.convert_page_breaks()}
+              value={o.pageBreaks ?? 'none'}
+              options={[
+                ['none', m.convert_break_none()],
+                ['rule', m.convert_break_rule()],
+                ['comment', m.convert_break_comment()],
+              ]}
+              onChange={(pageBreaks) => set({ ...o, pageBreaks })}
+            />
+          </Row>
+          <Row>
+            <CheckField
+              label={m.convert_keep_headers()}
+              checked={o.keepHeadersFooters === true}
+              onChange={(keepHeadersFooters) => set({ ...o, keepHeadersFooters })}
+            />
+            <CheckField
+              label={m.convert_join_hyphens()}
+              checked={o.joinHyphens !== false}
+              onChange={(joinHyphens) => set({ ...o, joinHyphens })}
+            />
+          </Row>
+          {o.format === 'markdown' ? (
+            <Row>
+              <SelectField<'include' | 'omit'>
+                label={m.convert_images()}
+                value={o.images === false ? 'omit' : 'include'}
+                options={[
+                  ['include', m.convert_images_zip()],
+                  ['omit', m.convert_images_omit()],
+                ]}
+                onChange={(choice) => set({ ...o, images: choice === 'include' })}
+              />
+            </Row>
+          ) : null}
+        </>
       ) : null}
     </>
   );

@@ -14,8 +14,10 @@
  * | flatten, compress | `ExportOptions.flattenAnnotations` / `flattenForms` / `compression` |
  * | metadata-strip, metadata-set | `setMetadataStrip`, `setMetadata` |
  * | security, remove-password | `setSecurity(recipeSecurityPolicy)`, `removePassword` |
- * | export | `prepareExport` options, or images (`rasterizeWorkspaceDocument`) |
- * | ocr, export markdown/text | not runnable in this build (`recipeStepAvailability`) |
+ * | export (pdf) | `prepareExport` options |
+ * | export (images) | `rasterizeWorkspaceDocument` |
+ * | export (markdown, text) | `convertWorkspaceDocument` (convert/convert-run.ts), `convertChoiceFor` |
+ * | ocr | not runnable in this build (`recipeStepAvailability`) |
  *
  * An image watermark goes on the pages rather than into the document's furniture: a batch
  * file gains no pages later, so both draw the same, and the page form keeps every overlay
@@ -32,8 +34,10 @@ import {
   type RecipeBatesOptions,
   type RecipeExportOptions,
   type RecipePageSelection,
+  type RecipeNotice,
   type RecipeRange,
   type RecipeStep,
+  type RecipeStepKind,
   type RecipeTextStyle,
   recipeResizeRequest,
   recipeSecurityPolicy,
@@ -48,8 +52,9 @@ import {
   updateDocumentOverlays,
   type Workspace,
 } from '@pdf-editor/document-model';
-import { type CompressionSettings, presetSettings } from '@pdf-editor/engine';
+import { type ConvertReport, type CompressionSettings, presetSettings } from '@pdf-editor/engine';
 
+import { type ConvertChoice, DEFAULT_CHOICE } from '../convert/convert-run';
 import { type PageBoxOf, planCrops, withCrops } from '../crop/plan';
 import {
   applyFurniture,
@@ -105,6 +110,87 @@ export class StepError extends Error {
 }
 
 export const DEFAULT_OUTPUT: RecipeExportOptions = { format: 'pdf' };
+
+// ---------------------------------------------------------------------------
+// Markdown and text output
+// ---------------------------------------------------------------------------
+
+/** The export step's Markdown or text options. */
+export type RecipeConvertOutput = Extract<RecipeExportOptions, { format: 'markdown' | 'text' }>;
+
+/**
+ * The conversion a Markdown or text export step asks for: the whole document with the
+ * step's options, and the export dialog's defaults for those it leaves out (no page breaks,
+ * running headers and footers left out, line-end hyphens joined, Markdown images in a ZIP).
+ */
+export function convertChoiceFor(output: RecipeConvertOutput): ConvertChoice {
+  return {
+    ...DEFAULT_CHOICE,
+    format: output.format,
+    scope: 'document',
+    range: '',
+    pageBreak: output.pageBreaks ?? DEFAULT_CHOICE.pageBreak,
+    keepHeadersFooters: output.keepHeadersFooters ?? DEFAULT_CHOICE.keepHeadersFooters,
+    joinHyphens: output.joinHyphens ?? DEFAULT_CHOICE.joinHyphens,
+    images: output.format === 'markdown' && (output.images ?? DEFAULT_CHOICE.images),
+  };
+}
+
+/**
+ * The conversion's honesty lines, as the export dialog shows them: reading order is
+ * reconstructed, tables are not detected (or how many were suspected), running lines left
+ * out, and pages without text (scans) that need OCR first.
+ */
+export function convertNotices(report: ConvertReport, choice: ConvertChoice): RecipeNotice[] {
+  const notices: RecipeNotice[] = [
+    { code: 'convert.reading-order', message: m.convert_note_order() },
+    report.suspectedTables > 0
+      ? {
+          code: 'convert.tables-found',
+          message: m.convert_note_tables_found({ count: report.suspectedTables }),
+        }
+      : { code: 'convert.tables', message: m.convert_note_tables() },
+  ];
+  if (report.dropped.length > 0 && !choice.keepHeadersFooters) {
+    notices.push({
+      code: 'convert.dropped',
+      message: m.convert_note_dropped({ count: report.dropped.length }),
+    });
+  }
+  if (report.pagesWithoutText.length > 0) {
+    notices.push({
+      code: 'convert.without-text',
+      message: m.convert_note_without_text({
+        pages: report.pagesWithoutText.map((p) => p + 1).join(', '),
+      }),
+    });
+  }
+  return notices;
+}
+
+/**
+ * Step kinds a Markdown or text output cannot carry: they only shape the PDF file.
+ * Flattening is not among them: flattened annotations and form values become page text.
+ */
+export const TEXT_IGNORED_STEPS: readonly RecipeStepKind[] = [
+  'compress',
+  'metadata-strip',
+  'metadata-set',
+  'security',
+  'remove-password',
+];
+
+/**
+ * The plan's output name with the extension of the file actually produced: the plan names
+ * a Markdown output `.md`, but one with images is a ZIP (`.zip`), as in the export dialog.
+ */
+export function withProducedExtension(planned: string, produced: string): string {
+  const dot = produced.lastIndexOf('.');
+  const extension = dot > 0 ? produced.slice(dot) : '';
+  const plannedDot = planned.lastIndexOf('.');
+  const stem = plannedDot > 0 ? planned.slice(0, plannedDot) : planned;
+  return `${stem}${extension}`;
+}
 
 function pagesOf(ws: Workspace, documentId: DocumentId, selection: RecipePageSelection): PageId[] {
   const doc = getDocument(ws, documentId);
@@ -312,7 +398,7 @@ export function applyRecipeStep(
       };
     }
     case 'ocr':
-      // planRecipeRun refuses plans with steps this build cannot run.
+      // planRecipeRun blocks plans with steps this build cannot run; runRecipe refuses them.
       throw new StepError(m.batch_error_unavailable());
   }
 }

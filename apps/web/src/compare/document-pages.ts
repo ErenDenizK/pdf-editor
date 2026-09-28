@@ -14,6 +14,7 @@
 import type {
   DocumentId,
   DocumentMetadata,
+  Rect,
   SourceId,
   VirtualDocument,
   Workspace,
@@ -132,6 +133,98 @@ export async function documentPages(
   const bytes = await toolSourceBytes(documentId, options.signal);
   const kept = bytes.slice(0);
   let scratch: ScratchDocument | undefined = await openScratch(bytes);
+  const opened = scratch.document;
+  return {
+    documentId,
+    name: doc.title,
+    pages: opened.pages.map((page, index) => ({
+      sourceId: opened.id,
+      index,
+      delta: 0,
+      intrinsic: page.rotation,
+      size: page.size,
+      origin: { x: page.cropBox?.x ?? 0, y: page.cropBox?.y ?? 0 },
+    })),
+    assembled: true,
+    metadata: doc.metadata,
+    fingerprint: opened.fingerprint,
+    sourceIds: [opened.id],
+    bytes: () => Promise.resolve([{ bytes: kept.slice(0) }]),
+    async dispose() {
+      const current = scratch;
+      scratch = undefined;
+      await current?.close();
+    },
+  };
+}
+
+/**
+ * True when exporting `doc` draws something the source pages do not have: page overlays or
+ * document furniture (page numbers, headers and footers, Bates, watermarks).
+ */
+export function hasExportAdditions(doc: VirtualDocument): boolean {
+  return (doc.furniture?.length ?? 0) > 0 || doc.pages.some((page) => page.overlays.length > 0);
+}
+
+/**
+ * Where `workspaceDocumentPages` finds what the app's stores and engine service hold for
+ * open tabs, for a workspace they do not know (the batch runner's private one, whose
+ * sources were opened straight in the engine and are closed by their owner).
+ */
+export interface WorkspacePagesDependencies {
+  /** The engine's CropBox of a source page (unrotated user space), when it reports one. */
+  readonly pageCropBox: (sourceId: SourceId, index: number) => Rect | undefined;
+  /** A copy of a source's bytes and the password that opened it (facts read with pdf-lib). */
+  readonly sourceBytes: (
+    sourceId: SourceId,
+  ) => Promise<{ readonly bytes: ArrayBuffer; readonly password?: string } | undefined>;
+  /** The document assembled exactly as it would be exported, without compression or password. */
+  readonly assembled: (signal?: AbortSignal) => Promise<ArrayBuffer>;
+  /** Opens assembled bytes in the engine (`dispose()` closes it). */
+  readonly openScratch: (bytes: ArrayBuffer) => Promise<ScratchDocument>;
+}
+
+/**
+ * `documentPages` for a document of any workspace: its sources must be open in the engine
+ * under their workspace ids. Plain documents read their sources; others (and every document
+ * when `assemble` is set, e.g. to include export-time additions and flattening) are read
+ * from the assembled copy that `deps` gives. Unlike `documentPages`, nothing here touches
+ * the workspace store or the engine service's per-source caches.
+ */
+export async function workspaceDocumentPages(
+  ws: Workspace,
+  documentId: DocumentId,
+  deps: WorkspacePagesDependencies,
+  options: { readonly signal?: AbortSignal; readonly assemble?: boolean } = {},
+): Promise<DocumentPages> {
+  const doc = ws.documents[documentId];
+  if (!doc) throw new Error('The document is not in the workspace');
+  if (options.assemble !== true && isPlainDocument(doc)) {
+    const pages = plainPages(ws, doc, deps.pageCropBox);
+    const sourceIds = [...new Set(pages.map((p) => p.sourceId))];
+    const only = sourceIds.length === 1 ? ws.sources[sourceIds[0] as SourceId] : undefined;
+    return {
+      documentId,
+      name: doc.title,
+      pages,
+      assembled: false,
+      metadata: doc.metadata,
+      ...(only ? { fingerprint: only.fingerprint } : {}),
+      sourceIds,
+      async bytes() {
+        const out: { bytes: ArrayBuffer; password?: string }[] = [];
+        for (const id of sourceIds) {
+          const read = await deps.sourceBytes(id);
+          if (read) out.push(read);
+        }
+        return out;
+      },
+      dispose: () => Promise.resolve(),
+    };
+  }
+  const bytes = await deps.assembled(options.signal);
+  const kept = bytes.slice(0);
+  let scratch: ScratchDocument | undefined = await deps.openScratch(bytes);
   const opened = scratch.document;
   return {
     documentId,

@@ -1228,16 +1228,25 @@ class Gen {
               },
             };
           }
-          default:
-            return {
-              kind,
-              options: {
-                format: this.pick(['markdown', 'text'] as const),
-                ...(this.bool()
-                  ? { pageBreaks: this.pick(['none', 'rule', 'comment'] as const) }
-                  : {}),
-              },
+          default: {
+            const shared = {
+              ...(this.bool()
+                ? { pageBreaks: this.pick(['none', 'rule', 'comment'] as const) }
+                : {}),
+              ...(this.bool() ? { keepHeadersFooters: this.bool() } : {}),
+              ...(this.bool() ? { joinHyphens: this.bool() } : {}),
             };
+            return this.bool()
+              ? {
+                  kind,
+                  options: {
+                    format: 'markdown',
+                    ...shared,
+                    ...(this.bool() ? { images: this.bool() } : {}),
+                  },
+                }
+              : { kind, options: { format: 'text', ...shared } };
+          }
         }
     }
   }
@@ -1402,6 +1411,49 @@ describe('built-in recipes', () => {
   });
 });
 
+describe('Markdown and text export options', () => {
+  const exportStep = (options: Record<string, Json>) => ({
+    format: RECIPE_FORMAT,
+    version: RECIPE_VERSION,
+    name: 'Notes',
+    steps: [{ kind: 'export', options }],
+  });
+
+  it('reads every option and keeps absent ones absent (the dialog’s defaults apply)', () => {
+    const full = {
+      format: 'markdown',
+      pageBreaks: 'comment',
+      keepHeadersFooters: true,
+      joinHyphens: false,
+      images: false,
+    } as const;
+    expect(readRecipe(exportStep(full)).steps[0]).toEqual({ kind: 'export', options: full });
+    expect(readRecipe(exportStep({ format: 'text' })).steps[0]).toEqual({
+      kind: 'export',
+      options: { format: 'text' },
+    });
+    const written = writeRecipe(readRecipe(exportStep(full)));
+    expect(readRecipe(written).steps[0]).toEqual({ kind: 'export', options: full });
+  });
+
+  it('rejects images on a text output, which has none', () => {
+    const error = readError(exportStep({ format: 'text', images: true }));
+    expect(error).toMatchObject({ problem: 'unknown-key', key: 'images', stepIndex: 0 });
+    expect(error.message).toBe('Step 1 (export), options: unknown option key "images"');
+  });
+
+  it.each<[string, Record<string, Json>]>([
+    ['keepHeadersFooters', { format: 'markdown', keepHeadersFooters: 'yes' }],
+    ['joinHyphens', { format: 'text', joinHyphens: 1 }],
+    ['images', { format: 'markdown', images: null }],
+    ['pageBreaks', { format: 'text', pageBreaks: 'page' }],
+  ])('rejects a wrong %s', (key, options) => {
+    const error = readError(exportStep(options));
+    expect(error.problem).toBe('invalid-value');
+    expect(error.path).toBe(`$.steps[0].options.${key}`);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
@@ -1471,12 +1523,31 @@ describe('describeRecipe', () => {
     });
   });
 
-  it('marks Markdown and text output as waiting for the converter', () => {
-    const step: RecipeStep = { kind: 'export', options: { format: 'markdown' } };
-    expect(recipeStepAvailability(step)).toEqual({ available: false, waitingFor: 'convert' });
-    expect(describeRecipe(recipe([step])).steps[0]?.facts).toEqual([
+  it('runs Markdown and text output, with the dialog’s defaults as facts', () => {
+    const markdown: RecipeStep = { kind: 'export', options: { format: 'markdown' } };
+    const text: RecipeStep = {
+      kind: 'export',
+      options: { format: 'text', pageBreaks: 'rule', keepHeadersFooters: true, joinHyphens: false },
+    };
+    expect(recipeStepAvailability(markdown)).toEqual({ available: true });
+    expect(recipeStepAvailability(text)).toEqual({ available: true });
+    expect(describeRecipe(recipe([markdown]))).toMatchObject({
+      output: 'markdown',
+      runnable: true,
+      waitingFor: [],
+    });
+    expect(describeRecipe(recipe([markdown])).steps[0]?.facts).toEqual([
       { key: 'format', value: 'markdown' },
       { key: 'pageBreaks', value: 'none' },
+      { key: 'keepHeadersFooters', value: false },
+      { key: 'joinHyphens', value: true },
+      { key: 'images', value: true },
+    ]);
+    expect(describeRecipe(recipe([text])).steps[0]?.facts).toEqual([
+      { key: 'format', value: 'text' },
+      { key: 'pageBreaks', value: 'rule' },
+      { key: 'keepHeadersFooters', value: true },
+      { key: 'joinHyphens', value: false },
     ]);
   });
 });

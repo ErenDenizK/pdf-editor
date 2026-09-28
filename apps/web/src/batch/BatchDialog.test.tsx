@@ -1,7 +1,8 @@
 /**
  * The Batch dialog in the browser: pick a built-in recipe, add files, run with the real
- * engines, see every file's status, download the ZIP; the recipe editor refuses an invalid
- * recipe with the reader's precise error; the palette command opens the dialog.
+ * engines, see every file's status, download the ZIP; build a plain-text recipe and
+ * download its .txt; the recipe editor refuses an invalid recipe with the reader's precise
+ * error; the palette command opens the dialog.
  */
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -111,6 +112,84 @@ describe('Batch dialog', () => {
     expect(list).toHaveTextContent('not a PDF');
     expect(within(dialog).getByTestId('batch-plan').textContent).toMatch(/^1 file /);
     expect(outside).not.toHaveBeenCalled();
+  });
+
+  it('builds a plain-text recipe, runs it and downloads the .txt', async () => {
+    const files = [await fixtureFile(simpleUrl, 'simple-text.pdf')];
+    vi.stubGlobal(
+      'showOpenFilePicker',
+      vi.fn(() => Promise.resolve(files.map((file) => ({ getFile: () => Promise.resolve(file) })))),
+    );
+    const written: Blob[] = [];
+    const savePicker = vi.fn((options: { suggestedName?: string }) =>
+      Promise.resolve({
+        name: options.suggestedName,
+        createWritable: () =>
+          Promise.resolve({
+            write: (data: Blob) => {
+              written.push(data);
+              return Promise.resolve();
+            },
+            close: () => Promise.resolve(),
+            abort: () => Promise.resolve(),
+          }),
+      }),
+    );
+    vi.stubGlobal('showSaveFilePicker', savePicker);
+
+    render(<BatchDialog />);
+    const dialog = await screen.findByTestId('batch-dialog');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'New' }));
+    const editor = await within(dialog).findByTestId('batch-editor');
+    await userEvent.fill(within(editor).getByRole('textbox', { name: 'Name' }), 'Text notes');
+    await userEvent.selectOptions(
+      within(editor).getByRole('combobox', { name: 'Step to add' }),
+      'export',
+    );
+    await userEvent.click(within(editor).getByRole('button', { name: 'Add step' }));
+    await userEvent.selectOptions(within(editor).getByRole('combobox', { name: 'Output' }), 'text');
+    // The export dialog's options: page breaks, running lines, hyphens (no images for text).
+    await userEvent.selectOptions(
+      within(editor).getByRole('combobox', { name: 'Between pages' }),
+      'rule',
+    );
+    await userEvent.click(
+      within(editor).getByRole('checkbox', {
+        name: 'Keep running headers, footers and page numbers',
+      }),
+    );
+    expect(
+      within(editor).getByRole('checkbox', { name: 'Join words hyphenated at line ends' }),
+    ).toBeChecked();
+    expect(within(editor).queryByRole('combobox', { name: 'Images' })).toBeNull();
+    expect(editor).not.toHaveTextContent('arrives in a later update');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save recipe' }));
+
+    const steps = await within(dialog).findByTestId('batch-recipe-steps');
+    expect(steps).toHaveTextContent('Plain text · A rule (---) · Running lines kept');
+    expect(steps).not.toHaveTextContent('arrives in a later update');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add files…' }));
+    await waitFor(() => expect(within(dialog).getByTestId('batch-files').children).toHaveLength(1));
+    expect(within(dialog).queryByTestId('batch-blocked')).toBeNull();
+    await userEvent.click(within(dialog).getByTestId('batch-run'));
+    const status = await within(dialog).findByTestId('batch-run-status');
+    await waitFor(() => expect(status.textContent).toMatch(/^Finished: 1 done/), {
+      timeout: 30_000,
+    });
+    const row = within(dialog).getByTestId('batch-file-row');
+    expect(row.textContent).toMatch(/Done with notes.*simple-text-Text notes\.txt/);
+    expect(row).toHaveTextContent('Reading order and headings are reconstructed');
+
+    await userEvent.click(within(dialog).getByTestId('batch-download'));
+    await waitFor(() => expect(written).toHaveLength(1));
+    expect(savePicker).toHaveBeenCalledWith(
+      expect.objectContaining({ suggestedName: 'simple-text-Text notes.txt' }),
+    );
+    const text = await (written[0] as Blob).text();
+    expect(text).toContain('This is page 1 of a three-page US Letter document');
+    // Kept: the running "PAGE n OF simple-text" line the defaults leave out.
+    expect(text).toContain('PAGE 1 OF simple-text');
+    expect(text).toContain('This is page 3 of a three-page US Letter document');
   });
 
   it('shows the reader’s error when a recipe cannot be saved', async () => {

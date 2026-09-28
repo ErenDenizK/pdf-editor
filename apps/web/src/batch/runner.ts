@@ -8,6 +8,12 @@
  * workspace, source and blobs), check the verification, and collect the output and every
  * honesty line into a `RecipeRunReport`. Then the source closes and its blobs go.
  *
+ * Images and Markdown / text outputs read the same private workspace: the rasterizer
+ * (`rasterizeWorkspaceDocument`) and the converter (`convertWorkspaceDocument`, analysis
+ * worker) get the private source's crop boxes and bytes, and a document the steps changed
+ * beyond plain source pages is assembled through the same export pipeline (without
+ * compression or password) and read from a private copy in the engine.
+ *
  * - **Isolation:** a file that fails (password skipped, damaged, a step that cannot apply,
  *   verification) is reported and the batch goes on.
  * - **Concurrency:** the plan's (one file at a time with OCR, else two); one with a
@@ -21,8 +27,8 @@
  *   computed once for the ZIP; the export's buffers are released as soon as they are.
  *
  * Dependency injection: `BatchRunnerDependencies` names the engine (the PDFium worker
- * proxy, `appBatchEngine`), the assembler, the compressor, the export pipeline and the
- * rasterizer; tests replace any of them.
+ * proxy, `appBatchEngine`), the assembler, the compressor, the export pipeline, the
+ * rasterizer and the converter; tests replace any of them.
  */
 import {
   type BlobId,
@@ -44,6 +50,8 @@ import {
 } from '@pdf-editor/document-model';
 import type { PdfAssembler } from '@pdf-editor/engine';
 
+import { hasExportAdditions } from '../compare/document-pages';
+import { convertWorkspaceDocument, outputFile } from '../convert/convert-run';
 import { getAssembler } from '../engine/assembler-client';
 import { type EngineFailureCode, type EngineResult, toFailure } from '../engine/engine-service';
 import {
@@ -60,12 +68,23 @@ import { pageBoxIn } from '../crop/plan';
 import {
   appBatchEngine,
   type BatchEngine,
+  newPrivateSourceId,
   openPrivateSource,
   type PrivateSource,
   SourceOpenError,
   type SourcePasswordPrompt,
 } from './private-source';
-import { applyRecipeStep, DEFAULT_OUTPUT, type StepNote, type StepState, StepError } from './steps';
+import {
+  applyRecipeStep,
+  convertChoiceFor,
+  convertNotices,
+  DEFAULT_OUTPUT,
+  type StepNote,
+  type StepState,
+  StepError,
+  TEXT_IGNORED_STEPS,
+  withProducedExtension,
+} from './steps';
 import { type ZipEntry, zipEntry } from './zip';
 
 export interface BatchRunnerDependencies {
@@ -74,6 +93,7 @@ export interface BatchRunnerDependencies {
   readonly compress?: ExportCompressor;
   readonly prepare?: typeof prepareExport;
   readonly rasterize?: typeof rasterizeWorkspaceDocument;
+  readonly convert?: typeof convertWorkspaceDocument;
   readonly now?: () => number;
 }
 
@@ -84,6 +104,7 @@ export function defaultBatchDependencies(): BatchRunnerDependencies {
     compress: compressExport,
     prepare: prepareExport,
     rasterize: rasterizeWorkspaceDocument,
+    convert: convertWorkspaceDocument,
   };
 }
 
@@ -221,6 +242,7 @@ export async function runRecipe(
   const now = deps.now ?? Date.now;
   const prepare = deps.prepare ?? prepareExport;
   const rasterize = deps.rasterize ?? rasterizeWorkspaceDocument;
+  const convert = deps.convert ?? convertWorkspaceDocument;
   const { signal, onFile } = options;
   const startedAt = now();
   const engine = await deps.engine();
@@ -424,8 +446,86 @@ export async function runRecipe(
         });
         return;
       }
-      if (output.format !== 'pdf') {
-        fail('unavailable', m.batch_failure_unavailable());
+      if (output.format === 'markdown' || output.format === 'text') {
+        if (filePlan.steps.some((s) => TEXT_IGNORED_STEPS.includes(s.step.kind))) {
+          notices.push({ code: 'export.text-ignored', message: m.batch_notice_text_ignored() });
+        }
+        const doc = getDocument(workspace, documentId);
+        const flatten = {
+          ...(state.exportOptions.flattenAnnotations === true ? { flattenAnnotations: true } : {}),
+          ...(state.exportOptions.flattenForms === true ? { flattenForms: true } : {}),
+        };
+        const choice = convertChoiceFor(output);
+        const converted = await convert(
+          workspace,
+          documentId,
+          choice,
+          {
+            pageCropBox: (sourceId, page) =>
+              sourceId === source.id ? source.cropBox(page) : undefined,
+            sourceBytes: async (id) =>
+              id === source.id
+                ? {
+                    bytes: await source.bytes(),
+                    ...(source.password === undefined ? {} : { password: source.password }),
+                  }
+                : undefined,
+            // The pages as the PDF output would draw them (furniture, crops, flattening),
+            // without compression or password: the engine opens this copy without one.
+            assembled: async (assembleSignal) => {
+              const prepared = await prepare(
+                documentId,
+                {
+                  ...flatten,
+                  compression: null,
+                  security: null,
+                  ...(assembleSignal ? { signal: assembleSignal } : {}),
+                  onProgress,
+                },
+                exportDeps,
+              );
+              if (!prepared.ok) throw new Error(prepared.error.message);
+              return prepared.value.bytes;
+            },
+            openScratch: async (bytes) => {
+              const id = newPrivateSourceId();
+              const document = await engine.open(id, bytes, {});
+              let closed = false;
+              return {
+                id,
+                document,
+                close: async () => {
+                  if (closed) return;
+                  closed = true;
+                  await engine.close(id).catch(() => undefined);
+                },
+              };
+            },
+            assemble: hasExportAdditions(doc) || Object.keys(flatten).length > 0,
+          },
+          signal ? { signal } : {},
+        );
+        notices.push(...convertNotices(converted.report, choice));
+        const produced = outputFile(converted, doc.title);
+        const outputName = withProducedExtension(filePlan.outputName, produced.name);
+        const bytes = produced.bytes.slice().buffer;
+        outputs[position] = {
+          index,
+          name: outputName,
+          type: produced.type,
+          entry: zipEntry(outputName, bytes, produced.type),
+        };
+        batesNumbered += doc.pages.length;
+        finish({
+          index,
+          name,
+          status: doneStatus(notices),
+          inputBytes: file.size,
+          outputName,
+          outputBytes: bytes.byteLength,
+          notices,
+          durationMs: now() - started,
+        });
         return;
       }
 

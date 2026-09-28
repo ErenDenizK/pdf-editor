@@ -1720,6 +1720,7 @@
   "batch_phase_opening": "Opening",
   "batch_phase_step": "Step {number} of {total}: {kind}",
   "batch_phase_exporting": "Writing the PDF",
+  "batch_phase_converting": "Converting to text",
   "batch_phase_verifying": "Verifying",
   "batch_phase_done": "Done",
   "batch_phase_done_notes": "Done with notes",
@@ -1819,8 +1820,10 @@
   "batch_pages_ranges_hint": "For example 1-3, 5, 8- (8 to the end).",
   "batch_pages_ranges_invalid": "Type page numbers or ranges, for example 1-3, 5, 8-.",
   "batch_waiting_ocr": "Needs text recognition (OCR), which arrives in a later update.",
-  "batch_waiting_convert": "Needs the Markdown and text export, which arrives in a later update.",
   "batch_detail_margins": "Margins {margins} pt",
+  "batch_detail_headers_kept": "Running lines kept",
+  "batch_detail_hyphens_kept": "Line-end hyphens kept",
+  "batch_detail_no_images": "Without images",
   "batch_detail_slots": [
     {
       "declarations": ["input count", "local countPlural = count: plural"],
@@ -1915,6 +1918,7 @@
     }
   ],
   "batch_notice_images_ignored": "Compression, flattening, metadata and password steps do not apply to images: the images carry none of them.",
+  "batch_notice_text_ignored": "Compression, metadata and password steps do not apply to Markdown or text: the text files carry none of them.",
   "batch_notice_not_smaller": "Compression did not make this file smaller.",
   "batch_failure_password": "It needs a password to open, and none was given.",
   "batch_failure_encryption": "It uses an encryption this app cannot open.",

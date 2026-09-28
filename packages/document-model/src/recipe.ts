@@ -445,12 +445,30 @@ export type RecipeExportOptions =
       /** `RasterOptions.background`; JPEG is always white. */
       readonly background: 'white' | 'transparent';
     }
-  | {
-      /** Spec §4 "Export as Markdown / text" (reserved until workstream W2 lands). */
-      readonly format: 'markdown' | 'text';
-      /** Page breaks: nothing, a rule (`---`) or a comment (`<!-- page 3 -->`). */
-      readonly pageBreaks?: 'none' | 'rule' | 'comment';
-    };
+  | (RecipeConvertCommon & {
+      /** convert/ConvertDialog.tsx → `convertWorkspaceDocument` (spec §4), one file per input. */
+      readonly format: 'markdown';
+      /**
+       * `ConvertChoice.images`: images in a ZIP next to the `.md` (on by default, as in the
+       * dialog; the output is then a `.zip`) or left out. Markdown only: a text output has no
+       * images, and the reader rejects the key there.
+       */
+      readonly images?: boolean;
+    })
+  | (RecipeConvertCommon & {
+      /** convert/ConvertDialog.tsx → `convertWorkspaceDocument` (spec §4), one file per input. */
+      readonly format: 'text';
+    });
+
+/** The options Markdown and text outputs share (the export dialog's; whole document only). */
+export interface RecipeConvertCommon {
+  /** `ConvertChoice.pageBreak`: nothing (default), a rule or a comment between pages. */
+  readonly pageBreaks?: 'none' | 'rule' | 'comment';
+  /** `ConvertChoice.keepHeadersFooters`: keep running headers, footers, page numbers (off). */
+  readonly keepHeadersFooters?: boolean;
+  /** `ConvertChoice.joinHyphens`: join words hyphenated at line ends (on by default). */
+  readonly joinHyphens?: boolean;
+}
 
 /** Every step kind with its options. */
 export interface RecipeStepOptionsMap {
@@ -1448,12 +1466,18 @@ const STEP_READERS: { readonly [K in RecipeStepKind]: StepReader<K> } = {
         return out;
       }
       case 'markdown':
-      case 'text':
-        only(o, at, ['format', 'pageBreaks']);
-        return {
-          format,
+      case 'text': {
+        const common = ['format', 'pageBreaks', 'keepHeadersFooters', 'joinHyphens'];
+        only(o, at, format === 'markdown' ? [...common, 'images'] : common);
+        const shared = {
           ...opt(o, 'pageBreaks', at, (v, a) => oneOf(v, a, ['none', 'rule', 'comment'] as const)),
+          ...opt(o, 'keepHeadersFooters', at, bool),
+          ...opt(o, 'joinHyphens', at, bool),
         };
+        return format === 'markdown'
+          ? { format, ...shared, ...opt(o, 'images', at, bool) }
+          : { format, ...shared };
+      }
     }
   },
 };
@@ -1589,8 +1613,11 @@ export function recipeEquals(a: Recipe, b: Recipe): boolean {
 // Availability
 // ---------------------------------------------------------------------------
 
-/** What a reserved step waits for: OCR (workstream W1) or the converter (W2). */
-export type RecipeWaitingFor = 'ocr' | 'convert';
+/**
+ * What a reserved step waits for: OCR (workstream W1). Derived from the step on every read,
+ * never stored in a recipe, so the list can shrink as workstreams land.
+ */
+export type RecipeWaitingFor = 'ocr';
 
 export type RecipeStepAvailability =
   | { readonly available: true }
@@ -1602,12 +1629,6 @@ export type RecipeStepAvailability =
  */
 export function recipeStepAvailability(step: RecipeStep): RecipeStepAvailability {
   if (step.kind === 'ocr') return { available: false, waitingFor: 'ocr' };
-  if (
-    step.kind === 'export' &&
-    (step.options.format === 'markdown' || step.options.format === 'text')
-  ) {
-    return { available: false, waitingFor: 'convert' };
-  }
   return { available: true };
 }
 
@@ -1740,7 +1761,9 @@ export type RecipeFactKey =
   | 'background'
   | 'compatibility'
   | 'includeComments'
-  | 'pageBreaks';
+  | 'pageBreaks'
+  | 'keepHeadersFooters'
+  | 'joinHyphens';
 
 export type RecipeFactValue = string | number | boolean | readonly string[] | readonly number[];
 
@@ -1923,7 +1946,13 @@ function stepFacts(step: RecipeStep): RecipeFact[] {
           ];
         case 'markdown':
         case 'text':
-          return [f('format', o.format), f('pageBreaks', o.pageBreaks ?? 'none')];
+          return [
+            f('format', o.format),
+            f('pageBreaks', o.pageBreaks ?? 'none'),
+            f('keepHeadersFooters', o.keepHeadersFooters === true),
+            f('joinHyphens', o.joinHyphens !== false),
+            ...(o.format === 'markdown' ? [f('images', o.images !== false)] : []),
+          ];
       }
     }
   }
