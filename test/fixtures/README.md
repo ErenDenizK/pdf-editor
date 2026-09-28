@@ -31,7 +31,7 @@ pnpm --filter @pdf-editor/fixtures-tool verify            # re-parse every file 
   and the scans are rasterised by the generator itself. Re-running the
   generator with the same `@cantoo/pdf-lib` version (2.11.1) and Node
   zlib produces byte-identical files.
-- **Total size:** 828.3 KB across 48 files.
+- **Total size:** 869.1 KB across 50 files.
 - **Not covered here** (need real-world files, to be added separately):
   CCITT/JBIG2/JPX scans, signatures from third-party signers (timestamps, LTV,
   certification signatures, ECDSA), optional content (layers), public-key
@@ -114,6 +114,8 @@ pnpm --filter @pdf-editor/fixtures-tool verify            # re-parse every file 
 | `signed-freed-content.pdf` | 20.0 KB | signed-approval.pdf plus a third revision that is only an xref section marking page 1's content stream free (M5 review finding 1b). | - | simple-text.pdf + hand-written incremental update(s); CMS from lib/pki.ts (m5-fixtures.ts); revision 3 written by hand |
 | `signed-no-eof.pdf` | 20.1 KB | signed-approval.pdf plus a third revision that replaces page 1's content stream ("PAY 1,000,000 TO MALLORY") and ends at `startxref N` without %%EOF (M5 review finding 1c). | - | simple-text.pdf + hand-written incremental update(s); CMS from lib/pki.ts (m5-fixtures.ts); revision 3 written by hand |
 | `signed-doctimestamp.pdf` | 36.6 KB | signed-approval.pdf plus a third revision with a document timestamp: field "Timestamp", /Type /DocTimeStamp, /SubFilter /ETSI.RFC3161, an RFC 3161 token (SHA-256 imprint of the byte ranges, genTime 2024-01-03) by the test TSA (timeStamping EKU) covering the whole file. | - | simple-text.pdf + hand-written incremental update(s); CMS from lib/pki.ts (m5-fixtures.ts); token from lib/pki.ts buildTimestampToken |
+| `signed-dup-entry.pdf` | 20.4 KB | signed-approval.pdf plus a third revision that defines page 1's content stream twice ("PAY 1,000,000 TO MALLORY", then a byte-identical copy of the signed stream) and whose xref section lists object 6 twice, first at the replacement, then at the copy (M5 second review finding 1). | - | simple-text.pdf + hand-written incremental update(s); CMS from lib/pki.ts (m5-fixtures.ts); revision 3 written by hand |
+| `signed-offset-early.pdf` | 20.4 KB | signed-then-modified.pdf's third revision (a /Text note on page 1) written with page 1's xref offset 3 bytes early, on spaces before its object header (M5 second review finding 2). | - | simple-text.pdf + hand-written incremental update(s); CMS from lib/pki.ts (m5-fixtures.ts); revision 3 written by hand |
 
 ## Expected behaviour
 
@@ -165,6 +167,8 @@ pnpm --filter @pdf-editor/fixtures-tool verify            # re-parse every file 
 - **`signed-freed-content.pdf`**: Status "Changed after signing" (content, page 1): a reference to a free object reads as null. pdf.js shows page 1 blank; PDFium still draws the signed stream.
 - **`signed-no-eof.pdf`**: Status "Changed after signing" (content, page 1); the file has three revisions. pdf.js shows MALLORY; PDFium, which wants %%EOF, falls back to the signed revision.
 - **`signed-doctimestamp.pdf`**: Approval "Intact, changed later" (a signature was added); Timestamp Intact with timestamp time and authority reported; never Broken because its CMS carries a TSTInfo (M5 review finding 2).
+- **`signed-dup-entry.pdf`**: Status "Changed after signing": two entries for one object in one revision are a structural change (other), whichever a reader keeps. pdf.js keeps the first entry and shows MALLORY; PDFium keeps the last and shows the signed page.
+- **`signed-offset-early.pdf`**: Status "Intact, changed later" (annotations, page 1): readers skip whitespace and comments from an xref offset to the object header, and so does the validator.
 
 ## Redaction and text-editing targets (M4)
 
@@ -395,6 +399,8 @@ test/fixtures/pki/root-ca.cert.pem -purpose any` (for `adbe.pkcs7.sha1` omit
 | `signed-no-eof.pdf` | Approval | ETSI.CAdES.detached | 2 | [0 3335 19721 552] | no | SHA-256 | **changed-after-signing** |
 | `signed-doctimestamp.pdf` | Approval | ETSI.CAdES.detached | 2 | [0 3335 19721 552] | no | SHA-256 | **intact-changed-later** |
 | `signed-doctimestamp.pdf` | Timestamp | ETSI.RFC3161 | 3 | [0 20731 37117 380] | yes | SHA-256 | **intact** |
+| `signed-dup-entry.pdf` | Approval | ETSI.CAdES.detached | 2 | [0 3335 19721 552] | no | SHA-256 | **changed-after-signing** |
+| `signed-offset-early.pdf` | Approval | ETSI.CAdES.detached | 2 | [0 3335 19721 552] | no | SHA-256 | **intact-changed-later** |
 
 | file | revisions | revision ends (bytes) | later changes |
 | --- | --- | --- | --- |
@@ -409,6 +415,8 @@ test/fixtures/pki/root-ca.cert.pem -purpose any` (for `adbe.pkcs7.sha1` omit
 | `signed-freed-content.pdf` | 3 | 2878, 20273, 20459 | rev 3: content (6 0 R) |
 | `signed-no-eof.pdf` | 3 | 2878, 20273, 20576 | rev 3: content (6 0 R) |
 | `signed-doctimestamp.pdf` | 3 | 2878, 20273, 37497 | rev 3: signature (13 0 R, 14 0 R, 15 0 R, 5 0 R) |
+| `signed-dup-entry.pdf` | 3 | 2878, 20273, 20934 | rev 3: other (6 0 R) |
+| `signed-offset-early.pdf` | 3 | 2878, 20273, 20932 | rev 3: annotations (14 0 R, 5 0 R) |
 
 `signed-tampered.pdf`: byte 1290 (inside the first range) changed from
 0xe7 to 0xe5 in 6 0 R (page 1 content stream, FlateDecode), turning "The quick brown fox jumps over the lazy dog."

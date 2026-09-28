@@ -167,6 +167,7 @@ async function laterChanges(
     ctx.before.set(end, before);
   }
   let changes: RevisionChange[];
+  let informational: readonly RevisionChange[];
   let notes: readonly string[];
   let lastRevision: number;
   try {
@@ -180,7 +181,7 @@ async function laterChanges(
       await before,
       afterCopy,
     );
-    ({ changes, notes, lastRevision } = later);
+    ({ changes, informational, notes, lastRevision } = later);
   } catch (error) {
     return fail(`The later revisions cannot be read (${errorText(error)}).`);
   }
@@ -217,7 +218,8 @@ async function laterChanges(
     }
   }
   const allowedSet = allowedKinds(docMdp);
-  const allowed = changes.every((c) => allowedSet.has(c.kind));
+  // Unreferenced objects readers ignore are listed but allowed (ADR-0013, notes after review).
+  const allowed = changes.every((c) => allowedSet.has(c.kind) || informational.includes(c));
   const listed =
     changes
       .map(

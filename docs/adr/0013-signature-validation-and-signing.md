@@ -55,3 +55,15 @@ run the whole pipeline.
   latter's licence is dual BSD-3/GPL and it is 1.6 MB for a decryptor we do not need.
 - **Certification signatures in M5.** Deferred to M6; their DocMDP rules need their own
   validation model.
+
+## Notes after review
+
+- **Unreferenced objects in a later revision** (second engine review, finding 3). An object
+  that no cross-reference section lists is listed as a change of kind `other` ("unreferenced
+  object N in revision K") but does not by itself lower the status below "Intact, changed
+  later": readers resolve objects through the xref and ignore it. It stays a structural change
+  when its number is in use in any xref section of the file, or when it could carry content (a
+  stream, a page, a catalog, an annotation, a form field, a signature, or raw text a scan could
+  take for an object header, trailer or xref), because a reader that rebuilds a damaged xref
+  may pick it up; that reconstruction risk is what the content-bearing rule covers. Bytes that
+  do not parse as objects remain a structural change.

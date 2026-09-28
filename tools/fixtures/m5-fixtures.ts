@@ -1362,11 +1362,9 @@ async function buildSignedEmptyField(built: Map<string, Uint8Array>): Promise<Bu
   };
 }
 
-async function buildSignedThenModified(built: Map<string, Uint8Array>): Promise<Built> {
-  const file = 'signed-then-modified.pdf';
-  const ap = await approvalFor(built);
-  const note = ap.base.size + 3;
-  const noteBody = [
+/** The /Text note revision 3 of signed-then-modified.pdf adds to page 1. */
+function noteAfterSigning(ap: Approval): string {
+  return [
     '<<',
     '/Type /Annot',
     '/Subtype /Text',
@@ -1379,6 +1377,13 @@ async function buildSignedThenModified(built: Map<string, Uint8Array>): Promise<
     `/P ${ref(ap.base.page)}`,
     '>>',
   ].join('\n');
+}
+
+async function buildSignedThenModified(built: Map<string, Uint8Array>): Promise<Built> {
+  const file = 'signed-then-modified.pdf';
+  const ap = await approvalFor(built);
+  const note = ap.base.size + 3;
+  const noteBody = noteAfterSigning(ap);
   const rev = appendRevision(
     ap.base,
     ap.text,
@@ -1620,10 +1625,14 @@ function malloryContent(ap: Approval): string {
   return `BT /${font} 24 Tf 72 700 Td ${lit(MALLORY)} Tj ET`;
 }
 
-/** Revision 3's trailer as appendRevision writes it, up to `startxref N` (no %%EOF). */
-function attackTrailer(ap: Approval, file: string, xrefAt: number): string {
+/**
+ * Revision 3's trailer as appendRevision writes it, up to `startxref N` (no %%EOF); /Size is
+ * the previous one unless `newSize` is given.
+ */
+function attackTrailer(ap: Approval, file: string, xrefAt: number, newSize?: number): string {
   const prev = Number(/startxref\s+(\d+)\s+%%EOF\s*$/.exec(ap.text)?.[1]);
-  const size = Number(/\/Size (\d+)/.exec(ap.text.slice(ap.text.lastIndexOf('trailer')))?.[1]);
+  const size =
+    newSize ?? Number(/\/Size (\d+)/.exec(ap.text.slice(ap.text.lastIndexOf('trailer')))?.[1]);
   if (!prev || !size) throw new Error(`${file}: previous trailer not found`);
   return (
     `trailer\n<<\n/Size ${size}\n/Root ${ref(ap.base.root)}\n/Info ${ap.base.info}\n` +
@@ -1687,6 +1696,85 @@ async function buildSignedDupObject(built: Map<string, Uint8Array>): Promise<Bui
         { revision: 3, kind: 'other', pages: [], objects: [ref(c)] },
       ],
     ),
+  };
+}
+
+/**
+ * Revision 3 defines page 1's content stream twice, the replacement first and a byte-identical
+ * copy of the signed one second, and its xref lists both (two `6 1` subsections, in that
+ * order). pdf.js keeps the first entry and shows the replacement; PDFium keeps the last.
+ */
+async function buildSignedDupEntry(built: Map<string, Uint8Array>): Promise<Built> {
+  const file = 'signed-dup-entry.pdf';
+  const ap = await approvalFor(built);
+  const c = ap.base.content;
+  const evil = malloryContent(ap);
+  let text = ap.text;
+  const evilAt = text.length;
+  text += `${c} 0 obj\n<<\n/Length ${evil.length}\n>>\nstream\n${evil}\nendstream\nendobj\n`;
+  const copyAt = text.length;
+  text += `${c} 0 obj\n${objectBody(ap.base.text, c)}\nendobj\n`;
+  const xrefAt = text.length;
+  text +=
+    `xref\n${c} 1\n${pad10(evilAt)} 00000 n \n${c} 1\n${pad10(copyAt)} 00000 n \n` +
+    `${attackTrailer(ap, file, xrefAt)}%%EOF\n`;
+  const bytes = bytesOf(text);
+  return {
+    bytes,
+    expect: attackExpect(
+      file,
+      bytes,
+      ap,
+      { technique: 'duplicate-entry', object: ref(c), resolvedContent: evil },
+      [{ revision: 3, kind: 'other', pages: [], objects: [ref(c)] }],
+    ),
+  };
+}
+
+/**
+ * signed-then-modified.pdf's revision 3 with page 1's xref offset 3 bytes early, on spaces
+ * before its `5 0 obj` header (readers skip whitespace to the header, M5 review 2 finding 2).
+ */
+async function buildSignedOffsetEarly(built: Map<string, Uint8Array>): Promise<Built> {
+  const file = 'signed-offset-early.pdf';
+  const ap = await approvalFor(built);
+  const note = ap.base.size + 3;
+  const page = withKey(
+    objectBody(ap.base.text, ap.base.page),
+    'Annots',
+    `[${ref(ap.widget)} ${ref(note)}]`,
+  );
+  let text = ap.text;
+  const pageAt = text.length;
+  text += `   ${ap.base.page} 0 obj\n${page}\nendobj\n`;
+  const noteAt = text.length;
+  text += `${note} 0 obj\n${noteAfterSigning(ap)}\nendobj\n`;
+  const xrefAt = text.length;
+  text +=
+    `xref\n${ap.base.page} 1\n${pad10(pageAt)} 00000 n \n${note} 1\n${pad10(noteAt)} 00000 n \n` +
+    `${attackTrailer(ap, file, xrefAt, note + 1)}%%EOF\n`;
+  const bytes = bytesOf(text);
+  return {
+    bytes,
+    expect: signedExpect(bytes, [
+      signatureTruth(file, bytes, {
+        field: 'Approval',
+        mode: 'cades-detached',
+        revision: 2,
+        byteRange: ap.byteRange,
+        cms: ap.cms,
+        when: SIGNED_1,
+        status: 'intact-changed-later',
+        laterChanges: [
+          {
+            revision: 3,
+            kind: 'annotations',
+            pages: [1],
+            objects: [ref(ap.base.page), ref(note)].sort(),
+          },
+        ],
+      }),
+    ]),
   };
 }
 
@@ -2179,6 +2267,28 @@ export const M5_FIXTURES: FixtureDef[] = [
     howGenerated: `${SIGNED_HOW}; token from lib/pki.ts buildTimestampToken`,
     derivedFrom: 'signed-approval.pdf',
     build: buildSignedDocTimestamp,
+  },
+  {
+    file: 'signed-dup-entry.pdf',
+    tags: ['signatures', 'pades', 'incremental-update', 'attack'],
+    summary:
+      'signed-approval.pdf plus a third revision that defines page 1\'s content stream twice ("PAY 1,000,000 TO MALLORY", then a byte-identical copy of the signed stream) and whose xref section lists object 6 twice, first at the replacement, then at the copy (M5 second review finding 1).',
+    behavior:
+      'Status "Changed after signing": two entries for one object in one revision are a structural change (other), whichever a reader keeps. pdf.js keeps the first entry and shows MALLORY; PDFium keeps the last and shows the signed page.',
+    howGenerated: `${SIGNED_HOW}; revision 3 written by hand`,
+    derivedFrom: 'signed-approval.pdf',
+    build: buildSignedDupEntry,
+  },
+  {
+    file: 'signed-offset-early.pdf',
+    tags: ['signatures', 'pades', 'incremental-update', 'annotations'],
+    summary:
+      "signed-then-modified.pdf's third revision (a /Text note on page 1) written with page 1's xref offset 3 bytes early, on spaces before its object header (M5 second review finding 2).",
+    behavior:
+      'Status "Intact, changed later" (annotations, page 1): readers skip whitespace and comments from an xref offset to the object header, and so does the validator.',
+    howGenerated: `${SIGNED_HOW}; revision 3 written by hand`,
+    derivedFrom: 'signed-approval.pdf',
+    build: buildSignedOffsetEarly,
   },
 ];
 

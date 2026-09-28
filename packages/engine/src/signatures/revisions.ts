@@ -6,7 +6,9 @@
  * it: page content and resources, annotations (with their appearance streams), form fields,
  * signatures, DSS, metadata, the page tree, or the catalog in other ways. Unreachable objects
  * cannot change what a reader shows and are ignored. Whatever the xref chain cannot account
- * for (later.ts) is kind `other`, which no DocMDP level allows.
+ * for (later.ts) is kind `other`, which no DocMDP level allows — except an unreferenced object
+ * that no xref section uses and that cannot carry content: it is listed as `other` for
+ * information, and such a change alone keeps the signature "Intact, changed later".
  */
 import {
   PDFArray,
@@ -249,6 +251,11 @@ function inherited(page: PDFDict, key: string): PDFObject | undefined {
 
 export interface LaterChanges {
   readonly changes: RevisionChange[];
+  /**
+   * The `other` changes (members of `changes`) that only list unreferenced objects readers
+   * ignore: they do not count against what the signature allows.
+   */
+  readonly informational: readonly RevisionChange[];
   /** Why the structural (`other`) changes were listed, one English line each. */
   readonly notes: readonly string[];
   /** 1-based number of the newest revision. */
@@ -346,17 +353,16 @@ export async function classifyLaterChanges(
     changed.add(num);
   }
 
-  const groups = new Map<
-    string,
-    { kind: RevisionChangeKind; revision: number; pages: Set<number>; objects: Set<string> }
-  >();
-  const group = (kind: RevisionChangeKind, revision: number) => {
+  const groups = new Map<string, Group>();
+  /** `informational` groups hold only unreferenced objects readers ignore. */
+  const group = (kind: RevisionChangeKind, revision: number, informational = false) => {
     const key = `${revision}:${kind}`;
     let found = groups.get(key);
     if (!found) {
-      found = { kind, revision, pages: new Set(), objects: new Set() };
+      found = { kind, revision, pages: new Set(), objects: new Set(), informational };
       groups.set(key, found);
     }
+    if (!informational) found.informational = false;
     return found;
   };
   const add = (kind: RevisionChangeKind, num: number, pages: Iterable<number> = []): void => {
@@ -366,11 +372,11 @@ export async function classifyLaterChanges(
     found.objects.add(`${num} ${w?.generation ?? 0} R`);
   };
   for (const s of structural) {
-    const found = group('other', s.revision);
+    const found = group('other', s.revision, s.informational === true);
     for (const o of s.objects) found.objects.add(o);
   }
   const done = (): LaterChanges => ({
-    changes: finish(groups),
+    ...finish(groups),
     notes: structural.map((s) => s.detail),
     lastRevision: later.lastRevision,
   });
@@ -560,18 +566,28 @@ export async function classifyLaterChanges(
   return done();
 }
 
-function finish(
-  groups: Map<
-    string,
-    { kind: RevisionChangeKind; revision: number; pages: Set<number>; objects: Set<string> }
-  >,
-): RevisionChange[] {
-  return [...groups.values()]
-    .sort((a, b) => a.revision - b.revision || a.kind.localeCompare(b.kind))
-    .map((g) => ({
+interface Group {
+  readonly kind: RevisionChangeKind;
+  readonly revision: number;
+  readonly pages: Set<number>;
+  readonly objects: Set<string>;
+  informational: boolean;
+}
+
+function finish(groups: Map<string, Group>): Pick<LaterChanges, 'changes' | 'informational'> {
+  const changes: RevisionChange[] = [];
+  const informational: RevisionChange[] = [];
+  for (const g of [...groups.values()].sort(
+    (a, b) => a.revision - b.revision || a.kind.localeCompare(b.kind),
+  )) {
+    const change: RevisionChange = {
       revision: g.revision,
       kind: g.kind,
       pages: [...g.pages].sort((a, b) => a - b),
       objects: [...g.objects].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)),
-    }));
+    };
+    changes.push(change);
+    if (g.informational) informational.push(change);
+  }
+  return { changes, informational };
 }

@@ -466,8 +466,16 @@ function checkAttack(entry: ManifestEntry, bytes: Uint8Array, c: Check): void {
   const region = latin.slice(signedEnd, xrefAt);
   const [num = 0] = attack.object.split(' ').map(Number);
   const table = latin.slice(xrefAt, latin.indexOf('trailer', xrefAt));
-  const entryLine = new RegExp(`\\n${num} 1\\n(\\d{10}) (\\d{5}) ([nf])`).exec(table);
-  c.ok(!!entryLine, `${attack.technique}: the last xref has one entry for ${attack.object}`);
+  const entryLines = [
+    ...table.matchAll(new RegExp(`\\n${num} 1\\n(\\d{10}) (\\d{5}) ([nf])`, 'g')),
+  ];
+  const entryLine = entryLines[0];
+  const twice = attack.technique === 'duplicate-entry';
+  c.eq(
+    entryLines.length,
+    twice ? 2 : 1,
+    `${attack.technique}: the last xref's entries for ${attack.object}`,
+  );
   const headers = [...region.matchAll(new RegExp(`(?:^|\\n)${num} 0 obj\\n`, 'g'))].map(
     (m) => signedEnd + (m.index ?? 0) + (m[0].startsWith('\n') ? 1 : 0),
   );
@@ -484,8 +492,12 @@ function checkAttack(entry: ManifestEntry, bytes: Uint8Array, c: Check): void {
     const offset = Number(entryLine?.[1]);
     c.eq(offset, headers[0], 'the entry points at the first definition');
     c.eq(streamAt(offset), attack.resolvedContent, 'the xref resolves to the new content');
-    if (attack.technique === 'duplicate-definition') {
+    if (attack.technique === 'duplicate-definition' || twice) {
       c.eq(headers.length, 2, 'two definitions');
+      if (twice) {
+        c.eq(entryLines[1]?.[3], 'n', 'the second entry is in use');
+        c.eq(Number(entryLines[1]?.[1]), headers[1], 'the second entry points at the second');
+      }
       const signed = latin.slice(0, signedEnd);
       const original = signed.slice(signed.lastIndexOf(`\n${num} 0 obj\n`) + 1);
       const second = latin.slice(headers[1] ?? 0);

@@ -77,11 +77,16 @@ function withCms(bytes: Uint8Array, range: readonly number[], cms: pkijs.SignedD
 
 /**
  * `bytes` plus one hand-written revision (uncompressed objects, a classic xref section, a
- * trailer continuing signed-approval.pdf's), as a writer that follows the rules would.
+ * trailer continuing signed-approval.pdf's), as a writer that follows the rules would;
+ * `unlisted` is written first and left out of the xref section.
  */
-function appendRevision(bytes: Uint8Array, objects: { num: number; body: string }[]): Uint8Array {
+function appendRevision(
+  bytes: Uint8Array,
+  objects: { num: number; body: string }[],
+  unlisted = '',
+): Uint8Array {
   const prev = /startxref\s+(\d+)\s*%%EOF\s*$/.exec(latin1(bytes, bytes.length - 64))?.[1];
-  let tail = '';
+  let tail = unlisted;
   const xref: string[] = [];
   for (const { num, body } of objects) {
     xref.push(`${num} 1\n${String(bytes.length + tail.length).padStart(10, '0')} 00000 n \n`);
@@ -207,6 +212,169 @@ describe('incremental-update attacks (review finding 1)', () => {
     const [b] = await validateSignatures(skip);
     expect(b?.status).toBe('changed-after-signing');
     expect(check(b, 'later-changes')?.detail).toMatch(/not back to the signed revision/);
+  });
+});
+
+describe('second review: duplicate entries, early offsets, unreferenced objects', () => {
+  let adapter: PdfiumAdapter;
+  beforeAll(() => {
+    adapter = new PdfiumAdapter({ wasmUrl });
+  });
+  afterAll(async () => {
+    await adapter.destroy();
+  });
+  const pdfiumPage1 = async (bytes: Uint8Array) => {
+    const id = sid('page-1');
+    await adapter.open(id, bytes.slice().buffer);
+    const text = (await adapter.getPageText(id, 0)).map((run) => run.text).join(' ');
+    await adapter.close(id);
+    return text;
+  };
+  /** `bytes` with `from` (first occurrence at or after `after`) replaced by `to`, same length. */
+  const patch = (bytes: Uint8Array, from: string, to: string, after = 0): Uint8Array => {
+    expect(to.length).toBe(from.length);
+    const at = latin1(bytes).indexOf(from, after);
+    expect(at).toBeGreaterThanOrEqual(after);
+    const out = bytes.slice();
+    new TextEncoder().encodeInto(to, out.subarray(at));
+    return out;
+  };
+  const note = '<< /Type /Annot /Subtype /Text /Rect [400 700 420 720] /P 5 0 R >>';
+  const statusOf = async (bytes: Uint8Array) => {
+    const [r] = await validateSignatures(bytes);
+    return r;
+  };
+
+  test('signed-dup-entry.pdf: two entries for page 1 content; pdf.js shows MALLORY, PDFium the signed page', async () => {
+    const bytes = await fixture('signed-dup-entry.pdf');
+    const [r] = await validateSignatures(bytes, { visual });
+    expect(r?.status, JSON.stringify(r?.checks)).toBe('changed-after-signing');
+    expect(check(r, 'digest')?.outcome).toBe('pass');
+    expect(r?.laterChanges).toEqual([
+      { revision: 3, kind: 'other', pages: [], objects: ['6 0 R'] },
+    ]);
+    expect(check(r, 'later-changes')?.detail).toMatch(/lists object 6 more than once/);
+    expect(await pdfjsPage1(bytes)).toContain(MALLORY);
+    const pdfium = await pdfiumPage1(bytes);
+    expect(pdfium).toContain(PAGE_1);
+    expect(pdfium).not.toContain(MALLORY);
+    // The other order (the copy first, the replacement last): both findings are listed.
+    const text = latin1(bytes);
+    const xref = text.lastIndexOf('xref\n6 1\n');
+    const [first = '', second = ''] = [...text.slice(xref).matchAll(/\d{10} 00000 n/g)].map(
+      (m) => m[0],
+    );
+    const swapped = patch(patch(bytes, first, second, xref), second, first, xref + 30);
+    const [s] = await validateSignatures(swapped);
+    expect(s?.status).toBe('changed-after-signing');
+    expect(s?.laterChanges).toEqual([
+      { revision: 3, kind: 'content', pages: [0], objects: ['6 0 R'] },
+      { revision: 3, kind: 'other', pages: [], objects: ['6 0 R'] },
+    ]);
+    expect(await pdfiumPage1(swapped)).toContain(MALLORY);
+  });
+
+  test('a repeated identical xref entry is harmless', async () => {
+    const base = await fixture('signed-then-modified.pdf');
+    const text = latin1(base);
+    const xref = text.lastIndexOf('\nxref\n') + 1;
+    const entry = /\n(14 1\n\d{10} 00000 n \n)/.exec(text.slice(xref))?.[1] ?? '';
+    expect(entry).not.toBe('');
+    const at = xref + text.slice(xref).indexOf(entry) + entry.length;
+    const twice = new Uint8Array([
+      ...base.subarray(0, at),
+      ...new TextEncoder().encode(entry),
+      ...base.subarray(at),
+    ]);
+    const r = await statusOf(twice);
+    expect(r?.status).toBe('intact-changed-later');
+    expect(r?.laterChanges).toEqual([
+      { revision: 3, kind: 'annotations', pages: [0], objects: ['5 0 R', '14 0 R'] },
+    ]);
+  });
+
+  test('signed-offset-early.pdf: an xref offset on whitespace or a comment before the header', async () => {
+    const bytes = await fixture('signed-offset-early.pdf');
+    const want = [{ revision: 3, kind: 'annotations', pages: [0], objects: ['5 0 R', '14 0 R'] }];
+    const r = await statusOf(bytes);
+    expect(r?.status, JSON.stringify(r?.checks)).toBe('intact-changed-later');
+    expect(r?.laterChanges).toEqual(want);
+    expect(await pdfjsPage1(bytes)).toContain(PAGE_1);
+    // A comment instead of the spaces: readers skip it too.
+    const comment = patch(bytes, '   5 0 obj', '%x\n5 0 obj', 20273);
+    const c = await statusOf(comment);
+    expect(c?.status).toBe('intact-changed-later');
+    expect(c?.laterChanges).toEqual(want);
+    // Anything else before the header is not skipped.
+    const junk = await statusOf(patch(bytes, '   5 0 obj', 'xx 5 0 obj', 20273));
+    expect(junk?.status).toBe('changed-after-signing');
+  });
+
+  test('unreferenced objects: listed; only a used number or possible content counts as a change', async () => {
+    const approval = await fixture('signed-approval.pdf');
+    const annot = [{ num: 14, body: note }];
+    // A stray dictionary with a number no xref section uses: listed, still Intact, changed later.
+    const stray = await statusOf(
+      appendRevision(approval, annot, '99 0 obj\n<< /Junk (leftover) >>\nendobj\n'),
+    );
+    expect(stray?.status, JSON.stringify(stray?.checks)).toBe('intact-changed-later');
+    expect(stray?.laterChanges).toEqual([
+      { revision: 3, kind: 'annotations', pages: [0], objects: ['14 0 R'] },
+      { revision: 3, kind: 'other', pages: [], objects: ['99 0 R'] },
+    ]);
+    expect(check(stray, 'later-changes')?.detail).toMatch(/unreferenced object 99 0 R/);
+    // A number in use (page 1's content stream), or an object that could carry content.
+    for (const unlisted of [
+      '6 0 obj\n<< /Junk (leftover) >>\nendobj\n',
+      '99 0 obj\n<< /Length 5 >>\nstream\nBT ET\nendstream\nendobj\n',
+      '99 0 obj\n<< /Type /Page /Parent 7 0 R /MediaBox [0 0 612 792] >>\nendobj\n',
+      '99 0 obj\n<< /Type /Annot /Subtype /Text /Rect [0 0 1 1] >>\nendobj\n',
+      '99 0 obj\n<< /FT /Tx /T (x) >>\nendobj\n',
+      '99 0 obj\n(trailer << /Root 20 0 R >>)\nendobj\n',
+    ]) {
+      const r = await statusOf(appendRevision(approval, annot, unlisted));
+      expect(r?.status, unlisted).toBe('changed-after-signing');
+      expect(check(r, 'later-changes')?.detail, unlisted).toMatch(/without listing it/);
+    }
+    // Garbage that is no object stays a change.
+    const garbage = await statusOf(appendRevision(approval, annot, 'garbage\n'));
+    expect(garbage?.status).toBe('changed-after-signing');
+  });
+
+  test("a revision's xref stream may not take a number an earlier revision uses", async () => {
+    const approval = await fixture('signed-approval.pdf');
+    const xrefStream = (num: number) => {
+      const at = approval.length;
+      const row = [1, (at >>> 24) & 255, (at >>> 16) & 255, (at >>> 8) & 255, at & 255, 0, 0];
+      const head =
+        `${num} 0 obj\n<< /Type /XRef /Size 30 /W [1 4 2] /Index [${num} 1] /Root 2 0 R` +
+        ` /Info 3 0 R /Prev 19999 /Length ${row.length} >>\nstream\n`;
+      return new Uint8Array([
+        ...approval,
+        ...new TextEncoder().encode(head),
+        ...row,
+        ...new TextEncoder().encode(`\nendstream\nendobj\nstartxref\n${at}\n%%EOF\n`),
+      ]);
+    };
+    const fresh = await statusOf(xrefStream(20));
+    expect(fresh?.status, JSON.stringify(fresh?.checks)).toBe('intact-changed-later');
+    // Page 1's content stream number: a reader resolves 6 0 R to the xref stream.
+    const taken = await statusOf(xrefStream(6));
+    expect(taken?.status).toBe('changed-after-signing');
+    expect(check(taken, 'later-changes')?.detail).toMatch(/takes the number 6/);
+    // pdf-lib's own incremental save with object streams stays allowed.
+    const doc = await PDFDocument.load(approval, {
+      forIncrementalUpdate: true,
+      updateMetadata: false,
+    });
+    const page = doc.getPage(2);
+    const ref = doc.context.register(
+      doc.context.obj({ Type: 'Annot', Subtype: 'Text', Rect: [10, 10, 30, 30] }),
+    );
+    page.node.set(PDFName.of('Annots'), doc.context.obj([ref]));
+    const saved = await statusOf(await doc.commit({ useObjectStreams: true }));
+    expect(saved?.status, JSON.stringify(saved?.checks)).toBe('intact-changed-later');
+    expect(saved?.laterChanges.map((c) => c.kind)).toEqual(['annotations']);
   });
 });
 

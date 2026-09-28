@@ -406,13 +406,17 @@ export interface SignatureTruth {
 export interface AttackTruth {
   /**
    * `duplicate-definition`: the object defined twice, the xref pointing at the first (new)
-   * one; `free-entry`: a free xref entry for it; `no-eof`: a replacement whose revision ends
+   * one; `duplicate-entry`: the object defined twice and the xref listing both, the new one
+   * first; `free-entry`: a free xref entry for it; `no-eof`: a replacement whose revision ends
    * at `startxref N` without %%EOF.
    */
-  technique: 'duplicate-definition' | 'free-entry' | 'no-eof';
+  technique: 'duplicate-definition' | 'duplicate-entry' | 'free-entry' | 'no-eof';
   /** The target, page 1's content stream. */
   object: string;
-  /** Page 1's content as the xref chain resolves it (`null`: the object is free). */
+  /**
+   * Page 1's content as the xref chain resolves it (`null`: the object is free); for
+   * `duplicate-entry`, as the first entry resolves it.
+   */
   resolvedContent: string | null;
 }
 

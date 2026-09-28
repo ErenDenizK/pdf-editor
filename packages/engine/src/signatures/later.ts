@@ -9,10 +9,16 @@
  *   through sections that all lie after the signed bytes, newest last in the file;
  * - every byte after the signed end belongs to a parsed part of some later revision: an
  *   object its xref points at, its xref section and trailer, or whitespace and comments
- *   (`%%EOF` is a comment). Anything else — a second definition of an object, a stray
- *   object, garbage — is a structural change;
- * - each in-use entry is resolved at its offset: the object header there must carry the
- *   entry's number and generation and the object must lie inside that revision;
+ *   (`%%EOF` is a comment). Anything else — a second definition of an object, garbage — is a
+ *   structural change. An unreferenced object is listed; it is structural when its number is
+ *   in use in some xref section or it could carry content (a stream, a page, an annotation, a
+ *   field, a signature, a catalog), since a reader that rebuilds a damaged xref may take it;
+ * - a revision lists each object once: two in-use entries for one number with different
+ *   targets (or a free and an in-use entry in one section) are read differently by readers
+ *   (pdf.js keeps the first, PDFium the last), so they are a structural change;
+ * - each in-use entry is resolved at its offset (past whitespace and comments, as readers
+ *   do): the object header there must carry the entry's number and generation and the object
+ *   must lie inside that revision;
  * - a compressed (type 2) entry resolves through an object stream that a later revision
  *   writes, and the stream's index must name the same object;
  * - a free (type 0) entry for an object that existed when signed deletes it (a reference to
@@ -26,15 +32,24 @@
  */
 import {
   decodePDFRawStream,
+  PDFDict,
   PDFName,
   PDFNumber,
   type PDFContext,
   type PDFObject,
   PDFObjectParser,
   PDFRawStream,
+  PDFStream,
 } from '@cantoo/pdf-lib';
 
-import { type XrefEntry, type XrefSection, dictRef, lastStartxref, parseSection } from './xref';
+import {
+  type XrefEntry,
+  type XrefSection,
+  dictRef,
+  lastStartxref,
+  parseSection,
+  walkChain,
+} from './xref';
 
 /** One object as the later revisions leave it (the newest entry for its number). */
 export interface LaterObject {
@@ -53,6 +68,11 @@ export interface StructuralChange {
   readonly detail: string;
   /** Objects involved, e.g. `6 0 R`. */
   readonly objects: readonly string[];
+  /**
+   * Listed for information only: an unreferenced object no xref section uses and that cannot
+   * carry content. Readers ignore it, so it does not by itself make the signature changed.
+   */
+  readonly informational?: boolean;
 }
 
 export interface LaterRevisions {
@@ -88,12 +108,18 @@ interface Parsed {
   readonly num: number;
   readonly gen: number;
   readonly object: PDFObject;
+  /** Where the `n g obj` header starts. */
+  readonly start: number;
   /** Just past `endobj`. */
   readonly end: number;
 }
 
+/** How far past an xref offset whitespace and comments are skipped to reach the header. */
+const MAX_LEAD = 64;
+
 /**
- * The indirect object whose header is exactly at `offset`, parsed within `[offset, limit)`.
+ * The indirect object whose header is at `offset` (or after up to MAX_LEAD bytes of
+ * whitespace and comments, which readers skip too), parsed within `[offset, limit)`.
  * Throws when there is no `n g obj … endobj` there.
  */
 function parseObjectAt(
@@ -104,9 +130,10 @@ function parseObjectAt(
   context: PDFContext,
 ): Parsed {
   const header = /(\d+)[\0\t\n\f\r ]+(\d+)[\0\t\n\f\r ]+obj/y;
-  header.lastIndex = offset;
+  header.lastIndex = skipSpace(text, offset, Math.min(limit, offset + MAX_LEAD));
   const m = header.exec(text);
   if (!m || header.lastIndex > limit) throw new Error(`no object header at byte ${offset}`);
+  const start = header.lastIndex - m[0].length;
   const bodyAt = header.lastIndex;
   const parser = PDFObjectParser.forBytes(bytes.subarray(bodyAt, limit), context);
   const object = parser.parseObject();
@@ -116,7 +143,7 @@ function parseObjectAt(
   if (!text.startsWith('endobj', after) || after + 6 > limit) {
     throw new Error(`object ${m[1]} ${m[2]} at byte ${offset} has no endobj`);
   }
-  return { num: Number(m[1]), gen: Number(m[2]), object, end: after + 6 };
+  return { num: Number(m[1]), gen: Number(m[2]), object, start, end: after + 6 };
 }
 
 interface RevisionPart {
@@ -196,7 +223,70 @@ export async function readLaterRevisions(
     .reverse()
     .map((c, i) => ({ revision: firstLater + i, main: c.main, ...(c.stm ? { stm: c.stm } : {}) }));
 
+  // Object numbers some xref section of the file uses (read when an unreferenced object is met).
+  let inUse: Promise<Set<number> | undefined> | undefined;
+  const numbersInUse = () => {
+    inUse ??= (async () => {
+      const signed = await walkChain(bytes, signedEnd);
+      if (signed.error) return undefined;
+      const out = new Set<number>();
+      for (const section of [...signed.sections, ...parts.flatMap((p) => [p.main, p.stm])]) {
+        for (const e of section?.entries ?? []) if (e.type !== 0) out.add(e.num);
+      }
+      return out;
+    })();
+    return inUse;
+  };
+  /**
+   * Bytes `[from, to)` of a revision that no xref entry, section or trailer covers: whitespace
+   * and comments, unreferenced objects, or anything else (structural).
+   */
+  const explainGap = async (from: number, to: number, revision: number): Promise<void> => {
+    let pos = skipSpace(text, from, to);
+    while (pos < to) {
+      let orphan: Parsed;
+      try {
+        orphan = parseObjectAt(bytes, text, pos, to, context);
+      } catch {
+        const stray = [...text.slice(pos, to).matchAll(/(?<!\d)(\d+)\s+(\d+)\s+obj\b/g)].map((h) =>
+          ref(Number(h[1]), Number(h[2])),
+        );
+        structural.push({
+          revision,
+          detail:
+            stray.length > 0
+              ? `Revision ${revision} writes ${stray.join(', ')} at byte ${pos} without listing it in its cross-reference section (a reader ignores it, other tools may not).`
+              : `Bytes ${pos}–${to} of revision ${revision} belong to no object, section or trailer.`,
+          objects: stray,
+        });
+        return;
+      }
+      const tag = ref(orphan.num, orphan.gen);
+      const used = (await numbersInUse())?.has(orphan.num) ?? true;
+      const content = mayCarryContent(orphan.object, text.slice(orphan.start, orphan.end));
+      if (used || content) {
+        structural.push({
+          revision,
+          detail: `Revision ${revision} writes ${tag} at byte ${orphan.start} without listing it in its cross-reference section (a reader ignores it, other tools may not: ${
+            used ? 'the number is in use in a cross-reference section' : 'it could carry content'
+          }).`,
+          objects: [tag],
+        });
+      } else {
+        structural.push({
+          revision,
+          detail: `Revision ${revision} writes the unreferenced object ${tag} at byte ${orphan.start}, which no cross-reference section lists and which carries no content (readers ignore it).`,
+          objects: [tag],
+          informational: true,
+        });
+      }
+      pos = skipSpace(text, orphan.end, to);
+    }
+  };
+
   // 2. Each revision's bytes: objects at their offsets, the section, the trailer.
+  const signedObjects = new Map<number, PDFObject>();
+  for (const [r, o] of context.enumerateIndirectObjects()) signedObjects.set(r.objectNumber, o);
   const parsedAt = new Map<number, Parsed>();
   const newest = new Map<number, { entry: XrefEntry; revision: number }>();
   let start = signedEnd;
@@ -235,6 +325,26 @@ export async function readLaterRevisions(
           objects: [],
         });
       }
+    }
+    // A section's own xref stream is left out of the objects, so its number must be new: a
+    // reader resolves a number the stream takes over to the stream (whose data may draw).
+    for (const num of selfObjects) {
+      const was = signedObjects.get(num);
+      const xrefBefore = was instanceof PDFRawStream && isXrefStream(was);
+      if (newest.has(num) || (was !== undefined && !xrefBefore)) {
+        structural.push({
+          revision,
+          detail: `The cross-reference stream of revision ${revision} takes the number ${num}, which an earlier revision uses for another object.`,
+          objects: [ref(num, 0)],
+        });
+      }
+    }
+    for (const num of conflicts([main, ...(stm ? [stm] : [])])) {
+      structural.push({
+        revision,
+        detail: `Revision ${revision} lists object ${num} more than once with different targets (a reader may take either).`,
+        objects: [ref(num, 0)],
+      });
     }
     for (const entry of entries) {
       if (entry.num === 0) continue;
@@ -276,20 +386,7 @@ export async function readLaterRevisions(
     let pos = start;
     for (const [from, to] of [...covered, [xrefEnd, xrefEnd] as [number, number]]) {
       const gapEnd = Math.min(from, xrefEnd);
-      if (gapEnd > pos && skipSpace(text, pos, gapEnd) < gapEnd) {
-        const junk = skipSpace(text, pos, gapEnd);
-        const stray = [...text.slice(junk, gapEnd).matchAll(/(?<!\d)(\d+)\s+(\d+)\s+obj\b/g)].map(
-          (h) => ref(Number(h[1]), Number(h[2])),
-        );
-        structural.push({
-          revision,
-          detail:
-            stray.length > 0
-              ? `Revision ${revision} writes ${stray.join(', ')} at byte ${junk} without listing it in its cross-reference section (a reader ignores it, other tools may not).`
-              : `Bytes ${junk}–${gapEnd} of revision ${revision} belong to no object, section or trailer.`,
-          objects: stray,
-        });
-      }
+      if (gapEnd > pos) await explainGap(pos, gapEnd, revision);
       pos = Math.max(pos, to);
     }
     start = xrefEnd;
@@ -391,6 +488,84 @@ export async function readLaterRevisions(
     ...(encrypt ? { encrypt } : {}),
     structural,
   };
+}
+
+const isXrefStream = (stream: PDFRawStream) =>
+  stream.dict.get(PDFName.of('Type')) === PDFName.of('XRef');
+
+/**
+ * Object numbers a revision lists more than once with different targets: two in-use entries
+ * across its sections (the main one and a hybrid file's /XRefStm), or a free and an in-use
+ * entry in one section. A repeated identical entry is harmless.
+ */
+function conflicts(sections: readonly XrefSection[]): Set<number> {
+  const out = new Set<number>();
+  const used = new Map<number, string>();
+  for (const section of sections) {
+    const free = new Set<number>();
+    const here = new Set<number>();
+    for (const e of section.entries) {
+      if (e.num === 0) continue;
+      if (e.type === 0) {
+        if (here.has(e.num)) out.add(e.num);
+        free.add(e.num);
+        continue;
+      }
+      const target = `${e.type} ${e.field2} ${e.field3}`;
+      const seen = used.get(e.num);
+      if ((seen !== undefined && seen !== target) || free.has(e.num)) out.add(e.num);
+      used.set(e.num, target);
+      here.add(e.num);
+    }
+  }
+  return out;
+}
+
+const CONTENT_TYPES = new Set([
+  'Catalog',
+  'Pages',
+  'Page',
+  'Annot',
+  'Sig',
+  'DocTimeStamp',
+  'ObjStm',
+  'XRef',
+  'XObject',
+  'DSS',
+]);
+const CONTENT_KEYS = [
+  'Root',
+  'Pages',
+  'Kids',
+  'Parent',
+  'Contents',
+  'Resources',
+  'Annots',
+  'Subtype',
+  'Rect',
+  'AP',
+  'FT',
+  'V',
+  'ByteRange',
+  'AcroForm',
+];
+
+/**
+ * Whether an unreferenced object could change what a reader shows if a reader that rebuilds
+ * a damaged xref took it: any stream (page content, form XObject, object stream), a page,
+ * catalog, annotation, field or signature, or raw text a reconstructing scan could mistake
+ * for an object header, a trailer or an xref section.
+ */
+function mayCarryContent(object: PDFObject, raw: string): boolean {
+  if (object instanceof PDFStream) return true;
+  const body = raw.slice(raw.indexOf('obj') + 3, raw.lastIndexOf('endobj'));
+  if (/obj|trailer|xref|stream|\/Root|\/Type\s*\/Catalog/.test(body)) return true;
+  if (object instanceof PDFDict) {
+    const type = object.get(PDFName.of('Type'));
+    if (type instanceof PDFName && CONTENT_TYPES.has(type.decodeText())) return true;
+    if (CONTENT_KEYS.some((k) => object.has(PDFName.of(k)))) return true;
+  }
+  return false;
 }
 
 /**
