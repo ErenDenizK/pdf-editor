@@ -11,7 +11,7 @@ import type { SignatureReport, SignerFacts } from '@pdf-editor/engine';
 import { Shield, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 
-import { getLocale, m } from '../i18n';
+import { formatNumber, getLocale, m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { useActiveDocument, useWorkspaceStore } from '../state/workspace-store';
 import { openSignedVersion, useSignatureStore } from './signature-store';
@@ -183,8 +183,9 @@ function SignatureCard({
             <dt>{m.signature_revision()}</dt>
             <dd className={styles.numeric}>
               {m.signature_revision_of({
-                revision: report.revision,
                 count: report.revisionCount,
+                revisionText: formatNumber(report.revision),
+                countText: formatNumber(report.revisionCount),
               })}
             </dd>
           </>

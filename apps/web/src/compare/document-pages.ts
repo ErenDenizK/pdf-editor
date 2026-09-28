@@ -34,6 +34,7 @@ import type {
 } from '@pdf-editor/engine';
 
 import { getEngineService } from '../engine/engine-service';
+import { m } from '../i18n';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { openScratch, type ScratchDocument } from '../tools/engine-access';
 import { toolSourceBytes } from '../tools/tool-source';
@@ -103,7 +104,8 @@ export async function documentPages(
   const state = useWorkspaceStore.getState();
   const ws = state.workspace;
   const doc = ws.documents[documentId];
-  if (!doc) throw new Error('The document was closed');
+  // Shown to the user inside compare_failed / the batch failure line: localized.
+  if (!doc) throw new Error(m.compare_error_document_closed());
   const service = getEngineService();
   if (isPlainDocument(doc)) {
     const pages = plainPages(ws, doc, (s, i) => service.pageCropBox(s, i));
@@ -198,7 +200,7 @@ export async function workspaceDocumentPages(
   options: { readonly signal?: AbortSignal; readonly assemble?: boolean } = {},
 ): Promise<DocumentPages> {
   const doc = ws.documents[documentId];
-  if (!doc) throw new Error('The document is not in the workspace');
+  if (!doc) throw new Error(m.compare_error_document_closed());
   if (options.assemble !== true && isPlainDocument(doc)) {
     const pages = plainPages(ws, doc, deps.pageCropBox);
     const sourceIds = [...new Set(pages.map((p) => p.sourceId))];

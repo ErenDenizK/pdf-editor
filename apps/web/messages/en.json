@@ -317,7 +317,21 @@
   "signature_algorithms": "Algorithm",
   "signature_key": "Key",
   "signature_revision": "Revision",
-  "signature_revision_of": "{revision} of {count}",
+  "signature_revision_of": [
+    {
+      "declarations": [
+        "input count",
+        "input revisionText",
+        "input countText",
+        "local countPlural = count: plural"
+      ],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{revisionText} of {countText} revision",
+        "countPlural=*": "{revisionText} of {countText} revisions"
+      }
+    }
+  ],
   "signature_details": "Certificates and checks",
   "signature_chain": "Chain as embedded",
   "signature_chain_root": "Ends at a root certificate included in the file (not trusted).",
@@ -1711,7 +1725,16 @@
       }
     }
   ],
-  "batch_run_progress": "{done} of {total} files finished",
+  "batch_run_progress": [
+    {
+      "declarations": ["input done", "input total", "local totalPlural = total: plural"],
+      "selectors": ["totalPlural"],
+      "match": {
+        "totalPlural=one": "{done} of {total} file finished",
+        "totalPlural=*": "{done} of {total} files finished"
+      }
+    }
+  ],
   "batch_run_ocr_prepare": "Starting text recognition…",
   "batch_run_ocr_download": "Loading OCR languages… {done} of {total}",
   "batch_run_progress_label": "Batch progress",
@@ -1923,6 +1946,14 @@
   "batch_error_unavailable": "This step is not available in this version.",
   "batch_error_ocr_languages": "The OCR languages ({languages}) could not be loaded, so no file was processed: {reason}. Connect once to download them, or keep them available offline under OCR languages.",
   "batch_error_ocr_start": "Text recognition could not start, so no file was processed: {reason}",
+  "batch_error_plan_blocked": "The recipe has steps this app cannot run.",
+  "batch_error_needs_password": "The recipe needs a password to run.",
+  "batch_error_files_mismatch": "The files changed after the run was planned; choose them again.",
+  "batch_error_recipe_not_found": "The recipe was not found: it may have been deleted in another window.",
+  "batch_error_built_in_read_only": "Built-in recipes are read-only: duplicate one to change it.",
+  "batch_error_recipe_id": "The recipe could not be saved: its stored name is not valid.",
+  "batch_error_storage": "The browser storage for recipes could not be read or written.",
+  "batch_error_folders_unsupported": "This browser cannot save into a folder; save the results as a ZIP or one by one.",
   "batch_notice_no_pages": "No page matched this step’s pages; nothing changed.",
   "batch_notice_crop_too_small": [
     {
@@ -2637,6 +2668,8 @@
   "compare_cancelled": "Comparison cancelled",
   "compare_failed": "The comparison failed: {reason}",
   "compare_report_failed": "The report could not be made: {reason}",
+  "compare_stale": "The documents changed since this comparison; run it again to compare them as they are now.",
+  "compare_error_document_closed": "The document was closed.",
   "compare_announce_done": [
     {
       "declarations": ["input pages", "local pagesPlural = pages: plural"],
@@ -2649,7 +2682,22 @@
   ],
   "compare_announce_identical": "Comparison done: no differences found",
   "compare_preparing": "Reading the documents…",
-  "compare_progress": "{phase}: {done} of {total}",
+  "compare_progress": [
+    {
+      "declarations": [
+        "input phase",
+        "input total",
+        "input doneText",
+        "input totalText",
+        "local totalPlural = total: plural"
+      ],
+      "selectors": ["totalPlural"],
+      "match": {
+        "totalPlural=one": "{phase}: {doneText} of {totalText} step",
+        "totalPlural=*": "{phase}: {doneText} of {totalText} steps"
+      }
+    }
+  ],
   "compare_progress_label": "Comparison progress",
   "compare_phase_text": "Reading text",
   "compare_phase_thumbnails": "Reading pages without text",
@@ -2756,7 +2804,16 @@
   "convert_preview": "Preview (first 40 lines)",
   "convert_preview_more": "… (more in the file)",
   "convert_preview_empty": "No text was found on these pages.",
-  "convert_progress": "Converting… {done}/{total}",
+  "convert_progress": [
+    {
+      "declarations": ["input done", "input total", "local totalPlural = total: plural"],
+      "selectors": ["totalPlural"],
+      "match": {
+        "totalPlural=one": "Converting… {done} of {total} step",
+        "totalPlural=*": "Converting… {done} of {total} steps"
+      }
+    }
+  ],
   "convert_note_order": "Reading order and headings are reconstructed from positions and font sizes: columns, sidebars, footnotes, tables and rotated text may come out in the wrong order.",
   "convert_note_tables": "Tables are not detected: their text follows in reading order.",
   "convert_note_tables_found": [

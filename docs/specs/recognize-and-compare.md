@@ -146,7 +146,8 @@ export interface OcrRecognizer {                        // browser adapter over 
 - **Entry:** "Compare with…" picks another open tab, "the file as opened" (this tab's
   sources without edits) or a file from disk. Both sides render as the engine sees them
   (content, edits, rotation, crop, resize); export-time overlays (numbers, watermark,
-  headers) are excluded and the view says so.
+  headers) are excluded and the view says so. *Deviation (M5):* "the file as opened" is not
+  offered yet; to compare with it, open the original file again as a second tab.
 - **Page matching:** by index, or best match (default when counts differ): Needleman–Wunsch
   over page similarity (Jaccard of word 3-shingles; without text, 32×32 greyscale thumbnail
   distance). Unpaired pages are inserted or deleted pages. O(n·m) is fine to 2 000 pages.
@@ -168,7 +169,11 @@ export interface OcrRecognizer {                        // browser adapter over 
 - A **Compare** view in the stage (a third view-switch segment while a comparison is open;
   Esc leaves): paired columns, synced scroll, Side by side / Overlay (onion skin slider) /
   Difference (heatmap); a right-panel **Changes** list (J/K), rows with a +/−/~ glyph, never
-  colour alone. Read-only; no history. Work runs in a new **analysis worker** (pure JS),
+  colour alone. Read-only; no history. Leaving the view keeps a finished comparison until
+  "New comparison" or a compared tab closes; when a compared document changes afterwards
+  (an edit, undo/redo, a page command), the view and the list say the result is out of
+  date and offer to run again, and the report (built from the bytes that were compared)
+  is not offered until then. Work runs in a new **analysis worker** (pure JS),
   visible pages first, then in the background; rendering stays in the PDFium worker at low
   priority; results cached per page pair and render key.
 - Honesty text: a pixel diff shows *where* pages look different at this resolution, not
@@ -261,9 +266,11 @@ and M5 ships validation only.
 - **Refused in M5:** encrypted outputs (Cantoo's `encrypt()` writes strings in plaintext,
   `test/fixtures/README.md`); certification signatures; timestamps and LTV (TSAs and
   OCSP/CRL responders need network, lack CORS and are blocked by `connect-src 'self'`; only
-  a user-run proxy would work, ADR-0007). **Existing signatures at export:** an unedited
-  signed source exports as its original bytes (signing may append); any other export of a
-  signed source says "Existing signatures will no longer verify in this file" first.
+  a user-run proxy would work, ADR-0007). **Existing signatures at export:** every export
+  (and every batch output) rewrites the file, so a signed source's signature values are
+  stripped, never shipped broken (ADR-0013, ARCHITECTURE §4 step 6); the dialog says so
+  first and the export summary (a batch file's notes) counts the signatures removed. The
+  original file keeps them; signing may then append a new signature.
 
 ### 3.3 Interfaces
 
@@ -446,7 +453,8 @@ integrates and commits, every R finding is fixed with a regression test.
 - **Compare:** exactly the seeded changes; 200 pages at 100 dpi in ≤ 60 s on the CI runner
   with no main-thread task over 200 ms (Long Tasks API in e2e).
 - **Signatures:** zero false Intact in the tamper test; no incremental output unless the
-  user signed or exported an unedited signed source. **Batch:** no password in any
+  user signed; a signed source's export (app or batch) carries no signature value and
+  says so. **Batch:** no password in any
   serialized recipe (property test over generated recipes).
 - **Bundle:** the shell grows ≤ 60 KB gzip; tesseract, pkijs and the analysis code load
   only when used (Lighthouse budget).

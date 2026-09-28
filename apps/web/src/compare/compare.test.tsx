@@ -64,6 +64,11 @@ afterEach(async () => {
 
 afterAll(() => getAnalysisWorkers().terminate());
 
+function enabled(id: string): boolean {
+  const command = commandRegistry.get(id);
+  return command !== undefined && commandRegistry.isEnabled(command);
+}
+
 async function openPair() {
   const report = await useWorkspaceStore
     .getState()
@@ -251,17 +256,83 @@ describe('compare-a.pdf against compare-b.pdf', () => {
     );
   }, 60_000);
 
-  it('releases the comparison when the view is left', async () => {
+  it('keeps the comparison when the view is left; New comparison releases it', async () => {
     const { a, b } = await openPair();
     useUiStore.getState().setViewMode('compare');
     useCompareStore.setState({ a, b });
     await startCompare();
     expect(hasActiveCompare()).toBe(true);
+    const { result } = useCompareStore.getState();
     useUiStore.getState().setViewMode('read');
-    await waitFor(() => expect(hasActiveCompare()).toBe(false));
-    expect(useCompareStore.getState().result).toBeNull();
     expect(useUiStore.getState().leftPanelView).toBe('pages');
+    // Read-only view: nothing to lose by leaving, so the result waits for the return.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(hasActiveCompare()).toBe(true);
+    expect(useCompareStore.getState()).toMatchObject({ status: 'done', result });
+    useUiStore.getState().setViewMode('compare');
+    expect(useUiStore.getState().leftPanelView).toBe('changes');
+    expect(useCompareStore.getState().result).toBe(result);
+
+    render(<CompareView dragging={false} />);
+    (await screen.findByRole('button', { name: 'New comparison' })).click();
+    await waitFor(() => expect(useCompareStore.getState().result).toBeNull());
+    expect(hasActiveCompare()).toBe(false);
     // The choices stay for the next time.
     expect(useCompareStore.getState().a).toBe(a);
   }, 60_000);
+
+  it('releases the comparison when a compared tab closes', async () => {
+    const { a, b } = await openPair();
+    useUiStore.getState().setViewMode('compare');
+    useCompareStore.setState({ a, b });
+    await startCompare();
+    useUiStore.getState().setViewMode('read');
+    useWorkspaceStore.getState().closeDocument(b);
+    await waitFor(() =>
+      expect(useCompareStore.getState()).toMatchObject({ status: 'setup', result: null }),
+    );
+    expect(hasActiveCompare()).toBe(false);
+  }, 60_000);
+
+  it('says the result is out of date after a compared document changes', async () => {
+    const { a, b } = await openPair();
+    useUiStore.getState().setViewMode('compare');
+    useCompareStore.setState({ a, b });
+    await startCompare();
+    render(<ChangesPanel />);
+    const panel = await screen.findByTestId('changes-panel');
+    const report = within(panel).getByRole('button', { name: 'Export report' });
+    expect(report).toBeEnabled();
+    expect(enabled('compare.exportReport')).toBe(true);
+    expect(within(panel).queryByTestId('changes-stale')).toBeNull();
+
+    // A page command on B (the palette works in any view): the result no longer describes it.
+    const page = useWorkspaceStore.getState().workspace.documents[b]?.pages[0];
+    if (!page) throw new Error('no page');
+    useWorkspaceStore.getState().rotatePages([page.id], 90);
+    const notice = await within(panel).findByTestId('changes-stale');
+    expect(notice).toHaveTextContent('The documents changed since this comparison');
+    expect(within(notice).getByRole('button', { name: 'Run again' })).toBeVisible();
+    expect(report).toBeDisabled();
+    expect(enabled('compare.exportReport')).toBe(false);
+    // The list stays (it describes the compared documents) and so does its text export.
+    expect(enabled('compare.exportChanges')).toBe(true);
+
+    // Undo: the documents are what was compared again.
+    useWorkspaceStore.getState().undo();
+    await waitFor(() => expect(within(panel).queryByTestId('changes-stale')).toBeNull());
+    expect(report).toBeEnabled();
+
+    // Run again from the notice compares the documents as they are now.
+    const before = useCompareStore.getState().result;
+    useWorkspaceStore.getState().rotatePages([page.id], 90);
+    (await within(panel).findByRole('button', { name: 'Run again' })).click();
+    await waitFor(() => expect(useCompareStore.getState().status).toBe('running'));
+    await waitFor(() => expect(useCompareStore.getState().status).toBe('done'), {
+      timeout: 30_000,
+    });
+    expect(useCompareStore.getState().stale).toBe(false);
+    expect(within(panel).queryByTestId('changes-stale')).toBeNull();
+    expect(useCompareStore.getState().result).not.toBe(before);
+  }, 90_000);
 });

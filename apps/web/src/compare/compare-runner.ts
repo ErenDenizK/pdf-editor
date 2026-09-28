@@ -5,9 +5,15 @@
  * progress and the results to the compare store as they land.
  *
  * Lifetime: the run holds an analysis-worker lease and, for assembled tabs, scratch
- * documents in the PDFium worker. Both are released on cancel, on a new run, when the
- * Compare view is left and when a compared tab closes; the worker keeps the pages and heat
- * maps of a finished run until then (`CompareRun.release`).
+ * documents in the PDFium worker. Both are released on cancel, on a new run ("New
+ * comparison", "Run again") and when a compared tab closes; the worker keeps the pages and
+ * heat maps of a finished run until then (`CompareRun.release`), so leaving the Compare
+ * view and coming back shows the same result.
+ *
+ * The report is built from the second document's bytes as the run read them (a snapshot
+ * taken when it starts), never from the tab at export time; while a compared document has
+ * changed since (`stale` in the store) the report is refused and the view offers to run
+ * again.
  */
 import type { CompareRun, PagePair } from '@pdf-editor/engine';
 
@@ -19,7 +25,12 @@ import { useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { deliverFile } from '../tools/deliver-file';
 import { toolSourceBytes } from '../tools/tool-source';
-import { clearCompareResults, type CompareSideView, useCompareStore } from './compare-store';
+import {
+  clearCompareResults,
+  type CompareSideView,
+  recordCompareBasis,
+  useCompareStore,
+} from './compare-store';
 import {
   documentFacts,
   type DocumentPages,
@@ -36,6 +47,8 @@ interface ActiveRun {
   sides: DocumentPages[];
   run: CompareRun | undefined;
   readonly heatmaps: Map<string, Promise<ImageBitmap | null>>;
+  /** B's bytes as this run read them, for the report (dropped with the run). */
+  reportBytes: Promise<ArrayBuffer> | undefined;
 }
 
 let active: ActiveRun | null = null;
@@ -68,6 +81,7 @@ async function dispose(run: ActiveRun): Promise<void> {
   run.heatmaps.clear();
   const finished = run.run;
   run.run = undefined;
+  run.reportBytes = undefined;
   if (finished) await finished.release().catch(() => undefined);
   for (const side of run.sides.splice(0)) await side.dispose().catch(() => undefined);
   run.lease?.release();
@@ -111,10 +125,13 @@ export async function startCompare(): Promise<void> {
     sides: [],
     run: undefined,
     heatmaps: new Map(),
+    reportBytes: undefined,
   };
   active = run;
   const { signal } = run.controller;
   const store = useCompareStore;
+  // What the result will describe: a later change to either document makes it stale.
+  recordCompareBasis(useWorkspaceStore.getState().workspace, a, b);
   store.setState({ status: 'preparing', progress: null, error: null });
   try {
     run.lease = await getAnalysisWorkers().acquire();
@@ -132,6 +149,17 @@ export async function startCompare(): Promise<void> {
     if (await superseded()) return;
     const sideB = await documentPages(b, { signal });
     run.sides.push(sideB);
+    // The report annotates B as compared: an assembled tab's copy, or the tab assembled now
+    // (in the background, while the comparison runs).
+    const reportBytes = sideB.assembled
+      ? sideB.bytes().then((read) => {
+          const first = read[0];
+          if (!first) throw new Error(m.compare_error_document_closed());
+          return first.bytes;
+        })
+      : toolSourceBytes(b, signal);
+    reportBytes.catch(() => undefined);
+    run.reportBytes = reportBytes;
     if (await superseded()) return;
     store.setState({ status: 'running', sides: { a: sideView(sideA), b: sideView(sideB) } });
     const proxy = run.lease.proxy;
@@ -200,9 +228,10 @@ export async function startCompare(): Promise<void> {
         ? m.compare_announce_identical()
         : m.compare_announce_done({ pages: counts.changed + counts.inserted + counts.deleted }),
     );
-    // The Changes panel lists the result.
+    // The Changes panel lists the result (in the view; a run finishing after the user left
+    // waits there for their return).
     const ui = useUiStore.getState();
-    if (!ui.leftPanelOpen || ui.leftPanelView !== 'changes') {
+    if (ui.viewMode === 'compare' && (!ui.leftPanelOpen || ui.leftPanelView !== 'changes')) {
       useUiStore.setState({ leftPanelOpen: true, leftPanelView: 'changes' });
     }
   } catch (error) {
@@ -251,11 +280,17 @@ function stemOf(name: string): string {
  * and change annotations, built in the analysis worker and downloaded.
  */
 export async function exportComparisonReport(): Promise<void> {
-  const { result, b, sides } = useCompareStore.getState();
+  const { result, sides, stale } = useCompareStore.getState();
   const lease = active?.lease;
-  if (!result || b === null || !lease || !sides) return;
+  const compared = active?.reportBytes;
+  if (!result || !lease || !sides || !compared) return;
+  if (stale) {
+    announce(m.compare_stale());
+    return;
+  }
   try {
-    const bytes = await toolSourceBytes(b);
+    // A copy: the snapshot stays for another export.
+    const bytes = (await compared).slice(0);
     const report = await lease.proxy.buildReport(bytes, result);
     const name = `${stemOf(sides.b.name)}-comparison.pdf`;
     const outcome = await deliverFile(report, name, 'application/pdf');

@@ -7,7 +7,9 @@
  *
  * The header carries the summary, the honesty lines (from the result's notes: a pixel diff
  * at N dpi cannot tell intent, …) and the two exports. While the run is in progress the
- * list fills in from the page map and the visual diffs as they land.
+ * list fills in from the page map and the visual diffs as they land. Once a compared
+ * document changes, the header says the list is out of date (Run again) and the report,
+ * which annotates the second document as compared, is not offered.
  */
 import { useMemo } from 'react';
 
@@ -21,7 +23,7 @@ import {
   type ChangeList,
 } from './changes';
 import { selectChange } from './compare-commands';
-import { exportComparisonReport } from './compare-runner';
+import { exportComparisonReport, startCompare } from './compare-runner';
 import { useCompareStore } from './compare-store';
 import { exportChangesText } from './changes-export';
 import styles from './ChangesPanel.module.css';
@@ -32,6 +34,7 @@ export default function ChangesPanel() {
   const pairs = useCompareStore((s) => s.pairs);
   const visuals = useCompareStore((s) => s.visuals);
   const sides = useCompareStore((s) => s.sides);
+  const stale = useCompareStore((s) => s.stale);
   const list = useMemo<ChangeList | null>(
     () =>
       result ? buildChangeList(result) : pairs ? buildPartialChangeList(pairs, visuals) : null,
@@ -71,6 +74,14 @@ export default function ChangesPanel() {
         ) : (
           <p className={styles.summary}>{m.compare_changes_running()}</p>
         )}
+        {stale ? (
+          <div className={styles.stale} role="status" data-testid="changes-stale">
+            <span>{m.compare_stale()}</span>
+            <button type="button" className={styles.action} onClick={() => void startCompare()}>
+              {m.compare_run_again()}
+            </button>
+          </div>
+        ) : null}
         {notes.length > 0 ? (
           <details className={styles.notice} data-testid="changes-honesty">
             <summary className={styles.noticeSummary}>{notes[0]}</summary>
@@ -85,7 +96,7 @@ export default function ChangesPanel() {
           <button
             type="button"
             className={styles.action}
-            disabled={!result}
+            disabled={!result || stale}
             onClick={() => void exportComparisonReport()}
           >
             {m.compare_export_report()}

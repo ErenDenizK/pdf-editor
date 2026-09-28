@@ -4,6 +4,7 @@
  * save picker for the first, then downloads: the picker needs a fresh user gesture each
  * time), or every file into a folder the user picks (`showDirectoryPicker`, Chromium).
  */
+import { m } from '../i18n';
 import { deliverFile, type FileDeliveryOutcome } from '../tools/deliver-file';
 import type { BatchOutput } from './runner';
 import { buildZip } from './zip';
@@ -70,7 +71,7 @@ export async function deliverToFolder(
   win: Window = window,
 ): Promise<'saved' | 'cancelled'> {
   const picker = (win as Window & { showDirectoryPicker?: DirectoryPicker }).showDirectoryPicker;
-  if (typeof picker !== 'function') throw new Error('Folders are not supported here');
+  if (typeof picker !== 'function') throw new Error(m.batch_error_folders_unsupported());
   let dir: DirectoryHandleLike;
   try {
     dir = await picker.call(win, { mode: 'readwrite', id: 'batch-output' });

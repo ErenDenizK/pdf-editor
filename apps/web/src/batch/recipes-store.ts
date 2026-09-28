@@ -29,6 +29,8 @@ import {
   writeRecipe,
 } from '@pdf-editor/document-model';
 
+import { m } from '../i18n';
+
 export type RecipeBackendKind = 'opfs' | 'indexeddb' | 'memory';
 
 /** One stored recipe as the backend keeps it. */
@@ -144,7 +146,7 @@ export function opfsBackend(dir: FileSystemDirectoryHandle): RecipeBackend {
       return records;
     },
     put: async (record) => {
-      if (!SAFE_ID.test(record.id)) throw new Error('Invalid recipe id');
+      if (!SAFE_ID.test(record.id)) throw new Error(m.batch_error_recipe_id());
       await writeText(dir, `${record.id}.json`, record.text);
       const meta: Meta = {
         savedAt: record.savedAt,
@@ -166,7 +168,7 @@ const DB_STORE = 'recipes';
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error ?? new Error('IndexedDB request failed'));
+    req.onerror = () => reject(req.error ?? new Error(m.batch_error_storage()));
   });
 }
 
@@ -285,13 +287,13 @@ export function createRecipeStore(
   };
   const saved = async (id: string) => {
     const record = (await records()).get(id);
-    if (record === undefined) throw new Error('Recipe not found');
+    if (record === undefined) throw new Error(m.batch_error_recipe_not_found());
     return record;
   };
   const recipeOf = async (id: string): Promise<Recipe> => {
     if (isBuiltInId(id)) {
       const found = BUILT_IN_RECIPES.find((b) => `${BUILT_IN_PREFIX}${b.id}` === id);
-      if (found === undefined) throw new Error('Recipe not found');
+      if (found === undefined) throw new Error(m.batch_error_recipe_not_found());
       return found.recipe;
     }
     return readRecipe((await saved(id)).text);
@@ -335,14 +337,14 @@ export function createRecipeStore(
       return [...builtInEntries(), ...entries];
     },
     save: async (recipe, id) => {
-      if (id !== undefined && isBuiltInId(id)) throw new Error('Built-in recipes are read-only');
+      if (id !== undefined && isBuiltInId(id)) throw new Error(m.batch_error_built_in_read_only());
       const target = id ?? newId();
       const keep = id === undefined ? undefined : (await records()).get(id);
       await put(target, recipe, keep);
       return target;
     },
     rename: async (id, name) => {
-      if (isBuiltInId(id)) throw new Error('Built-in recipes are read-only');
+      if (isBuiltInId(id)) throw new Error(m.batch_error_built_in_read_only());
       const record = await saved(id);
       const recipe = readRecipe(record.text);
       await put(id, { ...recipe, name: clampName(name) }, record);
@@ -354,7 +356,7 @@ export function createRecipeStore(
       return target;
     },
     remove: async (id) => {
-      if (isBuiltInId(id)) throw new Error('Built-in recipes are read-only');
+      if (isBuiltInId(id)) throw new Error(m.batch_error_built_in_read_only());
       await (await backend()).remove(id);
     },
     markUsed: async (id) => {

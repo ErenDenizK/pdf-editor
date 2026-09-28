@@ -66,6 +66,7 @@ import {
   type ExportDependencies,
   type ExportOptions,
   type ExportPhase,
+  type ExportSignatureSteps,
   prepareExport,
 } from '../export/export-service';
 import { summarizeReport } from '../export/summary';
@@ -114,8 +115,21 @@ export interface BatchRunnerDependencies {
   readonly prepare?: typeof prepareExport;
   readonly rasterize?: typeof rasterizeWorkspaceDocument;
   readonly convert?: typeof convertWorkspaceDocument;
+  /**
+   * The export's signature steps. A recipe never signs, so only `strip` runs: a rewritten
+   * signed input loses its signature values, as the app's export does (spec
+   * recognize-and-compare §3.2, ADR-0013). Defaults to `batchSignatureSteps`.
+   */
+  readonly signatures?: ExportSignatureSteps;
   readonly now?: () => number;
 }
+
+/** The export's signature steps in a batch: strip only (a recipe has no signing step). */
+export const batchSignatureSteps: ExportSignatureSteps = {
+  strip: async (bytes) => (await import('../signatures/pdf-pass')).stripSignatures(bytes),
+  rect: () => Promise.reject(new Error('A batch does not sign')),
+  sign: () => Promise.reject(new Error('A batch does not sign')),
+};
 
 export function defaultBatchDependencies(): BatchRunnerDependencies {
   return {
@@ -126,6 +140,7 @@ export function defaultBatchDependencies(): BatchRunnerDependencies {
     prepare: prepareExport,
     rasterize: rasterizeWorkspaceDocument,
     convert: convertWorkspaceDocument,
+    signatures: batchSignatureSteps,
   };
 }
 
@@ -259,14 +274,14 @@ export async function runRecipe(
   options: BatchRunOptions = {},
   deps: BatchRunnerDependencies = defaultBatchDependencies(),
 ): Promise<BatchRunResult> {
-  if (plan.blocked.length > 0) throw new BatchRunError('The recipe has steps this app cannot run');
+  if (plan.blocked.length > 0) throw new BatchRunError(m.batch_error_plan_blocked());
   const values: RecipeRuntimeValues = options.values ?? new Map();
   if (checkRecipeInputs(plan, values).length > 0) {
-    throw new BatchRunError('The recipe needs a password to run');
+    throw new BatchRunError(m.batch_error_needs_password());
   }
   const inputs = keptFiles(files);
   if (inputs.length !== plan.files.length) {
-    throw new BatchRunError('The files do not match the plan');
+    throw new BatchRunError(m.batch_error_files_mismatch());
   }
   const now = deps.now ?? Date.now;
   const prepare = deps.prepare ?? prepareExport;
@@ -490,6 +505,9 @@ export async function runRecipe(
         blobs: (id) => blobs.get(id),
         ...(deps.compress ? { compress: deps.compress } : {}),
         compressionFor: () => undefined,
+        // Every export rewrites the file: a signed input's signatures are removed, not
+        // shipped broken, and the notes say so (summarizeReport's signaturesRemoved).
+        signatures: deps.signatures ?? batchSignatureSteps,
       };
       const onProgress = (progress: { readonly phase: ExportPhase }) =>
         report({ index, name, phase: 'exporting', exportPhase: progress.phase });

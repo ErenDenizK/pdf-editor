@@ -2,10 +2,13 @@
  * The centre pane. Empty: the onboarding drop target. With a document: the Read / Arrange
  * mode switch over the active document (`stage/ReadView`, `stage/ArrangeView`), plus the
  * floating tool bar. Both views are keyed by document so switching tabs starts fresh. The
- * third view, Compare (`compare/CompareView`, loaded on first use), brings its own bar.
+ * third view, Compare (`compare/CompareView`, loaded on first use), brings its own bar; its
+ * segment in the mode switch shows only while a comparison is open (being set up, running
+ * or kept after leaving the view; spec recognize-and-compare §2.2).
  */
 import { type KeyboardEvent, lazy, Suspense, useRef } from 'react';
 
+import { comparisonOpen, useCompareStore } from '../compare/compare-store';
 import { m } from '../i18n';
 import { ArrangeView } from '../stage/ArrangeView';
 import { ReadView } from '../stage/ReadView';
@@ -99,6 +102,9 @@ const MODES: readonly {
 function ModeSwitch() {
   const viewMode = useUiStore((s) => s.viewMode);
   const setViewMode = useUiStore((s) => s.setViewMode);
+  const compareOpen = useCompareStore((s) => comparisonOpen(viewMode === 'compare', s.status));
+  // Compare is entered with its command (3, the palette); the segment returns to it.
+  const modes = compareOpen ? MODES : MODES.filter((mode) => mode.id !== 'compare');
   const shortcuts = {
     read: useCommandShortcut('mode.read'),
     arrange: useCommandShortcut('mode.arrange'),
@@ -109,16 +115,16 @@ function ModeSwitch() {
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     event.preventDefault();
-    const index = MODES.findIndex((mode) => mode.id === viewMode);
+    const index = modes.findIndex((mode) => mode.id === viewMode);
     const step = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
-    const next: ViewMode = MODES[(index + step + MODES.length) % MODES.length]?.id ?? 'read';
+    const next: ViewMode = modes[(index + step + modes.length) % modes.length]?.id ?? 'read';
     setViewMode(next);
     ref.current?.querySelector<HTMLElement>(`[data-mode="${next}"]`)?.focus();
   };
 
   return (
     <div ref={ref} role="radiogroup" aria-label={m.view_mode_label()} className={styles.segmented}>
-      {MODES.map((mode) => {
+      {modes.map((mode) => {
         const checked = viewMode === mode.id;
         return (
           <Tooltip key={mode.id} label={mode.tooltip()} shortcut={shortcuts[mode.id]}>

@@ -3,8 +3,11 @@
  * the Changes list, Esc back to the previous view, run, and the two exports. Registered
  * from `app-commands.ts`. The view's code and the analysis worker load on first use.
  *
- * Leaving the Compare view releases the comparison (its heat maps and scratch documents in
- * the workers); closing a compared tab does too.
+ * Leaving the Compare view keeps the comparison (the view is read-only, so leaving loses
+ * nothing to ask about): coming back shows the same result, and the view-switch segment
+ * stays while it is kept. "New comparison" and closing a compared tab release it (its heat
+ * maps and scratch documents in the workers). A change to a compared document, in any view,
+ * marks the result stale (compare-store.ts `refreshCompareStale`).
  */
 import type { DocumentId } from '@pdf-editor/document-model';
 
@@ -14,7 +17,7 @@ import { announce } from '../shell/announcer';
 import { type LeftPanelView, useUiStore, type ViewMode } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { buildChangeList, buildPartialChangeList, type ChangeItem, stepChange } from './changes';
-import { requestReveal, useCompareStore } from './compare-store';
+import { refreshCompareStale, requestReveal, useCompareStore } from './compare-store';
 
 const runner = () => import('./compare-runner');
 
@@ -90,7 +93,7 @@ function onEnter(): void {
 }
 
 function onLeave(): void {
-  void runner().then((r) => r.releaseCompare());
+  // The result stays until "New comparison" or a compared tab closes.
   const ui = useUiStore.getState();
   if (ui.leftPanelView === 'changes') {
     const restore = previousPanel ?? { open: true, view: 'pages' as const };
@@ -111,11 +114,15 @@ function watch(): () => void {
     else if (prev.viewMode === 'compare') onLeave();
   });
   const offWs = useWorkspaceStore.subscribe((state, prev) => {
-    if (state.workspace.documents === prev.workspace.documents) return;
+    if (state.workspace === prev.workspace) return;
     const { a, b, status } = useCompareStore.getState();
     const docs = state.workspace.documents;
     const gone = (id: DocumentId | null) => id !== null && docs[id] === undefined;
-    if (!gone(a) && !gone(b)) return;
+    if (!gone(a) && !gone(b)) {
+      // An edit, undo / redo or page command on a compared document: say the result is old.
+      refreshCompareStale(state.workspace);
+      return;
+    }
     if (status !== 'setup') void runner().then((r) => r.releaseCompare());
     const pair = defaultPair();
     useCompareStore.setState({
@@ -136,6 +143,8 @@ function watch(): () => void {
 }
 
 const hasResult = () => inCompare() && useCompareStore.getState().result !== null;
+/** The report annotates B as compared: refused once a compared document changed. */
+const hasFreshResult = () => hasResult() && !useCompareStore.getState().stale;
 
 export function registerCompareCommands(registry: CommandRegistry): () => void {
   const disposers = [
@@ -206,7 +215,7 @@ export function registerCompareCommands(registry: CommandRegistry): () => void {
       title: m.cmd_compare_export_report(),
       group: m.group_view(),
       keywords: ['compare', 'report', 'pdf', 'annotations', 'export'],
-      when: hasResult,
+      when: hasFreshResult,
       run: () => runner().then((r) => r.exportComparisonReport()),
     }),
     registry.register({

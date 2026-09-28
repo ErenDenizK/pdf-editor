@@ -13,7 +13,10 @@
  *   glass; everything docked is opaque (DESIGN.md §2).
  *
  * Zoom is the shell's (Mod+= / Mod+- / Mod+0 and the status bar work here too); fit width
- * fits the two columns to the stage. Read-only: nothing here changes a document.
+ * fits the two columns to the stage. Read-only: nothing here changes a document. When a
+ * compared document changes after the run read it (in another view, or undo / redo here),
+ * the pages draw the new state while the result describes the old one: a notice says so
+ * and offers to run again.
  */
 import type { DocumentId } from '@pdf-editor/document-model';
 import type { PagePair, PixelDiffResult, TextChange } from '@pdf-editor/engine';
@@ -51,7 +54,7 @@ import {
   partitionFiles,
   pickFiles,
 } from '../files/open-files';
-import { formatPercent, m } from '../i18n';
+import { formatNumber, formatPercent, m } from '../i18n';
 import { PageCanvas } from '../pages/PageCanvas';
 import { CSS_PX_PER_PT } from '../pages/page-geometry';
 import { announce } from '../shell/announcer';
@@ -336,6 +339,7 @@ function CompareResults() {
   const result = useCompareStore((s) => s.result);
   const mode = useCompareStore((s) => s.layout);
   const reveal = useCompareStore((s) => s.reveal);
+  const stale = useCompareStore((s) => s.stale);
   const zoom = useUiStore((s) => s.zoom);
   const fitMode = useUiStore((s) => s.fitMode);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -447,7 +451,12 @@ function CompareResults() {
   if (pairs && sides) for (let row = range.first; row <= range.last; row++) rows.push(row);
 
   return (
-    <div className={styles.results} data-testid="compare-view" data-status={status}>
+    <div
+      className={styles.results}
+      data-testid="compare-view"
+      data-status={status}
+      data-stale={stale ? '' : undefined}
+    >
       <div className={styles.bar}>
         {pairs && sides ? <PageMapStrip pairs={pairs} firstInView={inView.first} /> : null}
         <button
@@ -458,6 +467,18 @@ function CompareResults() {
           {m.compare_new()}
         </button>
       </div>
+      {stale ? (
+        <div className={styles.stale} role="status" data-testid="compare-stale">
+          <span>{m.compare_stale()}</span>
+          <button
+            type="button"
+            className={toolStyles.secondary}
+            onClick={() => void startCompare()}
+          >
+            {m.compare_run_again()}
+          </button>
+        </div>
+      ) : null}
       <div
         ref={viewportRef}
         className={styles.viewport}
@@ -842,8 +863,9 @@ function ProgressCard({ centred }: { readonly centred: boolean }) {
       ? m.compare_preparing()
       : m.compare_progress({
           phase: phaseLabel(progress.phase),
-          done: progress.done,
           total: progress.total,
+          doneText: formatNumber(progress.done),
+          totalText: formatNumber(progress.total),
         });
   return (
     <div className={styles.progress} data-centred={centred ? '' : undefined}>

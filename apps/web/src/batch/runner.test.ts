@@ -21,7 +21,7 @@ import {
   sourceId,
 } from '@pdf-editor/document-model';
 import type { OcrRecognizer, PdfRenderer } from '@pdf-editor/engine';
-import { PDFDocument } from '@cantoo/pdf-lib';
+import { PDFDocument, PDFName } from '@cantoo/pdf-lib';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import encryptedUrl from '../../../../test/fixtures/encrypted-aes-128.pdf?url';
@@ -30,6 +30,7 @@ import imagesUrl from '../../../../test/fixtures/images.pdf?url';
 import manifest from '../../../../test/fixtures/manifest.json';
 import markdownUrl from '../../../../test/fixtures/markdown-source.pdf?url';
 import scanUrl from '../../../../test/fixtures/scan-text.pdf?url';
+import signedUrl from '../../../../test/fixtures/signed-approval.pdf?url';
 import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
 import truncatedUrl from '../../../../test/fixtures/truncated.pdf?url';
 import { fixtureFile, pngBlob } from '../../test/store-harness';
@@ -372,6 +373,33 @@ describe('run control', () => {
       blocked: [{ stepIndex: 0, kind: 'page-numbers', waitingFor: 'later' as never }],
     };
     await expect(runRecipe(blocked, files)).rejects.toThrow(/cannot run/);
+  });
+});
+
+describe('signed inputs', () => {
+  it('removes the signatures of a signed input, as the app export does, and says so', async () => {
+    const files = [await fixtureFile(signedUrl, 'signed-approval.pdf')];
+    const result = await runRecipe(planFor(builtIn('number-pages'), files), files);
+
+    const outcome = result.report.files[0];
+    expect(outcome?.status).toBe('done-with-notes');
+    const removed = outcome?.notices.find((n) => n.code === 'export.signatures-removed');
+    expect(removed?.message).toContain('1 existing signature was removed');
+    expect(removed?.message).toContain('signed-approval.pdf');
+
+    // The rewritten file carries no signature that could only verify as broken: the field
+    // stays, empty, and no signature dictionary (/ByteRange) is left.
+    const bytes = await outputBytes(result, 0);
+    const pdf = await PDFDocument.load(bytes, { updateMetadata: false });
+    const fields = pdf.getForm().getFields();
+    expect(fields.map((f) => f.getName())).toContain('Approval');
+    for (const field of fields) {
+      expect(field.acroField.dict.get(PDFName.of('V'))).toBeUndefined();
+    }
+    const text = new TextDecoder('latin1').decode(new Uint8Array(bytes));
+    expect(text).not.toMatch(/\/ByteRange/);
+    expect(text).not.toMatch(/\/Type\s*\/Sig\b/);
+    expect(await pageText(bytes, 0)).toContain('1 / 3');
   });
 });
 
