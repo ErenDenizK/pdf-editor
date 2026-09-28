@@ -329,31 +329,82 @@ export class RawText {
     return path !== 0 && this.m.FPDFGlyphPath_CountGlyphSegments(path) > 0;
   }
 
-  /** A new text object in `font`, filled by `SetText` (unicode mapped back to char codes). */
-  createText(docPtr: number, font: number, size: number, text: string): number {
-    const obj = this.m.FPDFPageObj_CreateTextObj(docPtr, font, size);
-    if (!obj) throw new Error('FPDFPageObj_CreateTextObj failed');
-    const ok = this.mem.withWideString(text, (ptr) => this.m.FPDFText_SetText(obj, ptr));
-    if (!ok) {
-      this.m.FPDFPageObj_Destroy(obj);
-      throw new Error('FPDFText_SetText failed');
-    }
-    return obj;
-  }
-
-  /** A new text object in `font` with explicit char codes (CIDs of a loaded subset). */
+  /** A new text object in `font` with explicit char codes (the font's own codes). */
   createCharcodes(docPtr: number, font: number, size: number, codes: readonly number[]): number {
     const obj = this.m.FPDFPageObj_CreateTextObj(docPtr, font, size);
     if (!obj) throw new Error('FPDFPageObj_CreateTextObj failed');
-    const ok = this.mem.withMem(Math.max(codes.length, 1) * 4, (p) => {
-      this.mem.heap().HEAPU32.set(codes, p >> 2);
-      return this.m.FPDFText_SetCharcodes(obj, p, codes.length);
-    });
-    if (!ok) {
+    if (!this.setCharcodes(obj, codes)) {
       this.m.FPDFPageObj_Destroy(obj);
       throw new Error('FPDFText_SetCharcodes failed');
     }
     return obj;
+  }
+
+  /**
+   * Replaces a text object's codes (`FPDFText_SetCharcodes`). The object keeps its font,
+   * matrix, colours and colour spaces, text state (Tc, Tw, Tz, Ts), clip and marks; TJ
+   * kerning is dropped (the glyphs advance naturally from the object's origin).
+   */
+  setCharcodes(obj: number, codes: readonly number[]): boolean {
+    return this.mem.withMem(Math.max(codes.length, 1) * 4, (p) => {
+      this.mem.heap().HEAPU32.set(codes, p >> 2);
+      return this.m.FPDFText_SetCharcodes(obj, p, codes.length);
+    });
+  }
+
+  /** Whether the text page made the character up (a space for a gap), not a code. */
+  isGenerated(textPage: number, index: number): boolean {
+    return this.m.FPDFText_IsGenerated(textPage, index) === 1;
+  }
+
+  /** Whether the character's Unicode came from its code (the font maps it to nothing). */
+  unicodeMapError(textPage: number, index: number): boolean {
+    return this.m.FPDFText_HasUnicodeMapError(textPage, index) === 1;
+  }
+
+  /** Removes every marked-content mark of `obj`. */
+  removeMarks(obj: number): void {
+    for (let k = this.m.FPDFPageObj_CountMarks(obj) - 1; k >= 0; k--) {
+      const mark = this.m.FPDFPageObj_GetMark(obj, k);
+      if (mark) this.m.FPDFPageObj_RemoveMark(obj, mark);
+    }
+  }
+
+  /** Transforms the object's clip path (when it has one) by `matrix`. */
+  transformClipPath(obj: number, matrix: TextMatrix): void {
+    if (!this.m.FPDFPageObj_GetClipPath(obj)) return;
+    this.m.FPDFPageObj_TransformClipPath(
+      obj,
+      matrix[0],
+      matrix[1],
+      matrix[2],
+      matrix[3],
+      matrix[4],
+      matrix[5],
+    );
+  }
+
+  /**
+   * The object rendered alone at `scale` (`FPDFTextObj_GetRenderedBitmap`), as its width,
+   * height and bytes; undefined when nothing is drawn (a blank glyph).
+   */
+  renderedText(
+    docPtr: number,
+    pagePtr: number,
+    obj: number,
+    scale: number,
+  ): { width: number; height: number; bytes: Uint8Array } | undefined {
+    const bitmap = this.m.FPDFTextObj_GetRenderedBitmap(docPtr, pagePtr, obj, scale);
+    if (!bitmap) return undefined;
+    try {
+      const width = this.m.FPDFBitmap_GetWidth(bitmap);
+      const height = this.m.FPDFBitmap_GetHeight(bitmap);
+      const stride = this.m.FPDFBitmap_GetStride(bitmap);
+      const buffer = this.m.FPDFBitmap_GetBuffer(bitmap);
+      return { width, height, bytes: this.mem.readBytes(buffer, stride * height) };
+    } finally {
+      this.m.FPDFBitmap_Destroy(bitmap);
+    }
   }
 
   /**

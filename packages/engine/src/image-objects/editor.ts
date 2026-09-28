@@ -75,6 +75,87 @@ function startsWith(bytes: Uint8Array, magic: readonly number[]): boolean {
   return magic.every((b, i) => bytes[i] === b);
 }
 
+/** Samples per side compared between PDFium's decode and the browser's (review m5). */
+const SAMPLE_GRID = 24;
+/** Largest mean difference per channel (0..255) for "the same pixels" (decoder rounding). */
+const SAMPLE_TOLERANCE = 6;
+
+/** RGB samples of the image as PDFium decodes it (/Decode and colour space applied, no masks). */
+interface DecodedSamples {
+  readonly width: number;
+  readonly height: number;
+  /** `[x, y, r, g, b]` per sample. */
+  readonly values: readonly (readonly [number, number, number, number, number])[];
+}
+
+function decodedSamples(raw: RawImages, obj: number): DecodedSamples | undefined {
+  const { m } = raw;
+  const bitmap = m.FPDFImageObj_GetBitmap(obj);
+  if (!bitmap) return undefined;
+  try {
+    const width = m.FPDFBitmap_GetWidth(bitmap);
+    const height = m.FPDFBitmap_GetHeight(bitmap);
+    const stride = m.FPDFBitmap_GetStride(bitmap);
+    const format = m.FPDFBitmap_GetFormat(bitmap);
+    const buffer = m.FPDFBitmap_GetBuffer(bitmap);
+    const bytesPerPixel =
+      format === 1 ? 1 : format === 2 ? 3 : format === 3 || format === 4 ? 4 : 0;
+    if (!bytesPerPixel || width < 1 || height < 1) return undefined;
+    const heap = raw.mem.heap().HEAPU8;
+    const values: [number, number, number, number, number][] = [];
+    for (let j = 0; j < SAMPLE_GRID; j++) {
+      for (let i = 0; i < SAMPLE_GRID; i++) {
+        const x = Math.min(width - 1, Math.floor(((i + 0.5) * width) / SAMPLE_GRID));
+        const y = Math.min(height - 1, Math.floor(((j + 0.5) * height) / SAMPLE_GRID));
+        const at = buffer + y * stride + x * bytesPerPixel;
+        if (bytesPerPixel === 1) {
+          const v = heap[at] ?? 0;
+          values.push([x, y, v, v, v]);
+        } else {
+          values.push([x, y, heap[at + 2] ?? 0, heap[at + 1] ?? 0, heap[at] ?? 0]);
+        }
+      }
+    }
+    return { width, height, values };
+  } finally {
+    m.FPDFBitmap_Destroy(bitmap);
+  }
+}
+
+/** Whether the JPEG, decoded by the browser, shows the samples PDFium decoded. */
+async function jpegShows(bytes: Uint8Array, samples: DecodedSamples): Promise<boolean> {
+  if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas !== 'function') {
+    return false;
+  }
+  let image: ImageBitmap;
+  try {
+    image = await createImageBitmap(new Blob([bytes.slice()], { type: 'image/jpeg' }), {
+      colorSpaceConversion: 'none',
+      premultiplyAlpha: 'none',
+    });
+  } catch {
+    return false;
+  }
+  try {
+    if (image.width !== samples.width || image.height !== samples.height) return false;
+    const context = new OffscreenCanvas(image.width, image.height).getContext('2d');
+    if (!context) return false;
+    context.drawImage(image, 0, 0);
+    const data = context.getImageData(0, 0, image.width, image.height).data;
+    let total = 0;
+    for (const [x, y, r, g, b] of samples.values) {
+      const at = (y * image.width + x) * 4;
+      total +=
+        Math.abs((data[at] ?? 0) - r) +
+        Math.abs((data[at + 1] ?? 0) - g) +
+        Math.abs((data[at + 2] ?? 0) - b);
+    }
+    return total / (3 * Math.max(samples.values.length, 1)) <= SAMPLE_TOLERANCE;
+  } finally {
+    image.close();
+  }
+}
+
 /** Checks a replacement's shape; returns the pixel size it must have, when known. */
 function checkReplacement(r: ImageReplacement): { width: number; height: number } | undefined {
   if ('rgba' in r) {
@@ -154,8 +235,8 @@ export class HostedImageEditor implements PdfImageEditor {
     );
   }
 
-  extractImage(ref: ImageObjectRef, options?: EngineCallOptions): Promise<ExtractedImage> {
-    return this.host.withRawAccess(
+  async extractImage(ref: ImageObjectRef, options?: EngineCallOptions): Promise<ExtractedImage> {
+    const read = await this.host.withRawAccess(
       ref.source,
       (access) => {
         const raw = new RawImages(access.module, access.memory);
@@ -179,20 +260,34 @@ export class HostedImageEditor implements PdfImageEditor {
           const names = raw.filterNames(place.obj);
           const jpeg = names.length === 1 && (names[0] === 'DCTDecode' || names[0] === 'DCT');
           const bytes = jpeg ? raw.rawData(place.obj) : undefined;
-          return {
-            width: pixels.width,
-            height: pixels.height,
-            rgba: pixels.rgba,
-            ...(bytes && startsWith(bytes, JPEG_MAGIC)
-              ? { original: { bytes, mime: 'image/jpeg' as const } }
-              : {}),
-          };
+          const { colorSpace, bitsPerPixel } = raw.metadata(place.obj, page.pagePtr);
+          const plain =
+            (colorSpace === 'DeviceRGB' && bitsPerPixel === 24) ||
+            (colorSpace === 'DeviceGray' && bitsPerPixel === 8);
+          const candidate =
+            bytes && plain && startsWith(bytes, JPEG_MAGIC)
+              ? { bytes, samples: decodedSamples(raw, place.obj) }
+              : undefined;
+          return { pixels, candidate };
         } finally {
           page.release();
         }
       },
       withSignal(options),
     );
+    const { pixels, candidate } = read;
+    // The stream's bytes are "the original" only when they decode to what the page shows:
+    // a /Decode array or a colour conversion would make the file differ (review m5).
+    const original =
+      candidate?.samples && (await jpegShows(candidate.bytes, candidate.samples))
+        ? { bytes: candidate.bytes, mime: 'image/jpeg' as const }
+        : undefined;
+    return {
+      width: pixels.width,
+      height: pixels.height,
+      rgba: pixels.rgba,
+      ...(original ? { original } : {}),
+    };
   }
 
   transformImage(

@@ -12,7 +12,7 @@ import redactImagesUrl from '../../../../test/fixtures/redact-images.pdf?url';
 import { applyEngineEditWithResult, replayEngineEdits } from '../edits/apply';
 import { imageRefJson, isImageReplayRequired } from '../edits/image-edit';
 import { isReplayRequired } from '../edits/text-edit';
-import { wasmUrl } from '../../test/helpers';
+import { toBuffer, wasmUrl } from '../../test/helpers';
 import { fixture, rejection } from '../text-edit/test-helpers';
 import { createPdfiumProxy } from '../worker/pdfium-proxy';
 import type { LocatedImage } from '../types';
@@ -124,6 +124,61 @@ describe('extract', () => {
     // Extraction leaves the page as it was.
     expect((await only(id, 2)).matrix).toEqual([360, 0, 0, 270, 126, 330]);
     await h.adapter.close(id);
+  });
+
+  test('the JPEG is offered only when it decodes to what the page shows (/Decode, review m5)', async () => {
+    const source = await PDFDocument.load(await fixture(imagesUrl));
+    let jpeg: Uint8Array | undefined;
+    for (const [, obj] of source.context.enumerateIndirectObjects()) {
+      if (
+        obj instanceof PDFRawStream &&
+        obj.dict.get(PDFName.of('Filter')) === PDFName.of('DCTDecode')
+      ) {
+        jpeg = obj.contents;
+      }
+    }
+    if (!jpeg) throw new Error('images.pdf has no JPEG');
+    const mean = (rgba: Uint8ClampedArray) => {
+      let sum = 0;
+      for (let i = 0; i < rgba.length; i += 4) sum += rgba[i] ?? 0;
+      return sum / (rgba.length / 4);
+    };
+    const results: Record<string, { offered: boolean; red: number }> = {};
+    for (const [label, decode] of [
+      ['identity', [0, 1, 0, 1, 0, 1]],
+      ['inverted', [1, 0, 1, 0, 1, 0]],
+    ] as const) {
+      const doc = await PDFDocument.create();
+      const ctx = doc.context;
+      const page = doc.addPage([400, 300]);
+      const image = ctx.register(
+        ctx.stream(jpeg, {
+          Type: 'XObject',
+          Subtype: 'Image',
+          Width: 160,
+          Height: 120,
+          ColorSpace: 'DeviceRGB',
+          BitsPerComponent: 8,
+          Filter: 'DCTDecode',
+          Decode: [...decode],
+        }),
+      );
+      page.node.set(PDFName.of('Resources'), ctx.obj({ XObject: { Im1: image } }));
+      page.node.set(
+        PDFName.of('Contents'),
+        ctx.register(ctx.stream('q 160 0 0 120 50 50 cm /Im1 Do Q')),
+      );
+      const id = await h.open(toBuffer(await doc.save()));
+      const out = await h.editor.extractImage(await only(id, 0));
+      results[label] = { offered: out.original !== undefined, red: mean(out.rgba) };
+      await h.adapter.close(id);
+    }
+    expect(results.identity?.offered).toBe(true);
+    // The inverted image shows other pixels than its JPEG: only the pixels are offered.
+    expect(results.inverted?.offered).toBe(false);
+    expect(
+      Math.abs((results.inverted?.red ?? 0) + (results.identity?.red ?? 0) - 255),
+    ).toBeLessThan(2);
   });
 });
 

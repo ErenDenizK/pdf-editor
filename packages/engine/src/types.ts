@@ -977,8 +977,13 @@ export interface LocatedRun extends TextRunRef {
  * - `font-substituted`: tier 1, the new text uses a bundled face (`substitute`);
  * - `moved-out-of-form`: tier 1 on text inside a Form XObject; the line now lives in the
  *   page content (the form's clip, transparency group and reuse no longer apply to it);
- * - `not-editable`: Type3, text drawn as paths, invisible (render mode 3), vertical, or
- *   nested forms.
+ * - `not-editable`: Type3, text drawn as paths, invisible (render mode 3), vertical, nested
+ *   forms, a form drawn more than once, a clip the re-created glyphs would leave, or codes
+ *   that cannot be read (the reason is in `TextEditability.tier1.reason`).
+ *
+ * Independently of the state, `colorSpaceChanged` (on the check and the result) says that
+ * some glyphs are re-created in DeviceRGB while the original text is painted in another
+ * colour space (CMYK, spot, ICC-based…): the badge and history label should say so.
  */
 export type TextEditHonesty =
   | 'same-font'
@@ -987,17 +992,42 @@ export type TextEditHonesty =
   | 'moved-out-of-form'
   | 'not-editable';
 
-/** Why a run is not editable at all. */
-export type TextEditBlocker = 'type3' | 'invisible' | 'paths' | 'vertical' | 'nested-form';
+/**
+ * Why a run is not editable at all (`type3` … `nested-form`), or not with tier 1:
+ * - `shared-form`: the text is in a Form XObject the document draws more than once (on
+ *   several pages, twice on a page, or from another form or appearance); editing it would
+ *   change every place, so the edit is refused;
+ * - `clipped`: the text is clipped and the edit would re-create glyphs outside the clip
+ *   (new objects cannot carry the clip), so they would become visible;
+ * - `unreadable-encoding`: the original character codes of the text could not be read from
+ *   the content stream, so the kept glyphs cannot be re-created exactly.
+ */
+export type TextEditBlocker =
+  | 'type3'
+  | 'invisible'
+  | 'paths'
+  | 'vertical'
+  | 'nested-form'
+  | 'shared-form'
+  | 'clipped'
+  | 'unreadable-encoding';
 
-/** Why tier 2 (the original font) cannot take the replacement. */
+/**
+ * Why tier 2 (the original font) cannot take the replacement. Besides the font reasons:
+ * - `ambiguous-encoding`: the font reads several codes as one of the new characters and
+ *   they draw different glyphs (an alternate "A" whose /ToUnicode says "A"); which glyph the
+ *   character should get is unknown (`missing` lists the characters);
+ * - `clipped`: the replacement or re-created glyphs would leave the text's clip path.
+ */
 export type TextTier2Refusal =
   | 'blocked'
   | 'in-form'
   | 'not-embedded'
   | 'outside-winansi'
   | 'missing-glyphs'
-  | 'readback';
+  | 'readback'
+  | 'ambiguous-encoding'
+  | 'clipped';
 
 /** Shrink-to-fit floor (spec §2.5): the replacement may shrink to 75% of the run's size. */
 export const TEXT_EDIT_SHRINK_FLOOR = 0.75;
@@ -1035,7 +1065,7 @@ export interface TextEditability {
     | {
         readonly ok: false;
         readonly reason: TextTier2Refusal;
-        /** Characters the original font cannot show (pre-check or read-back). */
+        /** Characters concerned: those the font cannot show, or with ambiguous codes. */
         readonly missing: readonly string[];
       };
   readonly tier1:
@@ -1055,6 +1085,12 @@ export interface TextEditability {
   readonly tier?: 1 | 2;
   /** Honesty state of the `auto` edit (`not-editable` when neither tier works). */
   readonly honesty: TextEditHonesty;
+  /**
+   * The `auto` edit re-creates glyphs in DeviceRGB while the text is painted in CMYK, a spot
+   * colour, an ICC-based or another non-RGB colour space (PDFium sets RGB fills only). The
+   * glyphs kept in the original object keep their colour space.
+   */
+  readonly colorSpaceChanged?: boolean;
   readonly fit: TextFitReport;
 }
 
@@ -1102,6 +1138,8 @@ export interface TextEditResult {
   readonly fellBack: boolean;
   /** Why tier 2 was not used, when `tier` is 1. */
   readonly tier2Refusal?: TextTier2Refusal;
+  /** Some glyphs were re-created in DeviceRGB; the original colour space was not RGB. */
+  readonly colorSpaceChanged?: boolean;
   readonly verification: TextEditVerification;
 }
 
@@ -1201,7 +1239,11 @@ export interface RedactionReport {
   /** Structure elements removed or stripped of /ActualText and /Alt. */
   readonly structElementsPruned: number;
   readonly attachments: {
-    /** Embedded files, file attachment annotations and /AF entries removed. */
+    /**
+     * Embedded files (the /EmbeddedFiles tree and any other file specification's /EF),
+     * file attachment and RichMedia annotations, /AF entries, and GoToE/GoToR actions
+     * that embed their target, removed.
+     */
     readonly removed: number;
     /** With `keepAttachments`: names of the kept files, not verified by the check. */
     readonly unverified: readonly string[];
@@ -1252,9 +1294,15 @@ export interface ForensicReport {
   readonly ok: boolean;
   /** One entry per `ForensicCheckId`, in that order. */
   readonly checks: readonly ForensicCheckResult[];
-  /** Streams whose filters could not be decoded, so their content was not searched. */
+  /**
+   * Streams that could not be decoded (filter, predictor parameters or corrupt data), so
+   * their content was not searched: "object N (reason)".
+   */
   readonly notSearched: readonly string[];
-  /** Embedded files present in the output (kept attachments); binary, not verifiable. */
+  /**
+   * Embedded files present in the output (kept attachments), wherever they are held;
+   * binary, not verifiable. Without `keepAttachments`, any of them fails `object-strings`.
+   */
   readonly unverifiedAttachments: readonly string[];
 }
 
@@ -1509,7 +1557,11 @@ export interface ExtractedImage {
   readonly height: number;
   /** RGBA, straight alpha, top row first: decode, colour conversion and masks applied. */
   readonly rgba: Uint8ClampedArray;
-  /** The stream's own bytes, when they are a file as is (a DCT-only image is a JPEG). */
+  /**
+   * The stream's own bytes, when they are a file as is: a DCT-only image in DeviceRGB or
+   * DeviceGray whose JPEG decodes to the pixels the page shows (no inverting /Decode, no
+   * colour conversion). Masks are not in it (`rgba` has them).
+   */
   readonly original?: { readonly bytes: Uint8Array; readonly mime: 'image/jpeg' };
 }
 

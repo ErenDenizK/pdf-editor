@@ -8,8 +8,10 @@ import { EngineError, type EngineErrorCode } from '../types';
 /**
  * - `stale-run`: the page no longer has the run as located (edited since, or replay onto
  *   different bytes); locate the runs again.
- * - `not-editable`: Type3, paths, invisible, vertical or nested-form text, or a tier that
- *   was requested explicitly and cannot take the replacement.
+ * - `not-editable`: Type3, paths, invisible, vertical or nested-form text, text in a form
+ *   drawn more than once (`shared-form`), an edit that would un-clip glyphs (`clipped`),
+ *   codes that cannot be read (`unreadable-encoding`), or a tier that was requested
+ *   explicitly and cannot take the replacement. The message names the reason.
  * - `does-not-fit`: `fit: 'keep'` and the replacement is wider than the free space, or
  *   `fit: 'shrink'` would go below the shrink floor.
  * - `unsupported-chars`: no bundled face has glyphs for every character.

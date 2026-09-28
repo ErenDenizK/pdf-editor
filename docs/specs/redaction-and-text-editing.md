@@ -171,8 +171,18 @@ of the content stream segment.
 ### 2.5 Decisions after the spike (`docs/research/05-text-editing-spike.md`, ADR-0011)
 
 - **Mechanism.** Both tiers split the text object around the selected characters and
-  keep the untouched glyphs in place (drift under 1e-4 pt). Whole-object
-  `FPDFText_SetText` is never used: it drops kerning and accepts missing glyphs silently.
+  keep the untouched glyphs in place (drift under 1e-4 pt). Kept glyphs keep their
+  original character codes (read from a snapshot of the page's content stream and
+  verified glyph by glyph against a probe); the original object is truncated in place so
+  its colour space, spacing, clip, graphics state and marks survive, and only the
+  replacement and any remaining glyphs become new objects. `FPDFText_SetText` is never
+  used: it drops kerning, re-encodes from Unicode and accepts missing glyphs silently.
+  Edits are refused, with a reason the editor shows, when the text sits in a form drawn
+  more than once (`shared-form`), when a re-created glyph would leave its clip
+  (`clipped`), or when the encoding cannot be read back reliably
+  (`unreadable-encoding`); tier 2 is refused when a replacement character has more than
+  one code in the font (`ambiguous-encoding`). A replacement painted outside DeviceRGB or
+  DeviceGray is reported as `colorSpaceChanged`.
 - **Tier 2 verification.** Every non-space character needs a glyph path in the original
   font before the edit; after it, a fresh text page must read back the exact replacement
   with widths from the font. Any miss falls back to tier 1 and the history label says so.

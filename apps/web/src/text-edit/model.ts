@@ -52,6 +52,12 @@ export function blockerLabel(
       return m.text_edit_reason_vertical();
     case 'nested-form':
       return m.text_edit_reason_nested_form();
+    case 'shared-form':
+      return m.text_edit_reason_shared_form();
+    case 'clipped':
+      return m.text_edit_reason_clipped();
+    case 'unreadable-encoding':
+      return m.text_edit_reason_unreadable_encoding();
     case 'unsupported-chars':
       return m.text_edit_reason_unsupported_chars({ chars: quoteChars(missing) });
   }
@@ -276,6 +282,10 @@ function refusalLabel(reason: TextTier2Refusal, missing: readonly string[]): str
       return m.text_edit_refusal_missing_glyphs({ chars });
     case 'readback':
       return m.text_edit_refusal_readback({ chars });
+    case 'clipped':
+      return m.text_edit_refusal_clipped();
+    case 'ambiguous-encoding':
+      return m.text_edit_refusal_ambiguous_encoding({ chars });
     case 'blocked':
       return m.text_edit_refusal_generic();
   }

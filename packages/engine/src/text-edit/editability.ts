@@ -34,6 +34,33 @@ export function blockerOf(info: ObjectInfo): TextEditBlocker | undefined {
   return undefined;
 }
 
+/**
+ * The selection as glyphs of the whole object (`analysis.glyphs`): a character range that
+ * splits a glyph (one code shown as several characters, such as a ligature) is refused.
+ */
+export function glyphSelection(
+  run: ResolvedRun,
+  range: GlyphRange,
+  glyphOfChar: readonly number[],
+  glyphCount: number,
+): { g0: number; g1: number } {
+  const at = (charIndex: number): number => {
+    // A generated space belongs to no glyph: the boundary is the next glyph.
+    let i = charIndex;
+    while (i < glyphOfChar.length && glyphOfChar[i] === -1) i++;
+    if (i >= glyphOfChar.length) return glyphCount;
+    const g = glyphOfChar[i] ?? -1;
+    if (i > 0 && glyphOfChar[i - 1] === g) {
+      throw textEditError(
+        'invalid-range',
+        `The selection splits a glyph that shows several characters in "${run.located.text}"`,
+      );
+    }
+    return g;
+  };
+  return { g0: at(run.from + range.g0), g1: at(run.from + range.g1) };
+}
+
 /** The selection as glyph indices `[g0, g1)` of the run. */
 export interface GlyphRange {
   readonly g0: number;
@@ -180,22 +207,19 @@ function toEdge(
   return Math.max(0, Math.min(...ts.filter((t) => t >= 0), Number.MAX_VALUE));
 }
 
-/** Width of `text` in the original font at `size`, points along the baseline. */
-export function tier2Width(raw: RawText, info: ObjectInfo, text: string, size: number): number {
-  const { scale } = axis(info.pageMatrix);
-  let width = 0;
-  for (const ch of text) width += raw.glyphWidth(info.font, ch, size) ?? 0;
-  return width * scale;
-}
-
 /** Width of `text` in a bundled face at `size`, points along the baseline. */
 export function tier1Width(face: Font, info: ObjectInfo, text: string, size: number): number {
   return faceAdvance(face, text) * size * axis(info.pageMatrix).scale;
 }
 
-export function fitOption(width: number, available: number): TextFitOption {
+/**
+ * The fit of a replacement `width` points wide, of which `spacing` (Tc/Tw, tier 2) does not
+ * shrink with the font size: `shrink` is the size factor that makes it fit.
+ */
+export function fitOption(width: number, available: number, spacing = 0): TextFitOption {
   const fits = width <= available + POSITION_TOLERANCE;
-  const shrink = fits || width <= 0 ? 1 : available / width;
+  const scalable = width - spacing;
+  const shrink = fits || scalable <= 0 ? 1 : Math.max(0, (available - spacing) / scalable);
   return { width, shrink, fits, canShrink: shrink >= TEXT_EDIT_SHRINK_FLOOR };
 }
 

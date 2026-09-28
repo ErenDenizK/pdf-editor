@@ -32,6 +32,8 @@ export interface CharInfo {
   readonly text: string;
   readonly origin: Point;
   readonly box: Rect;
+  /** A space the text page generated for a gap inside the object (no code draws it). */
+  readonly generated: boolean;
 }
 
 /** Everything the editor reads about one text object. */
@@ -126,6 +128,7 @@ export function objectInfo(
     text: raw.charText(textPage, index),
     origin: raw.charOrigin(textPage, index),
     box: raw.charBox(textPage, index),
+    generated: raw.isGenerated(textPage, index),
   }));
   return {
     obj,
