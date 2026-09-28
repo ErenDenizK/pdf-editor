@@ -21,9 +21,12 @@ const { bitmap } = await pdfium.renderPage(sourceId, 0, { scale: devicePixelRati
 ```
 
 - **wasm URL**: injected by the app. Use the package export `@embedpdf/pdfium/pdfium.wasm`
-  (`dist/pdfium.wasm` is not in the package's `exports` map). Relative URLs are resolved
-  against `location` because EmbedPDF's worker runs from a `blob:` URL; the CSP therefore
-  needs `worker-src blob:` and `connect-src 'self'` for the wasm fetch.
+  (`dist/pdfium.wasm` is not in the package's `exports` map). The app runs the engine in
+  this package's own worker (`@pdf-editor/engine/pdfium.worker` behind `createPdfiumProxy`,
+  ADR-0011), a same-origin module worker: the CSP needs only `worker-src 'self'` and
+  `connect-src 'self'` for the wasm fetch. The default `engineFactory` (EmbedPDF's own
+  worker, used when no factory is passed) runs from a `blob:` URL and would also need
+  `worker-src blob:`; it is loaded lazily and stays out of the app bundle.
 - **Font fallback is off by default** (`fontFallback: null`). EmbedPDF's default would fetch
   fonts from cdn.jsdelivr.net, which this project never does. To enable fallback, host the
   fonts yourself and pass a `FontFallbackConfig` (`FontCharset` is re-exported), e.g.
@@ -31,7 +34,7 @@ const { bitmap } = await pdfium.renderPage(sourceId, 0, { scale: devicePixelRati
   The config is posted to the worker, so use URLs, not a `fontLoader` function.
 - The engine starts lazily on the first call; `destroy()` terminates its worker.
 - **Page labels and /Lang**: EmbedPDF has no API for them (PDFium's `FPDF_GetPageLabel` is
-  exported by `@embedpdf/pdfium` but unreachable inside EmbedPDF's blob: worker). Pass an
+  exported by `@embedpdf/pdfium` but not through the `PdfEngine` interface). Pass an
   `inspector` (the assembler proxy, or a `PdfLibAssembler`): `open` then inspects a copy of
   the bytes with pdf-lib in parallel and fills `pages[].label` and `metadata.language`.
 - **`flags.repaired`**: PDFium and pdf-lib repair silently, so `open` runs

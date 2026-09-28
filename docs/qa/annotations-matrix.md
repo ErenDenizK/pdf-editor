@@ -74,13 +74,13 @@ rewritten on every run; the versions in its header are the ones that ran.
 | Note: popup open by default (`/Open true`) | ok | ok |
 | Stamp, named (`Approved`, generated appearance) | ok | ok |
 | Stamp, image (PNG) | ok | ok |
-| Link (URI https://example.org/; its blue underline appearance only) | ok | fail: black or grey ink besides the #0000FF appearance (640 pixels at 2×) |
+| Link (URI https://example.org/; its blue underline appearance only) | ok | ok |
 | Page 2 (`/Rotate 90`): highlight over its text line | ok | ok |
 | Page 2: note icon upright (NoRotate: not turned with the page), text in the comment UI | ok | ok |
 | Page 2: note icon hung from the /Rect upper-left corner (ISO 32000-2 §12.5.3) | ok | differs: icon placed in the rotated /Rect footprint (x 580–600, y 72–92 pt), not hung from the /Rect's upper-left corner (x 600–620, y 72–92 pt) |
 | Page 2: square placed in display space | ok | ok |
 
-40 ok, 1 differs, 1 fail (of 42). Contact sheets: [pdfium](samples/annotations-matrix-pdfium.png), [pdfjs](samples/annotations-matrix-pdfjs.png).
+41 ok, 1 differs, 0 fail (of 42). Contact sheets: [pdfium](samples/annotations-matrix-pdfium.png), [pdfjs](samples/annotations-matrix-pdfjs.png).
 <!-- matrix:auto:end -->
 
 Contact sheets (each checked region outlined: green ok, amber differs, red fail):

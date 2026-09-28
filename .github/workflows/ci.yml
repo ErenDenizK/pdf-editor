@@ -52,6 +52,27 @@ jobs:
       - name: Unit and browser-mode tests
         run: pnpm test
 
+      # Two independent renderers (our PDFium build, pdf.js) check every annotation of the
+      # committed sample; the sample is regenerated first and must match what is committed.
+      - name: Annotation cross-viewer matrix (PDFium, pdf.js)
+        run: pnpm --filter @pdf-editor/qa-tool matrix:fresh
+        env:
+          QA_MATRIX_EVIDENCE_DIR: ${{ runner.temp }}/qa-matrix
+
+      - name: Committed annotation sample and matrix are current
+        run: git diff --exit-code -- docs/qa/samples/annotations-sample.pdf docs/qa/annotations-matrix.md
+
+      - name: Upload matrix evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qa-matrix
+          path: |
+            ${{ runner.temp }}/qa-matrix
+            docs/qa/annotations-matrix.md
+            docs/qa/samples/annotations-matrix-*.png
+          retention-days: 14
+
       - name: Build
         run: pnpm build
 
