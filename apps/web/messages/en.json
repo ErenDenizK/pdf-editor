@@ -1630,6 +1630,311 @@
   "cmd_tools_compress": "Compress…",
   "cmd_tools_export_images": "Export pages as images…",
   "cmd_tools_save_repaired": "Save repaired copy",
+  "cmd_batch": "Batch…",
+  "batch_title": "Batch",
+  "batch_new_recipe_title": "New recipe",
+  "batch_edit_recipe_title": "Edit recipe",
+  "batch_recipes": "Recipes",
+  "batch_new": "New",
+  "batch_import": "Import…",
+  "batch_builtin_group": "Built in",
+  "batch_saved_group": "Your recipes",
+  "batch_saved_empty": "None yet. Duplicate a built-in recipe or create a new one.",
+  "batch_builtin_readonly": "Built in, read-only",
+  "batch_edit": "Edit",
+  "batch_rename": "Rename",
+  "batch_rename_save": "Save name",
+  "batch_duplicate": "Duplicate",
+  "batch_export_recipe": "Export",
+  "batch_delete": "Delete",
+  "batch_undo": "Undo",
+  "batch_copy_name": "{name} (copy)",
+  "batch_imported": "Imported “{name}”.",
+  "batch_import_failed": "This recipe cannot be imported. {reason}",
+  "batch_exported": "Recipe exported.",
+  "batch_duplicated": "Duplicated. The copy is in your recipes.",
+  "batch_deleted": "Deleted “{name}”.",
+  "batch_saved": "Saved “{name}”.",
+  "batch_steps_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} step",
+        "countPlural=*": "{count} steps"
+      }
+    }
+  ],
+  "batch_last_used": "used {date}",
+  "batch_output_line": "Each file becomes: {format}.",
+  "batch_output_pdf": "PDF",
+  "batch_output_images": "Images (one ZIP per file)",
+  "batch_output_markdown": "Markdown",
+  "batch_output_text": "Plain text",
+  "batch_files": "Files",
+  "batch_clear_files": "Remove all",
+  "batch_drop_hint": "Drop PDFs or a folder here. They are processed here and never open as tabs.",
+  "batch_add_files": "Add files…",
+  "batch_remove_file": "Remove {name}",
+  "batch_review": "Review",
+  "batch_plan_line": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} file ({size}) will run. Output: {format}.",
+        "countPlural=*": "{count} files ({size}) will run. Output: {format}."
+      }
+    }
+  ],
+  "batch_delivery_zip": "The results come as one ZIP, or one by one.",
+  "batch_delivery_single": "The result downloads as a file.",
+  "batch_skipped_line": "Skipped {name}: {reason}",
+  "batch_blocked_line": "Step {number} ({kind}) cannot run yet: {reason}",
+  "batch_no_files": "None of these files is a PDF that can run.",
+  "batch_password_legend": "Password for the outputs (step {number})",
+  "batch_password_hint": "Asked once for the whole batch and held in memory until the run ends. It is never saved in the recipe.",
+  "batch_password": "Password",
+  "batch_password_confirm": "Confirm password",
+  "batch_password_mismatch": "The passwords do not match.",
+  "batch_password_too_long": "Passwords are limited to 127 bytes.",
+  "batch_storage_local": "Recipes are saved in this browser only.",
+  "batch_storage_memory": "This browser does not allow saving: recipes last until the page reloads. Export them to keep them.",
+  "batch_run": "Run",
+  "batch_run_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Run on {count} file",
+        "countPlural=*": "Run on {count} files"
+      }
+    }
+  ],
+  "batch_run_progress": "{done} of {total} files finished",
+  "batch_run_progress_label": "Batch progress",
+  "batch_run_summary": "Finished: {done} done ({notes} with notes), {failed} failed, {skipped} skipped.",
+  "batch_running_note": "Files are processed on this device. Cancel stops the run; finished files are kept.",
+  "batch_announce_done": "Batch finished: {done} done, {failed} failed",
+  "batch_phase_queued": "Waiting",
+  "batch_phase_opening": "Opening",
+  "batch_phase_step": "Step {number} of {total}: {kind}",
+  "batch_phase_exporting": "Writing the PDF",
+  "batch_phase_verifying": "Verifying",
+  "batch_phase_done": "Done",
+  "batch_phase_done_notes": "Done with notes",
+  "batch_phase_failed": "Failed: {reason}",
+  "batch_phase_skipped": "Skipped",
+  "batch_output_file": "{name}, {size}",
+  "batch_failure_at_step": "Step {number}: {message}",
+  "batch_notice_at_step": "Step {number} ({kind}): {message}",
+  "batch_source_password": "“{name}” is protected. Enter its password to include it.",
+  "batch_source_password_incorrect": "That password is not correct. Try again or skip the file.",
+  "batch_skip_file": "Skip file",
+  "batch_open_file": "Open",
+  "batch_no_outputs": "No file finished, so there is nothing to download.",
+  "batch_outputs_ready": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} file ready ({size}).",
+        "countPlural=*": "{count} files ready ({size})."
+      }
+    }
+  ],
+  "batch_download": "Download",
+  "batch_download_zip": "Download ZIP",
+  "batch_download_files": "Download files",
+  "batch_save_folder": "Save to folder…",
+  "batch_delivered_zip": "Saved {name}.",
+  "batch_delivered_files": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Saved {count} file.",
+        "countPlural=*": "Saved {count} files."
+      }
+    }
+  ],
+  "batch_delivered_folder": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Saved {count} file to the folder.",
+        "countPlural=*": "Saved {count} files to the folder."
+      }
+    }
+  ],
+  "batch_delivery_failed": "Could not save the results: {reason}",
+  "batch_steps_heading": "Steps",
+  "batch_steps_empty": "No steps yet. Add the first one below.",
+  "batch_add_step_kind": "Step to add",
+  "batch_add_step": "Add step",
+  "batch_step_move_up": "Move {step} up",
+  "batch_step_move_down": "Move {step} down",
+  "batch_step_remove": "Remove {step}",
+  "batch_editor_note": "Steps run in this order on every file.",
+  "batch_save_recipe": "Save recipe",
+  "batch_field_name": "Name",
+  "batch_field_description": "Description",
+  "batch_field_rotation": "Turn",
+  "batch_rotate_right": "90° right",
+  "batch_rotate_half": "180°",
+  "batch_rotate_left": "90° left",
+  "batch_field_top": "Top (pt)",
+  "batch_field_right": "Right (pt)",
+  "batch_field_bottom": "Bottom (pt)",
+  "batch_field_left": "Left (pt)",
+  "batch_crop_hint": "Margins are measured from the edges of each page as displayed. The crop hides content; it does not remove it.",
+  "batch_field_width_pt": "Width (pt)",
+  "batch_field_height_pt": "Height (pt)",
+  "batch_field_margin_x": "Side margin (pt)",
+  "batch_field_margin_y": "Edge margin (pt)",
+  "batch_field_opacity_percent": "Opacity (%)",
+  "batch_field_languages": "Languages",
+  "batch_field_dpi": "Resolution (dpi)",
+  "batch_field_output": "Output",
+  "batch_tokens_hint": "Tokens: {page}, {pages}, {label}, {title}, {date}.",
+  "batch_bates_continuous": "Continue the numbers from one file to the next",
+  "batch_watermark_image_set": "Image embedded in the recipe",
+  "batch_watermark_image_too_large": "The image must be 1 MB or smaller to be embedded in a recipe.",
+  "batch_watermark_image_type": "Choose a PNG or JPEG image.",
+  "batch_compress_linearize": "Fast web view",
+  "batch_meta_keep": "Keep",
+  "batch_meta_set": "Set to…",
+  "batch_meta_remove": "Remove",
+  "batch_security_hint": "Each output requires a password to open, asked when the recipe runs. Choose what readers may do:",
+  "batch_remove_password_hint": "Outputs of protected files are saved without a password (their password is asked when each file opens).",
+  "batch_ocr_scope_without_text": "Pages without text",
+  "batch_pages_first": "First page",
+  "batch_pages_last": "Last page",
+  "batch_pages_landscape": "Landscape pages",
+  "batch_pages_portrait": "Portrait pages",
+  "batch_pages_custom": "Pages…",
+  "batch_pages_ranges": "Pages {ranges}",
+  "batch_pages_ranges_label": "Page numbers",
+  "batch_pages_ranges_hint": "For example 1-3, 5, 8- (8 to the end).",
+  "batch_pages_ranges_invalid": "Type page numbers or ranges, for example 1-3, 5, 8-.",
+  "batch_waiting_ocr": "Needs text recognition (OCR), which arrives in a later update.",
+  "batch_waiting_convert": "Needs the Markdown and text export, which arrives in a later update.",
+  "batch_detail_margins": "Margins {margins} pt",
+  "batch_detail_slots": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} slot",
+        "countPlural=*": "{count} slots"
+      }
+    }
+  ],
+  "batch_detail_continuous": "continues across files",
+  "batch_detail_annotations": "Annotations",
+  "batch_detail_forms": "Form fields",
+  "batch_detail_sets": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Sets {count} field",
+        "countPlural=*": "Sets {count} fields"
+      }
+    }
+  ],
+  "batch_detail_removes": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Removes {count} field",
+        "countPlural=*": "Removes {count} fields"
+      }
+    }
+  ],
+  "batch_detail_password_asked": "Password asked when the recipe runs",
+  "batch_detail_denied": "Denies: {list}",
+  "batch_step_rotate": "Rotate pages",
+  "batch_step_delete_pages": "Delete pages",
+  "batch_step_crop": "Crop pages",
+  "batch_step_page_size": "Resize pages",
+  "batch_step_page_numbers": "Page numbers",
+  "batch_step_header_footer": "Header and footer",
+  "batch_step_bates": "Bates numbering",
+  "batch_step_watermark": "Watermark",
+  "batch_step_flatten": "Flatten",
+  "batch_step_compress": "Compress",
+  "batch_step_metadata_strip": "Strip metadata",
+  "batch_step_metadata_set": "Set metadata",
+  "batch_step_security": "Set password",
+  "batch_step_remove_password": "Remove password",
+  "batch_step_ocr": "Recognize text (OCR)",
+  "batch_step_export": "Output",
+  "batch_builtin_office_scan_cleanup": "Office scan cleanup",
+  "batch_builtin_office_scan_cleanup_desc": "Compress for reading on screen (e-book) and number the pages.",
+  "batch_builtin_share_safely": "Share safely",
+  "batch_builtin_share_safely_desc": "Remove metadata, attachments and scripts, flatten annotations and forms, and require a password to open (asked when the recipe runs). Printing and accessibility stay allowed.",
+  "batch_builtin_print_ready": "Print-ready",
+  "batch_builtin_print_ready_desc": "Fit every page on A4 in its own orientation and number the pages.",
+  "batch_builtin_web_ready": "Web-ready",
+  "batch_builtin_web_ready_desc": "Compress strongly for the web (screen) with fast web view.",
+  "batch_builtin_strip_metadata": "Strip metadata",
+  "batch_builtin_strip_metadata_desc": "Remove document information, XMP, attachments, scripts and private data.",
+  "batch_builtin_number_pages": "Number pages",
+  "batch_builtin_number_pages_desc": "Add “1 / 12” style page numbers at the bottom centre.",
+  "batch_builtin_scan_to_searchable": "Scan to searchable",
+  "batch_builtin_scan_to_searchable_desc": "Recognize the text of scanned pages (English) and compress for screen reading.",
+  "batch_where_recipe": "Recipe",
+  "batch_where_step": "Step {number}",
+  "batch_where_step_kind": "Step {number} ({kind})",
+  "batch_error_not_json": "The file is not a recipe: it is not valid JSON.",
+  "batch_error_not_recipe": "The file is not a PDF Editor recipe.",
+  "batch_error_newer": "It uses recipe format {version}, which is newer than this app reads. Open it with PDF Editor {app} or later.",
+  "batch_error_newer_unknown": "It uses recipe format {version}, made by a newer version of the app. Update the app to use it.",
+  "batch_error_unsupported_version": "Recipe format {version} cannot be read.",
+  "batch_error_unknown_kind": "{where}: this kind of step is unknown ({path}).",
+  "batch_error_unknown_key": "{where}: unknown option “{key}” ({path}).",
+  "batch_error_missing_key": "{where}: “{key}” is missing ({path}).",
+  "batch_error_invalid_value": "{where}: invalid value ({path}).",
+  "batch_error_secret": "{where}: recipes never contain passwords or other secrets ({path}).",
+  "batch_error_step_order": "{where}: the output step must be the last step.",
+  "batch_error_delete_all": "This would delete every page of the file.",
+  "batch_error_no_password": "No password was given for this step.",
+  "batch_error_unavailable": "This step is not available in this version.",
+  "batch_notice_no_pages": "No page matched this step’s pages; nothing changed.",
+  "batch_notice_crop_too_small": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} page was too small for the margins and was left uncropped.",
+        "countPlural=*": "{count} pages were too small for the margins and were left uncropped."
+      }
+    }
+  ],
+  "batch_notice_images_ignored": "Compression, flattening, metadata and password steps do not apply to images: the images carry none of them.",
+  "batch_notice_not_smaller": "Compression did not make this file smaller.",
+  "batch_failure_password": "It needs a password to open, and none was given.",
+  "batch_failure_encryption": "It uses an encryption this app cannot open.",
+  "batch_failure_corrupt": "The file is damaged or is not a PDF.",
+  "batch_failure_cancelled": "Stopped: the batch was cancelled.",
+  "batch_failure_engine": "The PDF engine failed on this file.",
+  "batch_failure_step": "The step failed: {reason}",
+  "batch_failure_unavailable": "This output is not available in this version.",
+  "batch_failure_verification": "The output did not pass verification: {problems}",
+  "batch_skip_not_pdf": "not a PDF",
+  "batch_skip_empty": "empty file",
+  "batch_skip_cancelled": "Not started: the batch was cancelled",
+  "batch_reason_password": "password",
+  "batch_reason_xfa": "XFA form",
+  "batch_reason_corrupt": "damaged file",
+  "batch_reason_verification": "verification",
+  "batch_reason_step": "a step",
+  "batch_reason_unavailable": "not available",
+  "batch_reason_aborted": "cancelled",
+  "batch_reason_internal": "error",
   "tools_images_count": [
     {
       "declarations": ["input count", "local countPlural = count: plural"],

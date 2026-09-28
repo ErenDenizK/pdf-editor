@@ -5,6 +5,7 @@
  */
 import { getActiveDocument } from '@pdf-editor/document-model';
 
+import { registerBatchCommands } from '../batch/batch-commands';
 import type { CommandRegistry } from '../commands/registry';
 import { m } from '../i18n';
 import { useWorkspaceStore } from '../state/workspace-store';
@@ -52,6 +53,7 @@ export function registerToolCommands(registry: CommandRegistry): () => void {
         }
       },
     }),
+    registerBatchCommands(registry),
   ];
   return () => {
     for (const dispose of disposers) dispose();

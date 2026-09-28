@@ -8,7 +8,14 @@
  * as it would be exported (page numbers, watermarks, crops, image pages) and the images
  * are rendered from that, so they always match the exported PDF.
  */
-import type { DocumentId, Rotation, SourceId, VirtualDocument } from '@pdf-editor/document-model';
+import type {
+  DocumentId,
+  Rect,
+  Rotation,
+  SourceId,
+  VirtualDocument,
+  Workspace,
+} from '@pdf-editor/document-model';
 import {
   fitsCanvas,
   type RasterBackground,
@@ -21,6 +28,7 @@ import {
 } from '@pdf-editor/engine';
 
 import { getEngineService } from '../engine/engine-service';
+import type { ExportDependencies } from '../export/export-service';
 import { displaySize } from '../pages/page-geometry';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { displayRectToUser, type PageFrame } from '../viewer/geometry';
@@ -78,16 +86,49 @@ function isPlain(doc: VirtualDocument, pages: readonly number[]): boolean {
 
 let jobCounter = 0;
 
+export interface RasterControl {
+  readonly signal?: AbortSignal;
+  readonly onProgress?: (p: RasterProgress) => void;
+}
+
+/** Where `rasterizeWorkspaceDocument` finds what the app's stores hold for the open tabs. */
+export interface RasterDependencies {
+  /** The export pipeline's dependencies for documents that must be assembled first. */
+  readonly exportDependencies?: ExportDependencies;
+  /** The engine's CropBox of a source page (the engine service's, by default). */
+  readonly pageCropBox?: (sourceId: SourceId, index: number) => Rect | undefined;
+}
+
+/** Renders pages of an open tab's document (the workspace store's) as images. */
 export async function rasterizeDocument(
   documentId: DocumentId,
   options: RasterOptions,
-  control: {
-    readonly signal?: AbortSignal;
-    readonly onProgress?: (p: RasterProgress) => void;
-  } = {},
+  control: RasterControl = {},
+): Promise<RasterFile> {
+  return rasterizeWorkspaceDocument(
+    useWorkspaceStore.getState().workspace,
+    documentId,
+    options,
+    control,
+  );
+}
+
+/**
+ * Renders pages of a document of `ws` as images: any workspace, such as the batch runner's
+ * private one, whose sources are open in the engine and whose export dependencies are
+ * given in `deps` (the app's stores by default).
+ */
+export async function rasterizeWorkspaceDocument(
+  ws: Workspace,
+  documentId: DocumentId,
+  options: RasterOptions,
+  control: RasterControl = {},
+  deps: RasterDependencies = {},
 ): Promise<RasterFile> {
   const { signal, onProgress } = control;
-  const ws = useWorkspaceStore.getState().workspace;
+  const pageCropBox =
+    deps.pageCropBox ??
+    ((sourceId: SourceId, index: number) => getEngineService().pageCropBox(sourceId, index));
   const doc = ws.documents[documentId];
   if (!doc || options.pages.length === 0) throw new RasterError('no-pages', 'No pages to export');
   const scale = options.dpi / 72;
@@ -104,7 +145,7 @@ export async function rasterizeDocument(
       const total = ((intrinsic + page.rotation) % 360) as Rotation;
       const shown = displaySize(ws, page);
       const quarter = total === 90 || total === 270;
-      const crop = getEngineService().pageCropBox(page.ref.source, page.ref.index);
+      const crop = pageCropBox(page.ref.source, page.ref.index);
       targets.push({
         sourceId: page.ref.source,
         index: page.ref.index,
@@ -123,7 +164,7 @@ export async function rasterizeDocument(
     let bytes: ArrayBuffer;
     try {
       // The images are rendered from this copy: no password, whatever the export applies.
-      bytes = await toolSourceBytes(documentId, signal);
+      bytes = await toolSourceBytes(documentId, signal, deps.exportDependencies);
     } catch (error) {
       const code = error instanceof ToolSourceError ? error.code : 'internal';
       throw new RasterError(

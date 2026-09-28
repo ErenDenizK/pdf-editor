@@ -12,16 +12,13 @@
 import {
   type DocumentId,
   findPageLocation,
-  getPage,
   type PageId,
   pageDisplaySize,
   pagesOfSize,
   pageTotalRotation,
   type Rect,
-  setPageCropBox,
   type Size,
   type SourceId,
-  type VirtualPage,
   type Workspace,
 } from '@pdf-editor/document-model';
 
@@ -46,7 +43,6 @@ import { type CropDraft, type CropScope, isCropWorking, useCropStore } from './c
 import { pageBoxOf } from './display';
 import {
   clampRect,
-  cropFromMargins,
   discardBands,
   isNoCrop,
   type Margins,
@@ -54,19 +50,29 @@ import {
   roundMargins,
   unionRects,
 } from './geometry';
+import {
+  type CropPlan,
+  findPage,
+  type PageCrop,
+  planCrops as planCropsWith,
+  withCrops,
+} from './plan';
+
+// The pure planning lives in plan.ts (shared with the batch runner); re-exported here.
+export { type CropPlan, type PageCrop, withCrops } from './plan';
+
+/**
+ * What displayed `margins` do to each of `pageIds` (plan.ts `planCrops`), with the page
+ * boxes of the open sources (`pageBoxOf`: the engine service's CropBoxes).
+ */
+export function planCrops(ws: Workspace, pageIds: readonly PageId[], margins: Margins): CropPlan {
+  return planCropsWith(ws, pageIds, margins, pageBoxOf);
+}
 
 const model = () => useWorkspaceStore.getState();
 
 /** Fill of the discarded bands: paper white, so they look like the page they were. */
 export const DISCARD_FILL = '#ffffff';
-
-function findPage(ws: Workspace, id: PageId): VirtualPage | undefined {
-  try {
-    return getPage(ws, id);
-  } catch {
-    return undefined;
-  }
-}
 
 /** The pages a scope covers, in document order (`reference`: the "same size" size). */
 export function scopePages(
@@ -86,52 +92,6 @@ export function scopePages(
     case 'same-size':
       return reference === undefined ? [] : pagesOfSize(ws, documentId, reference);
   }
-}
-
-/** One page's new crop; `crop` undefined clears it (the whole page shows again). */
-export interface PageCrop {
-  readonly pageId: PageId;
-  readonly crop: Rect | undefined;
-}
-
-export interface CropPlan {
-  readonly crops: readonly PageCrop[];
-  /** Blank and image pages: the assembler writes no /CropBox for them, so they are left. */
-  readonly notPdf: number;
-  /** Pages too small for the margins (less than the minimum side would be left). */
-  readonly tooSmall: number;
-}
-
-/**
- * What displayed `margins` do to each of `pageIds`: every page gets the crop the margins
- * leave of its own page box, in its own rotation. All-zero margins clear the crop.
- */
-export function planCrops(ws: Workspace, pageIds: readonly PageId[], margins: Margins): CropPlan {
-  const crops: PageCrop[] = [];
-  let notPdf = 0;
-  let tooSmall = 0;
-  const clear = isNoCrop(margins);
-  for (const pageId of pageIds) {
-    const page = findPage(ws, pageId);
-    if (page === undefined) continue;
-    if (page.ref.kind !== 'source') {
-      notPdf++;
-      continue;
-    }
-    if (clear) {
-      crops.push({ pageId, crop: undefined });
-      continue;
-    }
-    const crop = cropFromMargins(pageBoxOf(page), margins, pageTotalRotation(ws, page));
-    if (crop === undefined) tooSmall++;
-    else crops.push({ pageId, crop });
-  }
-  return { crops, notPdf, tooSmall };
-}
-
-/** The workspace with the plan's crops set (one model change per page). */
-export function withCrops(ws: Workspace, crops: readonly PageCrop[]): Workspace {
-  return crops.reduce((acc, { pageId, crop }) => setPageCropBox(acc, pageId, crop), ws);
 }
 
 export interface DiscardPlan {

@@ -1,0 +1,408 @@
+/*
+ * The Batch dialog (spec §5): a large, opaque dialog (DESIGN.md §2: dialogs are opaque),
+ * layered on ShortcutOverlay.module.css's popup and ToolDialog.module.css's controls.
+ */
+.popup {
+  width: min(1040px, calc(100vw - 32px));
+  height: min(760px, calc(100vh - 48px));
+  max-height: none;
+}
+
+.layout {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border-hairline);
+}
+
+.sidebarHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-2) var(--space-4);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.list {
+  flex: 1;
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-3);
+  overflow-y: auto;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.row[aria-pressed='true'] {
+  background: var(--accent-muted);
+  --text-tertiary: var(--text-secondary);
+}
+
+.row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) {
+  .row:hover:not([aria-pressed='true']) {
+    background: var(--surface-hover);
+  }
+}
+
+.rowName {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.groupLabel {
+  padding: var(--space-3) var(--space-3) var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.scroll {
+  display: grid;
+  flex: 1;
+  grid-auto-rows: max-content;
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-6);
+  overflow-y: auto;
+}
+
+.section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.heading {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+.muted {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.steps {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-2);
+}
+
+.stepNumber {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.stepTitle {
+  font-weight: 500;
+}
+
+.stepDetail {
+  display: block;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stepTools {
+  display: flex;
+  gap: 2px;
+}
+
+.iconButton {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+}
+
+.iconButton svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.5;
+}
+
+.iconButton:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .iconButton:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.stepForm {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+}
+
+/* The one honesty-notice recipe (DESIGN.md §3): a warning hairline, no tint, no stripe. */
+.notice {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning-line);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.notices {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.error {
+  color: var(--danger);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.code {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.drop {
+  display: grid;
+  place-items: center;
+  gap: var(--space-2);
+  min-height: 88px;
+  padding: var(--space-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.drop[data-over] {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.files {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-2);
+}
+
+.file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-3);
+  align-items: center;
+  min-height: 32px;
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.file + .file {
+  border-top: 1px solid var(--border-hairline);
+}
+
+.fileName {
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileMeta {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.progressList {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-2);
+}
+
+.progressRow {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.progressRow + .progressRow {
+  border-top: 1px solid var(--border-hairline);
+}
+
+.progressHead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+}
+
+.status {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.status[data-tone='done'] {
+  color: var(--success);
+}
+
+.status[data-tone='notes'] {
+  color: var(--warning);
+}
+
+.status[data-tone='failed'] {
+  color: var(--danger);
+}
+
+.prompt {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  background: var(--surface-2);
+}
+
+.footer {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  border-top: 1px solid var(--border-hairline);
+}
+
+.footerNote {
+  flex: 1;
+  min-width: 200px;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.linkButton {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+}
+
+.emptyRow {
+  padding: 0 var(--space-3);
+}
+
+.inlineActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.alignEnd {
+  align-self: end;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-2) var(--space-3);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(120px, 30%) 1fr;
+  }
+
+  .sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border-hairline);
+  }
+}
