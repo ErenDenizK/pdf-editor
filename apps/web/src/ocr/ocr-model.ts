@@ -6,7 +6,9 @@
  * Results are read from the `ocr.apply` edits of the workspace (their payload holds the
  * recognised words per page, `OcrApplyPayload` in packages/engine/src/ocr/edit.ts), never
  * from a side store: undo, redo and replay change what the panel shows exactly as they change
- * the document. The latest edit of a page wins (a re-run replaces the earlier layer).
+ * the document. The latest edit of a page wins (a re-run replaces the earlier layer). A later
+ * `redaction.apply` on the same source hides, at read time, the words it removed from the page
+ * (inside its areas, or matching its strings); the stored payload stays whole for replay.
  *
  * Kept free of engine runtime imports (types only): the right panel reads this module from
  * the entry chunk, where the engine is not loaded.
@@ -227,6 +229,16 @@ export function languageName(code: string, locale: string): string {
   return code;
 }
 
+/** Language names as a sentence lists them: "Turkish and English" / "Türkçe ve İngilizce". */
+export function languageList(codes: readonly string[], locale: string): string {
+  const names = codes.map((code) => languageName(code, locale));
+  try {
+    return new Intl.ListFormat([locale], { style: 'long', type: 'conjunction' }).format(names);
+  } catch {
+    return names.join(', ');
+  }
+}
+
 /** Languages as the history label and Tesseract write them: "tur+eng". */
 export function languagesKey(codes: readonly string[]): string {
   return codes.join('+');
@@ -283,6 +295,11 @@ export interface OcrPageRecord {
   readonly editId: string;
   readonly languages: readonly string[];
   readonly words: readonly StoredWord[];
+  /**
+   * Index in the edit's stored words of each of `words`, when a later redaction hid some
+   * (the J / K focus and the rows keep the stored index); `words[i]` is stored word `i` without.
+   */
+  readonly storedIndex?: readonly number[];
   readonly quality: OcrQuality;
   readonly meanConfidence: number;
   readonly dpi?: number;
@@ -346,13 +363,152 @@ export function recordsOfEdit(edit: EngineEdit, t: OcrThresholds): OcrPageRecord
 
 export const recordKey = (source: SourceId, pageIndex: number) => `${source}:${pageIndex}`;
 
-/** Every recognised page of the workspace by `recordKey`, the latest edit winning. */
+/** What a `redaction.apply` removed: areas per page and strings document-wide (tolerant). */
+interface Redacted {
+  readonly areas: ReadonlyMap<number, readonly Rect[]>;
+  readonly strings: readonly string[];
+}
+
+function isRect(value: unknown): value is Rect {
+  const r = value as Record<string, unknown> | null;
+  return (
+    typeof r === 'object' &&
+    r !== null &&
+    [r.x, r.y, r.width, r.height].every((n) => typeof n === 'number' && Number.isFinite(n))
+  );
+}
+
+function redactedBy(edit: EngineEdit): Redacted | undefined {
+  if (edit.kind !== 'redaction.apply') return undefined;
+  const plan = (edit.payload as { readonly plan?: unknown } | null | undefined)?.plan as
+    | { readonly areas?: unknown; readonly strings?: unknown }
+    | undefined;
+  if (!plan) return undefined;
+  const areas = new Map<number, Rect[]>();
+  for (const raw of Array.isArray(plan.areas) ? (plan.areas as unknown[]) : []) {
+    const area = raw as { readonly pageIndex?: unknown; readonly rect?: unknown } | null;
+    if (!area || !Number.isInteger(area.pageIndex) || !isRect(area.rect)) continue;
+    const list = areas.get(area.pageIndex as number) ?? [];
+    list.push(area.rect);
+    areas.set(area.pageIndex as number, list);
+  }
+  const strings = Array.isArray(plan.strings)
+    ? (plan.strings as unknown[]).filter((s): s is string => typeof s === 'string')
+    : [];
+  return { areas, strings };
+}
+
+/** Whether two rects share a positive area (touching edges do not). */
+function overlaps(a: Rect, b: Rect): boolean {
+  return (
+    Math.min(a.x + a.width, b.x + b.width) > Math.max(a.x, b.x) &&
+    Math.min(a.y + a.height, b.y + b.height) > Math.max(a.y, b.y)
+  );
+}
+
+/**
+ * Invisible formatting code points redaction ignores when matching, as inclusive ranges: soft
+ * hyphen, combining grapheme joiner, joiners, directional marks, invisible operators, BOM.
+ */
+const INVISIBLE: readonly (readonly [number, number])[] = [
+  [0x00ad, 0x00ad],
+  [0x034f, 0x034f],
+  [0x061c, 0x061c],
+  [0x180e, 0x180e],
+  [0x200b, 0x200f],
+  [0x202a, 0x202e],
+  [0x2060, 0x2064],
+  [0x2066, 0x206f],
+  [0xfeff, 0xfeff],
+];
+
+function ignoredInMatch(char: string): boolean {
+  if (/^\s$/u.test(char)) return true;
+  const cp = char.codePointAt(0) ?? 0;
+  return INVISIBLE.some(([from, to]) => cp >= from && cp <= to);
+}
+
+/**
+ * Text as redaction matches it (packages/engine/src/redaction/strings.ts `normalizeForMatch`,
+ * which this chunk cannot import): NFKC, lower case, without whitespace and invisible
+ * formatting characters.
+ */
+function normalizeForMatch(text: string): string {
+  let out = '';
+  for (const char of text.normalize('NFKC').toLowerCase()) {
+    if (!ignoredInMatch(char)) out += char;
+  }
+  return out;
+}
+
+/**
+ * Indices of `words` a redacted string covers: the page's words are joined in reading order
+ * (as the invisible layer puts them on the page) and every word overlapping a match goes, so
+ * a string spanning several words hides each of them.
+ */
+function wordsMatching(words: readonly StoredWord[], strings: readonly string[]): Set<number> {
+  const hit = new Set<number>();
+  const needles = [...new Set(strings.map(normalizeForMatch))].filter((n) => n !== '');
+  if (needles.length === 0) return hit;
+  let text = '';
+  const owner: number[] = [];
+  words.forEach((word, i) => {
+    const n = normalizeForMatch(word[0]);
+    text += n;
+    owner.push(...new Array<number>(n.length).fill(i));
+  });
+  for (const needle of needles) {
+    for (let at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + 1)) {
+      for (let k = at; k < at + needle.length; k++) hit.add(owner[k] as number);
+    }
+  }
+  return hit;
+}
+
+/** `record` without the words `redacted` removed from its page (quality from what is left). */
+function withoutRedacted(
+  record: OcrPageRecord,
+  redacted: Redacted,
+  t: OcrThresholds,
+): OcrPageRecord {
+  const areas = redacted.areas.get(record.pageIndex) ?? [];
+  const matched = wordsMatching(record.words, redacted.strings);
+  const keep: number[] = [];
+  record.words.forEach((word, i) => {
+    if (matched.has(i)) return;
+    const box = storedWordRect(word);
+    if (areas.some((area) => overlaps(area, box))) return;
+    keep.push(i);
+  });
+  if (keep.length === record.words.length) return record;
+  const words = keep.map((i) => record.words[i] as StoredWord);
+  const mean = words.length === 0 ? 0 : words.reduce((sum, w) => sum + w[6], 0) / words.length;
+  return {
+    ...record,
+    words,
+    storedIndex: keep.map((i) => record.storedIndex?.[i] ?? i),
+    meanConfidence: mean,
+    quality: qualityOf(mean, words.length, t),
+  };
+}
+
+/**
+ * Every recognised page of the workspace by `recordKey`, the latest edit winning, without the
+ * words a later `redaction.apply` of the same source removed (see the module comment).
+ */
 export function ocrRecords(
   edits: readonly EngineEdit[],
   t: OcrThresholds,
 ): Map<string, OcrPageRecord> {
   const out = new Map<string, OcrPageRecord>();
   for (const edit of edits) {
+    const redacted = redactedBy(edit);
+    if (redacted) {
+      for (const [key, record] of out) {
+        if (record.source === edit.source) out.set(key, withoutRedacted(record, redacted, t));
+      }
+      continue;
+    }
     for (const record of recordsOfEdit(edit, t)) {
       out.set(recordKey(record.source, record.pageIndex), record);
     }
@@ -369,9 +525,9 @@ export function documentHasOcr(edits: readonly EngineEdit[], doc: VirtualDocumen
 }
 
 /**
- * A stored word's box in unrotated user space: from its origin on the descender line along
- * the baseline (`width`) and one row height up (`fontSize`), turned by `angle`; the axis-
- * aligned bounds (as `layerWordRect` in packages/engine/src/ocr/verify.ts).
+ * A stored word's box in unrotated user space: from its origin, the corner of the word's ink
+ * rectangle, along the line's angle (`width`) and the ink height up (`fontSize`), turned by
+ * `angle`; the axis-aligned bounds (as `layerWordRect` in packages/engine/src/ocr/verify.ts).
  */
 export function storedWordRect(word: StoredWord): Rect {
   const [, x, y, width, fontSize, angle] = word;
@@ -387,7 +543,7 @@ export function storedWordRect(word: StoredWord): Rect {
 
 /** A low-confidence word of a page (a row of the OCR section). */
 export interface OcrWordRow {
-  /** Index of the word in the page's stored words. */
+  /** Index of the word in the edit's stored words. */
   readonly index: number;
   readonly text: string;
   readonly confidence: number;
@@ -397,8 +553,9 @@ export interface OcrWordRow {
 /** The words of a page below the low-confidence threshold, in reading order. */
 export function lowConfidenceRows(record: OcrPageRecord, t: OcrThresholds): OcrWordRow[] {
   const rows: OcrWordRow[] = [];
-  record.words.forEach((word, index) => {
+  record.words.forEach((word, i) => {
     if (word[6] >= t.lowConfidence) return;
+    const index = record.storedIndex?.[i] ?? i;
     rows.push({ index, text: word[0], confidence: word[6], rect: storedWordRect(word) });
   });
   return rows;
@@ -441,15 +598,16 @@ export function countByQuality(rows: readonly OcrPageRow[]): Record<OcrQuality, 
   return counts;
 }
 
-/** What the export summary says about OCR (spec §1.3): pages recognised and languages. */
+/** What the export summary says about OCR (spec §1.3): pages with recognised text, languages. */
 export interface OcrExportSummary {
   readonly pages: number;
   readonly languages: readonly string[];
 }
 
 /**
- * The OCR line of an export: recognised pages the document shows (latest edit per page) and
- * their languages in first-seen order; undefined without any.
+ * The OCR line of an export: recognised pages the document shows (latest edit per page) that
+ * carry words (a page where nothing was found, or whose words a redaction removed, adds no
+ * text) and their languages in first-seen order; undefined without any.
  */
 export function ocrExportSummaryOf(
   doc: VirtualDocument,
@@ -457,7 +615,7 @@ export function ocrExportSummaryOf(
   t: OcrThresholds,
 ): OcrExportSummary | undefined {
   const records = ocrRecords(edits, t);
-  const rows = documentQualityRows(doc, records);
+  const rows = documentQualityRows(doc, records).filter((row) => row.record.words.length > 0);
   if (rows.length === 0) return undefined;
   const languages: string[] = [];
   for (const row of [...rows].sort((a, b) => a.docIndex - b.docIndex)) {

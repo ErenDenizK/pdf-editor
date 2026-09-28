@@ -2864,9 +2864,52 @@
     }
   ],
   "ocr_phase_prepare": "Preparing…",
-  "ocr_phase_download": "Downloading languages… {done} of {total}",
+  "ocr_phase_download": [
+    {
+      "declarations": [
+        "input count",
+        "input done",
+        "input total",
+        "local countPlural = count: plural"
+      ],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Downloading the language… {done} of {total}",
+        "countPlural=*": "Downloading languages… {done} of {total}"
+      }
+    }
+  ],
   "ocr_phase_start": "Starting text recognition…",
-  "ocr_phase_recognize": "Recognized {done} of {total} pages…",
+  "ocr_phase_recognize": [
+    {
+      "declarations": [
+        "input total",
+        "input doneText",
+        "input totalText",
+        "local totalPlural = total: plural"
+      ],
+      "selectors": ["totalPlural"],
+      "match": {
+        "totalPlural=one": "Recognized {doneText} of {totalText} page…",
+        "totalPlural=*": "Recognized {doneText} of {totalText} pages…"
+      }
+    }
+  ],
+  "ocr_phase_recheck": [
+    {
+      "declarations": [
+        "input total",
+        "input doneText",
+        "input totalText",
+        "local totalPlural = total: plural"
+      ],
+      "selectors": ["totalPlural"],
+      "match": {
+        "totalPlural=one": "The document changed: recognizing the changed page again, {doneText} of {totalText}…",
+        "totalPlural=*": "The document changed: recognizing the changed pages again, {doneText} of {totalText}…"
+      }
+    }
+  ],
   "ocr_phase_write": "Adding the text to the document…",
   "ocr_progress_label": "Text recognition progress",
   "ocr_progress_continues": "You can close this: recognition continues and the status bar shows its progress. Nothing changes until every page is done.",
@@ -2883,6 +2926,18 @@
     }
   ],
   "ocr_not_applied": "The recognized text was not added because the document changed meanwhile. Run it again.",
+  "ocr_changed_during_run": "The document changed while text was being recognized. Run it again.",
+  "ocr_recheck": [
+    {
+      "declarations": ["input count", "input countText", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "The document changed during recognition: {countText} page is recognized again.",
+        "countPlural=*": "The document changed during recognition: {countText} pages are recognized again."
+      }
+    }
+  ],
+  "ocr_document_closed": "Recognition stopped: its document was closed.",
   "ocr_cancelled": "Recognition cancelled. The document is unchanged.",
   "ocr_failed_short": "Text recognition failed. The document is unchanged.",
   "ocr_failed": "Text recognition failed; the document is unchanged. {reason}",
@@ -2928,8 +2983,37 @@
   "ocr_no_low_words": "No low-confidence words.",
   "ocr_section_no_layer": "Page {page} has no text recognized by this app.",
   "ocr_section_document": "Pages by quality",
-  "ocr_word_announce": "Word {index} of {total}: {word}, {confidence}% confidence",
-  "ocr_status": "Recognizing text {done}/{total}",
+  "ocr_word_announce": "Word {index} of {total}: {word}, {confidence} confidence",
+  "ocr_status": [
+    {
+      "declarations": [
+        "input total",
+        "input doneText",
+        "input totalText",
+        "local totalPlural = total: plural"
+      ],
+      "selectors": ["totalPlural"],
+      "match": {
+        "totalPlural=one": "Recognizing text: {doneText} of {totalText} page",
+        "totalPlural=*": "Recognizing text: {doneText} of {totalText} pages"
+      }
+    }
+  ],
+  "ocr_status_recheck": [
+    {
+      "declarations": [
+        "input total",
+        "input doneText",
+        "input totalText",
+        "local totalPlural = total: plural"
+      ],
+      "selectors": ["totalPlural"],
+      "match": {
+        "totalPlural=one": "Recognizing a changed page again: {doneText} of {totalText}",
+        "totalPlural=*": "Recognizing changed pages again: {doneText} of {totalText}"
+      }
+    }
+  ],
   "ocr_languages_title": "OCR languages",
   "ocr_languages_intro": "Languages come from this site and nowhere else. Each downloads on first use; keep a language available offline to recognize text without a connection.",
   "ocr_languages_loading": "Reading the languages on this device…",

@@ -137,6 +137,7 @@ export function OcrLanguages({ onBack }: { readonly onBack: (() => void) | undef
                 <span className={styles.meta}>
                   {working && busy
                     ? m.ocr_phase_download({
+                        count: 1,
                         done: formatMegabytes(busy.done, locale),
                         total: formatMegabytes(busy.total, locale),
                       })

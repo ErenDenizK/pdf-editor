@@ -304,7 +304,13 @@ export async function executeEdit(ctx: EngineContext, edit: EngineEdit): Promise
   const { applyEngineEditWithResult } = await import('@pdf-editor/engine');
   const source = edit.source;
   const toEngine = (id: string) => annotationIds.engineId(source, id);
-  const result = await applyEngineEditWithResult(ctx.editor, mapIds(await hydrate(edit), toEngine));
+  let result: Awaited<ReturnType<typeof applyEngineEditWithResult>>;
+  try {
+    result = await applyEngineEditWithResult(ctx.editor, mapIds(await hydrate(edit), toEngine));
+  } finally {
+    // Also after a refusal: the engine may have changed part of the document.
+    if (changesContent(edit)) bumpRevision(source);
+  }
   const wanted = editAnnotationId(edit);
   if (edit.kind === 'annotation.create' && result.annotation) {
     // A create without an id takes the engine's; one with an id keeps it (or is mapped).
@@ -338,19 +344,45 @@ export function onPagesChanged(listener: PagesListener): () => void {
   };
 }
 
+/**
+ * The pages an edit changed: an OCR layer's pages and a redaction's area pages (their payloads
+ * list them), the edit's page otherwise.
+ */
+function pagesOf(edit: EngineEdit): number[] {
+  const payload = edit.payload as
+    | { readonly pages?: unknown; readonly plan?: { readonly areas?: unknown } }
+    | null
+    | undefined;
+  const list =
+    edit.kind === 'ocr.apply'
+      ? payload?.pages
+      : edit.kind === 'redaction.apply'
+        ? payload?.plan?.areas
+        : undefined;
+  const pages = new Set([edit.pageIndex]);
+  for (const item of Array.isArray(list) ? (list as unknown[]) : []) {
+    const pageIndex = (item as { readonly pageIndex?: unknown } | null)?.pageIndex;
+    if (Number.isInteger(pageIndex)) pages.add(pageIndex as number);
+  }
+  return [...pages];
+}
+
 function pagesChanged(edits: readonly EngineEdit[]): void {
   const seen = new Map<string, { source: SourceId; pageIndex: number }>();
   const textChanged = new Set<string>();
   for (const edit of edits) {
-    const key = `${edit.source}:${edit.pageIndex}`;
-    seen.set(key, { source: edit.source, pageIndex: edit.pageIndex });
-    if (edit.kind === 'text.edit') textChanged.add(key);
+    for (const pageIndex of pagesOf(edit)) {
+      const key = `${edit.source}:${pageIndex}`;
+      seen.set(key, { source: edit.source, pageIndex });
+      // Content edits change the page's text (an OCR layer adds its words).
+      if (changesContent(edit)) textChanged.add(key);
+    }
   }
   if (seen.size === 0) return;
   const pages = [...seen.values()];
   const service = getEngineService();
   for (const page of pages) {
-    // Text edits change the page's text: drop the memoized runs before views re-read.
+    // Drop the memoized text runs before views re-read.
     if (textChanged.has(`${page.source}:${page.pageIndex}`)) {
       service.invalidatePageText(page.source, page.pageIndex);
     }
@@ -374,6 +406,38 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
 
 /** Edits the engine has executed, per source, oldest first. */
 const applied = new Map<SourceId, readonly EngineEdit[]>();
+
+/**
+ * Per source, a counter bumped once each engine mutation of the source's page content has
+ * finished (an executed content edit, refused or not, a reopen, the source closing).
+ * Annotations and form values do not count: they are drawn apart from the page content.
+ * Never reset, so a value read before some work and read again later tells whether the
+ * engine's page content changed between.
+ */
+const revisions = new Map<SourceId, number>();
+
+function changesContent(edit: EngineEdit): boolean {
+  return !(
+    edit.kind.startsWith('annotation.') ||
+    edit.kind === 'form.set-value' ||
+    edit.kind === 'redaction.mark'
+  );
+}
+
+function bumpRevision(source: SourceId): void {
+  revisions.set(source, (revisions.get(source) ?? 0) + 1);
+}
+
+/**
+ * The source's content revision (see `revisions`). Work reading the engine outside the queue
+ * (OCR renders pages while edits go on, ocr/ocr-run.ts) reads it before it starts; inside a
+ * `runAction` action an unchanged value means the engine's document is still the one that
+ * work read: every mutation queued before the first read had finished by then, or its bump
+ * came after it and changed the value.
+ */
+export function sourceRevision(source: SourceId): number {
+  return revisions.get(source) ?? 0;
+}
 
 function annotationEdits(ws: Workspace): Map<SourceId, EngineEdit[]> {
   const bySource = new Map<SourceId, EngineEdit[]>();
@@ -440,6 +504,7 @@ async function rebuild(
   edits: readonly EngineEdit[],
 ): Promise<{ readonly state: readonly EngineEdit[]; readonly ok: boolean }> {
   const reopened = await getEngineService().reopenSource(source);
+  bumpRevision(source);
   // The reopened document knows none of the ids the engine answered before.
   annotationIds.forgetSource(source);
   if (!reopened.ok) {
@@ -733,6 +798,7 @@ useWorkspaceStore.subscribe((state, previous) => {
 
 /** Forgets a closed source: its edit state and id map (the engine document is gone). */
 function forgetSource(source: SourceId): void {
+  bumpRevision(source);
   applied.delete(source);
   annotationIds.forgetSource(source);
   syncDirtySources();

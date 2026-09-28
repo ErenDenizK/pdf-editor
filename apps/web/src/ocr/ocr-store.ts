@@ -17,7 +17,8 @@ import type { FactsBySource, OcrTarget } from './ocr-model';
 export type OcrDialogView = 'run' | 'languages';
 
 /** What the run is doing (the dialog's and the status bar's progress). */
-export type OcrPhase = 'prepare' | 'download' | 'start' | 'recognize' | 'write';
+/** `recheck`: pages whose source changed during the run are recognised again (ocr-run.ts). */
+export type OcrPhase = 'prepare' | 'download' | 'start' | 'recognize' | 'recheck' | 'write';
 
 /** A finished run, for the dialog's result and the announcement. */
 export interface OcrRunResult {
@@ -41,6 +42,8 @@ export type OcrRun =
       /** Pages recognised. */
       readonly done: number;
       readonly total: number;
+      /** Languages of the run (the download message). */
+      readonly languages: number;
       /** Bytes of language data received / expected while downloading. */
       readonly download?: { readonly done: number; readonly total: number };
     }
@@ -116,7 +119,14 @@ export async function startOcrRun(request: OcrRunRequest): Promise<void> {
   controller = abort;
   const { documentId } = request;
   useOcrStore.setState({
-    run: { kind: 'running', documentId, phase: 'prepare', done: 0, total: request.targets.length },
+    run: {
+      kind: 'running',
+      documentId,
+      phase: 'prepare',
+      done: 0,
+      total: request.targets.length,
+      languages: request.languages.length,
+    },
   });
   let next: OcrRun;
   try {

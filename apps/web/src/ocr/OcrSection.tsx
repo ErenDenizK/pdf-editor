@@ -13,13 +13,13 @@ import { formatNumber, formatPercent, getLocale, m } from '../i18n';
 import { useSelectionStore } from '../state/selection-store';
 import { useViewStore } from '../state/view-store';
 import { useActiveDocument, useWorkspaceStore } from '../state/workspace-store';
-import { qualityExplanation, qualityLabel } from './labels';
+import { pageProgress, qualityExplanation, qualityLabel } from './labels';
 import styles from './Ocr.module.css';
 import {
   countByQuality,
   documentHasOcr,
   documentQualityRows,
-  languageName,
+  languageList,
   lowConfidenceRows,
   type OcrPageRecord,
   ocrRecords,
@@ -71,7 +71,9 @@ export function OcrSection() {
     <div className={styles.section} data-testid="ocr-section">
       {run.kind === 'running' && run.documentId === section.doc.id ? (
         <p className={styles.empty} role="status">
-          {m.ocr_phase_recognize({ done: run.done, total: run.total })}
+          {run.phase === 'recheck'
+            ? m.ocr_phase_recheck(pageProgress(run))
+            : m.ocr_phase_recognize(pageProgress(run))}
         </p>
       ) : null}
       <h3 className={styles.subTitle}>{m.ocr_section_page({ page: pageNumber })}</h3>
@@ -84,7 +86,7 @@ export function OcrSection() {
               {record.words.length > 0 ? ` · ${percent(record.meanConfidence)}` : ''}
             </dd>
             <dt>{m.ocr_section_languages()}</dt>
-            <dd>{record.languages.map((code) => languageName(code, locale)).join(', ')}</dd>
+            <dd>{languageList(record.languages, locale)}</dd>
             {record.dpi !== undefined ? (
               <>
                 <dt>{m.ocr_section_dpi()}</dt>

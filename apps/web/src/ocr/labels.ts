@@ -4,7 +4,7 @@
  */
 import type { OcrQuality } from '@pdf-editor/engine';
 
-import { m } from '../i18n';
+import { formatNumber, m } from '../i18n';
 
 /** "Good", "Review", "Poor", "No text found". */
 export function qualityLabel(quality: OcrQuality): string {
@@ -32,4 +32,13 @@ export function qualityExplanation(quality: OcrQuality): string {
     case 'no-text':
       return m.ocr_quality_no_text_explanation();
   }
+}
+
+/** "3 of 12" for the page progress messages (`ocr_phase_recognize`, `ocr_status`). */
+export function pageProgress(run: { readonly done: number; readonly total: number }): {
+  readonly total: number;
+  readonly doneText: string;
+  readonly totalText: string;
+} {
+  return { total: run.total, doneText: formatNumber(run.done), totalText: formatNumber(run.total) };
 }

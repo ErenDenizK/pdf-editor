@@ -22,14 +22,14 @@ import { type OcrLanguagePack, parsePageRange } from '@pdf-editor/engine';
 import { X } from 'lucide-react';
 import { type SyntheticEvent, useEffect, useId, useMemo, useState } from 'react';
 
-import { getLocale, m } from '../i18n';
+import { formatNumber, getLocale, m } from '../i18n';
 import overlay from '../shell/ShortcutOverlay.module.css';
 import { useSignatureStore } from '../signatures/signature-store';
 import toolStyles from '../tools/ToolDialog.module.css';
 import { useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 import { useWorkspaceStore } from '../state/workspace-store';
-import { qualityLabel } from './labels';
+import { pageProgress, qualityLabel } from './labels';
 import styles from './Ocr.module.css';
 import { OcrLanguages } from './OcrLanguages';
 import { ocrDependencies } from './ocr-deps';
@@ -92,8 +92,10 @@ export default function OcrDialog() {
 /** The form, or the progress / outcome of a run on this document. */
 function RunView({ documentId }: { readonly documentId: DocumentId }) {
   const run = useOcrStore((s) => s.run);
+  // One run at a time: its progress shows whichever document the dialog opened on.
   if (run.kind === 'running') return <Progress run={run} />;
-  if (run.kind !== 'idle') return <Outcome run={run} />;
+  // An outcome belongs to its document; another document's dialog offers a new run.
+  if (run.kind !== 'idle' && run.documentId === documentId) return <Outcome run={run} />;
   return <RunForm documentId={documentId} />;
 }
 
@@ -389,6 +391,7 @@ function phaseText(run: Extract<OcrRun, { kind: 'running' }>): string {
     case 'download':
       return run.download
         ? m.ocr_phase_download({
+            count: run.languages,
             done: formatMegabytes(run.download.done, getLocale()),
             total: formatMegabytes(run.download.total, getLocale()),
           })
@@ -396,7 +399,9 @@ function phaseText(run: Extract<OcrRun, { kind: 'running' }>): string {
     case 'start':
       return m.ocr_phase_start();
     case 'recognize':
-      return m.ocr_phase_recognize({ done: run.done, total: run.total });
+      return m.ocr_phase_recognize(pageProgress(run));
+    case 'recheck':
+      return m.ocr_phase_recheck(pageProgress(run));
     case 'write':
       return m.ocr_phase_write();
   }
@@ -443,13 +448,16 @@ function Outcome({ run }: { readonly run: Exclude<OcrRun, { kind: 'idle' | 'runn
     const { result } = run;
     const parts = (['good', 'review', 'poor', 'no-text'] as const)
       .filter((q) => result.byQuality[q] > 0)
-      .map((q) => `${qualityLabel(q)}: ${result.byQuality[q]}`);
+      .map((q) => `${qualityLabel(q)}: ${formatNumber(result.byQuality[q])}`);
     return (
       <div className={`${toolStyles.body} ${styles.body}`} data-testid="ocr-result">
         <p className={toolStyles.strong}>{result.label}</p>
         <p className={toolStyles.description}>{parts.join(' · ')}</p>
         <p className={toolStyles.hint}>
-          {m.ocr_result_words({ words: result.words, low: result.lowConfidence })}
+          {m.ocr_result_words({
+            words: formatNumber(result.words),
+            low: formatNumber(result.lowConfidence),
+          })}
         </p>
         {result.timedOut > 0 ? (
           <p className={styles.notice}>{m.ocr_result_timed_out({ count: result.timedOut })}</p>

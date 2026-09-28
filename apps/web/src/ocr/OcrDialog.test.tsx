@@ -2,7 +2,8 @@
  * The OCR dialog (spec recognize-and-compare §1.5) on scan-text.pdf with the real PDFium
  * worker for the page facts: pages without text by default, languages with size and state,
  * quality, the replace option and the signed-source warning, the honesty text; a run's
- * progress, hiding the dialog while it continues, and cancelling it. The recognizer itself
+ * progress, hiding the dialog while it continues, and cancelling it; a finished run shown on
+ * its own document only; the recheck progress in the dialog and the status bar. The recognizer itself
  * (tesseract.js) is replaced here; the e2e test runs it (e2e/ocr.spec.ts).
  */
 import type { SourceId } from '@pdf-editor/document-model';
@@ -11,9 +12,11 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import scanUrl from '../../../../test/fixtures/scan-text.pdf?url';
+import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
 import { fixtureFile } from '../../test/store-harness';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import OcrDialog from './OcrDialog';
+import { OcrStatus } from './OcrStatus';
 import { type OcrDependencies, ocrDependencies, setOcrDependencies } from './ocr-deps';
 import type { OcrRunCallbacks } from './ocr-run';
 import { openOcrDialog, type OcrRunRequest, resetOcrStore, useOcrStore } from './ocr-store';
@@ -263,6 +266,65 @@ describe('the OCR dialog', () => {
     expect(result).toHaveTextContent('Recognize text: 2 pages, eng');
     expect(result).toHaveTextContent('Good: 1 · Review: 1');
     expect(result).toHaveTextContent('Words: 90 · low confidence: 4');
+  });
+
+  it('shows a finished run on its own document only', async () => {
+    useDeps();
+    const { documentId } = await openScan();
+    openOcrDialog(documentId as never);
+    render(<OcrDialog />);
+    const run = await screen.findByRole('button', { name: 'Recognize 2 pages' });
+    await waitFor(() => expect(run).toBeEnabled());
+    act(() => run.click());
+    await waitFor(() => expect(runs).toHaveLength(1));
+    const progress = await screen.findByTestId('ocr-progress');
+    act(() => within(progress).getByRole('button', { name: 'Continue in background' }).click());
+    await waitFor(() => expect(useOcrStore.getState().dialog).toBeNull());
+    act(() => runs[0]?.finish());
+    await waitFor(() => expect(useOcrStore.getState().run.kind).toBe('done'));
+
+    // Another document: its own form, not the other run's result.
+    const report = await useWorkspaceStore
+      .getState()
+      .openFiles([await fixtureFile(simpleUrl, 'simple.pdf')]);
+    const other = report.opened[0]?.documentId;
+    if (!other) throw new Error('simple.pdf did not open');
+    act(() => openOcrDialog(other));
+    expect(
+      await screen.findByRole('button', { name: /^Recognize \d+ pages?$/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('ocr-result')).toBeNull();
+
+    // Back on the document it ran on, the result is still there.
+    act(() => openOcrDialog(documentId as never));
+    expect(await screen.findByTestId('ocr-result')).toHaveTextContent(
+      'Recognize text: 2 pages, eng',
+    );
+  });
+
+  it('says when changed pages are recognised again, in the dialog and the status bar', async () => {
+    const { documentId } = await openScan();
+    const running = (phase: 'recognize' | 'recheck', done: number, total: number) =>
+      useOcrStore.setState({
+        dialog: { view: 'run', documentId: documentId as never },
+        run: { kind: 'running', documentId: documentId as never, phase, done, total, languages: 1 },
+      });
+    act(() => running('recheck', 0, 1));
+    render(
+      <>
+        <OcrDialog />
+        <OcrStatus separator={undefined} />
+      </>,
+    );
+    expect(await screen.findByTestId('ocr-progress')).toHaveTextContent(
+      'The document changed: recognizing the changed page again, 0 of 1…',
+    );
+    expect(screen.getByTestId('status-ocr')).toHaveTextContent(
+      'Recognizing a changed page again: 0 of 1',
+    );
+    act(() => running('recognize', 1, 2));
+    expect(screen.getByTestId('status-ocr')).toHaveTextContent('Recognizing text: 1 of 2 pages');
+    expect(screen.getByTestId('ocr-progress')).toHaveTextContent('Recognized 1 of 2 pages…');
   });
 
   it('opens the language manager and comes back', async () => {

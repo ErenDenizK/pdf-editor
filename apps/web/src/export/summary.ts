@@ -9,7 +9,7 @@ import type { ReconciliationReport } from '@pdf-editor/engine';
 import { restrictionList } from '../document/security-text';
 import { STRIP_ITEMS } from '../document/strip-items';
 import { formatNumber, getLocale, m } from '../i18n';
-import { languageName, type OcrExportSummary } from '../ocr/ocr-model';
+import { languageList, type OcrExportSummary } from '../ocr/ocr-model';
 import { pagesPhrase } from '../state/workspace-store';
 import { checkName } from '../redaction/report-text';
 import type { SignatureExportSummary } from '../signatures/signing';
@@ -54,7 +54,7 @@ export interface ContentSummary {
   readonly ocr?: OcrExportSummary;
 }
 
-/** "Recognized text (OCR): 12 pages, Turkish and English …" with the honesty line. */
+/** "Recognized text (OCR) on 12 pages: Turkish and English …" with the honesty line. */
 function ocrItems(ocr: OcrExportSummary): SummaryItem[] {
   const locale = getLocale();
   return [
@@ -64,7 +64,7 @@ function ocrItems(ocr: OcrExportSummary): SummaryItem[] {
       text: m.ocr_summary({
         count: ocr.pages,
         countText: formatNumber(ocr.pages),
-        languages: ocr.languages.map((code) => languageName(code, locale)).join(', '),
+        languages: languageList(ocr.languages, locale),
       }),
       details: [m.ocr_honesty()],
     },

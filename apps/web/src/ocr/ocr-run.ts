@@ -7,12 +7,20 @@
  * 2. Per page: `renderForOcr` in the PDFium worker (8-bit greyscale in display orientation, at
  *    `ocrDpiFor` of the page's facts and the quality), then `recognize`. Two pages are in
  *    flight at once, matching the recognizer pool; the PDFium worker renders one at a time.
+ *    A page that fails stops the other lane before the error is passed on.
  * 3. Only when every page is recognised: one `ocr.apply` edit per source inside the edit
  *    runner's queue (`runAction`), committed as one history entry ("Recognize text: 12 pages,
  *    tur+eng"). The payload stores the words, so undo (reopen + replay) and redo never
  *    recognise again. A cancelled run stops before step 3 and commits nothing; a layer that
  *    fails its verification in the worker makes the action throw, and the runner reverts
  *    what it executed.
+ *
+ * Pages render outside the queue, so edits go on meanwhile. Each page's render records its
+ * source's content revision (edit-runner.ts `sourceRevision`); inside the action, a page whose
+ * source changed since (a redaction, a text or image edit, an undo of one) is not written from
+ * what was read: those pages are recognised again ("The document changed: recognizing …"),
+ * at most `RECHECKS` times, then the run fails and commits nothing. Closing the run's
+ * document stops it; a source that left the workspace is not written.
  */
 import type { EngineEdit, SourceId } from '@pdf-editor/document-model';
 import {
@@ -26,15 +34,24 @@ import {
   type PdfOcrLayer,
 } from '@pdf-editor/engine';
 
-import { executeEdit, runAction } from '../annotations/edit-runner';
-import { getEngineService, getOcrRecognizers, toFailure } from '../engine/engine-service';
-import { m } from '../i18n';
+import { executeEdit, runAction, sourceRevision } from '../annotations/edit-runner';
+import {
+  getEngineService,
+  getOcrRecognizers,
+  type OcrRecognizerLease,
+  toFailure,
+} from '../engine/engine-service';
+import { formatNumber, m } from '../i18n';
 import { announce } from '../shell/announcer';
+import { useWorkspaceStore } from '../state/workspace-store';
 import { factsOf, languagesKey, type OcrTarget, replaceModeFor } from './ocr-model';
 import type { OcrPhase, OcrRunRequest, OcrRunResult } from './ocr-store';
 
 /** Pages recognised at once (the recognizer pool has one or two workers). */
 const LANES = 2;
+
+/** Times the pages of a source that changed during the run are recognised again. */
+export const RECHECKS = 2;
 
 export interface OcrRunProgress {
   readonly phase: OcrPhase;
@@ -56,6 +73,10 @@ function throwIfAborted(signal: AbortSignal): void {
 export interface OcrRecognition {
   readonly results: OcrPageResult[];
   readonly reducedDpi: number;
+  /** Per target: `revisionOf(source)` read just before its page was rendered (0 without it). */
+  readonly revisions: readonly number[];
+  /** Per target: whether the 40 MP cap rendered it below the asked DPI. */
+  readonly reduced: readonly boolean[];
 }
 
 /**
@@ -63,7 +84,8 @@ export interface OcrRecognition {
  * `getOcrRecognizers()`, its languages ensured): `LANES` pages in flight, rasters from
  * `layer.renderForOcr` at `dpiOf(target)`. Shared by the OCR dialog's run and the batch
  * runner's OCR step (batch/ocr-step.ts), which opens its sources privately. Throws an
- * `aborted` EngineError once `signal` fires; nothing is written here.
+ * `aborted` EngineError once `signal` fires; a page that fails aborts the other lanes and,
+ * once they have stopped, its error is thrown. Nothing is written here.
  */
 export async function recognizeTargets(
   targets: readonly OcrTarget[],
@@ -72,36 +94,60 @@ export async function recognizeTargets(
     readonly layer: Pick<PdfOcrLayer, 'renderForOcr'>;
     readonly languages: readonly string[];
     readonly dpiOf: (target: OcrTarget) => number;
+    /** The source's content revision, read before each render (see `OcrRecognition`). */
+    readonly revisionOf?: (source: SourceId) => number;
   },
   { signal, onProgress }: OcrRunCallbacks,
 ): Promise<OcrRecognition> {
-  const { recognizer, layer, languages, dpiOf } = options;
+  const { recognizer, layer, languages, dpiOf, revisionOf } = options;
   const results: OcrPageResult[] = new Array<OcrPageResult>(targets.length);
+  const revisions: number[] = new Array<number>(targets.length).fill(0);
+  const reduced: boolean[] = new Array<boolean>(targets.length).fill(false);
+  // Aborted by the caller's signal or by the first page that fails.
+  const lanes = new AbortController();
+  const stop = () => lanes.abort();
+  signal.addEventListener('abort', stop, { once: true });
+  if (signal.aborted) lanes.abort();
+  let failure: { readonly error: unknown } | undefined;
   let next = 0;
   let done = 0;
-  let reducedDpi = 0;
   const lane = async () => {
     for (;;) {
-      throwIfAborted(signal);
+      throwIfAborted(lanes.signal);
       const at = next;
       next += 1;
       const target = targets[at];
       if (target === undefined) return;
+      revisions[at] = revisionOf?.(target.source) ?? 0;
       const raster = await layer.renderForOcr(target.source, target.index, {
         dpi: dpiOf(target),
         rotation: target.rotation,
-        signal,
+        signal: lanes.signal,
       });
-      if (raster.requestedDpi !== undefined) reducedDpi += 1;
-      results[at] = await recognizer.recognize(raster, target.index, languages, { signal });
+      if (raster.requestedDpi !== undefined) reduced[at] = true;
+      results[at] = await recognizer.recognize(raster, target.index, languages, {
+        signal: lanes.signal,
+      });
       done += 1;
       onProgress({ phase: 'recognize', done, total: targets.length });
     }
   };
   onProgress({ phase: 'recognize', done: 0, total: targets.length });
-  await Promise.all(Array.from({ length: Math.min(LANES, targets.length) }, lane));
+  try {
+    await Promise.allSettled(
+      Array.from({ length: Math.min(LANES, targets.length) }, () =>
+        lane().catch((error: unknown) => {
+          failure ??= { error };
+          lanes.abort();
+        }),
+      ),
+    );
+  } finally {
+    signal.removeEventListener('abort', stop);
+  }
   throwIfAborted(signal);
-  return { results, reducedDpi };
+  if (failure) throw failure.error;
+  return { results, reducedDpi: reduced.filter(Boolean).length, revisions, reduced };
 }
 
 /**
@@ -154,70 +200,137 @@ export function plansOf(
 
 /**
  * Runs `request` (see the module comment). Resolves to the result, or undefined when the run
- * was cancelled before anything was written; rejects when recognition or the layer failed
- * (nothing is committed then either).
+ * was cancelled (or its document closed) before anything was written; rejects when
+ * recognition or the layer failed, or the document kept changing (nothing is committed then
+ * either).
  */
 export async function recognizeAndApply(
   request: OcrRunRequest,
   callbacks: OcrRunCallbacks,
 ): Promise<OcrRunResult | undefined> {
-  const { signal, onProgress } = callbacks;
+  const { onProgress } = callbacks;
   const started = performance.now();
   const codes = [...request.languages];
-  const lease = await getOcrRecognizers().acquire();
+  const { targets } = request;
+  // The run's own signal: the caller's cancel, or its document closing.
+  const run = new AbortController();
+  let closed = false;
+  const cancel = () => run.abort();
+  callbacks.signal.addEventListener('abort', cancel, { once: true });
+  if (callbacks.signal.aborted) run.abort();
+  const documentOpen = () =>
+    useWorkspaceStore.getState().workspace.documents[request.documentId] !== undefined;
+  const unsubscribe = useWorkspaceStore.subscribe(() => {
+    if (!closed && !documentOpen()) {
+      closed = true;
+      run.abort();
+    }
+  });
+  const signal = run.signal;
+  const own: OcrRunCallbacks = { signal, onProgress };
+  let lease: OcrRecognizerLease | undefined;
   try {
-    const { recognizer } = lease;
-    await ensureRunLanguages(recognizer, codes, callbacks);
-    const layer = await getEngineService().ocrLayer();
-    const { results, reducedDpi } = await recognizeTargets(
-      request.targets,
-      {
-        recognizer,
-        layer,
-        languages: codes,
-        dpiOf: (target) => ocrDpiFor(factsOf(request.facts, target), request.quality),
-      },
-      callbacks,
-    );
+    if (!documentOpen()) {
+      closed = true;
+      run.abort();
+    }
     throwIfAborted(signal);
-    onProgress({ phase: 'write' });
-    const report = ocrReportOf(results, { totalMs: performance.now() - started });
-    const label = m.ocr_history_label({
-      count: report.pages,
-      languages: languagesKey(codes),
-    });
-    const plans = plansOf(request, results);
-    const committed = await runAction(async (ctx) => {
-      const edits: EngineEdit[] = [];
-      for (const [source, plan] of plans) {
-        const executed = await executeEdit(
-          ctx,
-          ocrApplyEdit(globalThis.crypto.randomUUID(), source, plan),
-        );
-        edits.push(executed.recorded);
-      }
-      return { edits, label, value: true };
-    });
-    if (!committed) throw new Error(m.ocr_not_applied());
-    announce(label);
-    return {
-      label,
-      pages: report.pages,
+    lease = await getOcrRecognizers().acquire();
+    const { recognizer } = lease;
+    await ensureRunLanguages(recognizer, codes, own);
+    const layer = await getEngineService().ocrLayer();
+    const recognition = {
+      recognizer,
+      layer,
       languages: codes,
-      byQuality: report.byQuality,
-      words: report.words,
-      lowConfidence: report.lowConfidence,
-      timedOut: report.timedOut,
-      reducedDpi,
+      dpiOf: (target: OcrTarget) => ocrDpiFor(factsOf(request.facts, target), request.quality),
+      revisionOf: sourceRevision,
     };
+    const results = new Array<OcrPageResult>(targets.length);
+    const revisions = new Array<number>(targets.length).fill(0);
+    const reduced = new Array<boolean>(targets.length).fill(false);
+    let pending = targets.map((_, i) => i);
+    for (let attempt = 0; ; attempt++) {
+      const pass = await recognizeTargets(
+        pending.map((i) => targets[i] as OcrTarget),
+        recognition,
+        attempt === 0
+          ? own
+          : { signal, onProgress: (progress) => onProgress({ ...progress, phase: 'recheck' }) },
+      );
+      pending.forEach((at, k) => {
+        results[at] = pass.results[k] as OcrPageResult;
+        revisions[at] = pass.revisions[k] ?? 0;
+        reduced[at] = pass.reduced[k] ?? false;
+      });
+      throwIfAborted(signal);
+      onProgress({ phase: 'write' });
+      const report = ocrReportOf(results, { totalMs: performance.now() - started });
+      const label = m.ocr_history_label({
+        count: report.pages,
+        languages: languagesKey(codes),
+      });
+      const plans = plansOf(request, results);
+      let stale: number[] = [];
+      let gone = false;
+      const committed = await runAction(async (ctx) => {
+        const ws = useWorkspaceStore.getState().workspace;
+        if (ws.documents[request.documentId] === undefined) {
+          gone = true;
+          return undefined;
+        }
+        // Pages whose source changed after they were rendered: recognised again.
+        stale = targets.flatMap((target, i) =>
+          ws.sources[target.source] !== undefined && sourceRevision(target.source) !== revisions[i]
+            ? [i]
+            : [],
+        );
+        if (stale.length > 0) return undefined;
+        const edits: EngineEdit[] = [];
+        for (const [source, plan] of plans) {
+          // A source that left the workspace (its pages removed) is not written.
+          if (ws.sources[source] === undefined) continue;
+          const executed = await executeEdit(
+            ctx,
+            ocrApplyEdit(globalThis.crypto.randomUUID(), source, plan),
+          );
+          edits.push(executed.recorded);
+        }
+        return edits.length === 0 ? undefined : { edits, label, value: true };
+      });
+      if (gone) {
+        closed = true;
+        run.abort();
+      }
+      throwIfAborted(signal);
+      if (committed) {
+        announce(label);
+        return {
+          label,
+          pages: report.pages,
+          languages: codes,
+          byQuality: report.byQuality,
+          words: report.words,
+          lowConfidence: report.lowConfidence,
+          timedOut: report.timedOut,
+          reducedDpi: reduced.filter(Boolean).length,
+        };
+      }
+      if (stale.length === 0) throw new Error(m.ocr_not_applied());
+      if (attempt >= RECHECKS) throw new Error(m.ocr_changed_during_run());
+      announce(m.ocr_recheck({ count: stale.length, countText: formatNumber(stale.length) }));
+      pending = stale;
+    }
   } catch (error) {
     if (signal.aborted || toFailure(error).code === 'aborted') {
-      announce(m.ocr_cancelled());
+      announce(closed ? m.ocr_document_closed() : m.ocr_cancelled());
       return undefined;
     }
     announce(m.ocr_failed_short());
     throw error;
   } finally {
-    lease.release();
+    unsubscribe();
+    callbacks.signal.removeEventListener('abort', cancel);
+    lease?.release();
   }
 }

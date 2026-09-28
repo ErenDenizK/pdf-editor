@@ -6,7 +6,7 @@
  */
 import type { VirtualDocument, VirtualPage, Workspace } from '@pdf-editor/document-model';
 
-import { m } from '../i18n';
+import { formatNumber, formatPercent, m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { useSelectionStore } from '../state/selection-store';
 import { useUiStore } from '../state/ui-store';
@@ -112,10 +112,10 @@ export function stepOcrWord(delta: 1 | -1): boolean {
   focusOcrWord(section, next);
   announce(
     m.ocr_word_announce({
-      index: rows.indexOf(next) + 1,
-      total: rows.length,
+      index: formatNumber(rows.indexOf(next) + 1),
+      total: formatNumber(rows.length),
       word: next.text,
-      confidence: next.confidence,
+      confidence: formatPercent(Math.round(next.confidence) / 100),
     }),
   );
   return true;

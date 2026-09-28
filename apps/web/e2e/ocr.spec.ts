@@ -6,7 +6,9 @@
  * low-confidence word, Find finds words of the manifest, and the export's summary names the
  * run. The exported file carries the words in its invisible layer (read back with pdf-lib);
  * undo removes the text and redo brings it back from the stored words.
- * Throughout, the request log shows no request to any other origin.
+ * Throughout, the request log shows no request to any other origin, and every worker the page
+ * starts (PDFium, tesseract.js) runs a script of this origin: no blob: or data: worker, whose
+ * requests the log could not attribute.
  */
 import { readFile } from 'node:fs/promises';
 
@@ -54,6 +56,8 @@ test('recognise scan-text.pdf offline-first: panel, search, export, no foreign r
   const origin = new URL(baseURL ?? 'http://localhost').origin;
   const foreign: string[] = [];
   const ocrFiles: string[] = [];
+  const workers: string[] = [];
+  page.on('worker', (worker) => workers.push(worker.url()));
   context.on('request', (request) => {
     const url = new URL(request.url());
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
@@ -175,6 +179,15 @@ test('recognise scan-text.pdf offline-first: panel, search, export, no foreign r
   expect(ocrFiles.some((p) => p.endsWith('/ocr/lang/eng.traineddata.gz'))).toBe(true);
   expect(ocrFiles.some((p) => /\/ocr\/tesseract-[\d.]+\/worker\.min\.js$/.test(p))).toBe(true);
   expect(foreign).toEqual([]);
+  // Every worker is a script of this origin (not blob:, data: or another site).
+  expect(workers.some((url) => /\/ocr\/tesseract-[\d.]+\/worker\.min\.js$/.test(url))).toBe(true);
+  const sameOrigin = (url: string) => {
+    const parsed = new URL(url);
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.origin === origin
+    );
+  };
+  expect(workers.filter((url) => !sameOrigin(url))).toEqual([]);
 });
 
 test('after "Keep available offline", OCR works with the network off', async ({

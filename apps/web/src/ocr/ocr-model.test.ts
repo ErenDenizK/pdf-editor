@@ -1,7 +1,8 @@
 /**
  * The pure OCR helpers (spec recognize-and-compare §1.2, §1.3, §1.5): page scope, the
  * replace option, default languages and their names, pack sizes, and the results read back
- * from `ocr.apply` edits (rows, rects, quality order, export summary).
+ * from `ocr.apply` edits (rows, rects, quality order, export summary), without the words a
+ * later redaction removed.
  */
 import type {
   EngineEdit,
@@ -24,6 +25,7 @@ import {
   type FactsBySource,
   formatMegabytes,
   invisibleTextOf,
+  languageList,
   languageName,
   languagesKey,
   lowConfidenceRows,
@@ -155,6 +157,10 @@ describe('languages', () => {
     expect(languageName('eng', 'tr')).toBe('İngilizce');
     expect(languageName('tur', 'tr')).toBe('Türkçe');
     expect(languageName('qqq', 'en')).toBe('qqq');
+    expect(languageList(['tur', 'eng'], 'en')).toBe('Turkish and English');
+    expect(languageList(['tur', 'eng', 'deu'], 'en')).toBe('Turkish, English, and German');
+    expect(languageList(['tur', 'eng'], 'tr')).toBe('Türkçe ve İngilizce');
+    expect(languageList(['eng'], 'en')).toBe('English');
     expect(languagesKey(['tur', 'eng'])).toBe('tur+eng');
   });
 
@@ -281,11 +287,98 @@ describe('results in the model', () => {
     expect(countByQuality(rows)).toEqual({ good: 0, review: 1, poor: 1, 'no-text': 1 });
     expect(documentHasOcr(edits, doc)).toBe(true);
     expect(documentHasOcr([annotation], doc)).toBe(false);
+    // Page 2 (A:1) found no text: it adds none, so it is not counted.
     expect(ocrExportSummaryOf(doc, [first, rerun, other], T)).toEqual({
-      pages: 3,
+      pages: 2,
       languages: ['tur', 'eng'],
     });
     expect(ocrExportSummaryOf(doc, [annotation], T)).toBeUndefined();
+  });
+
+  function redaction(
+    id: string,
+    source: SourceId,
+    areas: { pageIndex: number; rect: { x: number; y: number; width: number; height: number } }[],
+    strings: string[] = [],
+  ): EngineEdit {
+    return {
+      id,
+      source,
+      pageIndex: areas[0]?.pageIndex ?? 0,
+      kind: 'redaction.apply',
+      payload: { plan: { areas, strings } },
+    };
+  }
+
+  it('hides the words a later redaction removed, keeping the stored indices', () => {
+    // An area over "Documnet" (x 140–210 on page 1) only.
+    const over = redaction('r1', A, [
+      { pageIndex: 0, rect: { x: 135, y: 690, width: 85, height: 30 } },
+    ]);
+    const record = ocrRecords([first, over], T).get(recordKey(A, 0));
+    expect(record?.words.map((w) => w[0])).toEqual(['Scanned']);
+    expect(record?.storedIndex).toEqual([0]);
+    expect(record?.meanConfidence).toBe(96);
+    expect(record?.quality).toBe('good');
+    expect(record && lowConfidenceRows(record, T)).toEqual([]);
+    // The payload is untouched (undo and replay read it).
+    expect((first.payload as { pages: { words: unknown[] }[] }).pages[0]?.words).toHaveLength(2);
+    // Touching an edge, another page or another source: nothing goes.
+    const edge = redaction('r2', A, [
+      { pageIndex: 0, rect: { x: 210, y: 700, width: 20, height: 14 } },
+    ]);
+    const page2 = redaction('r3', A, [
+      { pageIndex: 1, rect: { x: 0, y: 0, width: 612, height: 792 } },
+    ]);
+    const onB = redaction('r4', B, [
+      { pageIndex: 0, rect: { x: 0, y: 0, width: 612, height: 792 } },
+    ]);
+    expect(ocrRecords([first, edge, page2, onB], T).get(recordKey(A, 0))?.words).toHaveLength(2);
+    // A redaction before the run does not touch the run's words.
+    expect(ocrRecords([over, first], T).get(recordKey(A, 0))?.words).toHaveLength(2);
+  });
+
+  it('hides every word a redacted string covers, across words, case and spaces', () => {
+    const run = ocrEdit('e9', A, [
+      {
+        pageIndex: 0,
+        words: [
+          ['Account', 72, 700, 60, 14, 0, 95],
+          ['TOP', 140, 700, 30, 14, 0, 60],
+          ['secret', 175, 700, 50, 14, 0, 70],
+          ['report', 230, 700, 50, 14, 0, 50],
+        ],
+      },
+      { pageIndex: 1, words: [['Top-Secret', 72, 700, 80, 14, 0, 97]] },
+    ]);
+    // Area-less plans are not valid redactions, but strings apply to every page of the source.
+    const scrub = redaction(
+      'r5',
+      A,
+      [{ pageIndex: 3, rect: { x: 0, y: 0, width: 1, height: 1 } }],
+      ['top secret'],
+    );
+    const records = ocrRecords([run, scrub], T);
+    const page1 = records.get(recordKey(A, 0));
+    expect(page1?.words.map((w) => w[0])).toEqual(['Account', 'report']);
+    expect(page1 && lowConfidenceRows(page1, T).map((r) => [r.index, r.text])).toEqual([
+      [3, 'report'],
+    ]);
+    // "Top-Secret" does not match "topsecret" (the hyphen stays), as the engine matches.
+    expect(records.get(recordKey(A, 1))?.words).toHaveLength(1);
+  });
+
+  it('drops a page whose words were all redacted from the export summary', () => {
+    const all = redaction('r6', B, [
+      { pageIndex: 0, rect: { x: 0, y: 0, width: 612, height: 792 } },
+    ]);
+    const records = ocrRecords([first, other, all], T);
+    expect(records.get(recordKey(B, 0))?.quality).toBe('no-text');
+    expect(ocrExportSummaryOf(doc, [first, other, all], T)).toEqual({
+      pages: 1,
+      languages: ['eng'],
+    });
+    expect(ocrExportSummaryOf(doc, [other, all], T)).toBeUndefined();
   });
 
   it('steps through rows with J and K, wrapping', () => {
