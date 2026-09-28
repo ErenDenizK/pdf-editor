@@ -1,9 +1,9 @@
 /**
- * Which section-operation dialog is open (split, merge, interleave, image sizing). One
- * dialog at a time; `OperationDialogs` renders it. The image-sizing dialog is a question:
- * `askImageSizing` resolves when the user answers (undefined when cancelled).
+ * Which section-operation dialog is open (split, merge, interleave, resize, image sizing).
+ * One dialog at a time; `OperationDialogs` renders it. The image-sizing dialog is a
+ * question: `askImageSizing` resolves when the user answers (undefined when cancelled).
  */
-import type { DocumentId } from '@pdf-editor/document-model';
+import type { DocumentId, PageId } from '@pdf-editor/document-model';
 import { create } from 'zustand';
 
 import type { ImageSizing } from '../files/images';
@@ -13,6 +13,13 @@ export type OperationDialog =
   | { readonly kind: 'interleave'; readonly documentId: DocumentId }
   | { readonly kind: 'merge-into'; readonly documentId: DocumentId }
   | { readonly kind: 'merge-all' }
+  | {
+      readonly kind: 'resize';
+      /** The document the dialog was opened for (the section, else the first page's). */
+      readonly documentId: DocumentId;
+      /** The selected pages, in document order; empty when opened for a whole document. */
+      readonly pageIds: readonly PageId[];
+    }
   | {
       readonly kind: 'image-size';
       readonly count: number;

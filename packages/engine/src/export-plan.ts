@@ -10,6 +10,8 @@
  *   headings), the same rule the assembler applies.
  * - Security: the effective policy's user password goes into the expectation, so an
  *   encrypted output can be re-opened by the verifier.
+ * - Resized pages whose content fits inside the new page (fit, stretch, a growing canvas)
+ *   are listed in `annotationsInsidePages`: their annotations must stay on the page.
  */
 
 import {
@@ -25,8 +27,11 @@ import {
   type OutlineNode,
   pageTotalRotation,
   type SecurityPolicy,
+  pageContentSize,
   pageUnrotatedSize,
+  resizeTransform,
   type SourceId,
+  type VirtualPage,
   type VirtualDocument,
   walkOutline,
   type Workspace,
@@ -58,10 +63,33 @@ export interface ExportPlanOptions {
   readonly security?: SecurityPolicy | null;
 }
 
+/** Whether a resized page's scaled content box lies inside the new page. */
+function contentFitsPage(ws: Workspace, page: VirtualPage): boolean {
+  const resize = page.resize;
+  if (resize === undefined) return false;
+  const content = pageContentSize(ws, page);
+  const t = resizeTransform(content, resize);
+  const epsilon = 0.01;
+  return (
+    t.offsetX >= -epsilon &&
+    t.offsetY >= -epsilon &&
+    t.offsetX + t.scaleX * content.width <= resize.width + epsilon &&
+    t.offsetY + t.scaleY * content.height <= resize.height + epsilon
+  );
+}
+
 function outlineTitles(nodes: readonly OutlineNode[]): string[] {
   const titles: string[] = [];
   walkOutline(nodes, (node) => titles.push(node.title));
   return titles;
+}
+
+function insideExpectation(
+  ws: Workspace,
+  pages: readonly VirtualPage[],
+): { annotationsInsidePages?: readonly number[] } {
+  const indices = pages.flatMap((page, i) => (contentFitsPage(ws, page) ? [i] : []));
+  return indices.length > 0 ? { annotationsInsidePages: indices } : {};
 }
 
 export function planExport(
@@ -109,6 +137,7 @@ export function planExport(
       outlineCount: countNodes(outline),
       outlineTitles: outlineTitles(outline),
       pageLabels: labeled ? effectiveLabels(ws, doc) : null,
+      ...insideExpectation(ws, doc.pages),
       ...(password ? { password } : {}),
     },
   };

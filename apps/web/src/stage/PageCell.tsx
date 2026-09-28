@@ -29,6 +29,7 @@ import { announce } from '../shell/announcer';
 import { useSelectionStore } from '../state/selection-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import styles from './ArrangeView.module.css';
+import { ResizedContent } from './ResizedContent';
 
 export interface PageCellProps {
   readonly pageId: PageId;
@@ -49,6 +50,16 @@ export interface PageCellProps {
   readonly totalRotation: number;
   readonly widthPt: number;
   readonly heightPt: number;
+  /**
+   * Resized pages (ResizedContent.tsx): the content box as fractions of the sheet, and the
+   * content's displayed size in points. Undefined when the page is not resized.
+   */
+  readonly contentLeft?: number | undefined;
+  readonly contentTop?: number | undefined;
+  readonly contentWidth?: number | undefined;
+  readonly contentHeight?: number | undefined;
+  readonly contentWidthPt?: number | undefined;
+  readonly contentHeightPt?: number | undefined;
   readonly thumbWidth: number;
   readonly thumbHeight: number;
   readonly cellWidth: number;
@@ -101,6 +112,12 @@ function PageCellInner({
   totalRotation,
   widthPt,
   heightPt,
+  contentLeft,
+  contentTop,
+  contentWidth,
+  contentHeight,
+  contentWidthPt,
+  contentHeightPt,
   thumbWidth,
   thumbHeight,
   cellWidth,
@@ -122,6 +139,14 @@ function PageCellInner({
     if (!el) return;
     return attachPageDrag(el, pageId);
   }, [pageId]);
+
+  const frame =
+    contentLeft === undefined ||
+    contentTop === undefined ||
+    contentWidth === undefined ||
+    contentHeight === undefined
+      ? undefined
+      : { left: contentLeft, top: contentTop, width: contentWidth, height: contentHeight };
 
   const position = String(index + 1);
   const labelText =
@@ -170,16 +195,18 @@ function PageCellInner({
           data-thumb=""
           style={{ width: thumbWidth, height: thumbHeight }}
         >
-          <PageCanvas
-            sourceId={sourceId}
-            blobId={blobId}
-            index={sourceIndex}
-            rotation={rotation}
-            widthPt={widthPt}
-            heightPt={heightPt}
-            cssWidth={thumbWidth}
-            priority={visible ? RENDER_PRIORITY.visible : RENDER_PRIORITY.offscreen}
-          />
+          <ResizedContent frame={frame}>
+            <PageCanvas
+              sourceId={sourceId}
+              blobId={blobId}
+              index={sourceIndex}
+              rotation={rotation}
+              widthPt={frame ? (contentWidthPt ?? widthPt) : widthPt}
+              heightPt={frame ? (contentHeightPt ?? heightPt) : heightPt}
+              cssWidth={frame ? thumbWidth * frame.width : thumbWidth}
+              priority={visible ? RENDER_PRIORITY.visible : RENDER_PRIORITY.offscreen}
+            />
+          </ResizedContent>
         </div>
       </div>
       <div className={styles.meta} aria-hidden="true">

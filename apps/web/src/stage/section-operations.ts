@@ -1,9 +1,9 @@
 /**
  * Section operations (light-table spec §5) bound to the stores: split, merge into, merge
- * all, interleave, rename, copy to a new document and images as pages. Each commits one
- * history entry with a readable label, keeps the result visible in Arrange when its inputs
- * were, and announces the outcome. The dialogs and commands call these; the math lives in
- * `operation-plans.ts`.
+ * all, interleave, rename, copy to a new document, images as pages and page resize. Each
+ * commits one history entry with a readable label, keeps the result visible in Arrange
+ * when its inputs were, and announces the outcome. The dialogs and commands call these;
+ * the math lives in `operation-plans.ts` (and the model's resize.ts).
  */
 import {
   type BlobId,
@@ -17,6 +17,8 @@ import {
   newEmptyDocument,
   type PageId,
   renameDocument,
+  type ResizeRequest,
+  resizePages,
   type Size,
   type SplitSpec,
   splitDocument,
@@ -245,6 +247,36 @@ export function startRename(documentId: DocumentId, surface?: 'tab' | 'section')
       ? 'section'
       : 'tab');
   ui().setRenaming({ documentId, surface: where });
+}
+
+// ---------------------------------------------------------------------------
+// Resize pages
+// ---------------------------------------------------------------------------
+
+/**
+ * "Resize pages…": resizes `pageIds` (resize.ts in the model; `undefined` returns them to
+ * their original size) as one history entry and announces it with `sizeLabel` (e.g.
+ * "A4 portrait" or "210 × 297 mm"). Resolves to whether anything changed.
+ */
+export function resizePagesTo(
+  pageIds: readonly PageId[],
+  request: ResizeRequest | undefined,
+  sizeLabel: string,
+): boolean {
+  if (pageIds.length === 0) return false;
+  const pages = pagesPhrase(pageIds.length);
+  const committed = model().applyOperation(
+    (ws) => resizePages(ws, pageIds, request),
+    m.history_resize({ pages }),
+  );
+  if (committed) {
+    announce(
+      request === undefined
+        ? m.announce_resize_cleared({ pages })
+        : m.announce_resized({ pages, size: sizeLabel }),
+    );
+  }
+  return committed;
 }
 
 // ---------------------------------------------------------------------------

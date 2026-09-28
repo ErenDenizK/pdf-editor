@@ -3,7 +3,7 @@
  * requested DPI, in tiles when a page exceeds the single-bitmap cap, and streams the tiles
  * to the compress worker, which stitches, encodes (PNG/JPEG/WebP) and zips them (fflate).
  *
- * Pages that are plain source pages (no overlays, no crop override) render straight from
+ * Pages that are plain source pages (no overlays, no crop override, no resize) render from
  * their source with the page's rotation. Otherwise the document is first assembled exactly
  * as it would be exported (page numbers, watermarks, crops, image pages) and the images
  * are rendered from that, so they always match the exported PDF.
@@ -67,7 +67,12 @@ interface PageTarget {
 function isPlain(doc: VirtualDocument, pages: readonly number[]): boolean {
   return pages.every((i) => {
     const page = doc.pages[i];
-    return page?.ref.kind === 'source' && page.overlays.length === 0 && page.cropBox === undefined;
+    return (
+      page?.ref.kind === 'source' &&
+      page.overlays.length === 0 &&
+      page.cropBox === undefined &&
+      page.resize === undefined
+    );
   });
 }
 

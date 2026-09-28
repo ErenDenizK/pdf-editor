@@ -92,7 +92,15 @@ interface VirtualPage {
      | { image: BlobId };
   rotation: 0 | 90 | 180 | 270;    // delta on top of the source /Rotate
   cropBox?: Rect;
+  resize?: PageResize;             // new page size, applied after the crop (see below)
   overlays: OverlayOp[];           // page numbers, watermark, header/footer (declarative)
+}
+
+interface PageResize {             // unrotated user space, like cropBox
+  width: number; height: number;   // the new page box, points
+  mode: 'scale' | 'fit' | 'canvas'; // cover (or `stretch`), fit with margins, keep 100%
+  anchor: Anchor;                  // nine positions; where the content sits
+  stretch?: boolean;               // scale only: per-axis scale, fills exactly
 }
 ```
 
@@ -108,6 +116,15 @@ interface VirtualPage {
   the source bytes so a crashed tab can be recovered.
 - Rendering a virtual page = render the source page (cached `ImageBitmap` keyed by
   source, index, rotation, scale) + overlay canvas.
+- **Resize** maps the content box (what the crop leaves visible) into the new page box by
+  x' = a·x + e, y' = d·y + f (document-model `resize.ts`, shared by every consumer). It is
+  stored unrotated so a later rotation turns the resized page as a whole; the dialog's
+  displayed size and anchor are converted per page. On screen the source bitmap is placed
+  at the content placement and the viewer's page frame folds the matrix in, so text,
+  links, annotations, forms and search follow; at export the assembler keeps the copied
+  page and wraps its content in `q <matrix> cm … Q`, transforming page boxes, annotation
+  and widget geometry and destinations (`pdflib/page-resize.ts`). The verification pass
+  checks the new page sizes and that annotations of pages whose content fits stay inside.
 
 ## 4. Export pipeline
 

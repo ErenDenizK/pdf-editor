@@ -46,6 +46,7 @@ import { outlineTargets } from './arrange-data';
 import styles from './ArrangeView.module.css';
 import { InlineTitleEditor } from './InlineTitleEditor';
 import { PageCell } from './PageCell';
+import { contentFrame } from './ResizedContent';
 import { SectionMenuEntries } from './SectionMenuEntries';
 import { startRename } from './section-operations';
 
@@ -168,6 +169,7 @@ export function ArrangeSection({
                     const fitted = fitInBox(size, metrics.cellWidth, metrics.boxHeight);
                     const ref = page.ref;
                     const file = ref.kind === 'source' ? files[ref.source] : undefined;
+                    const frame = contentFrame(ws, page);
                     return (
                       <PageCell
                         key={page.id}
@@ -193,6 +195,12 @@ export function ArrangeSection({
                         totalRotation={safeRotation(ws, page)}
                         widthPt={size.width}
                         heightPt={size.height}
+                        contentLeft={frame?.left}
+                        contentTop={frame?.top}
+                        contentWidth={frame?.width}
+                        contentHeight={frame?.height}
+                        contentWidthPt={frame?.widthPt}
+                        contentHeightPt={frame?.heightPt}
                         thumbWidth={fitted.width}
                         thumbHeight={fitted.height}
                         cellWidth={metrics.cellWidth}

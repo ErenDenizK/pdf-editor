@@ -68,8 +68,11 @@ export function pageTotalRotation(ws: Workspace, page: VirtualPage): Rotation {
   return ((intrinsic + page.rotation) % 360) as Rotation;
 }
 
-/** Unrotated size: crop box override, else the source page / blank / image size. */
-export function pageUnrotatedSize(ws: Workspace, page: VirtualPage): Size {
+/**
+ * Unrotated size of the page's content box, before any resize: the crop box override, else
+ * the source page / blank / image size.
+ */
+export function pageContentSize(ws: Workspace, page: VirtualPage): Size {
   if (page.cropBox !== undefined) {
     return { width: page.cropBox.width, height: page.cropBox.height };
   }
@@ -79,6 +82,14 @@ export function pageUnrotatedSize(ws: Workspace, page: VirtualPage): Size {
     throw new DocumentModelError('invalid-index', `Source page ${page.ref.index} does not exist`);
   }
   return info.size;
+}
+
+/** Unrotated page size: the resize when there is one, else the content box. */
+export function pageUnrotatedSize(ws: Workspace, page: VirtualPage): Size {
+  if (page.resize !== undefined) {
+    return { width: page.resize.width, height: page.resize.height };
+  }
+  return pageContentSize(ws, page);
 }
 
 /** Size as displayed: unrotated size with width/height swapped for 90/270 rotations. */

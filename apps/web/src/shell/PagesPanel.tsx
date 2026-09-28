@@ -36,6 +36,7 @@ import {
 } from '../state/selection-store';
 import { useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
+import { contentFrame, ResizedContent } from '../stage/ResizedContent';
 import { useWorkspaceStore } from '../state/workspace-store';
 import styles from './LeftRail.module.css';
 
@@ -245,6 +246,8 @@ function PageOption({
   const selected = useSelectionStore((s) => (id === undefined ? false : s.selected.has(id)));
   if (!page) return null;
   const label = effectiveLabel(ws, doc, index);
+  // Resized pages: the bitmap covers the content box, placed as the export draws it.
+  const frame = contentFrame(ws, page);
   return (
     <div
       role="option"
@@ -262,16 +265,18 @@ function PageOption({
     >
       <div className={styles.pageBox}>
         <div className={styles.pageSheet} style={{ width: box.width, height: box.height }}>
-          <PageCanvas
-            sourceId={page.ref.kind === 'source' ? page.ref.source : undefined}
-            blobId={page.ref.kind === 'image' ? page.ref.blob : undefined}
-            index={page.ref.kind === 'source' ? page.ref.index : 0}
-            rotation={page.rotation}
-            widthPt={size.width}
-            heightPt={size.height}
-            cssWidth={box.width}
-            priority={priority}
-          />
+          <ResizedContent frame={frame}>
+            <PageCanvas
+              sourceId={page.ref.kind === 'source' ? page.ref.source : undefined}
+              blobId={page.ref.kind === 'image' ? page.ref.blob : undefined}
+              index={page.ref.kind === 'source' ? page.ref.index : 0}
+              rotation={page.rotation}
+              widthPt={frame?.widthPt ?? size.width}
+              heightPt={frame?.heightPt ?? size.height}
+              cssWidth={box.width * (frame?.width ?? 1)}
+              priority={priority}
+            />
+          </ResizedContent>
         </div>
       </div>
       <span className={styles.pageLabel} aria-hidden="true">

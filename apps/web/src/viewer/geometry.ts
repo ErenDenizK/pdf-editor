@@ -9,8 +9,20 @@
  *
  * Every overlay (text layer, search highlights, link hotspots, tiles) goes through here,
  * so there is exactly one place where rotation and the CropBox origin are applied.
+ *
+ * Resized pages (`VirtualPage.resize`) get an equivalent frame (`resizedPageFrame`): engine
+ * geometry stays in the *source* page's user space, and the frame folds the resize matrix
+ * x' = a·x + e, y' = d·y + f into its origin, size and scale (measured in content units of
+ * 1/a new-page points, so `scale` is the content's CSS pixels per source point), plus
+ * `stretchY` = d/a for a non-uniform stretch. Overlays need no resize logic of their own.
  */
-import type { Rect, Rotation, Size } from '@pdf-editor/document-model';
+import {
+  type PageResize,
+  type Rect,
+  resizeTransform,
+  type Rotation,
+  type Size,
+} from '@pdf-editor/document-model';
 
 export interface PageFrame {
   /** Unrotated CropBox size in points. */
@@ -28,6 +40,44 @@ export interface PageFrame {
   readonly intrinsicRotation?: Rotation;
   /** CSS pixels per point. */
   readonly scale: number;
+  /**
+   * Resized pages stretched non-uniformly: user-space y is multiplied by this before the
+   * mapping (x by 1). Undefined reads as 1. See `resizedPageFrame`.
+   */
+  readonly stretchY?: number;
+}
+
+/**
+ * The frame of a resized page: `contentBox` is the source page's visible box (crop box, in
+ * the source's user space), `resize` the stored (unrotated) resize, `rotation` the total
+ * rotation and `cssScale` the CSS pixels per point of the *new* page. Mapping engine
+ * geometry through it gives its place on the resized page as the export draws it
+ * (packages/engine/src/pdflib/page-resize.ts uses the same matrix).
+ */
+export function resizedPageFrame(input: {
+  readonly contentBox: Rect;
+  readonly resize: PageResize;
+  readonly rotation: Rotation;
+  readonly cssScale: number;
+  readonly intrinsicRotation?: Rotation;
+}): PageFrame {
+  const { contentBox: box, resize } = input;
+  const t = resizeTransform({ width: box.width, height: box.height }, resize);
+  const a = t.scaleX;
+  const d = t.scaleY;
+  const e = t.offsetX - a * box.x;
+  const f = t.offsetY - d * box.y;
+  return {
+    size: { width: resize.width / a, height: resize.height / a },
+    originX: -e / a + 0,
+    originY: -f / a + 0,
+    rotation: input.rotation,
+    scale: input.cssScale * a,
+    ...(Math.abs(d / a - 1) > 1e-9 ? { stretchY: d / a } : {}),
+    ...(input.intrinsicRotation === undefined
+      ? {}
+      : { intrinsicRotation: input.intrinsicRotation }),
+  };
 }
 
 export interface Box {
@@ -51,11 +101,12 @@ export function displayedSize(frame: PageFrame): Size {
  */
 export function userRectToCss(frame: PageFrame, rect: Rect): Box {
   const { width: W, height: H } = frame.size;
+  const k = frame.stretchY ?? 1;
   // Unrotated, top-left origin, y down.
   const ux = rect.x - frame.originX;
-  const uy = frame.originY + H - (rect.y + rect.height);
+  const uy = frame.originY + H - k * (rect.y + rect.height);
   const w = rect.width;
-  const h = rect.height;
+  const h = rect.height * k;
   let box: Box;
   switch (frame.rotation) {
     case 90:
@@ -118,7 +169,13 @@ export function displayRectToUser(frame: PageFrame, box: Box): Rect {
       w = box.width;
       h = box.height;
   }
-  return { x: ux + frame.originX, y: frame.originY + H - (uy + h), width: w, height: h };
+  const k = frame.stretchY ?? 1;
+  return {
+    x: ux + frame.originX,
+    y: (frame.originY + H - (uy + h)) / k,
+    width: w,
+    height: h / k,
+  };
 }
 
 /**

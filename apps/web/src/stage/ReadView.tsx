@@ -19,6 +19,7 @@ import {
   type Rect,
   type Size,
   type VirtualDocument,
+  type VirtualPage,
   pageTotalRotation,
   type Workspace,
 } from '@pdf-editor/document-model';
@@ -34,7 +35,7 @@ import { MAX_ZOOM, MIN_ZOOM, useUiStore } from '../state/ui-store';
 import { type ReadLayout, useViewStore } from '../state/view-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import styles from '../shell/Stage.module.css';
-import { userRectToCss } from '../viewer/geometry';
+import { type Box, userRectToCss } from '../viewer/geometry';
 import { GoToPageDialog } from '../viewer/GoToPageDialog';
 import {
   documentFingerprint,
@@ -47,6 +48,7 @@ import { setReadController } from '../viewer/read-controller';
 import '../viewer/register';
 import { installCopyHandler } from '../viewer/TextLayer';
 import { PageOverlays } from './page-overlays';
+import { type ContentFrame, contentFrame, ResizedContent } from './ResizedContent';
 
 const PAD_X = 48;
 const PAD_TOP = 16;
@@ -60,6 +62,66 @@ const WHEEL_ZOOM_DOUBLING = 300;
 const NAV_SETTLE_MS = 180;
 /** Remember the reading position after it has settled for this long. */
 const REMEMBER_DELAY_MS = 600;
+
+/**
+ * A resized page in Read mode (`VirtualPage.resize`): where its content bitmap goes on the
+ * sheet (the model's `pageContentPlacement`, via `contentFrame`), in CSS pixels snapped to
+ * device pixels, and the content's scale for the canvas and tiles. The overlays use the
+ * page's resized frame (`pageFrame` with the page), which maps engine geometry to the same
+ * place through the resize matrix; read-resize.test.tsx checks the two agree.
+ */
+interface ResizedLayout {
+  readonly box: Box;
+  /** Displayed content size in points (after rotation). */
+  readonly contentPt: Size;
+  /** CSS pixels per content point (horizontally, for a stretch). */
+  readonly contentScale: number;
+  /** Non-uniform (stretch): the bitmap is stretched by CSS, never drawn 1:1 or tiled. */
+  readonly stretched: boolean;
+  /** Content reaches past the sheet (scale to cover, shrinking canvas): clip the sheet. */
+  readonly overflows: boolean;
+}
+
+/** Exported for tests. */
+export function resizedLayout(
+  frame: ContentFrame,
+  stretched: boolean,
+  sheet: Size,
+  dpr: number,
+): ResizedLayout {
+  const raw = {
+    left: frame.left * sheet.width,
+    top: frame.top * sheet.height,
+    width: frame.width * sheet.width,
+    height: frame.height * sheet.height,
+  };
+  const contentPt = { width: frame.widthPt, height: frame.heightPt };
+  const contentScale = raw.width / Math.max(1e-6, contentPt.width);
+  const snap = (v: number) => Math.round(v * dpr) / dpr;
+  // Uniform: the same snapping as a sheet, so the exact-scale bitmap maps 1:1.
+  const size = stretched
+    ? { width: raw.width, height: raw.height }
+    : sheetSize(contentPt.width, contentPt.height, contentScale, dpr);
+  const box = { left: snap(raw.left), top: snap(raw.top), ...size };
+  const overflows =
+    box.left < -0.5 ||
+    box.top < -0.5 ||
+    box.left + box.width > sheet.width + 0.5 ||
+    box.top + box.height > sheet.height + 0.5;
+  return { box, contentPt, contentScale, stretched, overflows };
+}
+
+function resizedLayoutOf(
+  ws: Workspace,
+  page: VirtualPage,
+  sheet: Size,
+  dpr: number,
+): ResizedLayout | undefined {
+  const frame = contentFrame(ws, page);
+  if (frame === undefined) return undefined;
+  const stretched = page.resize?.mode === 'scale' && page.resize.stretch === true;
+  return resizedLayout(frame, stretched, sheet, dpr);
+}
 
 /** Documents whose remembered position was already applied this session. */
 const restored = new Set<string>();
@@ -509,6 +571,7 @@ function PageColumn({
       sizePt: size,
       rotation: pageTotalRotation(ws, page),
       cssScale,
+      page,
     });
     const box = userRectToCss(frame, reveal);
     const top = rowTop + box.top;
@@ -667,7 +730,15 @@ function PageColumn({
               const name = `${m.cell_label({ position: index + 1, count: pages.length })}${rotationPhrase(total)}`;
               const label = labels[index];
               const textual = sourceId !== undefined;
-              const tiled = textual && rowVisible && needsTiles(cssScale, size.width, size.height);
+              const resized = resizedLayoutOf(ws, page, { width, height }, dpr);
+              // The bitmap covers the content box: the page's own, or the resized one's.
+              const contentPt = resized?.contentPt ?? size;
+              const contentScale = resized?.contentScale ?? cssScale;
+              const tiled =
+                textual &&
+                rowVisible &&
+                resized?.stretched !== true &&
+                needsTiles(contentScale, contentPt.width, contentPt.height);
               return (
                 <div
                   key={page.id}
@@ -680,34 +751,37 @@ function PageColumn({
                   className={styles.page}
                   data-page-id={page.id}
                   data-page-index={index}
-                  style={{ width, height }}
+                  data-resized={resized === undefined ? undefined : ''}
+                  style={{ width, height, ...(resized?.overflows ? { overflow: 'hidden' } : {}) }}
                 >
-                  <PageCanvas
-                    sourceId={sourceId}
-                    blobId={page.ref.kind === 'image' ? page.ref.blob : undefined}
-                    index={sourceIndex}
-                    rotation={page.rotation}
-                    widthPt={size.width}
-                    heightPt={size.height}
-                    cssWidth={width}
-                    exact
-                    priority={rowVisible ? RENDER_PRIORITY.page : RENDER_PRIORITY.offscreen}
-                    delayMs={ZOOM_RENDER_DELAY_MS}
-                  />
-                  {tiled && sourceId !== undefined ? (
-                    <TiledPage
+                  <ResizedContent frame={resized?.box} unit="px">
+                    <PageCanvas
                       sourceId={sourceId}
+                      blobId={page.ref.kind === 'image' ? page.ref.blob : undefined}
                       index={sourceIndex}
                       rotation={page.rotation}
-                      frame={pageFrame({
-                        sourceId,
-                        sourceIndex,
-                        sizePt: size,
-                        rotation: total,
-                        cssScale,
-                      })}
+                      widthPt={contentPt.width}
+                      heightPt={contentPt.height}
+                      cssWidth={resized?.box.width ?? width}
+                      exact={resized?.stretched !== true}
+                      priority={rowVisible ? RENDER_PRIORITY.page : RENDER_PRIORITY.offscreen}
+                      delayMs={ZOOM_RENDER_DELAY_MS}
                     />
-                  ) : null}
+                    {tiled && sourceId !== undefined ? (
+                      <TiledPage
+                        sourceId={sourceId}
+                        index={sourceIndex}
+                        rotation={page.rotation}
+                        frame={pageFrame({
+                          sourceId,
+                          sourceIndex,
+                          sizePt: contentPt,
+                          rotation: total,
+                          cssScale: contentScale,
+                        })}
+                      />
+                    ) : null}
+                  </ResizedContent>
                   <PageOverlays
                     page={page}
                     pageId={page.id}

@@ -33,6 +33,7 @@ import {
   sliceLabels,
 } from './labels';
 import { pruneOutline, restrictOutline, wrapOutline } from './outline';
+import { assertResize, type ResizeRequest, resizeForPage, resizeProblem } from './resize';
 import { pageDisplaySize } from './selectors';
 import type {
   BatesConfig,
@@ -42,6 +43,7 @@ import type {
   OverlayOp,
   PageId,
   PageLabelRange,
+  PageResize,
   Rect,
   Size,
   VirtualDocument,
@@ -250,9 +252,9 @@ export function deletePages(ws: Workspace, pageIds: readonly PageId[]): Workspac
 }
 
 /**
- * Duplicates pages with fresh ids and the same reference, rotation, crop and overlays.
- * Without a target each copy goes right after its original; with a target all copies
- * are inserted there in relative order.
+ * Duplicates pages with fresh ids and the same reference, rotation, crop, resize and
+ * overlays. Without a target each copy goes right after its original; with a target all
+ * copies are inserted there in relative order.
  */
 export function duplicatePages(
   ws: Workspace,
@@ -317,6 +319,66 @@ export function setPageCropBox(
     }
     return { ...page, cropBox };
   });
+}
+
+function sameResize(a: PageResize, b: PageResize): boolean {
+  return (
+    a.width === b.width &&
+    a.height === b.height &&
+    a.mode === b.mode &&
+    a.anchor === b.anchor &&
+    (a.stretch === true) === (b.stretch === true)
+  );
+}
+
+function withResize(page: VirtualPage, resize: PageResize | undefined): VirtualPage {
+  if (resize === undefined) {
+    if (page.resize === undefined) return page;
+    const { resize: _removed, ...rest } = page;
+    return rest;
+  }
+  if (page.resize !== undefined && sameResize(page.resize, resize)) return page;
+  return { ...page, resize };
+}
+
+/**
+ * Resizes pages (resize.ts). `request` is what the user sees: the displayed size and
+ * anchor, converted per page to the stored unrotated form, so pages in different rotations
+ * all come out as asked. A request replaces any earlier resize (it maps the content box,
+ * not the previous result); a request that matches a page's content size clears its
+ * resize, and `undefined` clears every selected page's resize ("Original size"). Pages
+ * whose resize does not change keep their identity; undo restores the previous snapshot.
+ */
+export function resizePages(
+  ws: Workspace,
+  pageIds: readonly PageId[],
+  request: ResizeRequest | undefined,
+): Workspace {
+  if (request !== undefined) {
+    assertResize(request, 'Resize');
+    if (request.matchOrientation !== undefined && typeof request.matchOrientation !== 'boolean') {
+      throw new DocumentModelError('invalid-argument', 'Resize matchOrientation must be a boolean');
+    }
+  }
+  return updatePages(ws, pageIds, (page) =>
+    withResize(page, request === undefined ? undefined : resizeForPage(ws, page, request)),
+  );
+}
+
+/**
+ * Sets (or clears, with undefined) a page's stored resize as is, in unrotated user space
+ * (restoring a saved value, tests). Prefer `resizePages`, which speaks in displayed terms.
+ */
+export function setPageResize(
+  ws: Workspace,
+  pageId: PageId,
+  resize: PageResize | undefined,
+): Workspace {
+  if (resize !== undefined) {
+    const problem = resizeProblem(resize);
+    if (problem !== undefined) throw new DocumentModelError('invalid-argument', problem);
+  }
+  return updatePages(ws, [pageId], (page) => withResize(page, resize));
 }
 
 /** Replaces the overlays of the selected pages. */

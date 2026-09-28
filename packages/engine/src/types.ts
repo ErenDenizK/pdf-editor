@@ -716,6 +716,13 @@ export interface VerificationExpectation {
    * annotations this app wrote); other annotations come from the sources as they were.
    */
   readonly annotationIds?: readonly string[];
+  /**
+   * Output page indices whose annotations (as `PdfEditor.listAnnotations` reports them,
+   * links included, hidden ones excepted) must all lie inside the page's visible box:
+   * resized pages whose content fits inside the new page (`planExport`), so a missing or
+   * wrong annotation transform is caught before the download.
+   */
+  readonly annotationsInsidePages?: readonly number[];
 }
 
 export interface VerificationResult {

@@ -6,6 +6,7 @@ import { DocumentModelError } from './errors';
 import { isPositiveFinite, isRotation, lookup } from './internal';
 import { PAGE_LABEL_STYLES } from './labels';
 import { walkOutline } from './outline';
+import { resizeProblem } from './resize';
 import type { DocumentId, PageId, SourceDocument, VirtualDocument, Workspace } from './types';
 
 /** Returns a list of human-readable violations (empty when the workspace is valid). */
@@ -69,6 +70,10 @@ export function checkWorkspaceInvariants(ws: Workspace): string[] {
         (!isPositiveFinite(page.cropBox.width) || !isPositiveFinite(page.cropBox.height))
       ) {
         report(`${where} page ${i}: invalid crop box`);
+      }
+      if (page.resize !== undefined) {
+        const problem = resizeProblem(page.resize);
+        if (problem !== undefined) report(`${where} page ${i}: ${problem}`);
       }
     });
 

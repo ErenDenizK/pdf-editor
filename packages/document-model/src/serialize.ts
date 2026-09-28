@@ -6,6 +6,7 @@
 import { DocumentModelError } from './errors';
 import { checkWorkspaceInvariants } from './invariants';
 import { PAGE_LABEL_STYLES } from './labels';
+import { RESIZE_MODES, resizeProblem } from './resize';
 import type {
   Anchor,
   BatesConfig,
@@ -25,6 +26,7 @@ import type {
   PageLabelRange,
   PageLabelStyle,
   PageRef,
+  PageResize,
   MetadataStrip,
   PermissionFlags,
   Rect,
@@ -344,6 +346,20 @@ function readTile(value: unknown, path: string): { gapX: number; gapY: number } 
   return { gapX: num(o.gapX, `${path}.gapX`), gapY: num(o.gapY, `${path}.gapY`) };
 }
 
+function readResize(value: unknown, path: string): PageResize {
+  const o = obj(value, path);
+  const resize: PageResize = {
+    width: num(o.width, `${path}.width`),
+    height: num(o.height, `${path}.height`),
+    mode: oneOf(o.mode, RESIZE_MODES, `${path}.mode`),
+    anchor: oneOf(o.anchor, ANCHORS, `${path}.anchor`),
+    ...opt(o, 'stretch', path, bool),
+  };
+  const problem = resizeProblem(resize);
+  if (problem !== undefined) fail(path, `a valid resize (${problem})`);
+  return resize;
+}
+
 function readPage(value: unknown, path: string): VirtualPage {
   const o = obj(value, path);
   return {
@@ -351,6 +367,7 @@ function readPage(value: unknown, path: string): VirtualPage {
     ref: readPageRef(o.ref, `${path}.ref`),
     rotation: readRotation(o.rotation, `${path}.rotation`),
     ...opt(o, 'cropBox', path, readRect),
+    ...opt(o, 'resize', path, readResize),
     overlays: arr(o.overlays, `${path}.overlays`).map((v, i) =>
       readOverlay(v, `${path}.overlays[${i}]`),
     ),

@@ -109,8 +109,37 @@ export interface VirtualPage {
   readonly rotation: Rotation;
   /** Optional CropBox override, in unrotated source user space. */
   readonly cropBox?: Rect;
+  /**
+   * Optional new page size (resize.ts). Applied after the crop: the visible content box
+   * (crop box, else the source/blank/image size) is mapped into a page of this size.
+   */
+  readonly resize?: PageResize;
   /** Declarative overlays materialized at export (page numbers, watermark, header/footer). */
   readonly overlays: readonly OverlayOp[];
+}
+
+/**
+ * How content meets a new page size:
+ * - `scale`: scaled to cover the new page (uniform; the overflow at the anchor's far side is
+ *   cut off), or, with `stretch`, scaled per axis to fill it exactly;
+ * - `fit`: scaled uniformly to fit inside, leaving margins (letterboxing);
+ * - `canvas`: kept at 100%; only the page box grows or shrinks around the anchor.
+ */
+export type ResizeMode = 'scale' | 'fit' | 'canvas';
+
+/**
+ * A page resize, in *unrotated* user space like `cropBox`: `width` × `height` is the new
+ * page box, and `anchor` names a side or corner of the unrotated page (`top` is +y). Stored
+ * unrotated so that a later rotation turns the resized page as a whole; `resizePages`
+ * takes what the user sees (displayed size and anchor) and converts per page.
+ */
+export interface PageResize {
+  readonly width: number;
+  readonly height: number;
+  readonly mode: ResizeMode;
+  readonly anchor: Anchor;
+  /** Only with `scale`: scale each axis on its own to fill the page exactly (distorts). */
+  readonly stretch?: boolean;
 }
 
 // ---------------------------------------------------------------------------

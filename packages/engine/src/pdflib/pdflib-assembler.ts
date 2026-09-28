@@ -4,8 +4,9 @@
  *
  * Pipeline: load each source once -> sanitize cross-page references in the (private) source
  * copies -> one `copyPages` call per source -> place pages in virtual order (blank and image
- * pages included) -> rotation and crop -> overlays -> link, outline, page-label, AcroForm,
- * structure-tree and metadata reconciliation -> optional encryption -> save.
+ * pages included) -> rotation and crop -> resize (page-resize.ts) -> overlays -> link,
+ * outline, page-label, AcroForm, structure-tree and metadata reconciliation -> optional
+ * encryption -> save.
  */
 
 import {
@@ -105,6 +106,13 @@ import { applyMetadata } from './metadata';
 import { diagnoseSource } from './metadata-diagnostics';
 import { nameText, namedDestinationResolver } from './named-destinations';
 import { effectiveRanges, labelForIndex, PDF_LABEL_STYLE } from './page-labels';
+import {
+  applyPageResize,
+  pageResizeMatrix,
+  type ResizeMatrix,
+  transformDestination,
+  visibleBox,
+} from './page-resize';
 
 /** Private marker written on link annotations between sanitizing and rewriting. */
 const LINK_TAG = PDFName.of('PdfEditorLinkTarget');
@@ -169,6 +177,29 @@ interface PlacedPage {
   /** Visible box (CropBox) in user space, used for overlay placement. */
   readonly box: Rect;
   readonly rotation: Rotation;
+  /**
+   * Resized pages: the matrix from the old visible box into the new page, and that old box.
+   * Applied after every page is placed (page-resize.ts), so a later occurrence of the same
+   * source page is duplicated from the untransformed page.
+   */
+  readonly resize?: { readonly matrix: ResizeMatrix; readonly contentBox: Rect };
+}
+
+/** A placed page, with its resize planned when the virtual page carries one. */
+function placedEntry(
+  page: PDFPage,
+  virtual: VirtualPage,
+  rotation: Rotation,
+  source?: SourceId,
+): PlacedPage {
+  const base = { page, virtual, rotation, ...(source === undefined ? {} : { source }) };
+  if (virtual.resize === undefined) return { ...base, box: page.getCropBox() };
+  const contentBox = visibleBox(page);
+  return {
+    ...base,
+    box: { x: 0, y: 0, width: virtual.resize.width, height: virtual.resize.height },
+    resize: { matrix: pageResizeMatrix(contentBox, virtual.resize), contentBox },
+  };
 }
 
 interface Counters {
@@ -396,12 +427,12 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
         if (vp.cropBox) {
           page.setCropBox(vp.cropBox.x, vp.cropBox.y, vp.cropBox.width, vp.cropBox.height);
         }
-        placed.push({ page, virtual: vp, source: ref.source, box: page.getCropBox(), rotation });
+        placed.push(placedEntry(page, vp, rotation, ref.source));
       } else if (ref.kind === 'blank') {
         const page = out.addPage([ref.size.width, ref.size.height]);
         const rotation = normalizeRotation(vp.rotation);
         page.setRotation(degrees(rotation));
-        placed.push({ page, virtual: vp, box: page.getCropBox(), rotation });
+        placed.push(placedEntry(page, vp, rotation));
       } else {
         const image = await embedImageCached(out, input.blobs, ref.blob, imageCache);
         const page = out.addPage([ref.size.width, ref.size.height]);
@@ -416,9 +447,31 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
         });
         const rotation = normalizeRotation(vp.rotation);
         page.setRotation(degrees(rotation));
-        placed.push({ page, virtual: vp, box: page.getCropBox(), rotation });
+        placed.push(placedEntry(page, vp, rotation));
       }
       options.onProgress?.(placed.length, total);
+    }
+
+    // 4b. Resize: new page boxes, content and annotation geometry (page-resize.ts).
+    const resizedAnnotations = new Set<PDFDict>();
+    let annotationsOutside = 0;
+    for (const entry of placed) {
+      if (!entry.resize || !entry.virtual.resize) continue;
+      throwIfAborted(signal);
+      const outcome = applyPageResize(
+        out,
+        entry.page,
+        entry.virtual.resize,
+        entry.resize.contentBox,
+        entry.resize.matrix,
+        resizedAnnotations,
+      );
+      annotationsOutside += outcome.annotationsOutside;
+    }
+    if (annotationsOutside > 0) {
+      warnings.add(
+        `${annotationsOutside} annotation${annotationsOutside === 1 ? '' : 's'} fell outside resized pages (cut off by the new size) and are not visible`,
+      );
     }
 
     // 5. Links: rewrite destinations (explicit and named, resolved in prepareSource) to the
@@ -774,6 +827,8 @@ function rewriteLinks(
   counters: Counters,
 ): void {
   const { context } = out;
+  // A GoTo action shared by several links holds one destination: transform it once.
+  const transformed = new Set<PDFArray>();
   for (const entry of placed) {
     if (!entry.source) continue;
     const annots = context.lookupMaybe(entry.page.node.get(N.Annots), PDFArray);
@@ -795,6 +850,10 @@ function rewriteLinks(
       }
       if (target && destination instanceof PDFArray) {
         destination.set(0, target.page.ref);
+        if (target.resize && !transformed.has(destination)) {
+          transformDestination(out, destination, target.resize.matrix);
+        }
+        transformed.add(destination);
         counters.linksRewritten++;
       } else {
         annots.remove(i);
@@ -1160,8 +1219,13 @@ function filterOutline(
     if (destination?.kind === 'page') {
       const index = pageIndexById.get(destination.page);
       const target = index === undefined ? undefined : placed[index];
-      if (target) dest = destinationArray(out, destination, target.page);
-      else resolved = false;
+      if (target) {
+        dest = destinationArray(out, destination, target.page);
+        // Views are in the source page's coordinates: follow a resize.
+        if (target.resize) transformDestination(out, dest, target.resize.matrix);
+      } else {
+        resolved = false;
+      }
     } else if (destination?.kind === 'uri') {
       action = out.context.obj({ S: 'URI', URI: PDFString.of(destination.uri) });
     } else if (destination?.kind === 'unresolved') {

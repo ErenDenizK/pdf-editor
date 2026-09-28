@@ -6,7 +6,13 @@
  * Mod+X / Mod+C / Mod+V act on pages only in Arrange mode; elsewhere the browser keeps
  * its clipboard shortcuts (text selection in Read mode).
  */
-import { type DocumentId, getActiveDocument, reversePages } from '@pdf-editor/document-model';
+import {
+  type DocumentId,
+  findPageLocation,
+  getActiveDocument,
+  type PageId,
+  reversePages,
+} from '@pdf-editor/document-model';
 
 import { targetPages } from '../commands/app-commands';
 import { type CommandRegistry, commandRegistry } from '../commands/registry';
@@ -34,7 +40,12 @@ import {
   mergeInto,
   startRename,
 } from './section-operations';
-import { provideMergeTargets, sectionCommandOrigin, sectionCommandTarget } from './section-menu';
+import {
+  provideMergeTargets,
+  registerSectionMenuItem,
+  sectionCommandOrigin,
+  sectionCommandTarget,
+} from './section-menu';
 
 const ui = () => useUiStore.getState();
 const model = () => useWorkspaceStore.getState();
@@ -60,6 +71,25 @@ export function provideArrangeColumns(provider: () => number): () => void {
   };
 }
 
+/**
+ * "Resize pages…" from the palette, the context menu or the section menu: the selected
+ * pages (of the invoking section, when a section menu ran it), else the whole document.
+ */
+function openResizeDialog(): void {
+  const ws = model().workspace;
+  const fromSection = sectionCommandTarget();
+  let pages: PageId[] = targetPages();
+  if (fromSection !== null) {
+    pages = pages.filter((id) => findPageLocation(ws, id)?.document === fromSection);
+  }
+  const documentId =
+    fromSection ??
+    (pages[0] === undefined ? undefined : findPageLocation(ws, pages[0])?.document) ??
+    ws.activeDocument;
+  if (documentId === undefined || ws.documents[documentId] === undefined) return;
+  openOperationDialog({ kind: 'resize', documentId, pageIds: pages });
+}
+
 /** Other open documents as "Merge into…" submenu entries, in tab order. */
 function mergeTargetEntries(documentId: DocumentId) {
   const { workspace, documentColors } = model();
@@ -82,6 +112,7 @@ export function registerArrangeCommands(registry: CommandRegistry = commandRegis
   const file = m.group_file();
   const disposers = [
     provideMergeTargets(mergeTargetEntries),
+    registerSectionMenuItem({ command: 'section.resize', label: m.section_resize, group: 'pages' }),
     registry.register({
       id: 'pages.cut',
       title: m.cmd_cut_pages(),
@@ -160,6 +191,14 @@ export function registerArrangeCommands(registry: CommandRegistry = commandRegis
       run: () => {
         insertBlankAfter();
       },
+    }),
+    registry.register({
+      id: 'pages.resize',
+      title: m.cmd_resize_pages(),
+      group: pages,
+      keywords: ['page size', 'scale', 'fit', 'canvas', 'a4', 'letter', 'paper', 'dimensions'],
+      when: () => hasTargets() || (getActiveDocument(model().workspace)?.pages.length ?? 0) > 0,
+      run: openResizeDialog,
     }),
     registry.register({
       id: 'pages.moveToRowStart',
@@ -322,6 +361,16 @@ export function registerArrangeCommands(registry: CommandRegistry = commandRegis
         const doc = sectionDocument();
         if (doc) openOperationDialog({ kind: 'interleave', documentId: doc.id });
       },
+    }),
+    registry.register({
+      id: 'section.resize',
+      title: m.cmd_resize_document_pages(),
+      group: documents,
+      // The section and tab menus run it; the palette has "Resize pages…" (pages.resize).
+      hiddenInPalette: true,
+      keywords: ['page size', 'scale', 'fit', 'canvas', 'a4', 'letter', 'paper', 'dimensions'],
+      when: () => (sectionDocument()?.pages.length ?? 0) > 0,
+      run: openResizeDialog,
     }),
     registry.register({
       id: 'section.rename',

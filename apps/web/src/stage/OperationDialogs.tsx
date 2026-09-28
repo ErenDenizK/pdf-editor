@@ -1,20 +1,14 @@
 /**
  * Dialogs for the section operations (spec §5): Split…, Merge into…, Merge all open
- * documents, Interleave with…, and the image-size question for "Insert images". Styled as
- * the export dialog (ShortcutOverlay popup + ExportDialog form parts). Every dialog shows
- * a live preview of what it will create, and commits one history entry.
+ * documents, Interleave with…, Resize pages… (ResizeDialog.tsx), and the image-size
+ * question for "Insert images". Styled as the export dialog (ShortcutOverlay popup +
+ * ExportDialog form parts, see OperationDialogFrame.tsx). Every dialog shows a live preview
+ * of what it will create, and commits one history entry.
  */
 import { Dialog } from '@base-ui/react/dialog';
 import type { DocumentId, InterleaveMode, SplitSpec } from '@pdf-editor/document-model';
-import { ArrowDown, ArrowUp, X } from 'lucide-react';
-import {
-  type ReactNode,
-  type RefObject,
-  type SyntheticEvent,
-  useId,
-  useRef,
-  useState,
-} from 'react';
+import { ArrowDown, ArrowUp } from 'lucide-react';
+import { type SyntheticEvent, useId, useRef, useState } from 'react';
 
 import styles from '../export/ExportDialog.module.css';
 import { A4, type ImageSizing, imagePageSize } from '../files/images';
@@ -30,6 +24,7 @@ import {
 } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
 import { useRetained } from '../ui/use-retained';
+import { Actions, Frame } from './OperationDialogFrame';
 import local from './OperationDialogs.module.css';
 import {
   answerImageSizing,
@@ -56,6 +51,7 @@ import {
   splitSection,
   titleProblemMessage,
 } from './section-operations';
+import { ResizeDialog } from './ResizeDialog';
 
 export function OperationDialogs() {
   const dialog = useOperationDialogStore((s) => s.dialog);
@@ -93,50 +89,11 @@ function DialogContent({ dialog }: { readonly dialog: OperationDialog }) {
       return <MergeAllDialog />;
     case 'interleave':
       return <InterleaveDialog documentId={dialog.documentId} />;
+    case 'resize':
+      return <ResizeDialog documentId={dialog.documentId} pageIds={dialog.pageIds} />;
     case 'image-size':
       return <ImageSizeDialog count={dialog.count} largest={dialog.largest} />;
   }
-}
-
-function Frame({
-  title,
-  testId,
-  initialFocus,
-  wide = false,
-  children,
-}: {
-  readonly title: string;
-  readonly testId: string;
-  readonly initialFocus?: RefObject<HTMLElement | null>;
-  readonly wide?: boolean;
-  readonly children: ReactNode;
-}) {
-  return (
-    <Dialog.Popup
-      className={`${overlay.popup} ${styles.popup} ${wide ? local.wide : ''}`}
-      data-testid={testId}
-      {...(initialFocus ? { initialFocus } : {})}
-    >
-      <div className={overlay.header}>
-        <Dialog.Title className={overlay.title}>{title}</Dialog.Title>
-        <Dialog.Close className={overlay.close} aria-label={m.common_close()}>
-          <X aria-hidden="true" />
-        </Dialog.Close>
-      </div>
-      {children}
-    </Dialog.Popup>
-  );
-}
-
-function Actions({ confirm, disabled }: { readonly confirm: string; readonly disabled: boolean }) {
-  return (
-    <div className={styles.actions}>
-      <Dialog.Close className={styles.secondary}>{m.common_cancel()}</Dialog.Close>
-      <button type="submit" className={styles.primary} disabled={disabled}>
-        {confirm}
-      </button>
-    </div>
-  );
 }
 
 /** Splits a message at a placeholder so a control can sit inside the sentence. */

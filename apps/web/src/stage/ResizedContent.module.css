@@ -1,0 +1,4 @@
+/* The content box of a resized page inside its sheet; the canvas fills it. */
+.content {
+  position: absolute;
+}
