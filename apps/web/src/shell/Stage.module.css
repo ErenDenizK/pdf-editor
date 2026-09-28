@@ -105,7 +105,7 @@
   flex: none;
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--tag-color);
 }
 
@@ -170,7 +170,7 @@
   flex: none;
   background: var(--page-background);
   box-shadow: var(--page-shadow);
-  border-radius: 2px;
+  border-radius: var(--radius-page);
   overflow: hidden;
 }
 
@@ -198,13 +198,13 @@
   place-items: center;
   border: 1px solid var(--accent);
   border-radius: var(--radius-3);
-  background: rgb(10 11 13 / 0.72);
+  background: var(--scrim);
   pointer-events: none;
 }
 
 .dropLabel {
   padding: 6px var(--space-3);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-hairline);
   border-radius: var(--radius-2);
   background: var(--surface-3);
   color: var(--text-primary);

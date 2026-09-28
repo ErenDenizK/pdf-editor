@@ -36,7 +36,7 @@
 }
 
 .layer > span::selection {
-  background: rgb(124 140 255 / 0.35);
+  background: var(--accent-highlight);
   color: transparent;
 }
 

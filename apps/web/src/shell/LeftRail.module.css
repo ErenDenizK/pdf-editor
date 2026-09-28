@@ -108,7 +108,7 @@
   flex: none;
   background: var(--page-background);
   box-shadow: var(--page-shadow);
-  border-radius: 2px;
+  border-radius: var(--radius-page);
   overflow: hidden;
 }
 
@@ -171,7 +171,7 @@
   flex: none;
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--tag-color);
 }
 

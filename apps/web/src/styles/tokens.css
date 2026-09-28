@@ -7,9 +7,12 @@
  * Refinements over the DESIGN.md draft, all for WCAG AA:
  * - --text-tertiary #6b7078 -> #858a92: the draft measured 3.76:1 on --surface-1;
  *   the new value is >= 4.76:1 on --surface-0..3.
- * - --glass alpha 0.72 -> 0.86: over a white PDF page the draft blended to #535457, which
- *   left --text-secondary at 2.4:1. At 0.86 the worst case (white page, no blur) blends to
- *   #313336: primary 10.3:1, secondary 4.7:1. Tertiary text is not used on glass.
+ * - Glass (design refinement pass, docs/design/audit/translucency.md): a 50% tint over a
+ *   backdrop that is blurred, colour-boosted and darkened, instead of the draft's 72% tint and
+ *   plain blur. Over a white page the draft blended to #535457 (--text-secondary 2.4:1); this
+ *   glass stays at #3f4043 or darker, where every glass text colour is AA: primary 8.4:1,
+ *   --glass-text-secondary 5.2:1, --glass-danger 4.6:1, warning 6.4:1, the accent (non-text
+ *   only) 3.5:1.
  */
 :root,
 [data-theme='dark'] {
@@ -22,27 +25,46 @@
   --surface-3: #1c1f24;
   --surface-hover: rgb(255 255 255 / 0.045);
   --surface-active: rgb(255 255 255 / 0.075);
-  --glass: rgb(16 18 21 / 0.86);
+  /* Floating chrome over the document (.glass in global.css). --glass-solid is the opaque
+     fallback. */
+  --glass: rgb(24 26 31 / 0.5);
+  --glass-filter: blur(24px) saturate(1.8) brightness(0.4);
   --glass-solid: #16181c;
-  --glass-blur: 16px;
   --scrim: rgb(5 6 8 / 0.56);
 
-  --border-hairline: rgb(255 255 255 / 0.08);
-  --border-strong: rgb(255 255 255 / 0.14);
-  --border-glass: rgb(255 255 255 / 0.12);
+  /* One border alpha (0.10) for dividers, surfaces, glass, keycaps and the page hairline,
+     plus one control step (0.16) for inputs and control outlines, which WCAG 1.4.11 asks to
+     stay identifiable. The swatch ring separates arbitrary colours from the bar. */
+  --border-hairline: rgb(255 255 255 / 0.1);
+  --border-strong: rgb(255 255 255 / 0.16);
+  --border-glass: rgb(255 255 255 / 0.1);
+  --border-swatch: rgb(255 255 255 / 0.28);
 
   --text-primary: #e6e7ea;
   --text-secondary: #9a9ea6;
   --text-tertiary: #858a92;
   --text-disabled: #4a4e55;
+  /* Text on glass: two steps, both AA over a white page. Tertiary maps to secondary. */
+  --glass-text-secondary: #b4b8bf;
+  --glass-text-disabled: #6f737b; /* disabled icons stay visible (2.2:1) over a white page */
+  --glass-danger: #ff8a8a; /* #ff6b6b would be 3.7:1 there */
 
   /* One accent: focus, selection, primary action. Nothing else. */
   --accent: #7c8cff;
-  --accent-muted: rgb(124 140 255 / 0.16);
+  /* Four accent alphas (plus the current search hit):
+     subtle: washes, hover fills, previews · muted: selected and current fills ·
+     line: 1px rings and borders on non-focus states · highlight: multiply highlights on the
+     page (search hits, text selection). */
   --accent-subtle: rgb(124 140 255 / 0.08);
+  --accent-muted: rgb(124 140 255 / 0.16);
+  --accent-line: rgb(124 140 255 / 0.45);
+  --accent-highlight: rgb(124 140 255 / 0.3);
+  --accent-highlight-strong: rgb(124 140 255 / 0.55);
   --danger: #ff6b6b;
   --success: #5fd39a;
   --warning: #f5c451;
+  /* Honesty notices: one recipe, a warning hairline and no tinted background. */
+  --warning-line: rgb(245 196 81 / 0.35);
 
   /* Source-document tags on the light table: small, desaturated, always paired with a
      file name so colour is never the only signal. Hues stay clear of the accent's. */
@@ -54,7 +76,7 @@
   --tag-5: #c7967a; /* clay */
 
   /* Pages get a hairline, never a drop shadow. The page itself is never themed. */
-  --page-shadow: 0 0 0 1px rgb(255 255 255 / 0.06);
+  --page-shadow: 0 0 0 1px var(--border-hairline);
   --page-background: #ffffff;
 
   --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, sans-serif;
@@ -70,9 +92,14 @@
   --leading-tight: 16px;
   --leading-base: 20px;
 
+  /* Radius scale: 2 (on-page marks, page sheets) · 4 (small controls, keycaps, badges) ·
+     6 (buttons, rows, inputs, menus, popovers, tooltips) · 10 (floating bars, palette,
+     dialogs, cards) · round (dots, discs, pills). */
+  --radius-page: 2px;
   --radius-1: 4px;
   --radius-2: 6px;
   --radius-3: 10px;
+  --radius-round: 999px;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -83,9 +110,13 @@
   --space-8: 32px;
   --space-12: 48px;
 
+  /* One curve. instant: drag feedback only · fast: state changes, popup enter and exit ·
+     base: scrims, drag-over. Popups, the palette and dialogs enter from one scale. */
+  --duration-instant: 60ms;
   --duration-fast: 120ms;
   --duration-base: 180ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --enter-scale: 0.98;
 
   /* Shell metrics. */
   --titlebar-height: 40px;
@@ -100,6 +131,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   :root {
+    --duration-instant: 0ms;
     --duration-fast: 0ms;
     --duration-base: 0ms;
   }
@@ -109,18 +141,27 @@
 @media (prefers-reduced-transparency: reduce) {
   :root {
     --glass: var(--glass-solid);
-    --glass-blur: 0px;
+    --glass-filter: none;
   }
 }
 
 @media (prefers-contrast: more) {
   :root {
     --glass: var(--glass-solid);
-    --glass-blur: 0px;
+    --glass-filter: none;
     --border-hairline: rgb(255 255 255 / 0.22);
     --border-strong: rgb(255 255 255 / 0.36);
     --border-glass: rgb(255 255 255 / 0.36);
     --text-secondary: #c2c5cb;
     --text-tertiary: #a9adb4;
+  }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --glass: Canvas;
+    --glass-solid: Canvas;
+    --glass-filter: none;
+    --border-glass: CanvasText;
   }
 }

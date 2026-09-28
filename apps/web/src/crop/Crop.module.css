@@ -64,7 +64,7 @@
 .previewSheet {
   position: relative;
   overflow: hidden;
-  border-radius: 2px;
+  border-radius: var(--radius-page);
   background: var(--page-background);
   box-shadow: var(--page-shadow);
   touch-action: none;
@@ -90,7 +90,7 @@
   margin: -6px 0 0 -6px;
   padding: 0;
   border: 1px solid var(--accent);
-  border-radius: 2px;
+  border-radius: var(--radius-page);
   background: var(--surface-0);
 }
 
@@ -131,8 +131,7 @@
 .warning {
   margin: 0;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-strong);
-  border-left: 2px solid var(--warning);
+  border: 1px solid var(--warning-line);
   border-radius: var(--radius-2);
   color: var(--text-primary);
   font-size: var(--text-sm);
@@ -156,6 +155,7 @@
 }
 
 .banner {
+  composes: glass from global;
   position: fixed;
   top: calc(var(--titlebar-height) + var(--space-3));
   left: 50%;
@@ -164,19 +164,10 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
-  border: 1px solid var(--border-glass);
   border-radius: var(--radius-3);
-  background: var(--glass-solid);
   color: var(--text-primary);
   font-size: var(--text-md);
   transform: translateX(-50%);
-}
-
-@supports (backdrop-filter: blur(1px)) {
-  .banner {
-    background: var(--glass);
-    backdrop-filter: blur(var(--glass-blur));
-  }
 }
 
 .bannerButton {

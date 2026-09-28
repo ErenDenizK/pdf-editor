@@ -32,6 +32,6 @@
 }
 
 .keycaps[data-tone='onGlass'] .cap {
-  background: rgb(255 255 255 / 0.06);
-  border-color: rgb(255 255 255 / 0.1);
+  background: var(--surface-active);
+  border-color: var(--border-glass);
 }

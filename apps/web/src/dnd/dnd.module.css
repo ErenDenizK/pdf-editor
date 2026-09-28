@@ -1,6 +1,8 @@
 /*
  * Native drag preview (light-table spec §3). The browser snapshots this element once when
  * the drag starts, so it is static: no transitions, no custom properties that could change.
+ * The literals mirror the tokens: radius 2px = --radius-page, 11px = --radius-round on a 22px
+ * pill, #7c8cff = --accent, #0a0b0d = --surface-0, #ffffff = --page-background.
  */
 .preview {
   position: relative;

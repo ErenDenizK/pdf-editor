@@ -1,9 +1,8 @@
 .popup {
+  composes: glass from global;
   width: min(320px, calc(100vw - 16px));
   padding: var(--space-3) var(--space-4) var(--space-4);
-  border: 1px solid var(--border-strong);
   border-radius: var(--radius-2);
-  background: var(--surface-3);
   color: var(--text-primary);
   outline: none;
   transform-origin: var(--transform-origin);
@@ -15,7 +14,7 @@
 .popup[data-starting-style],
 .popup[data-ending-style] {
   opacity: 0;
-  transform: scale(0.98);
+  transform: scale(var(--enter-scale));
 }
 
 .title {

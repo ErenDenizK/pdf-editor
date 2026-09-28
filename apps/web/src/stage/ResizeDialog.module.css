@@ -104,7 +104,7 @@
 .anchorDot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--text-tertiary);
 }
 
@@ -163,7 +163,7 @@
 .previewSheet {
   position: relative;
   overflow: hidden;
-  border-radius: 2px;
+  border-radius: var(--radius-page);
   background: var(--page-background);
   box-shadow: var(--page-shadow);
 }

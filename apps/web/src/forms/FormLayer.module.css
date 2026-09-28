@@ -10,7 +10,7 @@
 
 .target {
   position: absolute;
-  border-radius: 2px;
+  border-radius: var(--radius-page);
   background: transparent;
   pointer-events: none;
   cursor: default;
@@ -35,18 +35,18 @@
 /* "Highlight fields": a translucent accent fill; the page itself is never tinted. */
 .layer[data-highlight] .target {
   background: var(--accent-muted);
-  box-shadow: inset 0 0 0 1px rgb(124 140 255 / 0.45);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
 .layer[data-highlight] .target[aria-disabled='true'],
 .layer[data-highlight] .target[aria-readonly='true'] {
-  background: rgb(255 255 255 / 0.06);
-  box-shadow: inset 0 0 0 1px rgb(107 112 120 / 0.6);
+  background: var(--surface-hover);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-tertiary) 60%, transparent);
 }
 
 @media (hover: hover) {
   .layer[data-live] .target:hover {
-    box-shadow: inset 0 0 0 1px rgb(124 140 255 / 0.7);
+    box-shadow: inset 0 0 0 1px var(--accent);
   }
 }
 
@@ -63,15 +63,15 @@
   margin: 0;
   padding: 0 3px;
   border: 1px solid var(--accent);
-  border-radius: 2px;
-  background: #ffffff;
+  border-radius: var(--radius-page);
+  background: var(--page-background);
   color: #111111;
   font-family: var(--font-sans);
   line-height: 1.2;
   pointer-events: auto;
   transform-origin: center;
   outline: none;
-  box-shadow: 0 0 0 2px rgb(124 140 255 / 0.35);
+  box-shadow: 0 0 0 2px var(--accent-line);
 }
 
 textarea.editor {
@@ -85,10 +85,11 @@ select.editor {
 }
 
 select.editor option:disabled {
-  color: #6b7078;
+  color: var(--text-tertiary);
 }
 
 .notice {
+  composes: glass from global;
   position: absolute;
   z-index: 3;
   display: grid;
@@ -96,9 +97,7 @@ select.editor option:disabled {
   min-width: 180px;
   max-width: 260px;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-strong);
   border-radius: var(--radius-2);
-  background: var(--surface-3);
   color: var(--text-primary);
   font-size: var(--text-sm);
   pointer-events: auto;
@@ -118,7 +117,7 @@ select.editor option:disabled {
   justify-self: start;
   gap: var(--space-1);
   padding: 1px 6px;
-  border: 1px solid rgb(245 196 81 / 0.4);
+  border: 1px solid var(--warning-line);
   border-radius: var(--radius-1);
   color: var(--warning);
   font-size: var(--text-xs);

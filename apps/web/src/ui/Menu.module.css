@@ -1,10 +1,9 @@
-/* Menus sit one step up the ladder (surface-3) with a strong hairline; no shadow. */
+/* Menus float over the document: frosted glass with a hairline (global .glass); no shadow. */
 .popup {
+  composes: glass from global;
   min-width: 180px;
   padding: var(--space-1);
-  border: 1px solid var(--border-strong);
   border-radius: var(--radius-2);
-  background: var(--surface-3);
   color: var(--text-primary);
   font-size: var(--text-md);
   outline: none;
@@ -17,7 +16,7 @@
 .popup[data-starting-style],
 .popup[data-ending-style] {
   opacity: 0;
-  transform: scale(0.98);
+  transform: scale(var(--enter-scale));
 }
 
 .item {
@@ -53,7 +52,7 @@
   content: '';
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--accent);
 }
 
@@ -94,6 +93,6 @@
   flex: none;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--tag-color, var(--text-tertiary));
 }

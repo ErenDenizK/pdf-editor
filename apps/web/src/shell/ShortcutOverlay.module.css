@@ -21,7 +21,7 @@
   flex-direction: column;
   width: min(760px, calc(100vw - 32px));
   max-height: min(640px, calc(100vh - 64px));
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-hairline);
   border-radius: var(--radius-3);
   background: var(--surface-1);
   transform: translate(-50%, -50%);
@@ -34,7 +34,7 @@
 .popup[data-starting-style],
 .popup[data-ending-style] {
   opacity: 0;
-  transform: translate(-50%, -50%) scale(0.985);
+  transform: translate(-50%, -50%) scale(var(--enter-scale));
 }
 
 .header {

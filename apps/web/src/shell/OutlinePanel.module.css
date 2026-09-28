@@ -65,7 +65,7 @@
   right: 0;
   left: var(--drop-indent, 0);
   height: 2px;
-  border-radius: 1px;
+  border-radius: var(--radius-page);
   background: var(--accent);
   pointer-events: none;
 }
@@ -161,7 +161,7 @@
   gap: var(--space-1);
   margin: 0 var(--space-2) var(--space-2);
   padding: var(--space-3);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-hairline);
   border-radius: var(--radius-2);
   background: var(--surface-3);
 }

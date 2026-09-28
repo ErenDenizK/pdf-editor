@@ -56,11 +56,11 @@
 
 @media (hover: hover) {
   .layer:not([data-drawing]) .hit:hover {
-    fill: rgb(124 140 255 / 0.1);
+    fill: var(--accent-subtle);
   }
 
   .layer:not([data-drawing]) .hit[data-stroke]:hover polyline {
-    stroke: rgb(124 140 255 / 0.25);
+    stroke: var(--accent-highlight);
   }
 }
 
@@ -73,7 +73,7 @@
 }
 
 .handle {
-  fill: #ffffff;
+  fill: var(--page-background);
   stroke: var(--accent);
   stroke-width: 1.5;
   pointer-events: all;
@@ -123,7 +123,7 @@
 }
 
 .previewBox {
-  fill: rgb(124 140 255 / 0.08);
+  fill: var(--accent-subtle);
   stroke: var(--accent);
   stroke-width: 1;
   stroke-dasharray: 4 3;
@@ -136,7 +136,7 @@
 
 .eraseTrail {
   fill: none;
-  stroke: rgb(229 57 53 / 0.5);
+  stroke: color-mix(in srgb, var(--danger) 50%, transparent);
   stroke-width: 6;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -147,10 +147,10 @@
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--surface-3);
   color: var(--warning);
-  box-shadow: 0 0 0 1px var(--border-strong);
+  box-shadow: 0 0 0 1px var(--border-hairline);
 }
 
 .lockBadge svg {
@@ -160,6 +160,7 @@
 
 /* Contextual bar: glass over the document, like the floating tool bar. */
 .bar {
+  composes: glass from global;
   position: absolute;
   z-index: 4;
   display: flex;
@@ -167,22 +168,12 @@
   gap: var(--space-2);
   height: 40px;
   padding: 0 var(--space-2);
-  border: 1px solid var(--border-glass);
   border-radius: var(--radius-3);
-  background: var(--glass-solid);
   color: var(--text-primary);
   font-size: var(--text-sm);
   white-space: nowrap;
   pointer-events: auto;
   cursor: default;
-}
-
-@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-  .bar {
-    background: var(--glass);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
-    backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
-  }
 }
 
 .barName {
@@ -194,7 +185,7 @@
   flex: none;
   width: 1px;
   height: 18px;
-  background: var(--border-strong);
+  background: var(--border-hairline);
 }
 
 .barLocked {
@@ -228,15 +219,14 @@
 }
 
 .notePopup {
+  composes: glass from global;
   position: absolute;
   z-index: 5;
   display: grid;
   gap: var(--space-2);
   width: 240px;
   padding: var(--space-3);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-3);
-  background: var(--surface-3);
+  border-radius: var(--radius-2);
   color: var(--text-primary);
   font-size: var(--text-md);
   pointer-events: auto;

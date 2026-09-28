@@ -4,14 +4,14 @@
 
 .hit {
   position: absolute;
-  border-radius: 1px;
-  background: rgb(124 140 255 / 0.28);
+  border-radius: var(--radius-page);
+  background: var(--accent-highlight);
   mix-blend-mode: multiply;
 }
 
 /* The current hit: stronger fill plus an outline (never colour alone). */
 .hit[data-current] {
-  background: rgb(124 140 255 / 0.55);
+  background: var(--accent-highlight-strong);
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }

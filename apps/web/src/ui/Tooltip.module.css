@@ -4,7 +4,7 @@
   gap: var(--space-2);
   min-height: 26px;
   padding: 3px var(--space-2);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-hairline);
   border-radius: var(--radius-2);
   background: var(--surface-3);
   color: var(--text-primary);
@@ -21,7 +21,7 @@
 .popup[data-starting-style],
 .popup[data-ending-style] {
   opacity: 0;
-  transform: scale(0.98);
+  transform: scale(var(--enter-scale));
 }
 
 .popup[data-instant] {

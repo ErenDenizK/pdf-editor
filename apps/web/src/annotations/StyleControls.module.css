@@ -20,8 +20,8 @@
 .swatch {
   width: 18px;
   height: 18px;
-  border: 1px solid rgb(255 255 255 / 0.28);
-  border-radius: 50%;
+  border: 1px solid var(--border-swatch);
+  border-radius: var(--radius-round);
   background: var(--swatch);
 }
 
@@ -41,7 +41,7 @@
   height: 20px;
   overflow: hidden;
   border: 1px dashed var(--border-strong);
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: conic-gradient(#e53935, #fb8c00, #ffeb3b, #43a047, #1e88e5, #8e24aa, #e53935);
 }
 
@@ -110,7 +110,7 @@
   flex: none;
   width: 1px;
   height: 18px;
-  background: var(--border-strong);
+  background: var(--border-hairline);
 }
 
 .visuallyHidden {

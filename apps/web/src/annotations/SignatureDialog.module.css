@@ -10,9 +10,8 @@
 
 .notice {
   padding: var(--space-2) var(--space-3);
-  border: 1px solid rgb(245 196 81 / 0.35);
+  border: 1px solid var(--warning-line);
   border-radius: var(--radius-2);
-  background: rgb(245 196 81 / 0.08);
   color: var(--text-primary);
   font-size: var(--text-sm);
   line-height: var(--leading-base);
@@ -52,7 +51,7 @@
   aspect-ratio: 440 / 160;
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-2);
-  background: #ffffff;
+  background: var(--page-background);
   touch-action: none;
   cursor: crosshair;
 }
@@ -62,7 +61,7 @@
   padding: 0 var(--space-3);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-2);
-  background: #ffffff;
+  background: var(--page-background);
   color: #1a237e;
   font-family: var(--font-sans);
   font-size: 28px;

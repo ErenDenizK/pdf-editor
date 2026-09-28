@@ -1,8 +1,10 @@
 /*
- * Glass over the document. Solid fallback when backdrop-filter is unsupported or when the
- * user prefers reduced transparency / more contrast (tokens.css swaps --glass).
+ * Glass over the document (the global .glass rule in styles/global.css), with its opaque
+ * fallbacks for browsers without backdrop-filter and for reduced transparency, more
+ * contrast and forced colours.
  */
 .toolbar {
+  composes: glass from global;
   position: absolute;
   bottom: var(--space-5);
   left: 50%;
@@ -11,18 +13,8 @@
   align-items: center;
   gap: 2px;
   padding: var(--space-1);
-  border: 1px solid var(--border-glass);
   border-radius: var(--radius-3);
-  background: var(--glass-solid);
   transform: translateX(-50%);
-}
-
-@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-  .toolbar {
-    background: var(--glass);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
-    backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
-  }
 }
 
 .divider {
@@ -30,7 +22,7 @@
   width: 1px;
   height: 20px;
   margin: 0 var(--space-1);
-  background: var(--border-strong);
+  background: var(--border-hairline);
 }
 
 .menuTrigger {

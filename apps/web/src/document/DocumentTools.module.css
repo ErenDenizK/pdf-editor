@@ -346,7 +346,7 @@
 
 .strengthBar > span {
   height: 3px;
-  border-radius: 1px;
+  border-radius: var(--radius-page);
   background: var(--surface-3);
 }
 
