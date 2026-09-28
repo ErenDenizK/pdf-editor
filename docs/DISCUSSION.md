@@ -35,6 +35,8 @@ The owner delegated all open items to the project lead. Resolutions, recorded in
 | 17. Design refinement pass | Owner direction: simplicity is right, but surfaces should be more translucent and a few effects look wrong. Scheduled as a dedicated pass after M4 (before M5), with a review of every effect against `docs/DESIGN.md`. |
 | 18. Product name | No hurry; decided last, before the v1.0 tag at the earliest. |
 | 19. M4 exit (2026-09-28) | Done after two independent reviews; 24 findings fixed with regression tests. Next: the design refinement pass (item 17), then M5. |
+| 20. Design refinement pass (2026-09-28) | Done: a token scale for radii and borders, translucent glass for every floating surface (`--glass` with a measured contrast margin), the effects that looked wrong toned down or removed, `docs/DESIGN.md` §2/§3/§5/§7 and the screenshots updated. The owner is asked to look at the glass surfaces in real Chrome, Safari and Firefox; headless captures cannot show backdrop blur faithfully. |
+| 21. M5 (2026-09-28) | Built as specified after two spikes (OCR offline, signing) and three ADRs. Two spec details changed on evidence: OCR quality thresholds are 90/80 (research 07) instead of 85/60, and the OCR files live under `ocr/tesseract-7.0.0/`. The batch OCR step is deferred to the review-fix round. The independent review is running; findings are fixed before the milestone is called done. |
 
 ## Open
 

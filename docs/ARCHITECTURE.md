@@ -27,12 +27,14 @@
  │ worker (1/doc)  │   │ @cantoo/pdf-lib        │   │ qpdf-wasm (repair,    │
  │ PDFium via      │   │ merge/split/rotate,    │   │ linearize, crypto     │
  │ @embedpdf/      │   │ overlays (numbers,     │   │ fallback)             │
- │ engines v2      │   │ watermark), outlines,  │   │ tesseract.js (OCR)    │
- │ render, text,   │   │ labels, AcroForm       │   │ image codecs (jSquash)│
- │ search, annots, │   │ reconciliation,        │   └───────────────────────┘
- │ forms, redact,  │   │ metadata, encryption   │
- │ flatten, save   │   └────────────────────────┘
- └─────────────────┘
+ │ engines v2      │   │ watermark), outlines,  │   │ signature worker      │
+ │ render, text,   │   │ labels, AcroForm       │   │ (pkijs: validate,     │
+ │ search, annots, │   │ reconciliation,        │   │ sign)                 │
+ │ forms, redact,  │   │ metadata, encryption   │   │ analysis worker       │
+ │ flatten, save,  │   └────────────────────────┘   │ (compare, Markdown)   │
+ │ OCR layer       │                                │ tesseract.js (OCR)    │
+ └─────────────────┘                                │ image codecs (jSquash)│
+                                                    └───────────────────────┘
 ```
 
 Roles:
@@ -55,8 +57,21 @@ Roles:
   generation, linearization, and a second, independent decrypt/encrypt path. ~0.45 MB
   gzip, loaded only when needed. We build the WASM ourselves in CI from qpdf 12.x rather
   than depending on a single-maintainer npm wrapper (*open*).
-- **tesseract.js (Apache-2.0)** for OCR in v2, producing an invisible text layer over the
-  untouched scanned image.
+- **tesseract.js (Apache-2.0)** for OCR (M5, ADR-0012): its worker and LSTM cores are served
+  from our origin under `ocr/tesseract-<version>/`, the language packs gzipped under
+  `ocr/lang/` and pinned by hash; the recognizer adapter (`ocr/recognizer.ts`) runs on the
+  main thread and posts greyscale rasters from the PDFium worker. The invisible text layer
+  is written by pdf-lib inside the PDFium worker (`PdfOcrLayer`), one Form XObject per page
+  with Tesseract's glyphless font, verified in a scratch document and recorded as an
+  `ocr.apply` edit that stores the words, so replay never recognises again.
+- **PKI.js (BSD-3-Clause)** in the signature worker (`worker/signature.worker.ts`, ADR-0013):
+  CMS validation over WebCrypto with revision classification (Intact, Intact but changed
+  later, Changed after signing, Broken, Cannot check) and PAdES-B approval signing with a
+  local PKCS#12 as the last export step. Identity and trust are never claimed.
+- **Analysis worker** (`worker/analysis.worker.ts`, pure JS): document comparison (page
+  alignment, pixelmatch visual diff, jsdiff word diff, the report PDF through pdf-lib) and
+  the layout-to-Markdown / text converter. Started on first use, ended after two idle
+  minutes.
 - **pdf.js is not in the default build.** It remains the documented fallback renderer
   if PDFium fidelity or performance disappoints on a class of files, and its source is our
   reference for text-layer and highlight QuadPoint construction. (*open*: see
@@ -156,9 +171,14 @@ interface PageResize {             // unrotated user space, like cropBox
 4. Optional: encrypt (pdf-lib AES-256) or hand to qpdf for linearize / compatibility mode
    (no object streams, PDF 1.4).
 5. **Verification pass**: re-open the output in a fresh PDFium worker, check page count,
-   extract text under redaction boxes (must be empty), compare page sizes. Only then offer
+   extract text under redaction boxes (must be empty), compare page sizes; applied
+   redactions re-run their forensic self-check on the exact final bytes. Only then offer
    the download.
-6. Delivery: File System Access API stream (Chromium) → OPFS + `<a download>`
+6. Optional **signing** (ADR-0013): after verification, the signature worker appends one
+   PAdES-B approval signature as an incremental update; the signed bytes are re-opened in
+   PDFium once more before delivery. Because every export is a rewrite, signatures present
+   in the sources are stripped, and the dialog says so.
+7. Delivery: File System Access API stream (Chromium) → OPFS + `<a download>`
    (Firefox/Safari).
 
 Incremental updates (append-only saves) are used only when the user annotated or filled a
@@ -204,7 +224,10 @@ repaired copy rather than an incremental save onto a broken xref.
   clashes between project sites and is recommended before v1.0.
 - PWA via `vite-plugin-pwa` (migrate to `@vite-pwa/core` when stable):
   `registerType: 'prompt'`; multi-megabyte WASM excluded from precache and cached at
-  runtime (CacheFirst) so first paint never waits on an engine download.
+  runtime (CacheFirst) so first paint never waits on an engine download. The OCR files
+  (`ocr/**`: tesseract's worker, cores and ~22 MB of language packs) are never precached
+  and live in their own `pdf-editor-ocr` CacheFirst cache, filled on first use or by
+  "Keep available offline" (ADR-0012).
 - Strict CSP in a `<meta>` tag: `default-src 'self'`, `connect-src 'none'` (or `'self'`
   only for our own assets), `worker-src 'self'`, `wasm-unsafe-eval` for WASM. The privacy
   indicator in the UI reads the live `PerformanceObserver` resource list to display

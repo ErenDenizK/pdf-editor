@@ -21,8 +21,12 @@ happens on the integration branch; `main` receives milestones.
 - Read, search, and annotate with standard PDF annotations that survive in other viewers.
 - Fill forms, add page numbers and watermarks, edit metadata, set passwords, compress with
   honest numbers, repair broken files.
-- Later: redaction that truly removes content, careful text editing, OCR, comparison,
-  signatures.
+- Redact so the content is really gone, edit text in place with honest fidelity states,
+  move and replace images, crop, resize pages, create form fields, edit bookmarks.
+- Recognize text in scans into a searchable layer (nine languages, downloaded on demand),
+  compare two documents visually and by words, check and add digital signatures without
+  ever calling anything "valid", export pages as Markdown or text, and run saved recipes
+  over many files at once.
 - Always: offline-capable, no telemetry, no accounts, no quotas, no upload. Served as
   static files from GitHub Pages.
 

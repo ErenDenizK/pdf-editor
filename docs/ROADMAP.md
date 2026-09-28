@@ -154,15 +154,36 @@ major, 8 minor) is resolved with regression tests (24 findings, 9 fix commits); 
 blank-Read-view bug found on the way is fixed; docs and changesets current → **v1.1.0**
 once the owner merges `develop` into `main` and tags.
 
-## M5 — Recognize and compare  (→ v1.x)
+## M5 — Recognize and compare  (→ v1.2) — **built 2026-09-28, independent review running**
 
-- OCR to searchable PDF (tesseract.js in a worker; glyphless invisible text layer;
-  language packs downloaded on demand and cached).
-- Compare two documents (visual pixel diff + text diff).
-- Digital signature validation (pkijs + WebCrypto); PAdES-B signing with a local
-  PKCS#12 as an incremental update. Timestamps and LTV documented as needing a proxy.
-- PDF → text / Markdown.
-- Batch: apply a recipe to many documents; saved recipes.
+Spec: `docs/specs/recognize-and-compare.md`; decisions in ADR-0012 (OCR hosting), ADR-0013
+(signatures), ADR-0014 (recipes); spikes in research 07 (OCR) and 08 (signing). Two new
+lazy workers beside PDFium: the signature worker (pkijs) and the analysis worker (compare,
+Markdown); tesseract's own worker is served from our origin.
+
+| Feature | Engine | Notes | Status |
+|---|---|---|---|
+| OCR to searchable PDF: nine language packs on demand, quality Standard / High, replace existing invisible text | tesseract.js + P + L (layer written in the PDFium worker) | scope defaults to pages without text; greyscale rasters in display orientation; glyphless Type0 font, one Form XObject per page, verified in a scratch document; quality Good ≥ 90 / Review 80–90 / Poor < 80; OCR panel with low-confidence rows (J/K, ring on the page); language manager with Keep available offline and local import; `ocr.apply` stores the words, replay never recognises again | done (Chromium-verified: 98% of words found, render pixel-identical, zero external requests, offline after keeping a pack; export verification does not yet re-read the OCR words; a re-run leaves the replaced layer unreachable until export clean-up) |
+| Compare two documents: page map, side by side or onion skin, changed areas, changed words, heat map, Changes panel, report PDF | analysis worker (pixelmatch + jsdiff) + P (render, text) | third stage view (3); auto / by index / best match; 100 or 150 dpi; rows in view diffed first; read-only, released when the view is left or a tab closes | done |
+| Digital signatures: status on open, Sign… on export | signature worker (pkijs + WebCrypto) + L (incremental update) | Intact / Intact but changed later / Changed after signing / Broken / Cannot check with the fixed honesty line; never "valid"; PAdES-B approval signature as the last export step; existing signatures stripped on rewrite and said so | done (no timestamps or LTV; DocMDP, encrypted outputs and legacy 3DES/RC2 PKCS#12 refused with the re-export command) |
+| PDF → Markdown / text | analysis worker | whole document, page or range; page breaks; running headers and footers dropped or kept; hyphens joined; images in a ZIP; preview with honesty notes; "OCR first" opens the OCR dialog | done (reading order is a heuristic; tables are not detected) |
+| Batch: saved recipes over many files | model (`recipe.ts`) + export service | OPFS recipes, import/export, five built-ins, plan review, per-file results with the export summary's notes, ZIP / files / folder delivery, two files at a time; recipes never store a password | done (the OCR step is defined in the model but not yet runnable; Markdown/text steps run) |
+
+Known behaviours and follow-ups from the workstreams:
+
+- Export verification does not check that an OCR'd output page yields its words
+  (`VerificationExpectation.ocrWords` in the spec); the layer is verified when written.
+- Engine OCR tests run in Chromium only; the spec asks for Firefox and WebKit too.
+- The language manager's switch means "on this device": the pack store cannot tell a pack
+  kept offline from one cached on first use.
+- The batch OCR step waits for its runner wiring (recognizer lease and `ocr.apply` per
+  private source).
+- Pure OCR helpers are reachable only through the engine's main index; the UI mirrors the
+  language-code table for display names.
+
+Exit: the independent correctness review (engine and web, in progress) resolved with
+regression tests; docs and changesets current → **v1.2.0** once the owner merges `develop`
+into `main` and tags.
 
 ## M6 — Ecosystem  (→ v2)
 

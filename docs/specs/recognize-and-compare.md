@@ -34,7 +34,7 @@ be precached) and `pdf-editor-wasm` keeps 4 entries (tesseract would evict PDFiu
 - tesseract.js 7, LSTM-only core (`oem 1`). Its classic `worker.min.js` is served from our
   origin with `workerBlobURL: false`; the API chunk is lazy-loaded on the main thread (it
   only posts messages). The core sits unhashed in a versioned directory
-  (`ocr/tesseract-core-7.0.0/`, Emscripten finds the `.wasm` by name); we detect SIMD with
+  (`ocr/tesseract-7.0.0/`, Emscripten finds the `.wasm` by name); we detect SIMD with
   `wasm-feature-detect` and pass one file as `corePath`. S1 picks `.js`+`.wasm` (0.4 MB
   smaller) or `.wasm.js`. A pool of 1–2 recognizers, reused, terminated after 60 s idle.
 - PWA: `globIgnores: ['ocr/**']`; a separate `pdf-editor-ocr` CacheFirst cache for core,
@@ -79,8 +79,8 @@ be precached) and `pdf-editor-wasm` keeps 4 entries (tesseract would evict PDFiu
 ### 1.3 Quality, honesty, model
 
 - Words under confidence 30 are dropped as noise (counted). Page quality from mean word
-  confidence: **Good** ≥ 85, **Review** 60–85, **Poor** < 60, **No text found**
-  (thresholds frozen after S1). The right panel's **OCR** section (page selected) shows
+  confidence: **Good** ≥ 90, **Review** 80–90, **Poor** < 80, **No text found**
+  (thresholds set by S1, research 07 §7; ADR-0012). The right panel's **OCR** section (page selected) shows
   quality, languages, DPI and low-confidence words as rows (J/K; the focused word gets the
   1px ring, the page is never tinted, DESIGN §3); the document view lists pages by quality.
 - Honesty text: recognised text may contain errors; the page image is unchanged; search
