@@ -70,6 +70,7 @@ export function ExportDialog() {
 
 function progressText(progress: ExportProgress | null, pageCount: number): string {
   if (progress === null || progress.phase === 'reading') return m.export_progress_reading();
+  if (progress.phase === 'redaction') return m.export_progress_redaction();
   if (progress.phase === 'assembling') {
     return m.export_progress_assembling({
       done: Math.min(progress.done, progress.total),
@@ -85,7 +86,8 @@ function progressValue(progress: ExportProgress | null): number {
   // Reading 0–10 %, assembling 10–85 %, verifying 85–100 %.
   if (progress.phase === 'reading') return 10 * share;
   if (progress.phase === 'assembling') return 10 + 75 * share;
-  return 85 + 15 * share;
+  if (progress.phase === 'redaction') return 95 + 5 * share;
+  return 85 + 10 * share;
 }
 
 function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
@@ -137,6 +139,13 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
     controller.current = null;
     if (!result.ok) {
       setStep({ kind: 'failed', message: result.error.message, problems: [] });
+    } else if (result.value.redaction && !result.value.redaction.report.ok) {
+      // A leak the self-check can see blocks the download (spec §1.2 step 5).
+      setStep({
+        kind: 'failed',
+        message: m.export_failed_redaction(),
+        problems: result.value.verification.problems,
+      });
     } else if (!result.value.verification.ok) {
       setStep({
         kind: 'failed',
@@ -319,11 +328,11 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
 
       {step.kind === 'failed' ? (
         <div className={styles.body}>
-          <p className={styles.error} role="alert">
+          <p className={styles.error} role="alert" data-testid="export-failed">
             {step.message}
           </p>
           {step.problems.length > 0 ? (
-            <ul className={styles.problems}>
+            <ul className={styles.problems} data-testid="export-problems">
               {step.problems.map((problem) => (
                 <li key={problem}>{problem}</li>
               ))}
@@ -381,7 +390,10 @@ function ReviewStep({
   readonly onBack: () => void;
   readonly onSave: () => void;
 }) {
-  const items = summarizeReport(prepared.report, prepared.sourceNotes, prepared.outcome);
+  const items = summarizeReport(prepared.report, prepared.sourceNotes, prepared.outcome, {
+    ...(prepared.redaction ? { redaction: prepared.redaction } : {}),
+    ...(prepared.textEdits ? { textEdits: prepared.textEdits } : {}),
+  });
   const seconds = (prepared.durationMs / 1000).toFixed(1);
   return (
     <div className={styles.body}>
@@ -400,7 +412,7 @@ function ReviewStep({
       {items.length > 0 ? (
         <ul className={styles.summary} aria-label={m.export_summary_label()}>
           {items.map((item) => (
-            <li key={item.id} data-tone={item.tone}>
+            <li key={item.id} data-tone={item.tone} data-summary-item={item.id}>
               {item.text}
               {item.details && item.details.length > 0 ? (
                 <details className={styles.details}>

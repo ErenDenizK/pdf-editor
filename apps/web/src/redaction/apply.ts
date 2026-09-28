@@ -1,0 +1,513 @@
+/**
+ * Applying redactions (spec redaction-and-text-editing §1.2, ADR-0011 §3): the ticked marks
+ * of the Redactions panel become permanent removals, source by source, as one history
+ * entry ("Redactions applied (N areas)").
+ *
+ * Per source with ticked marks, inside the edit runner's queue (`runAction`):
+ *
+ * 1. every /Redact mark of the source is deleted (`annotation.delete`, invertible), so the
+ *    bytes the engine redacts carry no pending marks;
+ * 2. one `redaction.apply` edit runs `PdfRedactor.applyRedactionPlan` in the PDFium worker:
+ *    the source is saved, redacted and verified in private scratch documents (engine pass,
+ *    scrub, blank-region gate, fill, forensic self-check) and the open document is replaced
+ *    by the verified bytes under the same source id, so the model's pages and their ids
+ *    stay as they are. The recorded payload is `{ plan: result.plan }` in the source's page
+ *    indices (`RedactionApplyPayload`), which `planExport` reads;
+ * 3. the marks that were not ticked (or sit on pages no document shows) are created again
+ *    with their ids: they stay marks.
+ *
+ * The model carries copies of source strings the assembler writes again at export: the
+ * document's metadata (Info and XMP) and its bookmark titles. For every document showing a
+ * redacted source, the redacted strings are replaced there too ("[redacted]"), committed
+ * into the same history entry (coalesced right after the engine edits). Anything else the
+ * export writes from the model (e.g. overlay text the user typed) is left to the export's
+ * self-check, which blocks the download when it still finds a redacted string.
+ *
+ * A `RedactionFailedError` (gate or self-check) stops everything: the action returns
+ * nothing, the runner reverts what it executed (deletes are re-created; a source already
+ * redacted in this action is reopened from its original bytes and its earlier edits
+ * replayed) and the document is unchanged. The failure's stage and reports are returned for
+ * the result sheet.
+ *
+ * Undo is reopen + replay (the edit's inverse is replay-required, as for text edits); redo
+ * applies the forward edits again. Every time the redactions a source holds change (apply,
+ * undo, redo) every page of that source is invalidated here: bitmaps, text, annotations and
+ * links, since the removal is not limited to the edit's own page.
+ */
+import type {
+  DocumentMetadata,
+  EngineEdit,
+  OutlineNode,
+  Rect,
+  SourceId,
+  VirtualDocument,
+  Workspace,
+} from '@pdf-editor/document-model';
+import type {
+  ApplyRedactionsResult,
+  PdfRedactor,
+  RedactionFailure,
+  RedactionPlan,
+} from '@pdf-editor/engine';
+
+import { useAnnotationStore } from '../annotations/annotation-store';
+import {
+  type EngineContext,
+  executeEdit,
+  onPagesChanged,
+  readAnnotations,
+  runAction,
+} from '../annotations/edit-runner';
+import { getEngineService } from '../engine/engine-service';
+import { m } from '../i18n';
+import { announce } from '../shell/announcer';
+import { useWorkspaceStore } from '../state/workspace-store';
+import { clearLinksForSource } from '../viewer/LinkLayer';
+import { isRedactMark, type RedactMark } from './marks';
+import { markKeyOf, useRedactionStore } from './redaction-store';
+
+/** Fill choices of the confirmation dialog (spec §1.2 step 4). */
+export type FillChoice = 'black' | 'white' | 'custom';
+
+export interface ApplyChoices {
+  readonly fill: FillChoice;
+  /** `#rrggbb`, used when `fill` is 'custom'. */
+  readonly customColor: string;
+  /** Drawn centred in every area; empty for none. */
+  readonly overlayText: string;
+  /** Keep embedded files and file attachment annotations (reported unverified). */
+  readonly keepAttachments: boolean;
+  /**
+   * Area only: the text under the marks is not added to the redacted strings, so the same
+   * text elsewhere in the document stays and is not searched for (`captureStrings: false`).
+   */
+  readonly areaOnly: boolean;
+}
+
+export const DEFAULT_CHOICES: ApplyChoices = {
+  fill: 'black',
+  customColor: '#1a237e',
+  overlayText: '',
+  keepAttachments: false,
+  areaOnly: false,
+};
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+export function fillColorOf(choices: ApplyChoices): string {
+  if (choices.fill === 'white') return '#ffffff';
+  if (choices.fill === 'custom' && HEX.test(choices.customColor)) return choices.customColor;
+  return '#000000';
+}
+
+function union(a: Rect, b: Rect): Rect {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    width: Math.max(a.x + a.width, b.x + b.width) - x,
+    height: Math.max(a.y + a.height, b.y + b.height) - y,
+  };
+}
+
+/** Whether two quads lie on one line (they overlap by more than half the lower one). */
+function sameLine(a: Rect, b: Rect): boolean {
+  const overlap = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return overlap > Math.min(a.height, b.height) / 2;
+}
+
+/**
+ * A mark's areas: its quads, those on one line joined (a token split across text runs
+ * gives several quads with nothing unselected between them), so an area is a line of a mark.
+ */
+export function markAreas(quads: readonly Rect[]): Rect[] {
+  const lines: Rect[] = [];
+  for (const quad of quads) {
+    const at = lines.findIndex((line) => sameLine(line, quad));
+    if (at >= 0) lines[at] = union(lines[at] as Rect, quad);
+    else lines.push({ ...quad });
+  }
+  return lines;
+}
+
+/** The plan for one source's ticked marks (areas in the source's page indices). */
+export function planForMarks(marks: readonly RedactMark[], choices: ApplyChoices): RedactionPlan {
+  const overlayText = choices.overlayText.trim();
+  return {
+    areas: marks.flatMap((mark) =>
+      markAreas(mark.quads).map((rect) => ({ pageIndex: mark.pageIndex, rect })),
+    ),
+    strings: [],
+    fillColor: fillColorOf(choices),
+    ...(overlayText === '' ? {} : { overlayText }),
+    ...(choices.keepAttachments ? { keepAttachments: true } : {}),
+  };
+}
+
+/** What one source's apply reported (the result sheet; no bytes). */
+export interface SourceRedaction {
+  readonly source: SourceId;
+  readonly name: string;
+  /** Marks applied (ticked). */
+  readonly marks: number;
+  /** Marks left as marks. */
+  readonly keptMarks: number;
+  readonly byteLength: number;
+  readonly result: Omit<ApplyRedactionsResult, 'bytes'>;
+}
+
+export type ApplyOutcome =
+  | { readonly kind: 'applied'; readonly label: string; readonly sources: SourceRedaction[] }
+  | {
+      /** The gate or the self-check stopped the apply; nothing changed. */
+      readonly kind: 'blocked';
+      readonly source: SourceId;
+      readonly name: string;
+      readonly stage: 'gate' | 'forensic';
+      readonly message: string;
+      readonly failure: RedactionFailure;
+    }
+  | { readonly kind: 'error'; readonly message: string }
+  | { readonly kind: 'nothing' };
+
+/** Areas of an applied outcome (the history label's count). */
+export function appliedAreas(sources: readonly SourceRedaction[]): number {
+  return sources.reduce((n, s) => n + s.result.plan.areas.length, 0);
+}
+
+interface Replacer {
+  matches(text: string): boolean;
+  replace(text: string, placeholder: string): string;
+}
+
+function scrubOutline(
+  nodes: readonly OutlineNode[],
+  matcher: Replacer,
+  placeholder: string,
+): readonly OutlineNode[] {
+  let changed = false;
+  const out = nodes.map((node) => {
+    const children = scrubOutline(node.children, matcher, placeholder);
+    const title = matcher.matches(node.title)
+      ? matcher.replace(node.title, placeholder)
+      : node.title;
+    if (title === node.title && children === node.children) return node;
+    changed = true;
+    return { ...node, title, children };
+  });
+  return changed ? out : nodes;
+}
+
+const METADATA_STRINGS = ['title', 'author', 'subject', 'keywords', 'creator', 'producer'] as const;
+
+function scrubMetadata(
+  metadata: DocumentMetadata,
+  matcher: Replacer,
+  placeholder: string,
+): DocumentMetadata {
+  const next: Record<string, unknown> = { ...metadata };
+  let changed = false;
+  for (const key of METADATA_STRINGS) {
+    const value = metadata[key];
+    if (value !== undefined && matcher.matches(value)) {
+      next[key] = matcher.replace(value, placeholder);
+      changed = true;
+    }
+  }
+  if (metadata.custom) {
+    const custom: Record<string, string> = {};
+    for (const [key, value] of Object.entries(metadata.custom)) {
+      const scrubbed = matcher.matches(value) ? matcher.replace(value, placeholder) : value;
+      if (scrubbed !== value) changed = true;
+      custom[key] = scrubbed;
+    }
+    next.custom = custom;
+  }
+  return changed ? (next as unknown as DocumentMetadata) : metadata;
+}
+
+/**
+ * The workspace with the redacted strings replaced in the metadata and bookmark titles of
+ * every document that shows a page of `sources` (unchanged when nothing matched).
+ */
+export function scrubModelStrings(
+  ws: Workspace,
+  sources: ReadonlySet<SourceId>,
+  matcher: Replacer,
+  placeholder: string,
+): Workspace {
+  let documents: Workspace['documents'] | undefined;
+  for (const id of ws.documentOrder) {
+    const doc = ws.documents[id];
+    if (!doc) continue;
+    if (!doc.pages.some((p) => p.ref.kind === 'source' && sources.has(p.ref.source))) continue;
+    const metadata = scrubMetadata(doc.metadata, matcher, placeholder);
+    const outline = scrubOutline(doc.outline, matcher, placeholder);
+    if (metadata === doc.metadata && outline === doc.outline) continue;
+    const next: VirtualDocument = { ...doc, metadata, outline, clean: false };
+    documents = { ...(documents ?? ws.documents), [id]: next };
+  }
+  return documents ? { ...ws, documents } : ws;
+}
+
+/** Pages of the workspace's documents that show each source page (listed marks). */
+function shownPages(ws: Workspace): Map<SourceId, Set<number>> {
+  const shown = new Map<SourceId, Set<number>>();
+  for (const id of ws.documentOrder) {
+    for (const page of ws.documents[id]?.pages ?? []) {
+      if (page.ref.kind !== 'source') continue;
+      const set = shown.get(page.ref.source) ?? new Set<number>();
+      set.add(page.ref.index);
+      shown.set(page.ref.source, set);
+    }
+  }
+  return shown;
+}
+
+interface SourceJob {
+  readonly source: SourceId;
+  readonly name: string;
+  readonly all: readonly RedactMark[];
+  readonly ticked: readonly RedactMark[];
+}
+
+async function jobsOf(ctx: EngineContext): Promise<SourceJob[]> {
+  const ws = useWorkspaceStore.getState().workspace;
+  const excluded = useRedactionStore.getState().excluded;
+  const jobs: SourceJob[] = [];
+  for (const [source, pages] of shownPages(ws)) {
+    const info = ws.sources[source];
+    if (!info) continue;
+    const all: RedactMark[] = [];
+    const ticked: RedactMark[] = [];
+    for (let pageIndex = 0; pageIndex < info.pageCount; pageIndex++) {
+      const marks = (await readAnnotations(source, pageIndex, ctx)).filter(
+        (a): a is RedactMark => isRedactMark(a) && !a.flags?.hidden,
+      );
+      for (const mark of marks) {
+        all.push(mark);
+        if (pages.has(pageIndex) && !excluded.has(markKeyOf(source, mark.id))) ticked.push(mark);
+      }
+    }
+    if (ticked.length > 0) jobs.push({ source, name: info.name, all, ticked });
+  }
+  return jobs;
+}
+
+/** Whether any listed mark is ticked (the panel's Apply button). */
+export function hasTickedMarks(entries: readonly { readonly markKey: string }[]): boolean {
+  const excluded = useRedactionStore.getState().excluded;
+  return entries.some((e) => !excluded.has(e.markKey));
+}
+
+/** `ctx` whose editor reports the result of `applyRedactionPlan` (executeEdit drops it). */
+function capturing(ctx: EngineContext): {
+  readonly ctx: EngineContext;
+  readonly result: () => ApplyRedactionsResult | undefined;
+} {
+  let captured: ApplyRedactionsResult | undefined;
+  const editor = new Proxy(ctx.editor, {
+    get(target, property, receiver): unknown {
+      if (property !== 'applyRedactionPlan') {
+        return Reflect.get(target, property, receiver) as unknown;
+      }
+      const apply = (target as Partial<PdfRedactor>).applyRedactionPlan;
+      if (!apply) return undefined;
+      return async (...args: Parameters<PdfRedactor['applyRedactionPlan']>) => {
+        captured = await apply.apply(target, args);
+        return captured;
+      };
+    },
+  });
+  return { ctx: { ...ctx, editor }, result: () => captured };
+}
+
+function isRedactionFailure(
+  error: unknown,
+): error is Error & { stage: 'gate' | 'forensic'; failure: RedactionFailure } {
+  const e = error as { name?: unknown; stage?: unknown; failure?: unknown } | null;
+  return (
+    e?.name === 'RedactionFailedError' &&
+    (e.stage === 'gate' || e.stage === 'forensic') &&
+    typeof e.failure === 'object'
+  );
+}
+
+let applying = false;
+
+/** Whether an apply is running. */
+export function isApplying(): boolean {
+  return applying;
+}
+
+/**
+ * Applies every ticked mark of the workspace (see the module comment). Never rejects.
+ */
+export async function applyTickedRedactions(choices: ApplyChoices): Promise<ApplyOutcome> {
+  if (applying) return { kind: 'error', message: m.redaction_apply_busy() };
+  applying = true;
+  // Set inside the action (a holder, so control flow does not narrow them away).
+  const status: { blocked?: Extract<ApplyOutcome, { kind: 'blocked' }>; nothing: boolean } = {
+    nothing: false,
+  };
+  // Joins the model scrub below to the engine edits' history entry.
+  const coalesceKey = `redaction.apply:${globalThis.crypto.randomUUID()}`;
+  try {
+    const sources = await runAction(async (ctx) => {
+      const jobs = await jobsOf(ctx);
+      if (jobs.length === 0) {
+        status.nothing = true;
+        return undefined;
+      }
+      const edits: EngineEdit[] = [];
+      const done: SourceRedaction[] = [];
+      for (const job of jobs) {
+        const recreate: EngineEdit[] = [];
+        for (const mark of job.all) {
+          const deleted = await executeEdit(ctx, {
+            id: globalThis.crypto.randomUUID(),
+            source: job.source,
+            pageIndex: mark.pageIndex,
+            kind: 'annotation.delete',
+            payload: { annotationId: mark.id },
+          });
+          edits.push(deleted.recorded);
+          const ticked = job.ticked.some((t) => t.id === mark.id);
+          // The delete's inverse is the create that restores the mark exactly.
+          if (!ticked && deleted.recorded.inverse) {
+            recreate.push({
+              id: globalThis.crypto.randomUUID(),
+              source: job.source,
+              pageIndex: mark.pageIndex,
+              kind: 'annotation.create',
+              payload: deleted.recorded.inverse.payload,
+            });
+          }
+        }
+        const plan = planForMarks(job.ticked, choices);
+        const capture = capturing(ctx);
+        let applied;
+        try {
+          applied = await executeEdit(capture.ctx, {
+            id: globalThis.crypto.randomUUID(),
+            source: job.source,
+            pageIndex: plan.areas[0]?.pageIndex ?? 0,
+            kind: 'redaction.apply',
+            payload: { plan, captureStrings: !choices.areaOnly },
+          });
+        } catch (error) {
+          if (!isRedactionFailure(error)) throw error;
+          status.blocked = {
+            kind: 'blocked',
+            source: job.source,
+            name: job.name,
+            stage: error.stage,
+            message: error.message,
+            failure: error.failure,
+          };
+          // Nothing is committed; the runner reverts what this action executed.
+          return undefined;
+        }
+        edits.push(applied.recorded);
+        for (const edit of recreate) edits.push((await executeEdit(ctx, edit)).recorded);
+        const result = capture.result();
+        if (!result) throw new Error('The engine returned no redaction result');
+        const { bytes, ...reports } = result;
+        done.push({
+          source: job.source,
+          name: job.name,
+          marks: job.ticked.length,
+          keptMarks: recreate.length,
+          byteLength: bytes.byteLength,
+          result: reports,
+        });
+      }
+      const label = m.history_redactions_applied({ count: appliedAreas(done) });
+      return { edits, label, coalesceKey, value: done };
+    });
+    if (status.blocked) return status.blocked;
+    if (!sources) {
+      return status.nothing
+        ? { kind: 'nothing' }
+        : { kind: 'error', message: m.redaction_apply_failed() };
+    }
+    const label = m.history_redactions_applied({ count: appliedAreas(sources) });
+    const strings = sources.flatMap((s) => s.result.plan.strings);
+    if (strings.length > 0) {
+      const { RedactedStringMatcher } = await import('@pdf-editor/engine');
+      const matcher = new RedactedStringMatcher(strings);
+      const placeholder = matcher.placeholder();
+      const redacted = new Set(sources.map((s) => s.source));
+      useWorkspaceStore
+        .getState()
+        .applyOperation((ws) => scrubModelStrings(ws, redacted, matcher, placeholder), label, {
+          coalesceKey,
+        });
+    }
+    announce(label);
+    return { kind: 'applied', label, sources };
+  } catch (error) {
+    console.warn('Applying redactions failed', error);
+    return {
+      kind: 'error',
+      message: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    applying = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Whole-source invalidation when a source's applied redactions change
+// ---------------------------------------------------------------------------
+
+/** Redaction edit ids per source as last seen by the page listener. */
+const seen = new Map<SourceId, string>();
+
+function redactionSignature(ws: Workspace, source: SourceId): string {
+  return ws.engineEdits
+    .filter((edit) => edit.source === source && edit.kind === 'redaction.apply')
+    .map((edit) => edit.id)
+    .join(',');
+}
+
+/** Drops everything cached for every page of `source` (after its content was replaced). */
+export function refreshSource(source: SourceId): void {
+  const ws = useWorkspaceStore.getState().workspace;
+  const count = ws.sources[source]?.pageCount ?? 0;
+  const service = getEngineService();
+  for (let index = 0; index < count; index++) {
+    service.invalidatePageText(source, index);
+    service.invalidatePage(source, index);
+  }
+  clearLinksForSource(source);
+  const annotations = useAnnotationStore.getState();
+  const prefix = `${source}:`;
+  for (const key of Object.keys(annotations.pages)) {
+    if (!key.startsWith(prefix)) continue;
+    const pageIndex = Number(key.slice(prefix.length));
+    if (Number.isInteger(pageIndex)) void annotations.reloadPage(source, pageIndex);
+  }
+}
+
+onPagesChanged((pages) => {
+  const ws = useWorkspaceStore.getState().workspace;
+  for (const source of new Set(pages.map((p) => p.source))) {
+    const signature = redactionSignature(ws, source);
+    if ((seen.get(source) ?? '') === signature) continue;
+    if (signature === '') seen.delete(source);
+    else seen.set(source, signature);
+    refreshSource(source);
+  }
+});
+
+getEngineService().onSourceClosed((source) => {
+  seen.delete(source);
+});
+
+/** Tests: forget what the page listener saw. */
+export function resetRedactionApply(): void {
+  seen.clear();
+  applying = false;
+}

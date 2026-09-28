@@ -4,7 +4,8 @@
  * selected", reveal on click, J / K review and delete. The header states honestly what a
  * mark is (only a mark until applied; applying is irreversible after export) and holds
  * the sensitive-data finder, whose matches are reviewed here before "Mark selected".
- * Applying is not available yet: the button is shown disabled with a note.
+ * "Apply redactions" is enabled while a listed mark is ticked and opens the confirmation
+ * dialog (redaction/ApplyRedactionsDialog.tsx), which applies the ticked marks.
  */
 import type { Rect, SourceId } from '@pdf-editor/document-model';
 import { ScanSearch, ShieldAlert, Trash2, X } from 'lucide-react';
@@ -22,6 +23,8 @@ import {
 } from '../../redaction';
 import type { PatternId } from '../../redaction/patterns';
 import { PATTERN_IDS } from '../../redaction/patterns';
+import { ApplyRedactionsDialog } from '../../redaction/ApplyRedactionsDialog';
+import { useApplyDialogStore } from '../../redaction/apply-store';
 import {
   collectMarks,
   type FinderMatch,
@@ -75,7 +78,7 @@ export function RedactionsPanel() {
           <ShieldAlert aria-hidden="true" />
           <span>{m.redaction_honesty()}</span>
         </p>
-        <Actions />
+        <Actions ticked={included.size} />
         {total > 0 ? (
           <p className={styles.summary} data-testid="redaction-summary">
             {m.redaction_summary({
@@ -104,10 +107,12 @@ export function RedactionsPanel() {
   );
 }
 
-function Actions() {
+function Actions({ ticked }: { readonly ticked: number }) {
   const doc = useActiveDocument();
   const noteId = useId();
   const status = useRedactionStore((s) => s.finder.status);
+  const openApply = useApplyDialogStore((s) => s.setOpen);
+  const disabled = ticked === 0;
   return (
     <div className={styles.actions}>
       <button
@@ -121,20 +126,34 @@ function Actions() {
         <ScanSearch aria-hidden="true" />
         {m.redaction_find()}
       </button>
-      <Tooltip label={m.redaction_apply_unavailable()} side="bottom">
+      {disabled ? (
+        <Tooltip label={m.redaction_apply_none()} side="bottom">
+          <button
+            type="button"
+            className={styles.apply}
+            aria-disabled="true"
+            aria-describedby={noteId}
+            data-testid="redaction-apply"
+          >
+            {m.redaction_apply()}
+          </button>
+        </Tooltip>
+      ) : (
         <button
           type="button"
           className={styles.apply}
-          aria-disabled="true"
-          aria-describedby={noteId}
           data-testid="redaction-apply"
+          onClick={() => openApply(true)}
         >
           {m.redaction_apply()}
         </button>
-      </Tooltip>
-      <span id={noteId} className="visually-hidden">
-        {m.redaction_apply_unavailable()}
-      </span>
+      )}
+      {disabled ? (
+        <span id={noteId} className="visually-hidden">
+          {m.redaction_apply_none()}
+        </span>
+      ) : null}
+      <ApplyRedactionsDialog />
     </div>
   );
 }

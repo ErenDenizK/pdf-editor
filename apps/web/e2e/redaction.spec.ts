@@ -5,6 +5,12 @@
  * with the text under them, export, and re-open the export: the /Redact annotations are
  * still there (marks survive save and are not applied). A second test marks every search
  * match and reviews them with J / K.
+ *
+ * Applying (spec §1.2, §5.3): marks by selection, search and area are applied through the
+ * confirmation dialog, the result sheet lists the self-check, the export's summary shows
+ * the check on the final file, and the export re-opened in the app has no trace of the
+ * token. Keeping attachments on `redact-metadata.pdf` is stopped by the self-check (the
+ * attachment still holds the token), and nothing changes until attachments are removed.
  */
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -105,7 +111,8 @@ test('mark by selection and by area, list them, export and re-open with the mark
   await expect(panel.getByRole('note')).toContainText('Marks are only marks');
   await expect(panel.getByTestId('redaction-summary')).toHaveText('2 marks · 2 selected');
   await expect(panel.getByTestId('redaction-snippet')).toHaveText([TOKEN, 'Area without text']);
-  await expect(panel.getByTestId('redaction-apply')).toHaveAttribute('aria-disabled', 'true');
+  // Ticked marks: "Apply redactions" is available.
+  await expect(panel.getByTestId('redaction-apply')).not.toHaveAttribute('aria-disabled');
   if (capture) {
     await page.screenshot({
       path: fileURLToPath(new URL('m4-redaction-marks-1440.png', screenshots)),
@@ -196,4 +203,177 @@ test('mark every search match, then review the marks with J and K', async ({ pag
   // Delete from the panel.
   await rows.nth(2).getByRole('button', { name: 'Delete mark' }).click();
   await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(2);
+});
+
+async function exportAndDownload(page: Page): Promise<{ bytes: Buffer; summary: string[] }> {
+  await page.getByRole('button', { name: 'Export document' }).click();
+  const exportDialog = page.getByTestId('export-dialog');
+  await expect(exportDialog).toBeVisible();
+  await exportDialog.getByRole('button', { name: 'Export', exact: true }).click();
+  await expect(exportDialog.getByTestId('export-verified')).toBeVisible({ timeout: 60_000 });
+  const summary = await exportDialog
+    .getByRole('list', { name: 'What changed on export' })
+    .locator(':scope > li')
+    .allTextContents();
+  const downloadPromise = page.waitForEvent('download');
+  await exportDialog.getByRole('button', { name: 'Download' }).click();
+  const bytes = await readFile(await (await downloadPromise).path());
+  await page.keyboard.press('Escape');
+  return { bytes, summary };
+}
+
+test('apply marks made by selection, search and area; export; the re-opened export has no token', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await page.addInitScript({
+    content:
+      "Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });",
+  });
+  await useFileInputPicker(page);
+  await page.goto('./?lang=en');
+  await openFixtures(page, ['redact-text-runs.pdf']);
+  await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
+    timeout: 20_000,
+  });
+
+  // 1. By selection (line 1).
+  await selectText(page, TOKEN);
+  await page.keyboard.press('x');
+  await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(1);
+
+  // 2. By search: every match (lines 2 and 3 are new; line 1 is already marked).
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ControlOrMeta+f');
+  await page.getByRole('searchbox', { name: 'Find in document' }).fill(TOKEN);
+  await expect(page.getByTestId('search-hit')).toHaveCount(3);
+  await page.getByTestId('search-mark-all').click();
+  await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(3);
+
+  // 3. By area, below the text.
+  await page.locator('[data-read-viewport]').focus();
+  await page.keyboard.press('x');
+  const redactLayer = page.locator('[data-redaction-layer="0"]');
+  await expect(redactLayer).toHaveAttribute('data-active', 'true');
+  const box = await redactLayer.boundingBox();
+  if (!box) throw new Error('page not rendered');
+  await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.75);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.85, { steps: 8 });
+  await page.mouse.up();
+  await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(4);
+  await page.keyboard.press('Escape');
+
+  // 4. Apply from the Redactions panel: the dialog says what happens, then the result.
+  await page.getByRole('tab', { name: 'Redactions' }).click();
+  const panel = page.locator('[data-redactions-panel]');
+  await expect(panel.getByTestId('redaction-summary')).toHaveText('4 marks · 4 selected');
+  await panel.getByTestId('redaction-apply').click();
+  const dialog = page.getByTestId('redaction-apply-dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('4 ticked marks become permanent removals.');
+  await expect(dialog.getByRole('note')).toContainText('cannot be undone');
+  await expect(dialog.getByRole('checkbox', { name: /Keep attachments/ })).not.toBeChecked();
+  await dialog.getByRole('textbox', { name: 'Overlay text (optional)' }).fill('REDACTED');
+  await dialog.getByTestId('redaction-apply-confirm').click();
+  const result = dialog.getByTestId('redaction-result');
+  await expect(result).toBeVisible({ timeout: 30_000 });
+  await expect(result.getByTestId('redaction-result-areas')).toHaveText('4 areas on 1 page');
+  await expect(result.getByTestId('redaction-checks-summary')).toHaveText(
+    'Self-check: 9 of 9 checks passed',
+  );
+  await expect(result.locator('[data-testid="redaction-check"][data-passed="true"]')).toHaveCount(
+    9,
+  );
+  if (capture) {
+    await page.screenshot({
+      path: fileURLToPath(new URL('m4-redaction-applied-1440.png', screenshots)),
+    });
+  }
+  await dialog.getByRole('button', { name: 'Close' }).last().click();
+  await expect(dialog).toBeHidden();
+  await expect(historyRow(page, 'Redactions applied (4 areas)')).toBeVisible();
+  await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(0);
+  await expect(panel.getByTestId('redaction-summary')).toHaveCount(0);
+  await expect(page.getByTestId('text-layer').first()).not.toContainText(TOKEN);
+
+  // 5. Export: the summary reports the self-check on the final file.
+  const { bytes, summary } = await exportAndDownload(page);
+  expect(summary[0]).toContain('Redaction: 4 areas on 1 page, self-check passed (9 checks).');
+  expect(bytes.toString('latin1')).not.toContain(TOKEN);
+  expect(await redactAnnotations(bytes)).toHaveLength(0);
+
+  // 6. Re-open the export in the app and search for the token: nothing.
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Open files' }).first().click();
+  await (await chooser).setFiles({
+    name: 'redacted.pdf',
+    mimeType: 'application/pdf',
+    buffer: bytes,
+  });
+  await expect(page.getByRole('tab', { name: 'redacted', selected: true })).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+f');
+  const field = page.getByRole('searchbox', { name: 'Find in document' });
+  // The rest of the text is there (the search runs on the re-opened file)…
+  await field.fill('quick brown fox');
+  await expect(page.getByTestId('search-hit')).toHaveCount(1, { timeout: 20_000 });
+  // …and the token is not.
+  await field.fill(TOKEN);
+  await expect(page.getByTestId('search-status')).toHaveText('No results', { timeout: 20_000 });
+  await expect(page.getByTestId('search-hit')).toHaveCount(0);
+});
+
+test('keeping attachments: the self-check sees the token in the attachment and nothing is applied', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await page.addInitScript({
+    content:
+      "Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });",
+  });
+  await useFileInputPicker(page);
+  await page.goto('./?lang=en');
+  await openFixtures(page, ['redact-metadata.pdf']);
+  await selectText(page, TOKEN);
+  await page.keyboard.press('x');
+  await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('tab', { name: 'Redactions' }).click();
+  const panel = page.locator('[data-redactions-panel]');
+  await panel.getByTestId('redaction-apply').click();
+  const dialog = page.getByTestId('redaction-apply-dialog');
+  await dialog.getByRole('checkbox', { name: /Keep attachments/ }).check();
+  await dialog.getByTestId('redaction-apply-confirm').click();
+
+  // Blocked by the self-check: the kept attachment still holds the token.
+  const blocked = dialog.getByTestId('redaction-blocked');
+  await expect(blocked).toBeVisible({ timeout: 30_000 });
+  await expect(blocked.getByRole('alert')).toHaveAttribute('data-stage', 'forensic');
+  await expect(blocked.getByRole('alert')).toContainText('The document is unchanged.');
+  await expect(blocked).toContainText('Kept attachments still contain the redacted text.');
+  await expect(blocked.locator('[data-check="byte-grep"]')).toHaveAttribute('data-passed', 'false');
+  await expect(blocked.locator('[data-check="object-strings"]')).toHaveAttribute(
+    'data-passed',
+    'false',
+  );
+  await expect(blocked.getByTestId('redaction-findings')).toContainText('Redacted text absent');
+  // Nothing happened: the mark is still a mark, no history entry.
+  await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(1);
+  await expect(historyRow(page, /Redactions applied/)).toHaveCount(0);
+
+  // Back: apply without keeping attachments. It passes, and so does the export.
+  await dialog.getByRole('button', { name: 'Back' }).click();
+  await dialog.getByRole('checkbox', { name: /Keep attachments/ }).uncheck();
+  await dialog.getByTestId('redaction-apply-confirm').click();
+  const result = dialog.getByTestId('redaction-result');
+  await expect(result).toBeVisible({ timeout: 30_000 });
+  await expect(result).toContainText('Attachments removed');
+  await dialog.getByRole('button', { name: 'Close' }).last().click();
+  await expect(historyRow(page, 'Redactions applied (1 area)')).toBeVisible();
+  const { bytes, summary } = await exportAndDownload(page);
+  expect(summary[0]).toContain('Redaction: 1 area on 1 page, self-check passed (9 checks).');
+  const pdf = await PDFDocument.load(bytes, { updateMetadata: false });
+  expect(pdf.catalog.lookup(PDFName.of('Names'))).toBeUndefined();
+  expect(bytes.toString('latin1')).not.toContain(TOKEN);
 });

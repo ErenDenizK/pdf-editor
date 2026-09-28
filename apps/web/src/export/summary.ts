@@ -9,7 +9,14 @@ import type { ReconciliationReport } from '@pdf-editor/engine';
 import { restrictionList } from '../document/security-text';
 import { STRIP_ITEMS } from '../document/strip-items';
 import { formatNumber, m } from '../i18n';
-import type { ExportOutcome, SourceNotes } from './export-service';
+import { pagesPhrase } from '../state/workspace-store';
+import { checkName } from '../redaction/report-text';
+import type {
+  ExportOutcome,
+  RedactionExportSummary,
+  SourceNotes,
+  TextEditExportSummary,
+} from './export-service';
 
 export interface SummaryItem {
   readonly id: string;
@@ -31,12 +38,85 @@ const COVERED = [
 
 const NO_NOTES: SourceNotes = { securityRemoved: [], repaired: [] };
 
+/** Content edits the export verified or finalized (Output section lines). */
+export interface ContentSummary {
+  readonly redaction?: RedactionExportSummary;
+  readonly textEdits?: TextEditExportSummary;
+}
+
+/** "Redaction: N areas on M pages, self-check passed (9 checks)", per page and per check. */
+function redactionItems(redaction: RedactionExportSummary): SummaryItem[] {
+  const { report } = redaction;
+  const pages = Object.keys(redaction.areasByPage)
+    .map(Number)
+    .sort((a, b) => a - b);
+  const items: SummaryItem[] = [
+    {
+      id: 'redaction',
+      tone: 'changed',
+      text: m.summary_redaction({
+        count: redaction.areas,
+        countText: formatNumber(redaction.areas),
+        pages: pagesPhrase(pages.length),
+        checks: formatNumber(report.checks.length),
+      }),
+      details: [
+        ...pages.map((index) =>
+          m.summary_redaction_page({
+            page: index + 1,
+            count: formatNumber(redaction.areasByPage[index] ?? 0),
+          }),
+        ),
+        ...report.checks
+          .filter((check) => check.passed)
+          .map((check) => m.summary_redaction_check({ name: checkName(check.id) })),
+      ],
+    },
+  ];
+  if (redaction.unmappedAreas > 0) {
+    items.push({
+      id: 'redaction-unmapped',
+      tone: 'changed',
+      text: m.summary_redaction_unmapped({ count: redaction.unmappedAreas }),
+    });
+  }
+  if (report.unverifiedAttachments.length > 0) {
+    items.push({
+      id: 'redaction-unverified',
+      tone: 'changed',
+      text: m.summary_redaction_unverified({ names: report.unverifiedAttachments.join(', ') }),
+    });
+  }
+  return items;
+}
+
+function textEditItem(textEdits: TextEditExportSummary): SummaryItem {
+  return {
+    id: 'text-edits',
+    tone: 'changed',
+    text: m.summary_text_edits({
+      count: textEdits.edits,
+      countText: formatNumber(textEdits.edits),
+      fonts: formatNumber(textEdits.fontsRenamed),
+      mcids: formatNumber(textEdits.mcidsReassigned),
+      objects: formatNumber(textEdits.unreachableRemoved),
+    }),
+    details: textEdits.sources.map((s) =>
+      m.summary_text_edits_source({ name: s.name, count: formatNumber(s.edits) }),
+    ),
+  };
+}
+
 export function summarizeReport(
   report: ReconciliationReport,
   notes: SourceNotes = NO_NOTES,
   outcome?: ExportOutcome,
+  content: ContentSummary = {},
 ): SummaryItem[] {
   const items: SummaryItem[] = [];
+  // Output: what the content edits became, first.
+  if (content.redaction) items.push(...redactionItems(content.redaction));
+  if (content.textEdits) items.push(textEditItem(content.textEdits));
   if (outcome?.security) {
     const restricted = restrictionList(outcome.security.permissions);
     items.push({

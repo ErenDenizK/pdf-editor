@@ -13,13 +13,28 @@
  *    open. Removals and repairs are reported (`sourceNotes`, and a report warning), never
  *    silent (ARCHITECTURE.md §5). Before saving, the annotations of every exported page of
  *    an edited source are counted (`listAnnotations`) for verification.
+ *    Sources with text edits (`text.edit`) are always saved by PDFium and then finalized
+ *    (`finalizeTextEdits`: `/Untitled` subset fonts renamed, repeated MCIDs repaired,
+ *    unreachable objects dropped; ADR-0011 §5) right where their edited bytes are produced,
+ *    so the assembler only ever sees finalized bytes. Sources with applied redactions
+ *    (`plan.redaction`) are always saved by PDFium too: the engine holds their redacted
+ *    document, never the original bytes kept at open.
  * 3. Assemble in the assembly worker, with progress. Image pages take their bytes from the
- *    workspace store's blobs (PNG or JPEG; WebP was re-encoded to PNG when inserted).
+ *    workspace store's blobs (PNG or JPEG; WebP was re-encoded to PNG when inserted). The
+ *    assembler always writes a new file (pdf-lib `copyPages`): there is no incremental or
+ *    byte-preserving path, which a redacted export must never take (spec §5.3).
  * 4. Verify: re-open the output in PDFium (and pdf-lib via the inspector; with the user
  *    password when the output is encrypted) and compare page count, sizes, rotations,
  *    labels and outline; with edited annotations also the annotation count per page and
- *    the annotation conformance rules for the annotations this app wrote. Only verified
- *    bytes are offered.
+ *    the annotation conformance rules for the annotations this app wrote. With applied
+ *    redactions, the redaction self-check (`verifyRedactedOutput` in the PDFium worker) runs
+ *    on the exact final bytes (after assembly, compression and encryption, with the user
+ *    password) against every plan mapped to output pages; a failing check fails
+ *    verification with the check's findings. Only verified bytes are offered.
+ *
+ * Order for an edited, redacted source: engine save (annotation and form post-passes) →
+ * `finalizeTextEdits` → assembly (and encryption) → compression → PDFium verification →
+ * redaction self-check.
  *
  * Never rejects: failures resolve to `{ ok: false }` with a message fit for the UI.
  */
@@ -34,8 +49,10 @@ import {
 } from '@pdf-editor/document-model';
 import type {
   CompressionSettings,
+  ForensicReport,
   PdfAssembler,
   PdfEditor,
+  PdfRedactor,
   ReconciliationReport,
   VerificationExpectation,
   VerificationResult,
@@ -50,11 +67,12 @@ import {
   toFailure,
 } from '../engine/engine-service';
 import { m } from '../i18n';
+import { failingCheckLines } from '../redaction/report-text';
 import { blobsOfDocument, useWorkspaceStore } from '../state/workspace-store';
 import { compressExport, type ExportCompressor } from '../tools/export-compression';
 import { exportCompressionFor } from '../tools/tools-store';
 
-export type ExportPhase = 'reading' | 'assembling' | 'verifying';
+export type ExportPhase = 'reading' | 'assembling' | 'verifying' | 'redaction';
 
 export interface ExportProgress {
   readonly phase: ExportPhase;
@@ -78,6 +96,34 @@ export interface ExportOutcome {
   readonly passwordRemoved: boolean;
   readonly metadata: DocumentMetadata;
 }
+/** The redaction self-check of an export with applied redactions (summary data). */
+export interface RedactionExportSummary {
+  /** Areas checked, in output pages. */
+  readonly areas: number;
+  /** Areas per output page index. */
+  readonly areasByPage: Readonly<Record<number, number>>;
+  /** Areas on resized output pages: not checked by area (their strings still are). */
+  readonly unmappedAreas: number;
+  /** The self-check on the exact bytes offered. */
+  readonly report: ForensicReport;
+}
+
+/** What `finalizeTextEdits` did for the sources with text edits (summary data). */
+export interface TextEditExportSummary {
+  /** `text.edit` edits in the exported sources. */
+  readonly edits: number;
+  readonly fontsRenamed: number;
+  readonly mcidsReassigned: number;
+  readonly unreachableRemoved: number;
+  readonly sources: readonly {
+    readonly name: string;
+    readonly edits: number;
+    readonly fontsRenamed: number;
+    readonly mcidsReassigned: number;
+    readonly unreachableRemoved: number;
+  }[];
+}
+
 export interface PreparedExport {
   readonly bytes: ArrayBuffer;
   /** The assembler's report, plus warnings about security removed and repairs. */
@@ -89,6 +135,10 @@ export interface PreparedExport {
   readonly durationMs: number;
   /** What the export applied at document level, for the summary's security and metadata lines. */
   readonly outcome?: ExportOutcome;
+  /** Present when the document shows pages of sources with applied redactions. */
+  readonly redaction?: RedactionExportSummary;
+  /** Present when the document shows pages of sources with text edits. */
+  readonly textEdits?: TextEditExportSummary;
   /** Sizes around the compression pass (spec §5, §8), when a preset was applied. */
   readonly compression?: {
     readonly preset: CompressionSettings['preset'];
@@ -149,6 +199,11 @@ export interface ExportDependencies {
   readonly compress?: ExportCompressor;
   /** The compression preset applied to a document's export, if any. */
   readonly compressionFor?: (documentId: DocumentId) => CompressionSettings | undefined;
+  /**
+   * Runs the redaction self-check on export bytes (the PDFium worker's `PdfRedactor`).
+   * Without it an export with applied redactions fails: it cannot be verified.
+   */
+  readonly redactor?: () => Promise<Pick<PdfRedactor, 'verifyRedactedOutput'>>;
 }
 
 const defaultDependencies = (): ExportDependencies => ({
@@ -163,6 +218,7 @@ const defaultDependencies = (): ExportDependencies => ({
   exclusive: runExclusive,
   compress: compressExport,
   compressionFor: exportCompressionFor,
+  redactor: () => getEngineService().redactor(),
 });
 
 const failed = (message: string, code: 'internal' | 'aborted' = 'internal') =>
@@ -244,6 +300,15 @@ async function expectedAnnotationCounts(
   return any ? counts : undefined;
 }
 
+/** `text.edit` edits per source. */
+function textEditCounts(ws: Workspace): Map<SourceId, number> {
+  const counts = new Map<SourceId, number>();
+  for (const edit of ws.engineEdits) {
+    if (edit.kind === 'text.edit') counts.set(edit.source, (counts.get(edit.source) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /** English report warnings for the source notes (the summary shows localized lines). */
 export function sourceNoteWarnings(notes: SourceNotes): string[] {
   const warnings: string[] = [];
@@ -293,6 +358,21 @@ async function prepareExportNow(
       options.security === undefined ? {} : { security: options.security },
     );
 
+    const redaction = plan.redaction;
+    const redactor = redaction ? await deps.redactor?.() : undefined;
+    // A redacted export that cannot be checked is never offered.
+    if (redaction && !redactor) return failed(m.export_failed_redaction());
+    const redacted = new Set<SourceId>(redaction?.sources ?? []);
+    const textEdits = textEditCounts(ws);
+    const { finalizeTextEdits } = await import('@pdf-editor/engine');
+    const textEditSources: {
+      name: string;
+      edits: number;
+      fontsRenamed: number;
+      mcidsReassigned: number;
+      unreachableRemoved: number;
+    }[] = [];
+
     const dirty = deps.dirtySources?.();
     const edited = new Set(plan.sources.filter((id) => hasEngineEdits(ws, id, dirty)));
     const flatten = options.flattenAnnotations === true;
@@ -333,7 +413,12 @@ async function prepareExportNow(
       const source = ws.sources[sourceId];
       const name = source?.name ?? m.unknown_file();
       const encrypted = source?.flags.encrypted === true;
-      const read = needsEngineSave(ws, sourceId, saveContext)
+      const edits = textEdits.get(sourceId) ?? 0;
+      // Redacted and text-edited sources: the engine's document, never the bytes kept at
+      // open (they would bring the removed content or the old text back).
+      const viaEngine =
+        needsEngineSave(ws, sourceId, saveContext) || redacted.has(sourceId) || edits > 0;
+      const read = viaEngine
         ? await deps.engine.saveSource(sourceId, {
             removeSecurity: encrypted,
             ...(flatten ? { flattenAnnotations: true } : {}),
@@ -348,7 +433,20 @@ async function prepareExportNow(
           codeOf(read.error.code),
         );
       }
-      sources.set(sourceId, read.value);
+      let bytes = read.value;
+      if (edits > 0) {
+        // Where the edited bytes are produced: fonts renamed, MCIDs repaired, GC.
+        const finalized = await finalizeTextEdits(bytes);
+        bytes = finalized.bytes;
+        textEditSources.push({
+          name,
+          edits,
+          fontsRenamed: finalized.fontsRenamed,
+          mcidsReassigned: finalized.mcidsReassigned,
+          unreachableRemoved: finalized.unreachableRemoved,
+        });
+      }
+      sources.set(sourceId, bytes);
       // With a new password on the output, the old protection is replaced, not dropped.
       if (encrypted && plan.security === undefined) securityRemoved.push(name);
       if (source?.flags.repaired === true) repaired.push(name);
@@ -404,17 +502,71 @@ async function prepareExportNow(
       );
     }
     onProgress?.({ phase: 'verifying', done: 1, total: 1 });
+
+    let verification = verified.value;
+    let redactionSummary: RedactionExportSummary | undefined;
+    if (redaction && redactor) {
+      if (signal?.aborted) return failed(m.export_error_cancelled(), 'aborted');
+      onProgress?.({ phase: 'redaction', done: 0, total: 1 });
+      const password = plan.security?.userPassword;
+      // On the exact bytes offered (a copy: the worker opens its own).
+      const check = await redactor.verifyRedactedOutput(bytes.slice(0), redaction.plans, {
+        ...(password ? { password } : {}),
+        ...(signal ? { signal } : {}),
+      });
+      const areasByPage: Record<number, number> = {};
+      let areas = 0;
+      for (const p of redaction.plans) {
+        for (const area of p.areas) {
+          areasByPage[area.pageIndex] = (areasByPage[area.pageIndex] ?? 0) + 1;
+          areas += 1;
+        }
+      }
+      redactionSummary = {
+        areas,
+        areasByPage,
+        unmappedAreas: redaction.unmappedAreas,
+        report: check,
+      };
+      if (!check.ok) {
+        // Marks left unapplied are flagged by the check (any /Redact in a redacted file).
+        const pendingMarks = check.checks.some((c) =>
+          c.findings.some((f) => f.detail === 'pending /Redact mark'),
+        );
+        verification = {
+          ok: false,
+          problems: [
+            ...verification.problems,
+            ...(pendingMarks ? [m.export_redaction_pending_marks()] : []),
+            ...failingCheckLines(check),
+          ],
+        };
+      }
+      onProgress?.({ phase: 'redaction', done: 1, total: 1 });
+    }
+    const textEditSummary: TextEditExportSummary | undefined =
+      textEditSources.length > 0
+        ? {
+            edits: textEditSources.reduce((n, s) => n + s.edits, 0),
+            fontsRenamed: textEditSources.reduce((n, s) => n + s.fontsRenamed, 0),
+            mcidsReassigned: textEditSources.reduce((n, s) => n + s.mcidsReassigned, 0),
+            unreachableRemoved: textEditSources.reduce((n, s) => n + s.unreachableRemoved, 0),
+            sources: textEditSources,
+          }
+        : undefined;
     return {
       ok: true,
       value: {
         bytes,
         report: { ...report, warnings: [...report.warnings, ...sourceNoteWarnings(sourceNotes)] },
         sourceNotes,
-        verification: verified.value,
+        verification,
         pageCount,
         sourceCount: plan.sources.length,
         durationMs: performance.now() - started,
         ...(compression ? { compression } : {}),
+        ...(redactionSummary ? { redaction: redactionSummary } : {}),
+        ...(textEditSummary ? { textEdits: textEditSummary } : {}),
         outcome: {
           ...(plan.security ? { security: plan.security } : {}),
           passwordRemoved: doc.passwordRemoved === true,

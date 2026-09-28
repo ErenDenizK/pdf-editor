@@ -1610,6 +1610,162 @@
       }
     }
   ],
+  "export_redaction_pending_marks": "Redaction marks that were not applied are still in the file: apply or delete them, then export again.",
+  "redaction_apply_none": "Tick at least one mark to apply",
+  "redaction_apply_busy": "Redactions are already being applied.",
+  "redaction_apply_failed": "Applying redactions failed; the document is unchanged.",
+  "history_redactions_applied": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Redactions applied ({count} area)",
+        "countPlural=*": "Redactions applied ({count} areas)"
+      }
+    }
+  ],
+  "redaction_apply_title": "Apply redactions",
+  "redaction_apply_scope": [
+    {
+      "declarations": ["input count", "input countText", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{countText} ticked mark becomes a permanent removal.",
+        "countPlural=*": "{countText} ticked marks become permanent removals."
+      }
+    }
+  ],
+  "redaction_apply_what": "The text, images and drawings under them are removed from the file, not covered. Links, notes and form values inside them are deleted, and the text found under them is also removed from bookmarks, metadata and tags.",
+  "redaction_apply_irreversible": "You can undo this while the document is open. Once the document is exported, it cannot be undone: the removed content is not in the file.",
+  "redaction_apply_unticked": [
+    {
+      "declarations": ["input count", "input countText", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{countText} unticked mark stays a mark; apply or delete it before exporting.",
+        "countPlural=*": "{countText} unticked marks stay marks; apply or delete them before exporting."
+      }
+    }
+  ],
+  "redaction_apply_fill": "Fill colour",
+  "redaction_fill_black": "Black",
+  "redaction_fill_white": "White",
+  "redaction_fill_custom": "Custom",
+  "redaction_fill_custom_label": "Custom fill colour",
+  "redaction_overlay_label": "Overlay text (optional)",
+  "redaction_overlay_placeholder": "e.g. REDACTED",
+  "redaction_keep_attachments": "Keep attachments",
+  "redaction_keep_attachments_hint": "Attachments are removed by default because their content cannot be searched reliably. Kept attachments are listed as not verified, and applying stops if redacted text can still be seen in them.",
+  "redaction_area_only": "Area only",
+  "redaction_area_only_hint": "Only the marked areas are removed. Without this, the text under the marks is also removed from bookmarks, metadata and tags and searched for in the whole file; applying stops if it still appears anywhere, for example unmarked on another page.",
+  "redaction_apply_confirm": "Apply redactions",
+  "redaction_applying": "Removing content and running the self-check…",
+  "redaction_result_title": "Redactions applied",
+  "redaction_result_areas": [
+    {
+      "declarations": [
+        "input count",
+        "input countText",
+        "input pages",
+        "local countPlural = count: plural"
+      ],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{countText} area on {pages}",
+        "countPlural=*": "{countText} areas on {pages}"
+      }
+    }
+  ],
+  "redaction_result_source": "{name}: {areas}",
+  "redaction_result_paths": "Drawings removed",
+  "redaction_result_images": "Images removed",
+  "redaction_result_annotations": "Annotations removed",
+  "redaction_result_links": "of which links",
+  "redaction_result_fields": "Form field values cleared",
+  "redaction_result_strings": "Text replaced in bookmarks, metadata and tags",
+  "redaction_result_searched": "Strings searched for in the whole file",
+  "redaction_result_attachments": "Attachments removed",
+  "redaction_result_unverified": "Attachments kept, not verified: {names}",
+  "redaction_result_kept_marks": "Unticked marks kept as marks",
+  "redaction_result_tags_pruned": "Accessibility tags pruned to match the removed content.",
+  "redaction_result_tags_removed": "Accessibility tags removed: they could not stay intact, so the file is no longer tagged.",
+  "redaction_result_gate": "Blank check passed: every area was empty before the fill.",
+  "redaction_result_checks": "Self-check: {passed} of {total} checks passed",
+  "redaction_result_export_note": "Export the document to save the redacted file; the export runs the self-check again on the final file.",
+  "redaction_check_passed": "Passed",
+  "redaction_check_failed": "Failed",
+  "redaction_check_parse": "The file parses",
+  "redaction_check_single_revision": "One revision only (no earlier versions kept)",
+  "redaction_check_no_unreachable_objects": "No unreferenced objects",
+  "redaction_check_no_text_in_areas": "No text in the areas",
+  "redaction_check_no_search_hits": "Redacted text not found by search",
+  "redaction_check_object_strings": "Redacted text absent from every string and stream",
+  "redaction_check_byte_grep": "Redacted text absent from the raw bytes",
+  "redaction_check_no_annotations_in_areas": "No annotations in the areas",
+  "redaction_check_fill_pixels": "The areas show only the fill",
+  "redaction_blocked_title": "Redactions not applied",
+  "redaction_blocked_gate": "Content was still visible in an area after removal, so nothing was applied. The document is unchanged.",
+  "redaction_blocked_forensic": "The self-check found redacted content in the result, so nothing was applied. The document is unchanged.",
+  "redaction_blocked_source": "File: {name}",
+  "redaction_blocked_area": "Page {page}, area {area}: {kinds}",
+  "redaction_blocked_hint_search": "The redacted text still appears elsewhere. Mark those places too, or choose Area only.",
+  "redaction_blocked_hint_attachments": "Kept attachments still contain the redacted text. Apply without keeping attachments.",
+  "redaction_leftover_text": "text",
+  "redaction_leftover_path": "drawing",
+  "redaction_leftover_image": "image",
+  "redaction_leftover_shading": "shading",
+  "redaction_leftover_form": "form",
+  "redaction_leftover_annotation": "annotation",
+  "redaction_leftover_unknown": "unknown content",
+  "summary_redaction": [
+    {
+      "declarations": [
+        "input count",
+        "input countText",
+        "input pages",
+        "input checks",
+        "local countPlural = count: plural"
+      ],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Redaction: {countText} area on {pages}, self-check passed ({checks} checks).",
+        "countPlural=*": "Redaction: {countText} areas on {pages}, self-check passed ({checks} checks)."
+      }
+    }
+  ],
+  "summary_redaction_page": "Page {page}: {count}",
+  "summary_redaction_check": "{name}: passed",
+  "summary_redaction_unmapped": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} area on a resized page was not checked by area; its text was still searched for.",
+        "countPlural=*": "{count} areas on resized pages were not checked by area; their text was still searched for."
+      }
+    }
+  ],
+  "summary_redaction_unverified": "Kept attachments, not verified: {names}",
+  "summary_text_edits": [
+    {
+      "declarations": [
+        "input count",
+        "input countText",
+        "input fonts",
+        "input mcids",
+        "input objects",
+        "local countPlural = count: plural"
+      ],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Text edits: {countText} (fonts renamed: {fonts}, marked-content ids repaired: {mcids}, unused objects removed: {objects}).",
+        "countPlural=*": "Text edits: {countText} (fonts renamed: {fonts}, marked-content ids repaired: {mcids}, unused objects removed: {objects})."
+      }
+    }
+  ],
+  "summary_text_edits_source": "{name}: {count}",
+  "export_progress_redaction": "Running the redaction self-check on the final file…",
+  "export_failed_redaction": "The redaction self-check found redacted content in the exported file, so it is not offered for download.",
   "cmd_resize_pages": "Resize pages…",
   "cmd_resize_document_pages": "Resize the document’s pages…",
   "action_resize_pages": "Resize pages…",

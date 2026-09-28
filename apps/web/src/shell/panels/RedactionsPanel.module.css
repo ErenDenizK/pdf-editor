@@ -70,7 +70,8 @@
 }
 
 @media (hover: hover) {
-  .button:not(:disabled):hover {
+  .button:not(:disabled):hover,
+  .apply:not([aria-disabled='true']):hover {
     background: var(--surface-hover);
     color: var(--text-primary);
   }
