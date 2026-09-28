@@ -1603,3 +1603,582 @@ export interface PdfImageEditor {
     options?: EngineCallOptions,
   ): Promise<ImageEditResult>;
 }
+
+// ---------------------------------------------------------------------------
+// Digital signatures (M5, spec recognize-and-compare §3, ADR-0013)
+// ---------------------------------------------------------------------------
+
+/**
+ * What the offline check found (ADR-0013). Never "valid": there is no trust store, no
+ * revocation and no timestamp authority on this device.
+ * - `intact`: the CMS verifies over its byte range and the range covers the whole file;
+ * - `intact-changed-later`: verifies; later revisions add only annotations, form values,
+ *   metadata or another signature (or DSS), listed in `laterChanges`;
+ * - `changed-after-signing`: verifies; later revisions touch page content, resources, the
+ *   page tree or the catalog in other ways;
+ * - `broken`: digest, signature or signing-certificate mismatch, or a byte range that is
+ *   malformed or does not end at a revision boundary;
+ * - `cannot-check`: unsupported SubFilter or algorithm, or an unreadable CMS.
+ */
+export type SignatureStatus =
+  | 'intact'
+  | 'intact-changed-later'
+  | 'changed-after-signing'
+  | 'broken'
+  | 'cannot-check';
+
+/** The fixed line every signature status carries; the UI renders it (translated) verbatim. */
+export const SIGNATURE_HONESTY_LINE =
+  'Checked on this device against the certificates in the file. Signer identity, trust and revocation are not verified.';
+
+export type SignatureCheckId =
+  | 'byte-range'
+  | 'digest'
+  | 'signature'
+  | 'signing-certificate'
+  | 'chain'
+  | 'validity'
+  | 'key-usage'
+  | 'timestamp'
+  | 'later-changes';
+
+export type SignatureCheckOutcome = 'pass' | 'fail' | 'not-checked' | 'unsupported';
+
+/** One check and its outcome; `detail` is an English fact line for the expandable view. */
+export interface SignatureCheck {
+  readonly id: SignatureCheckId;
+  readonly outcome: SignatureCheckOutcome;
+  readonly detail: string;
+}
+
+export type RevisionChangeKind =
+  | 'form-fill'
+  | 'annotations'
+  | 'signature'
+  | 'dss'
+  | 'metadata'
+  | 'pages'
+  | 'content'
+  | 'other';
+
+/** Objects a later incremental revision changed, grouped by kind. */
+export interface RevisionChange {
+  /** 1-based revision (file order) that wrote the objects. */
+  readonly revision: number;
+  readonly kind: RevisionChangeKind;
+  /** 0-based page indices the change is on (empty when it is not on a page). */
+  readonly pages: readonly number[];
+  /** The changed objects, e.g. `14 0 R`. */
+  readonly objects: readonly string[];
+}
+
+/** One certificate as facts (no trust judgement). */
+export interface SignerFacts {
+  /** RFC 4514 string, e.g. `CN=Ada Lovelace,O=Example`. */
+  readonly subject: string;
+  readonly issuer: string;
+  readonly commonName?: string;
+  /** Serial number in hex, as openssl prints it. */
+  readonly serialNumber: string;
+  /** ISO 8601. */
+  readonly notBefore: string;
+  readonly notAfter: string;
+  /** e.g. `RSA 2048`, `ECDSA P-256`. */
+  readonly publicKey: string;
+  /** The certificate's own signature algorithm, e.g. `RSASSA-PKCS1-v1_5 with SHA-256`. */
+  readonly signatureAlgorithm: string;
+  readonly selfSigned: boolean;
+  /** keyUsage bits by name, when the extension is present. */
+  readonly keyUsage?: readonly string[];
+  /** SHA-256 fingerprint of the DER, lower-case hex. */
+  readonly sha256: string;
+}
+
+/** Spec §3.3 name for `SignerFacts`. */
+export type CertificateSummary = SignerFacts;
+
+/** The validator's result for one signature (a /Sig field with /V, or a /Perms entry). */
+export interface SignatureReport {
+  /** Fully qualified field name; `/Perms /<key>` for a usage-rights dictionary. */
+  readonly fieldName: string;
+  /** First widget's page and rect (unrotated user space), when the field has a widget. */
+  readonly pageIndex?: number;
+  readonly rect?: Rect;
+  readonly filter?: string;
+  /** /SubFilter without the slash; empty when absent. */
+  readonly subFilter: string;
+  /** The /ByteRange as written (may be malformed; see the `byte-range` check). */
+  readonly byteRange: readonly number[];
+  /** 1-based revision whose end the byte range reaches, when it reaches one. */
+  readonly revision?: number;
+  /** Revisions in the file (`startxref … %%EOF` trailers). */
+  readonly revisionCount: number;
+  readonly coversWholeFile: boolean;
+  readonly status: SignatureStatus;
+  /** Always `SIGNATURE_HONESTY_LINE`. */
+  readonly honesty: string;
+  readonly checks: readonly SignatureCheck[];
+  /** Changes made by revisions after the signed one (empty when the range covers the file). */
+  readonly laterChanges: readonly RevisionChange[];
+  /** The certificate the CMS names as signer. */
+  readonly signer?: SignerFacts;
+  /** Certificates as embedded: the path built from the signer as far as it goes, leaf first. */
+  readonly chain: readonly SignerFacts[];
+  /** /M as ISO 8601, "claimed by the signer" (not a trusted time). */
+  readonly claimedTime?: string;
+  readonly reason?: string;
+  readonly location?: string;
+  readonly contactInfo?: string;
+  /** /Name of the signature dictionary. */
+  readonly signerName?: string;
+  /** e.g. `SHA-256`. */
+  readonly digestAlgorithm?: string;
+  /** e.g. `RSASSA-PKCS1-v1_5`, `RSA-PSS`, `ECDSA P-256`. */
+  readonly signatureAlgorithm?: string;
+  /** Signed attribute names (`contentType`, `messageDigest`, `signingCertificateV2`, …). */
+  readonly signedAttributes: readonly string[];
+  /** SHA-1 (or another weak choice) was used; `weakReasons` says which. */
+  readonly weak: boolean;
+  readonly weakReasons: readonly string[];
+  /** DocMDP /P when this is a certification signature (1 no changes, 2 forms, 3 annots). */
+  readonly docMdpPermissions?: 1 | 2 | 3;
+}
+
+/** Spec §3.3 name for `SignatureReport`. */
+export type SignatureValidation = SignatureReport;
+
+export interface ValidateSignaturesOptions extends EngineCallOptions {
+  /** For encrypted files: decrypts /M, /Reason and field names (the check itself needs none). */
+  readonly password?: string;
+}
+
+/** A PAdES-B approval signature to add (spec §3.2). */
+export interface SignRequest {
+  /** The .p12/.pfx file (PBES2 only). Transferred to the worker and dropped after use. */
+  readonly pkcs12: ArrayBuffer;
+  readonly password: string;
+  readonly reason?: string;
+  readonly location?: string;
+  readonly contactInfo?: string;
+  /** New field name; default `Signature1` (or the next free `SignatureN`). */
+  readonly fieldName?: string;
+  /** A visible widget with the signer name and date; invisible when absent. */
+  readonly visible?: { readonly pageIndex: number; readonly rect: Rect };
+  /** Name shown in a visible widget and written as /Name; default the certificate's CN. */
+  readonly signerName?: string;
+  /** Bytes reserved for the DER CMS (default 16384; at least 4096). */
+  readonly reserveBytes?: number;
+  /** The claimed time (/M); default now. ISO 8601 or a Date. */
+  readonly date?: string | Date;
+}
+
+export interface SignOptions extends EngineCallOptions {
+  readonly onProgress?: ProgressCallback;
+}
+
+export interface SignResult {
+  /** The signed file: the input bytes unchanged plus one incremental section. */
+  readonly bytes: ArrayBuffer;
+  /** The validator's report on the new signature (always `intact`, or signing fails). */
+  readonly report: SignatureReport;
+  readonly fieldName: string;
+  readonly byteRange: readonly [number, number, number, number];
+  /** The appended section's xref kind (matches the source). */
+  readonly xrefKind: 'table' | 'stream';
+  /** DER size of the CMS and the space reserved for it. */
+  readonly cmsBytes: number;
+  readonly reserveBytes: number;
+  readonly signer: SignerFacts;
+}
+
+/** Why signing refused or failed (`SigningError.reason`; the `EngineError.code` is coarser). */
+export type SigningFailureReason =
+  | 'encrypted-input'
+  | 'damaged-input'
+  | 'legacy-pkcs12'
+  | 'bad-password'
+  | 'malformed-pkcs12'
+  | 'no-key'
+  | 'unsupported-key'
+  | 'field-exists'
+  | 'bad-request'
+  | 'reserve-too-small'
+  | 'verification-failed';
+
+/** A signing refusal or failure. Crosses the worker as a value (see signature-protocol). */
+export class SigningError extends EngineError {
+  constructor(
+    readonly reason: SigningFailureReason,
+    message: string,
+    options?: { cause?: unknown },
+  ) {
+    super(SIGNING_ERROR_CODES[reason], message, options);
+    this.name = 'SigningError';
+  }
+}
+
+const SIGNING_ERROR_CODES: Record<SigningFailureReason, EngineErrorCode> = {
+  'encrypted-input': 'unsupported-encryption',
+  'damaged-input': 'corrupt',
+  'legacy-pkcs12': 'unsupported',
+  'bad-password': 'password-incorrect',
+  'malformed-pkcs12': 'corrupt',
+  'no-key': 'unsupported',
+  'unsupported-key': 'unsupported',
+  'field-exists': 'unsupported',
+  'bad-request': 'internal',
+  'reserve-too-small': 'internal',
+  'verification-failed': 'internal',
+};
+
+// ---------------------------------------------------------------------------
+// Compare two documents (M5 spec recognize-and-compare §2): the analysis worker
+// ---------------------------------------------------------------------------
+
+/**
+ * How a page is laid out for comparison: its unrotated CropBox size, the lower-left corner of
+ * that box in user space, and the rotation it is displayed (and rendered) with: the page's
+ * /Rotate plus any view rotation. Renders and pixel regions use this display frame; tokens,
+ * regions and facts are reported in unrotated user space.
+ */
+export interface ComparePageGeometry {
+  readonly size: Size;
+  readonly rotation: Rotation;
+  /** CropBox lower-left corner in user space; (0, 0) when absent. */
+  readonly origin?: { readonly x: number; readonly y: number };
+}
+
+/** One page's input to a comparison: geometry plus `getPageText` runs (glyph boxes). */
+export interface ComparePageInput extends ComparePageGeometry {
+  readonly runs: readonly TextRun[];
+}
+
+/** A word (or punctuation mark) of a page, normalised for comparison, with its glyph boxes. */
+export interface CompareToken {
+  /** Normalised text (NFKC, no soft hyphens, line-end hyphenation joined). */
+  readonly text: string;
+  /** Glyph boxes in user space, one per line the token spans (hyphenated words have two). */
+  readonly rects: readonly Rect[];
+}
+
+/**
+ * Pixels handed to the analysis worker: an `ImageBitmap` (transferred and closed there) or
+ * RGBA bytes (straight alpha, row-major, top row first; the buffer is transferred).
+ */
+export type AnalysisRaster =
+  | ImageBitmap
+  | {
+      readonly width: number;
+      readonly height: number;
+      readonly data: Uint8ClampedArray;
+    };
+
+/** RGBA pixels returned by the analysis worker (heat maps). */
+export interface AnalysisRgba {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Uint8ClampedArray;
+}
+
+export type CompareAlignment = 'auto' | 'index' | 'best-match';
+
+/**
+ * A row of the page map: `a` and `b` are page indices (0-based) in each document; a missing
+ * side is a deleted (`b` absent) or inserted (`a` absent) page. `similarity` is the
+ * alignment's confidence in [0, 1]: Jaccard similarity of word 3-shingles (`basis: 'text'`),
+ * 32×32 thumbnail similarity (`'thumbnail'`, pages without text), or, for unpaired pages,
+ * the best similarity any page of the other document reached.
+ */
+export interface PagePair {
+  readonly a?: number;
+  readonly b?: number;
+  readonly similarity: number;
+  readonly basis: 'text' | 'thumbnail' | 'index' | 'none';
+}
+
+/**
+ * Pixel difference of one aligned page pair, rendered at `dpi` in a common top-left frame
+ * (`width` × `height` px: the larger of both pages on each axis). JSON-serialisable: the
+ * heat map stays in the worker under `heatmapId` (fetch it with `heatmap(job, id)`).
+ */
+export interface PixelDiffResult {
+  readonly dpi: number;
+  readonly width: number;
+  readonly height: number;
+  /** Changed pixels (pixelmatch, anti-aliasing excluded) in the common frame. */
+  readonly changedPixels: number;
+  /** `changedPixels / (width × height)`. */
+  readonly changedRatio: number;
+  /** Changed areas (8 px grid cells, clustered) in the second document's user space. */
+  readonly regions: readonly Rect[];
+  /** The same areas in the first document's user space. */
+  readonly regionsA: readonly Rect[];
+  /** The pages render at different pixel sizes (the difference counts as changed pixels). */
+  readonly sizeMismatch: boolean;
+  /** Present when `changedPixels > 0`. */
+  readonly heatmapId?: string;
+}
+
+/** Where a text change sits on one side: page, the text as extracted, glyph boxes per line. */
+export interface TextSpanRef {
+  readonly page: number;
+  readonly text: string;
+  readonly rects: readonly Rect[];
+  /** The line(s) the span sits on, for context ("… on Monday after …"). */
+  readonly line?: string;
+}
+
+/**
+ * A word-level text change: `removed` (only `a`), `added` (only `b`) or `changed` (both, the
+ * removed words replaced by the added ones). A change that crosses a page break is split.
+ */
+export interface TextChange {
+  readonly kind: 'added' | 'removed' | 'changed';
+  readonly a?: TextSpanRef;
+  readonly b?: TextSpanRef;
+}
+
+export interface TextComparison {
+  /**
+   * `document`: one diff over the paired pages' words in page-map order (text reflowing
+   * across a page break is not a change); `page-pairs`: one diff per pair, used when asked
+   * or when the document diff exceeded its time budget.
+   */
+  readonly scope: 'document' | 'page-pairs';
+  readonly changes: readonly TextChange[];
+  /** Pairs whose own diff also ran out of time: reported as whole-page replacements. */
+  readonly pairsOverBudget: readonly number[];
+  readonly tokens: { readonly a: number; readonly b: number };
+}
+
+/** What the facts diff compares (spec §2.1 "Facts"), gathered from inspection data. */
+export interface CompareFacts {
+  /** Info dictionary text entries (Title, Author, …, custom keys), name without slash. */
+  readonly info: Readonly<Record<string, string>>;
+  /** Simple XMP properties (`dc:title`, `pdf:Producer`, `xmp:CreatorTool`, …) when read. */
+  readonly xmp?: Readonly<Record<string, string>>;
+  readonly pages: readonly { readonly size: Size; readonly rotation: Rotation }[];
+  /** Per page: annotation subtype (e.g. `Highlight`, `Link`) → count; widgets and popups excluded. */
+  readonly annotations: readonly Readonly<Record<string, number>>[];
+  readonly formFields: readonly {
+    readonly name: string;
+    readonly kind: string;
+    readonly value?: string;
+  }[];
+  /** Embedded file names (document-level and file attachment annotations). */
+  readonly attachments: readonly string[];
+  /** Signature fields and whether each carries a signature value (never validated here). */
+  readonly signatures: readonly { readonly field: string; readonly signed: boolean }[];
+}
+
+export type FactChangeKind =
+  | 'page-count'
+  | 'metadata'
+  | 'xmp'
+  | 'page-size'
+  | 'page-rotation'
+  | 'annotations'
+  | 'form-field'
+  | 'attachment'
+  | 'signature';
+
+/** One difference in the facts; values are display strings, a missing side is absence. */
+export interface FactChange {
+  readonly kind: FactChangeKind;
+  /** The key (`Title`, `dc:title`, `Highlight`, a field or file name, `size`, …). */
+  readonly key: string;
+  readonly a?: string;
+  readonly b?: string;
+  /** For page facts: the page in each document (0-based). */
+  readonly aPage?: number;
+  readonly bPage?: number;
+}
+
+export type ComparePairStatus = 'identical' | 'changed' | 'inserted' | 'deleted';
+
+/** The outcome for one row of the page map. */
+export interface ComparePairResult {
+  readonly pair: PagePair;
+  readonly status: ComparePairStatus;
+  /** Absent for inserted and deleted pages, and when the visual diff was not run. */
+  readonly visual?: PixelDiffResult;
+  /** Text changes that touch this pair's pages. */
+  readonly textChanges: number;
+  /** Word count of an inserted or deleted page. */
+  readonly words?: number;
+  /** First line of an inserted or deleted page (its heading, usually). */
+  readonly firstLine?: string;
+  /** Page size or rotation differs (also listed in `facts`). */
+  readonly geometryChanged: boolean;
+}
+
+export interface CompareSideSummary {
+  readonly name: string;
+  readonly fingerprint?: string;
+  readonly pageCount: number;
+}
+
+/** The whole comparison, JSON-serialisable (heat maps are referenced by id). */
+export interface ComparisonResult {
+  readonly version: 1;
+  readonly a: CompareSideSummary;
+  readonly b: CompareSideSummary;
+  readonly settings: {
+    readonly alignment: 'index' | 'best-match';
+    readonly dpi: number;
+    readonly threshold: number;
+    readonly visual: boolean;
+    readonly text: boolean;
+  };
+  readonly pages: readonly ComparePairResult[];
+  readonly text: TextComparison;
+  readonly facts: readonly FactChange[];
+  readonly counts: {
+    readonly identical: number;
+    readonly changed: number;
+    readonly inserted: number;
+    readonly deleted: number;
+    readonly textAdded: number;
+    readonly textRemoved: number;
+    readonly textChanged: number;
+    readonly visualRegions: number;
+    readonly facts: number;
+  };
+  /** Fixed honesty lines (English) the UI and the report show with the result. */
+  readonly notes: readonly string[];
+}
+
+export type ComparePhase = 'text' | 'thumbnails' | 'align' | 'visual' | 'text-diff' | 'facts';
+
+export interface CompareProgress {
+  readonly phase: ComparePhase;
+  readonly done: number;
+  readonly total: number;
+}
+
+export interface CompareOptions extends EngineCallOptions {
+  /**
+   * `auto` (default): by index when the page counts match and every positional pair is
+   * similar enough (above `minSimilarity`), best match otherwise.
+   */
+  readonly alignment?: CompareAlignment;
+  /** Render resolution of the visual diff (default 100). */
+  readonly dpi?: number;
+  /** pixelmatch threshold (default 0.1). */
+  readonly threshold?: number;
+  /** Default `document`; falls back to `page-pairs` when over budget. */
+  readonly textScope?: 'document' | 'page-pairs';
+  /** Document language for word segmentation (`Intl.Segmenter`); default `en`. */
+  readonly locale?: string;
+  /** Join words hyphenated at a line end (default true). */
+  readonly joinHyphens?: boolean;
+  /** Run the visual diff (default true). */
+  readonly visual?: boolean;
+  /** Run the text diff (default true). */
+  readonly text?: boolean;
+  /** Best match pairs two pages only above this similarity (default 0.15). */
+  readonly minSimilarity?: number;
+  readonly onProgress?: (progress: CompareProgress) => void;
+  /** Called as each pair's visual diff lands (in processing order), before the text diff. */
+  readonly onPair?: (index: number, pair: PagePair, visual: PixelDiffResult) => void;
+  /**
+   * Order in which pairs are diffed visually (indices into the page map), e.g. the pages
+   * on screen first; pairs not listed follow in page-map order.
+   */
+  readonly visualOrder?: (pairs: readonly PagePair[]) => readonly number[];
+}
+
+// ---------------------------------------------------------------------------
+// PDF → text / Markdown (M5 spec §4): the analysis worker
+// ---------------------------------------------------------------------------
+
+/** An image drawn on a page, as placed (unrotated user space) and optionally its pixels. */
+export interface ConvertImageInput {
+  readonly rect: Rect;
+  /** Encoded PNG or JPEG bytes (JPEG is passed through), or RGBA pixels (encoded as PNG). */
+  readonly png?: Uint8Array;
+  readonly jpeg?: Uint8Array;
+  readonly rgba?: {
+    readonly width: number;
+    readonly height: number;
+    readonly data: Uint8Array | Uint8ClampedArray;
+  };
+}
+
+export interface ConvertLinkInput {
+  readonly rect: Rect;
+  readonly uri: string;
+}
+
+/** One page's input to a conversion (from `getPageText`, link annotations, `locateImages`). */
+export interface ConvertPageInput extends ComparePageGeometry {
+  readonly runs: readonly TextRun[];
+  readonly links?: readonly ConvertLinkInput[];
+  readonly images?: readonly ConvertImageInput[];
+}
+
+export type ConvertPageBreak = 'none' | 'rule' | 'comment';
+
+export interface ConvertOptions {
+  readonly format?: 'markdown' | 'text';
+  /** `document` (default): one file; `pages`: one file per page. */
+  readonly scope?: 'document' | 'pages';
+  /** Between pages in a document-scope file (default `none`). */
+  readonly pageBreak?: ConvertPageBreak;
+  /** Keep running headers, footers and page numbers (default false: dropped). */
+  readonly keepHeadersFooters?: boolean;
+  /** Join words hyphenated at a line end (default true). */
+  readonly joinHyphens?: boolean;
+  /** Markdown: include images (written as files under `images/`); default true. */
+  readonly images?: boolean;
+  /**
+   * Markdown: start the file with an HTML comment saying how it was made and what is not
+   * reconstructed (tables, rotated text); default false.
+   */
+  readonly headerComment?: boolean;
+  /** Base name of the document-scope file (default `document`). */
+  readonly baseName?: string;
+}
+
+export type ConvertBlockKind = 'heading' | 'paragraph' | 'list-item' | 'image';
+
+export interface ConvertReport {
+  readonly pages: number;
+  /** Pages (0-based) without extractable text: candidates for OCR. */
+  readonly pagesWithoutText: readonly number[];
+  readonly headings: number;
+  readonly paragraphs: number;
+  readonly listItems: number;
+  readonly images: number;
+  readonly links: number;
+  /** Groups of lines laid out like a table (their text is emitted in reading order). */
+  readonly suspectedTables: number;
+  readonly bodyFontSize?: number;
+  readonly dropped: readonly {
+    readonly page: number;
+    readonly text: string;
+    readonly reason: 'running-header' | 'running-footer' | 'page-number';
+  }[];
+  /** Fixed honesty lines (English). */
+  readonly notes: readonly string[];
+}
+
+export interface ConvertFile {
+  /** Relative path, e.g. `document.md`, `page-003.md`, `images/p1-1.png`. */
+  readonly path: string;
+  readonly mime: string;
+  readonly bytes: Uint8Array;
+}
+
+export interface ConvertResult {
+  readonly format: 'markdown' | 'text';
+  /** The text of the document-scope file (or every page file joined), for previews. */
+  readonly text: string;
+  /** One string per page (the per-page file contents). */
+  readonly pageTexts: readonly string[];
+  /** Text files first, then images. */
+  readonly files: readonly ConvertFile[];
+  /** A ZIP of `files` when there is more than one file; absent otherwise. */
+  readonly zip?: Uint8Array;
+  readonly report: ConvertReport;
+}

@@ -129,3 +129,16 @@ export type {
   RasterFile,
 } from './worker/compress-protocol';
 export type { RasterPageInput, RasterPageSpec, RasterTile } from './rasterize/encode-page';
+// Digital signatures (M5 §3, ADR-0013): validation and PAdES-B signing. In the app they run in
+// the signature worker (`@pdf-editor/engine/signature.worker`, wrapped by
+// `createSignatureProxy`); the functions below are the same code on the calling thread.
+export {
+  DEFAULT_RESERVE_BYTES,
+  PKCS12_REEXPORT_COMMAND,
+  type RevisionEnd,
+  revisionBytes,
+  revisionEnds,
+  signPdf,
+  validateSignatures,
+} from './signatures';
+export { createSignatureProxy, type SignatureProxy } from './worker/signature-proxy';

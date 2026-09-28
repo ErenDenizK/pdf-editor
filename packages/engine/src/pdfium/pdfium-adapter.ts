@@ -80,6 +80,7 @@ import {
   type VerificationExpectation,
   type VerificationResult,
 } from '../types';
+import { loadForSignatures, readSignatureFields } from '../signatures/fields';
 import { checkXrefStructure } from '../structure/xref-check';
 import { permissionsFromP } from '../pdflib/inspect';
 import { type ClearFieldsRequest, clearFields, finalizeForms } from './form-finalize';
@@ -210,6 +211,11 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   private readonly docs = new Map<SourceId, OpenEntry>();
   /** Sources whose form values were set since open (save regenerates appearances). */
   private readonly formsEdited = new Set<SourceId>();
+  /** Signature facts by field name, per open document (listFormFields' /V pairing). */
+  private readonly signatureFactsCache = new WeakMap<
+    OpenEntry,
+    Promise<ReadonlyMap<string, FormFieldSignature> | undefined>
+  >();
   private scratchCounter = 0;
 
   constructor(options: PdfiumAdapterOptions) {
@@ -974,17 +980,29 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     const fields = [...groups.values()].map(describeField);
     const signatureFields = fields.filter((f) => f.kind === 'signature');
     if (signatureFields.length === 0) return fields;
-    // EmbedPDF lists signatures without their field: pair them only when the counts agree.
+    // PDFium lists every top-level /Sig field, signed or not (an unsigned one has an empty
+    // /ByteRange and /Contents), without its name: it cannot be paired by position.
     const engine = await this.engine();
-    const signatures = await this.run(
-      engine.getSignatures(this.entry(id).doc),
-      options,
-      'getSignatures',
+    const entry = this.entry(id);
+    const signatures = await this.run(engine.getSignatures(entry.doc), options, 'getSignatures');
+    const signed = signatures.filter(
+      (s) => s.byteRange.byteLength > 0 || s.contents.byteLength > 0,
     );
-    if (signatures.length !== signatureFields.length) return fields;
+    if (signed.length === 0) return fields;
+    // Pair by the parsed /V of each field (spec §3.3), read from PDFium's current bytes.
+    const byName = await this.signatureFacts(entry, options);
+    if (byName) {
+      return fields.map((field) => {
+        if (field.kind !== 'signature') return field;
+        const facts = byName.get(field.name);
+        return facts ? { ...field, signature: facts } : field;
+      });
+    }
+    // The field tree cannot be read: attach PDFium's facts only when every field is signed.
+    if (signed.length !== signatureFields.length) return fields;
     return fields.map((field) => {
       const index = signatureFields.indexOf(field);
-      const signature = index < 0 ? undefined : signatures[index];
+      const signature = index < 0 ? undefined : signed[index];
       if (!signature) return field;
       const facts: FormFieldSignature = {
         ...(signature.time ? { date: signature.time } : {}),
@@ -992,6 +1010,42 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
       };
       return { ...field, signature: facts };
     });
+  }
+
+  /**
+   * Signed signature fields by fully qualified name, with /Name, /M and /Reason of their /V
+   * (cached per open document); undefined when the field tree cannot be read.
+   */
+  private signatureFacts(
+    entry: OpenEntry,
+    options: EngineCallOptions,
+  ): Promise<ReadonlyMap<string, FormFieldSignature> | undefined> {
+    let pending = this.signatureFactsCache.get(entry);
+    if (!pending) {
+      pending = (async () => {
+        try {
+          const engine = await this.engine();
+          const bytes = await this.run(engine.saveAsCopy(entry.doc), options, 'save');
+          const { doc, decrypted } = await loadForSignatures(new Uint8Array(bytes), entry.password);
+          const map = new Map<string, FormFieldSignature>();
+          for (const field of readSignatureFields(doc, decrypted)) {
+            if (!field.signed || !field.sig || field.fieldObject === undefined) continue;
+            const { name: signer, m: date, reason } = field.sig;
+            map.set(field.name, {
+              ...(signer ? { signer } : {}),
+              ...(date ? { date } : {}),
+              ...(reason ? { reason } : {}),
+            });
+          }
+          return map;
+        } catch {
+          this.signatureFactsCache.delete(entry);
+          return undefined;
+        }
+      })();
+      this.signatureFactsCache.set(entry, pending);
+    }
+    return pending;
   }
 
   /**

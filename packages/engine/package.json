@@ -14,6 +14,10 @@
       "types": "./src/worker/assembler.worker.ts",
       "import": "./src/worker/assembler.worker.ts"
     },
+    "./analysis.worker": {
+      "types": "./src/worker/analysis.worker.ts",
+      "import": "./src/worker/analysis.worker.ts"
+    },
     "./compress.worker": {
       "types": "./src/worker/compress.worker.ts",
       "import": "./src/worker/compress.worker.ts"
@@ -30,6 +34,10 @@
     "./fonts": {
       "types": "./src/fonts/index.ts",
       "import": "./src/fonts/index.ts"
+    },
+    "./signature.worker": {
+      "types": "./src/worker/signature.worker.ts",
+      "import": "./src/worker/signature.worker.ts"
     }
   },
   "scripts": {
@@ -44,7 +52,11 @@
     "@embedpdf/models": "2.15.1",
     "@embedpdf/pdfium": "2.15.1",
     "@pdf-editor/document-model": "workspace:*",
+    "asn1js": "3.0.10",
     "comlink": "^4.4.2",
-    "fflate": "0.8.3"
+    "diff": "9.0.0",
+    "fflate": "0.8.3",
+    "pixelmatch": "7.2.0",
+    "pkijs": "3.4.1"
   }
 }
