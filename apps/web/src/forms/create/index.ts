@@ -7,6 +7,11 @@
  * Placing and editing end when leaving Read mode, switching documents or picking another
  * tool; Esc cancels placing. A ToolMode for placing fields can be added to the tool store
  * later; until then the Forms panel drives it.
+ *
+ * Keyboard path: arming focuses the current page's layer once the menu or palette that
+ * armed it has given the focus back to its control (remembered as the invoker); there
+ * Enter or Space places the field (arrows move it first, CreatedFieldLayer), and Esc
+ * cancels and returns the focus to the invoker.
  */
 import { type CreatedFieldKind, getActiveDocument } from '@pdf-editor/document-model';
 
@@ -14,6 +19,7 @@ import type { CommandRegistry } from '../../commands/registry';
 import { m } from '../../i18n';
 import { announce } from '../../shell/announcer';
 import { useUiStore } from '../../state/ui-store';
+import { useViewStore } from '../../state/view-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { useToolStore } from '../../viewer/tool-store';
 import { useFormStore } from '../form-store';
@@ -34,6 +40,66 @@ export const FIELD_KINDS: readonly CreatedFieldKind[] = [
   'button',
 ];
 
+/** Popups that give the focus back to their control when they close (menu, palette). */
+const POPUP = '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
+/** How long arming waits for such a popup to close before taking the focus anyway. */
+const SETTLE_MS = 1000;
+
+/** The control that armed placing (focus goes back there on Esc). */
+let placingInvoker: HTMLElement | null = null;
+let settleFrame = 0;
+
+/** The placing layer of the current page (else the first one shown). */
+function currentPlacingLayer(): HTMLElement | null {
+  const page = useViewStore.getState().currentPage;
+  return (
+    document.querySelector<HTMLElement>(`[data-created-field-layer="${page}"][data-placing]`) ??
+    document.querySelector<HTMLElement>('[data-created-field-layer][data-placing]')
+  );
+}
+
+/**
+ * Focuses the current page's placing layer once the focus has left the popup that armed
+ * placing (the menu or palette returns it to its control first, which becomes the invoker).
+ */
+function focusPlacingLayer(): void {
+  if (typeof window === 'undefined') return;
+  cancelAnimationFrame(settleFrame);
+  const started = performance.now();
+  const step = () => {
+    if (useCreateStore.getState().placing === null) return;
+    const waiting = performance.now() - started < SETTLE_MS;
+    const active = document.activeElement;
+    const inPopup = active instanceof HTMLElement && active.closest(POPUP) !== null;
+    const layer = currentPlacingLayer();
+    if ((inPopup || !layer) && waiting) {
+      settleFrame = requestAnimationFrame(step);
+      return;
+    }
+    if (!layer) return;
+    if (active !== layer) {
+      placingInvoker =
+        active instanceof HTMLElement && active !== document.body && !inPopup ? active : null;
+    }
+    layer.focus({ preventScroll: true });
+  };
+  settleFrame = requestAnimationFrame(step);
+}
+
+/** Esc while a placing layer has the focus: back to the control that armed placing. */
+function returnPlacingFocus(): void {
+  if (typeof document === 'undefined') return;
+  cancelAnimationFrame(settleFrame);
+  const invoker = placingInvoker;
+  placingInvoker = null;
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || !active.matches('[data-created-field-layer]')) return;
+  const target = invoker?.isConnected
+    ? invoker
+    : document.querySelector<HTMLElement>('[data-read-viewport]');
+  target?.focus({ preventScroll: true });
+}
+
 /** Arms placing `kind`: Read mode, Select tool, the field editor closed. */
 export function startPlacing(kind: CreatedFieldKind): void {
   if (!getActiveDocument(useWorkspaceStore.getState().workspace)) return;
@@ -45,10 +111,12 @@ export function startPlacing(kind: CreatedFieldKind): void {
   store.select(null);
   store.setPlacing(kind);
   announce(m.forms_create_placing({ kind: kindName(kind) }));
+  focusPlacingLayer();
 }
 
 export function cancelPlacing(): void {
   if (useCreateStore.getState().placing === null) return;
+  returnPlacingFocus();
   useCreateStore.getState().setPlacing(null);
   announce(m.forms_create_placing_cancelled());
 }
@@ -75,6 +143,13 @@ const stop = () => {
 
 useUiStore.subscribe((state, previous) => {
   if (state.viewMode !== previous.viewMode) stop();
+});
+// Placing ended (placed, cancelled, stopped): forget the invoker.
+useCreateStore.subscribe((state, previous) => {
+  if (state.placing === null && previous.placing !== null) {
+    if (typeof window !== 'undefined') cancelAnimationFrame(settleFrame);
+    placingInvoker = null;
+  }
 });
 useToolStore.subscribe((state, previous) => {
   if (state.mode !== previous.mode && state.mode !== 'select') stop();

@@ -5,7 +5,9 @@
  * box with eight handles and the contextual bar); dragging it moves it, dragging a handle
  * resizes it (Shift keeps the aspect ratio, Alt resizes from the centre). Each committed
  * drag is one history entry. With the selection focused, arrow keys nudge by 1 pt (Shift:
- * 10 pt), Delete removes the image and Esc deselects.
+ * 10 pt), Mod+Arrow resizes it keeping the aspect ratio (Right / Up grow, Left / Down
+ * shrink the longer side by 1 pt, Shift: 10 pt; the new size is announced), Delete removes
+ * the image and Esc deselects.
  *
  * Images are located again for every page revision (object paths go stale after any
  * edit); after an edit the layer selects the image again where it expects it.
@@ -15,11 +17,13 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   useEffect,
+  useId,
   useRef,
   useState,
 } from 'react';
 
 import type { PageTarget } from '../annotations/annotation-store';
+import { currentPlatform, parseShortcut, toAriaKeyShortcut } from '../commands/shortcuts';
 import { type Box, cssBoxToUser, type PageFrame, rectToCss } from '../annotations/geometry';
 import { m } from '../i18n';
 import type { PageOverlayProps } from '../stage/page-overlays';
@@ -32,6 +36,7 @@ import {
   HANDLES,
   type Handle,
   handlePoint,
+  keyResizeBox,
   moveBox,
   nudgeOffset,
   resizeBox,
@@ -46,6 +51,18 @@ import { formatPt, sameImage } from './readout';
 const DRAG_THRESHOLD = 3;
 /** Size of a handle square, CSS pixels. */
 const HANDLE_SIZE = 8;
+/** `aria-keyshortcuts` of the selection. */
+const SELECTION_KEYS = [
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  ...['Up', 'Down', 'Left', 'Right'].map((key) =>
+    toAriaKeyShortcut(parseShortcut(`Mod+${key}`), currentPlatform),
+  ),
+  'Delete',
+  'Escape',
+].join(' ');
 
 interface Gesture {
   readonly kind: 'move' | 'resize';
@@ -66,6 +83,7 @@ export function ImageLayer(props: PageOverlayProps) {
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef<HTMLButtonElement>(null);
+  const keysId = useId();
 
   // Located again (after an edit, undo or redo): keep or restore the selection.
   useEffect(() => {
@@ -143,10 +161,16 @@ export function ImageLayer(props: PageOverlayProps) {
     window.addEventListener('pointercancel', cancel);
   };
 
-  const commitBox = (sel: ImageSelection, from: Box, box: Box) => {
+  const commitBox = (
+    sel: ImageSelection,
+    from: Box,
+    box: Box,
+    announcement?: (rect: ReturnType<typeof roundRect>) => string,
+  ) => {
     setGesture(null);
     if (!boxChanged(from, box)) return;
-    void transformImage(sel.target, sel.image, roundRect(cssBoxToUser(frame, box)));
+    const rect = roundRect(cssBoxToUser(frame, box));
+    void transformImage(sel.target, sel.image, rect, announcement?.(rect));
   };
 
   const select = (image: LocatedImage): ImageSelection => {
@@ -209,6 +233,20 @@ export function ImageLayer(props: PageOverlayProps) {
       if (!busy) void deleteImage(selection.target, selection.image);
       return;
     }
+    const mod = currentPlatform === 'mac' ? event.metaKey : event.ctrlKey;
+    if (mod && !event.altKey) {
+      const from = rectToCss(frame, selection.image.bounds);
+      const next = keyResizeBox(from, event.key, event.shiftKey, frame.scale);
+      if (!next) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (busy) return;
+      commitBox(selection, from, next, (rect) =>
+        m.image_object_resized_to({ width: formatPt(rect.width), height: formatPt(rect.height) }),
+      );
+      return;
+    }
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     const offset = nudgeOffset(event.key, event.shiftKey, frame.scale);
     if (!offset) return;
     event.preventDefault();
@@ -261,7 +299,8 @@ export function ImageLayer(props: PageOverlayProps) {
               width: formatPt(selection.image.bounds.width),
               height: formatPt(selection.image.bounds.height),
             })}
-            aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Delete Escape"
+            aria-keyshortcuts={SELECTION_KEYS}
+            aria-describedby={keysId}
             style={{ left: shown.left, top: shown.top, width: shown.width, height: shown.height }}
             onKeyDown={onSelectionKeyDown}
             onPointerDown={(e) => onImagePointerDown(e, selection.image)}
@@ -288,6 +327,9 @@ export function ImageLayer(props: PageOverlayProps) {
               );
             })}
           </button>
+          <span id={keysId} className="visually-hidden">
+            {m.image_object_resize_keys({ mod: currentPlatform === 'mac' ? 'Command' : 'Ctrl' })}
+          </span>
           {gesture === null ? (
             <ImageBar selection={selection} frame={frame} box={shown} />
           ) : (

@@ -106,6 +106,31 @@ export function nudgeOffset(
   }
 }
 
+/**
+ * Keyboard resize (Mod+Arrow): Right / Up grow the box, Left / Down shrink it, so that its
+ * longer side changes by 1 pt (Shift: 10) at `scale` px/pt and the other side keeps the
+ * aspect ratio; the top-left corner stays. Undefined for other keys; never below `min`.
+ */
+export function keyResizeBox(
+  box: Box,
+  key: string,
+  shift: boolean,
+  scale: number,
+  min = MIN_SIDE,
+): Box | undefined {
+  const sign =
+    key === 'ArrowRight' || key === 'ArrowUp'
+      ? 1
+      : key === 'ArrowLeft' || key === 'ArrowDown'
+        ? -1
+        : 0;
+  if (sign === 0 || box.width <= 0 || box.height <= 0) return undefined;
+  const longer = Math.max(box.width, box.height);
+  const shorter = Math.min(box.width, box.height);
+  const factor = Math.max((longer + sign * (shift ? 10 : 1) * scale) / longer, min / shorter);
+  return { left: box.left, top: box.top, width: box.width * factor, height: box.height * factor };
+}
+
 /** Whether two boxes differ by more than `epsilon` CSS pixels on any edge. */
 export function boxChanged(a: Box, b: Box, epsilon = 0.5): boolean {
   return (

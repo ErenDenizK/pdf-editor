@@ -57,6 +57,58 @@ export function blockerLabel(
   }
 }
 
+/** A run's identity on its page revision: object path and first text-page character. */
+export function runKey(run: Pick<LocatedRun, 'objectPath' | 'charStart'>): string {
+  return `${run.objectPath.join('.')}:${run.charStart}`;
+}
+
+/** Where a run starts on the page (its first glyph's origin, else its line box corner). */
+function runOrigin(run: LocatedRun): { x: number; y: number } {
+  return run.glyphs[0]?.origin ?? { x: run.lineBox.x, y: run.lineBox.y };
+}
+
+/** Length of a rect projected on the unit vector `v`. */
+function extentAlong(rect: LocatedRun['lineBox'], v: { x: number; y: number }): number {
+  return Math.abs(v.x) * rect.width + Math.abs(v.y) * rect.height;
+}
+
+/**
+ * The run the keyboard focus returns to after the editor over `previous` closed: among the
+ * editable `runs` on the same line (same writing direction, origin within half the line's
+ * thickness of it), the one with `previous`'s key, else the one nearest to where `previous`
+ * started (an edit splits the line into new objects, so keys change). Undefined when no
+ * editable run is left on that line.
+ */
+export function focusReturnRun(
+  runs: readonly LocatedRun[],
+  previous: LocatedRun,
+): LocatedRun | undefined {
+  const d = previous.direction;
+  const normal = { x: -d.y, y: d.x };
+  const origin = runOrigin(previous);
+  const tolerance = Math.max(extentAlong(previous.lineBox, normal) / 2, 0.5);
+  const key = runKey(previous);
+  let best: LocatedRun | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const run of runs) {
+    if (blockerOfRun(run)) continue;
+    if (run.direction.x * d.x + run.direction.y * d.y < 0.99) continue;
+    const o = runOrigin(run);
+    const offset = { x: o.x - origin.x, y: o.y - origin.y };
+    if (Math.abs(offset.x * normal.x + offset.y * normal.y) > tolerance) continue;
+    if (runKey(run) === key) return run;
+    // Distance along the line from `previous`'s start to the run's extent (0 inside it).
+    const start = offset.x * d.x + offset.y * d.y;
+    const end = start + extentAlong(run.lineBox, d);
+    const distance = start > 0 ? start : end < 0 ? -end : 0;
+    if (distance < bestDistance) {
+      best = run;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 function quoteChars(chars: readonly string[]): string {
   return chars.length === 0 ? '…' : chars.map((c) => `“${c}”`).join(' ');
 }

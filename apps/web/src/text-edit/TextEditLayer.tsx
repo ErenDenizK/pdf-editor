@@ -8,9 +8,19 @@
  * editor over the run with the clicked character selected; Enter or Space on a focused run
  * opens it with the whole line selected. Runs are located again for every page revision,
  * since references go stale after any edit (spec §2.5).
+ *
+ * When Enter or Esc closes the editor, the focus goes back to the run's target; after a
+ * commit the runs are new, so it goes to the run on the same line nearest to where the
+ * edited one started (`focusReturnRun`), and to the layer while they are located or when
+ * none is left.
  */
 import type { LocatedRun } from '@pdf-editor/engine';
-import type { PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  useLayoutEffect,
+  useRef,
+} from 'react';
 
 import type { PageTarget } from '../annotations/annotation-store';
 import { cssPointToUser, type PageFrame, rectToCss } from '../annotations/geometry';
@@ -19,7 +29,14 @@ import type { PageOverlayProps } from '../stage/page-overlays';
 import { Tooltip } from '../ui/Tooltip';
 import { pageFrame } from '../viewer/page-frame';
 import { useToolStore } from '../viewer/tool-store';
-import { blockerLabel, blockerOfRun, glyphIndexAt, glyphSelection } from './model';
+import {
+  blockerLabel,
+  blockerOfRun,
+  focusReturnRun,
+  glyphIndexAt,
+  glyphSelection,
+  runKey,
+} from './model';
 import { usePageRevision, usePageRuns } from './runs';
 import styles from './TextEdit.module.css';
 import { TextEditor } from './TextEditor';
@@ -34,6 +51,28 @@ export function TextEditLayer(props: PageOverlayProps) {
   const session = useTextEditStore((s) => (s.session?.target.pageId === pageId ? s.session : null));
   const revision = usePageRevision(sourceId, sourceIndex);
   const runs = usePageRuns(active && visible ? sourceId : undefined, sourceIndex, revision);
+  const focusReturn = useTextEditStore((s) =>
+    s.focusReturn?.pageId === pageId ? s.focusReturn : null,
+  );
+  const layerRef = useRef<HTMLDivElement>(null);
+
+  // The editor closed from the keyboard: focus the run again (or its line's nearest run).
+  useLayoutEffect(() => {
+    const layer = layerRef.current;
+    if (!focusReturn || session || !layer) return;
+    const located = runs !== null && revision !== focusReturn.staleRevision;
+    if (!located) {
+      // Until the page's new runs are located, the layer keeps the focus.
+      if (document.activeElement !== layer) layer.focus({ preventScroll: true });
+      return;
+    }
+    const run = focusReturnRun(runs, focusReturn.run);
+    const target = run
+      ? layer.querySelector<HTMLElement>(`[data-run-key="${CSS.escape(runKey(run))}"]`)
+      : null;
+    (target ?? layer).focus({ preventScroll: true });
+    useTextEditStore.getState().clearFocusReturn();
+  }, [focusReturn, session, runs, revision]);
 
   if (!active || sourceId === undefined) return null;
   const frame = pageFrame(props);
@@ -50,10 +89,12 @@ export function TextEditLayer(props: PageOverlayProps) {
 
   return (
     <div
+      ref={layerRef}
       className={styles.layer}
       data-text-edit-layer={pageIndex}
       role="group"
       aria-label={m.text_edit_layer_label({ page: pageIndex + 1 })}
+      tabIndex={-1}
       onPointerDown={(event) => {
         // A press on the page outside any run closes the editor (nothing is applied).
         if (event.target === event.currentTarget) useTextEditStore.getState().close();
@@ -139,6 +180,7 @@ function RunTarget({
       data-editable=""
       data-editing={editing || undefined}
       data-text-run={run.text}
+      data-run-key={runKey(run)}
       aria-label={m.text_edit_run({ text: run.text })}
       style={style}
       onPointerDown={onPointerDown}

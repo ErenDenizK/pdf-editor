@@ -3,7 +3,9 @@
  * each at 126, 330; page 1 a PNG with a soft mask, 160 × 120 px). Press I, drag the first
  * image 50 px to the right: one history entry, the image located again at its new place;
  * Extract saves a PNG of the image's pixel size; export, re-open the export: the image's
- * rect (as the engine locates it) moved by 50 px in points.
+ * rect (as the engine locates it) moved by 50 px in points. From the keyboard: the
+ * contextual bar is one Tab stop with arrow keys between its buttons, and Mod+Arrow resizes
+ * the selected image keeping its aspect ratio (announced).
  */
 import { readFile } from 'node:fs/promises';
 
@@ -158,4 +160,57 @@ test('keyboard: arrows nudge the selected image, Delete removes it, undo brings 
   // Undo of the move applies its inverse.
   await page.keyboard.press('ControlOrMeta+z');
   await expect.poll(async () => (await imageRect(firstImage(page)))[0]).toBeCloseTo(126, 1);
+});
+
+test('keyboard: the bar is one Tab stop with arrow keys; Mod+Arrow resizes keeping the ratio', async ({
+  page,
+}) => {
+  await openFixtures(page, ['images.pdf']);
+  await armImageTool(page);
+  const target = firstImage(page);
+  await expect(target).toBeVisible({ timeout: 20_000 });
+  await target.focus();
+  await page.keyboard.press('Enter');
+  const selection = page.getByTestId('image-selection');
+  await expect(selection).toBeFocused();
+
+  const bar = page.getByTestId('image-bar');
+  const replace = bar.getByRole('button', { name: 'Replace…' });
+  const extract = bar.getByRole('button', { name: 'Extract' });
+  const remove = bar.getByRole('button', { name: 'Delete' });
+  await expect
+    .poll(() => bar.getByRole('button').evaluateAll((els) => els.map((el) => el.tabIndex)))
+    .toEqual([0, -1, -1]);
+  await page.keyboard.press('Tab');
+  await expect(replace).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(extract).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(remove).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(replace).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(remove).toBeFocused();
+  // One Tab stop that remembers the last button.
+  await page.keyboard.press('Shift+Tab');
+  await expect(selection).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(remove).toBeFocused();
+
+  // Mod+Right: the longer side (360 pt) grows by 1 pt, the height keeps the ratio.
+  await selection.focus();
+  const live = page.locator('div[role="status"][aria-live="polite"].visually-hidden');
+  await page.keyboard.press('ControlOrMeta+ArrowRight');
+  await expect(historyRow(page, 'Image resized')).toBeVisible({ timeout: 20_000 });
+  await expect(live).toHaveText(/Image resized to 361 × 270\.[78] pt/);
+  await expect.poll(async () => (await imageRect(firstImage(page)))[2]).toBeCloseTo(361, 1);
+  await expect.poll(async () => (await imageRect(firstImage(page)))[3]).toBeCloseTo(270.75, 1);
+  await expect(selection).toBeFocused();
+  // Mod+Shift+Left shrinks it by 10 pt; the top-left corner stays.
+  const [x] = await imageRect(firstImage(page));
+  await page.keyboard.press('ControlOrMeta+Shift+ArrowLeft');
+  await expect(live).toHaveText(/Image resized to 351 × 263\.[23] pt/, { timeout: 20_000 });
+  await expect.poll(async () => (await imageRect(firstImage(page)))[2]).toBeCloseTo(351, 1);
+  await expect.poll(async () => (await imageRect(firstImage(page)))[3]).toBeCloseTo(263.25, 1);
+  expect((await imageRect(firstImage(page)))[0]).toBeCloseTo(x ?? 0, 1);
 });

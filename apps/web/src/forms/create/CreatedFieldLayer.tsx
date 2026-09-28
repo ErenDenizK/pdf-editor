@@ -15,17 +15,23 @@
  *   Mod+D duplicates it, Enter opens its properties, Esc deselects. A press on empty page
  *   deselects.
  * - Placing ("Add field" in the Forms panel): a click places the kind at its default size,
- *   a drag draws its box. Esc cancels (create/index.ts).
+ *   a drag draws its box. Esc cancels (create/index.ts). From the keyboard the current
+ *   page's layer takes the focus (create/index.ts): Enter or Space places the field at its
+ *   default size in the centre of the visible part of the page, arrows move it first
+ *   (Shift: 10 pt; it is drawn while the layer has the keyboard focus). The new field then
+ *   takes the focus, selected in Edit fields.
  *
  * Geometry goes through the viewer's page frame (rotation, CropBox, resize), and every
  * rect is clamped into the page's visible box.
  */
 import {
   type CreatedField,
+  type CreatedFieldKind,
   DEFAULT_FIELD_SIZE,
   FIELD_BORDER_WIDTH,
   FIELD_COLORS,
   type FieldColor,
+  type FieldId,
   fieldFontSize,
   findPageLocation,
   MIN_FIELD_SIDE,
@@ -38,6 +44,8 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useEffect,
+  useId,
+  useRef,
   useState,
 } from 'react';
 
@@ -118,6 +126,26 @@ function pageBounds(props: PageOverlayProps, frame: PageFrame): Rect {
   return right > x && top > y ? { x, y, width: right - x, height: top - y } : content;
 }
 
+/** `rect` inside `bounds`: no larger than them, slid in when it sticks out. */
+function clampInto(rect: Rect, bounds: Rect): Rect {
+  const width = Math.min(rect.width, bounds.width);
+  const height = Math.min(rect.height, bounds.height);
+  return round({
+    width,
+    height,
+    x: Math.min(Math.max(rect.x, bounds.x), bounds.x + bounds.width - width),
+    y: Math.min(Math.max(rect.y, bounds.y), bounds.y + bounds.height - height),
+  });
+}
+
+/** Arrow key → step direction on the displayed page. */
+const ARROW_STEPS: Readonly<Record<string, readonly [number, number]>> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+};
+
 function boxFromPoints(a: { x: number; y: number }, b: { x: number; y: number }): Box {
   return {
     left: Math.min(a.x, b.x),
@@ -163,6 +191,12 @@ export function CreatedFieldLayer(props: PageOverlayProps) {
     s.active?.pageId === pageId && s.active.fieldId !== undefined ? s.active : null,
   );
   const [gesture, setGesture] = useState<Gesture | null>(null);
+  /** The field placed from the keyboard, before Enter (drawn while the layer has focus). */
+  const [pending, setPending] = useState<{ kind: CreatedFieldKind; rect: Rect } | null>(null);
+  const layerRef = useRef<HTMLDivElement>(null);
+  /** A field placed here: it takes the focus once Edit fields shows it. */
+  const focusPlaced = useRef<FieldId | null>(null);
+  const keysId = useId();
 
   const location = findPageLocation(ws, pageId);
   const doc = location ? ws.documents[location.document] : undefined;
@@ -187,6 +221,16 @@ export function CreatedFieldLayer(props: PageOverlayProps) {
     );
     if (!exists) useCreateStore.getState().select(null);
   }, [ws, selected]);
+
+  // The field just placed takes the focus (keyboard users continue on it).
+  useEffect(() => {
+    const id = focusPlaced.current;
+    if (!id || !isDesign) return;
+    focusPlaced.current = null;
+    layerRef.current
+      ?.querySelector<HTMLElement>(`[data-created-field-id="${CSS.escape(id)}"]`)
+      ?.focus({ preventScroll: true });
+  });
 
   if (placed.length === 0 && !isPlacing && !isDesign) return null;
   const frame = pageFrame(props);
@@ -271,6 +315,67 @@ export function CreatedFieldLayer(props: PageOverlayProps) {
     window.addEventListener('pointercancel', cancel);
   };
 
+  /** Adds the field; it takes the focus once shown in Edit fields. */
+  const place = (kind: CreatedFieldKind, rect: Rect) => {
+    setPending(null);
+    useCreateStore.getState().setPlacing(null);
+    focusPlaced.current = addField(kind, pageId, rect) ?? null;
+  };
+
+  /** The kind's default size, upright, in the centre of the page's part in the viewport. */
+  const centredRect = (kind: CreatedFieldKind): Rect => {
+    const s = frame.scale;
+    // The displayed page, CSS px from its top left, and its part inside the scroll view.
+    const shown = displayedSize(frame);
+    const width = shown.width * s;
+    const height = shown.height * s;
+    let cx = width / 2;
+    let cy = height / 2;
+    const origin = layerRef.current?.getBoundingClientRect();
+    const view = layerRef.current?.closest('[data-read-viewport]')?.getBoundingClientRect();
+    if (origin && view) {
+      const left = Math.max(0, view.left - origin.left);
+      const right = Math.min(width, view.right - origin.left);
+      const top = Math.max(0, view.top - origin.top);
+      const bottom = Math.min(height, view.bottom - origin.top);
+      if (right > left) cx = (left + right) / 2;
+      if (bottom > top) cy = (top + bottom) / 2;
+    }
+    const size = DEFAULT_FIELD_SIZE[kind];
+    const box = {
+      left: cx - (size.width * s) / 2,
+      top: cy - (size.height * s) / 2,
+      width: size.width * s,
+      height: size.height * s,
+    };
+    return clampInto(cssToUser(frame, box), bounds);
+  };
+
+  const pendingRect = (kind: CreatedFieldKind): Rect =>
+    pending?.kind === kind ? pending.rect : centredRect(kind);
+
+  const onPlacingKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!isPlacing || !placing || event.target !== event.currentTarget) return;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const step = ARROW_STEPS[event.key];
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      event.stopPropagation();
+      place(placing, pendingRect(placing));
+    } else if (step) {
+      event.preventDefault();
+      event.stopPropagation();
+      const d = (event.shiftKey ? 10 : 1) * frame.scale;
+      const box = userRectToCss(frame, pendingRect(placing));
+      const rect = cssToUser(frame, {
+        ...box,
+        left: box.left + step[0] * d,
+        top: box.top + step[1] * d,
+      });
+      setPending({ kind: placing, rect: clampInto(rect, bounds) });
+    }
+  };
+
   const onLayerPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     if (isPlacing && placing) {
@@ -303,21 +408,7 @@ export function CreatedFieldLayer(props: PageOverlayProps) {
           width: Math.max(min, box.width),
           height: Math.max(min, box.height),
         };
-        const rect = cssToUser(frame, box);
-        const clamped = round({
-          width: Math.min(rect.width, bounds.width),
-          height: Math.min(rect.height, bounds.height),
-          x: Math.min(
-            Math.max(rect.x, bounds.x),
-            bounds.x + bounds.width - Math.min(rect.width, bounds.width),
-          ),
-          y: Math.min(
-            Math.max(rect.y, bounds.y),
-            bounds.y + bounds.height - Math.min(rect.height, bounds.height),
-          ),
-        });
-        useCreateStore.getState().setPlacing(null);
-        addField(placing, pageId, clamped);
+        place(placing, clampInto(cssToUser(frame, box), bounds));
       });
       return;
     }
@@ -365,13 +456,7 @@ export function CreatedFieldLayer(props: PageOverlayProps) {
 
   const onDesignKey = (event: ReactKeyboardEvent<HTMLElement>, p: Placed) => {
     const mod = event.metaKey || event.ctrlKey;
-    const steps: Record<string, [number, number]> = {
-      ArrowLeft: [-1, 0],
-      ArrowRight: [1, 0],
-      ArrowUp: [0, -1],
-      ArrowDown: [0, 1],
-    };
-    const step = steps[event.key];
+    const step = ARROW_STEPS[event.key];
     const handled = () => {
       event.preventDefault();
       event.stopPropagation();
@@ -410,23 +495,49 @@ export function CreatedFieldLayer(props: PageOverlayProps) {
     }
   };
 
-  const preview = gesture?.type === 'place' ? boxFromPoints(gesture.start, gesture.current) : null;
+  const preview =
+    gesture?.type === 'place'
+      ? boxFromPoints(gesture.start, gesture.current)
+      : isPlacing && pending?.kind === placing
+        ? userRectToCss(frame, pending.rect)
+        : null;
   const dragging = gesture && gesture.type !== 'place' && gesture.moved ? gesture : null;
   const rectOf = (p: Placed) =>
     dragging?.field.id === p.field.id && dragging.widget === p.widget ? dragging.rect : p.rect;
 
   return (
     <div
+      ref={layerRef}
       className={styles.layer}
       data-created-field-layer={pageIndex}
       data-design={isDesign || undefined}
       data-placing={isPlacing || undefined}
       role={isPlacing ? 'application' : undefined}
       aria-label={
-        isPlacing && placing ? m.forms_create_placing({ kind: kindName(placing) }) : undefined
+        isPlacing && placing
+          ? m.forms_create_placing_layer({ kind: kindName(placing), page: pageIndex + 1 })
+          : undefined
       }
+      aria-describedby={isPlacing ? keysId : undefined}
+      tabIndex={isPlacing ? 0 : undefined}
       onPointerDown={onLayerPointerDown}
+      onKeyDown={onPlacingKey}
+      onFocus={(event) => {
+        // Keyboard focus shows where Enter will place the field.
+        if (!isPlacing || !placing || event.target !== event.currentTarget) return;
+        if (event.currentTarget.matches(':focus-visible') && pending?.kind !== placing) {
+          setPending({ kind: placing, rect: centredRect(placing) });
+        }
+      }}
+      onBlur={(event) => {
+        if (event.target === event.currentTarget) setPending(null);
+      }}
     >
+      {isPlacing ? (
+        <span id={keysId} className="visually-hidden">
+          {m.forms_create_placing_keys()}
+        </span>
+      ) : null}
       {placed.map((p) => (
         <FieldLook
           key={`${p.field.id}#${p.widget}`}
@@ -489,6 +600,7 @@ export function CreatedFieldLayer(props: PageOverlayProps) {
                 key={`design:${p.field.id}#${p.widget}`}
                 data-created-design={p.field.name}
                 data-created-kind={p.field.kind}
+                data-created-field-id={p.field.id}
                 className={styles.design}
                 style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
                 role="button"
@@ -548,6 +660,7 @@ export function CreatedFieldLayer(props: PageOverlayProps) {
       {preview ? (
         <div
           className={styles.preview}
+          data-created-pending={gesture?.type === 'place' ? undefined : ''}
           style={{
             left: preview.left,
             top: preview.top,

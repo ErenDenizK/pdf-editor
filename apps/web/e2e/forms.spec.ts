@@ -3,7 +3,9 @@
  * place, export with and without "Flatten form fields", and parse the download with
  * pdf-lib. Field creation (M4): add a text field and a checkbox from the Forms panel by
  * dragging on a page, fill them, export (the app's verification re-opens the output and
- * checks the created fields) and parse the download.
+ * checks the created fields) and parse the download. From the keyboard: arming a field
+ * (palette or panel) focuses the page, arrows move the field, Enter places it, Esc cancels
+ * and returns the focus to the control that armed it.
  */
 import { readFile } from 'node:fs/promises';
 
@@ -153,4 +155,70 @@ test('add a text field and a checkbox by drag, fill them, export: the fields exi
   const rect = widget?.getRectangle();
   expect(rect?.width).toBeGreaterThan(100);
   expect(pdf.getPage(0).node.Annots()?.size()).toBe(2);
+});
+
+test('keyboard: place a field from the palette, cancel from the Forms panel', async ({ page }) => {
+  await useFileInputPicker(page);
+  await page.goto('./?lang=en');
+  await expect(page.getByTestId('app-shell')).toBeVisible();
+  await openFixtures(page, ['simple-text.pdf']);
+  const pageBox = page.locator('[data-page-index="0"]');
+  await expect(pageBox).toBeVisible({ timeout: 20_000 });
+  const layer = page.locator('[data-page-index="0"] [data-created-field-layer]');
+
+  // From the palette: the page's layer takes the focus and shows the field to place.
+  await page.locator('[data-read-viewport]').focus();
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByRole('combobox', { name: 'Search commands' }).fill('Add form field: Text field');
+  await expect(page.getByRole('option', { name: /Add form field: Text field/ })).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(layer).toHaveAttribute('data-placing', 'true');
+  await expect(layer).toBeFocused();
+  await expect(layer).toHaveAccessibleName('Place the Text field on page 1');
+  const pending = layer.locator('[data-created-pending]');
+  await expect(pending).toBeVisible();
+  const before = await pending.boundingBox();
+  const size = await pageBox.boundingBox();
+  if (!before || !size) throw new Error('not laid out');
+  const scale = size.width / 612;
+  await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.press('ArrowDown');
+  await expect
+    .poll(async () => (await pending.boundingBox())?.x)
+    .toBeCloseTo(before.x + 10 * scale, 0);
+  const moved = await pending.boundingBox();
+  expect(moved?.y).toBeCloseTo(before.y + scale, 0);
+  await page.keyboard.press('Enter');
+  // The new field is selected in Edit fields and has the focus, where the preview was.
+  const created = page.locator('[data-created-design="Text1"]');
+  await expect(created).toBeFocused();
+  const placed = await created.boundingBox();
+  expect(placed?.x).toBeCloseTo(moved?.x ?? 0, 0);
+  expect(placed?.y).toBeCloseTo(moved?.y ?? 0, 0);
+
+  // From the Forms panel's menu: Esc cancels and returns to "Add field".
+  await page.getByRole('tab', { name: 'Forms', exact: true }).click();
+  await expect(page.locator('[data-edit-fields]')).toHaveAttribute('aria-pressed', 'true');
+  const addField = page.locator('[data-add-field]');
+  await addField.focus();
+  await page.keyboard.press('Enter');
+  const checkbox = page.getByRole('menuitem', { name: 'Checkbox', exact: true });
+  await expect(checkbox).toBeVisible();
+  await checkbox.focus();
+  await page.keyboard.press('Enter');
+  await expect(layer).toHaveAttribute('data-placing', 'true');
+  await expect(layer).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(layer).not.toHaveAttribute('data-placing', 'true');
+  await expect(addField).toBeFocused();
+  await expect(page.locator('[data-created-look]')).toHaveCount(1);
+
+  // Space places it at once.
+  await page.keyboard.press('Enter');
+  await expect(checkbox).toBeVisible();
+  await checkbox.focus();
+  await page.keyboard.press('Enter');
+  await expect(layer).toBeFocused();
+  await page.keyboard.press(' ');
+  await expect(page.locator('[data-created-design="CheckBox1"]')).toBeFocused();
 });

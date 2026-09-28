@@ -14,7 +14,7 @@ import {
 } from '@pdf-editor/document-model';
 import { degrees, PDFDocument } from '@cantoo/pdf-lib';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 
 import formsAUrl from '../../../../../test/fixtures/forms-a.pdf?url';
@@ -151,6 +151,52 @@ describe('placing fields', () => {
     act(() => startPlacing('radio'));
     await userEvent.keyboard('{Escape}');
     expect(useCreateStore.getState().placing).toBeNull();
+  });
+
+  it('from the keyboard: the layer takes the focus, arrows move the field, Enter places it', async () => {
+    await openSimple();
+    renderLayer(0);
+    const invoker = document.createElement('button');
+    invoker.textContent = 'Add field';
+    document.body.append(invoker);
+    try {
+      invoker.focus();
+      act(() => startPlacing('text'));
+      const layer = layerOf(0);
+      await vi.waitFor(() => expect(document.activeElement).toBe(layer));
+      expect(layer).toHaveAccessibleName('Place the Text field on page 1');
+      expect(layer).toHaveAccessibleDescription(/Enter or Space places it/);
+      // Default size in the centre of the page (612 × 792 at 1 px/pt): (226, 385) from the
+      // top left, so y = 792 - 385 - 22 = 385; Shift+Right 10 pt, Down 1 pt.
+      await userEvent.keyboard('{Shift>}{ArrowRight}{/Shift}{ArrowDown}');
+      expect(layer.querySelector('[data-created-pending]')).not.toBeNull();
+      await userEvent.keyboard('{Enter}');
+      await settle();
+      const [field] = fields();
+      expect(field?.kind).toBe('text');
+      expect(field?.widgets[0]?.rect).toEqual({ x: 236, y: 384, width: 160, height: 22 });
+      expect(useCreateStore.getState()).toMatchObject({ placing: null, design: true });
+      // The new field has the focus, selected in Edit fields.
+      await vi.waitFor(() =>
+        expect(document.activeElement?.getAttribute('data-created-field-id')).toBe(field?.id),
+      );
+
+      // Esc cancels and gives the focus back to the control that armed placing.
+      invoker.focus();
+      act(() => startPlacing('checkbox'));
+      await vi.waitFor(() => expect(document.activeElement).toBe(layerOf(0)));
+      await userEvent.keyboard(' ');
+      expect(fields()[1]?.widgets[0]?.rect).toEqual({ x: 299, y: 389, width: 14, height: 14 });
+      invoker.focus();
+      act(() => startPlacing('radio'));
+      await vi.waitFor(() => expect(document.activeElement).toBe(layerOf(0)));
+      await userEvent.keyboard('{Escape}');
+      expect(useCreateStore.getState().placing).toBeNull();
+      expect(document.activeElement).toBe(invoker);
+      expect(fields()).toHaveLength(2);
+    } finally {
+      invoker.remove();
+    }
   });
 
   it('on a /Rotate 90 page a click places the field upright (user-space size swapped)', async () => {

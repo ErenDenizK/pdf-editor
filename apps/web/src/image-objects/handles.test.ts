@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { boxChanged, HANDLES, handlePoint, moveBox, nudgeOffset, resizeBox } from './handles';
+import {
+  boxChanged,
+  HANDLES,
+  handlePoint,
+  keyResizeBox,
+  moveBox,
+  nudgeOffset,
+  resizeBox,
+} from './handles';
 
 const box = { left: 100, top: 50, width: 200, height: 100 };
 
@@ -69,6 +77,38 @@ describe('image selection handles', () => {
     expect(nudgeOffset('ArrowRight', false, 1.5)).toEqual({ dx: 1.5, dy: 0 });
     expect(nudgeOffset('ArrowUp', true, 2)).toEqual({ dx: 0, dy: -20 });
     expect(nudgeOffset('Enter', false, 1)).toBeUndefined();
+  });
+
+  it('Mod+Arrow resizes the longer side by 1 pt (Shift 10) keeping the aspect ratio', () => {
+    // 200 × 100 px at 2 px/pt: Right grows the width by 2 px, the height follows.
+    expect(keyResizeBox(box, 'ArrowRight', false, 2)).toEqual({
+      left: 100,
+      top: 50,
+      width: 202,
+      height: 101,
+    });
+    expect(keyResizeBox(box, 'ArrowUp', true, 1)).toEqual({
+      left: 100,
+      top: 50,
+      width: 210,
+      height: 105,
+    });
+    expect(keyResizeBox(box, 'ArrowLeft', true, 2)).toEqual({
+      left: 100,
+      top: 50,
+      width: 180,
+      height: 90,
+    });
+    expect(keyResizeBox(box, 'ArrowDown', false, 1)).toEqual({
+      left: 100,
+      top: 50,
+      width: 199,
+      height: 99.5,
+    });
+    // Never below the minimum side; other keys are not a resize.
+    const small = { left: 0, top: 0, width: 8, height: 4 };
+    expect(keyResizeBox(small, 'ArrowLeft', true, 1)).toEqual({ ...small });
+    expect(keyResizeBox(box, 'Enter', false, 1)).toBeUndefined();
   });
 
   it('small jitters are not a change', () => {

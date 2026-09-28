@@ -33,6 +33,8 @@ async function commit(
   payload: unknown,
   label: string,
   expectBounds: Rect | null,
+  /** Said in the live region on success (default: the label). */
+  announcement = label,
 ): Promise<ImageEditOutcome & { readonly reason?: string }> {
   const engine = await import('@pdf-editor/engine');
   const store = useImageStore.getState();
@@ -64,7 +66,7 @@ async function commit(
     useImageStore.getState().setBusy(false);
   }
   if (done) {
-    announce(label);
+    announce(announcement);
     return { ok: true, label };
   }
   useImageStore.getState().setExpect(null);
@@ -76,11 +78,15 @@ async function commit(
   return { ok: false, message, ...(reason === undefined ? {} : { reason }) };
 }
 
-/** Moves / resizes `image` so that its bounds fill `rect` (unrotated user space). */
+/**
+ * Moves / resizes `image` so that its bounds fill `rect` (unrotated user space);
+ * `announcement` replaces the history label in the live region.
+ */
 export async function transformImage(
   target: PageTarget,
   image: LocatedImage,
   rect: Rect,
+  announcement?: string,
 ): Promise<ImageEditOutcome> {
   const engine = await import('@pdf-editor/engine');
   const resized =
@@ -93,6 +99,7 @@ export async function transformImage(
     { image: engine.imageRefJson(image), rect },
     label,
     rect,
+    announcement,
   );
 }
 

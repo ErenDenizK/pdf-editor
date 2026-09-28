@@ -17,6 +17,7 @@ import {
   editRange,
   familyOfFace,
   fitStateOf,
+  focusReturnRun,
   fontLine,
   glyphIndexAt,
   glyphSelection,
@@ -329,5 +330,50 @@ describe('history label', () => {
     expect(historyLabel(result({ tier: 1, honesty: 'moved-out-of-form' }))).toBe(
       'Text edited (moved out of form)',
     );
+  });
+});
+
+describe('focus after the editor closes', () => {
+  /** A run of `text` starting at (x, y), 10 pt per character, as object `path` from `charStart`. */
+  function at(text: string, x: number, y: number, path: number, charStart: number): LocatedRun {
+    const base = run(text);
+    return {
+      ...base,
+      objectPath: [path],
+      charStart,
+      lineBox: { x, y: y - 2, width: text.length * 10, height: 12 },
+      glyphs: base.glyphs.map((g, i) => ({
+        ...g,
+        rect: { ...g.rect, x: x + i * 10, y: y - 2 },
+        origin: { x: x + i * 10, y },
+      })),
+    };
+  }
+
+  it('returns to the same run while it is still there (Esc)', () => {
+    const line = at(LINE, 10, 100, 0, 0);
+    const below = at('Second line', 10, 80, 1, 25);
+    expect(focusReturnRun([below, line], line)).toBe(line);
+  });
+
+  it('after a commit, the run of the same line nearest to where the edited one started', () => {
+    const before = at(LINE, 10, 100, 0, 0);
+    // The edit split the line into new objects with new indices.
+    const head = at('The quick brown ', 10, 100, 3, 0);
+    const word = at('cat', 170, 100, 4, 16);
+    const tail = at(' jumps', 200, 100, 5, 19);
+    const other = at('Another line', 10, 60, 0, 30);
+    expect(focusReturnRun([other, tail, word, head], before)).toBe(head);
+    // Only a run further along is left on the line: that one.
+    expect(focusReturnRun([other, tail], before)).toBe(tail);
+  });
+
+  it('never returns a run of another line, nor one that cannot be edited', () => {
+    const before = at(LINE, 10, 100, 0, 0);
+    const other = at('Another line', 10, 60, 1, 30);
+    const invisible = { ...at('OCR', 10, 100, 2, 40), renderMode: 3 };
+    // Same key but on another line (object indices shifted): not the edited line.
+    const shifted = at('Moved', 10, 40, 0, 0);
+    expect(focusReturnRun([other, invisible, shifted], before)).toBeUndefined();
   });
 });

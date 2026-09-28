@@ -4,7 +4,8 @@
  * Identity-H Inter subset on y = 650, and in other fonts below). Press E, click the
  * Helvetica line, replace "fox" with "cat", Enter; export, re-open the export and search:
  * "cat" is on the edited line and the edited line no longer has "fox". A second test types
- * a character the Inter subset lacks and sees the "font substituted" badge. Screenshots for
+ * a character the Inter subset lacks and sees the "font substituted" badge. From the
+ * keyboard, the focus returns to the line after Esc and after Enter. Screenshots for
  * the design review with `CAPTURE_SCREENSHOTS=1` (docs/design/screenshots/).
  */
 import { readFile } from 'node:fs/promises';
@@ -135,6 +136,48 @@ test('replace a word in the Helvetica line, export, re-open: the edited line rea
   await expect(cat.first()).toContainText('brown cat jumps');
   // One "fox" fewer: the edited line lost it, the other lines keep theirs.
   await expect(await search(page, 'fox')).toHaveCount(foxBefore - 1);
+});
+
+test('keyboard: the focus returns to the line after Esc and after Enter', async ({ page }) => {
+  await openFonts(page);
+  await page.locator('[data-read-viewport]').focus();
+  await page.keyboard.press('e');
+  const first = line(page, 0);
+  await expect(first).toBeVisible({ timeout: 20_000 });
+  const lineBox = await first.boundingBox();
+  if (!lineBox) throw new Error('line not laid out');
+  await first.focus();
+  await page.keyboard.press('Enter');
+  const editor = page.getByRole('textbox', { name: 'Line text' });
+  await expect(editor).toBeFocused();
+
+  // Esc: back on the same run; the tool stays armed.
+  await page.keyboard.press('Escape');
+  await expect(editor).toHaveCount(0);
+  await expect(first).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Edit text' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+
+  // Enter commits: the line is new runs, the focus goes to the one where the edit started.
+  await page.keyboard.press('Enter');
+  await expect(editor).toBeFocused();
+  await editor.fill(FOX.replace('dog', 'cat'));
+  await editor.press('Enter');
+  await expect(editor).toHaveCount(0, { timeout: 20_000 });
+  await expect(historyRow(page, /^Text edited/)).toBeVisible({ timeout: 20_000 });
+  const focused = page.locator('[data-text-edit-layer="0"] [data-text-run]:focus');
+  await expect(focused).toHaveAttribute('data-text-run', /^The quick brown fox/, {
+    timeout: 20_000,
+  });
+  const focusedBox = await focused.boundingBox();
+  expect(Math.abs((focusedBox?.y ?? 0) - lineBox.y)).toBeLessThan(2);
+  expect(Math.abs((focusedBox?.x ?? 0) - lineBox.x)).toBeLessThan(2);
+  // The keyboard continues from there.
+  await page.keyboard.press('Enter');
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue(/^The quick brown fox/);
 });
 
 test('a character the Identity-H subset lacks switches the badge to the substitute font', async ({

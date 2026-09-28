@@ -13,6 +13,16 @@
   cursor: default;
 }
 
+/* The layer holds the focus after a commit while the page's runs are located again. */
+.layer:focus {
+  outline: none;
+}
+
+.layer:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
+
 .run {
   position: absolute;
   margin: 0;

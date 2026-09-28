@@ -4,6 +4,8 @@
  * text, and a header with the font, the honesty badge and, when the new text is wider than
  * the free space, the fit choice. The badge follows `checkEditability` for the current
  * text (debounced); Enter commits one history entry through the edit runner, Esc cancels.
+ * Either way the focus goes back to the run's target on the page (TextEditLayer), so the
+ * keyboard continues where it was.
  */
 import type { TextEditability } from '@pdf-editor/engine';
 import { Ban, Check, CircleDashed, Info, type LucideIcon, TriangleAlert } from 'lucide-react';
@@ -92,6 +94,8 @@ export function TextEditor({
   const [shift, setShift] = useState(0);
 
   const close = useCallback(() => useTextEditStore.getState().close(), []);
+  /** Closes from the keyboard: the focus returns to the run (`committed`: once re-located). */
+  const finish = (committed: boolean) => useTextEditStore.getState().finish(committed);
   const refocus = () => requestAnimationFrame(() => inputRef.current?.focus());
 
   const runCheck = useCallback(
@@ -163,7 +167,7 @@ export function TextEditor({
     const value = text;
     const range = editRange(run, value);
     if (!range) {
-      close();
+      finish(false);
       return;
     }
     setError(null);
@@ -191,7 +195,7 @@ export function TextEditor({
     }
     const outcome = await commitTextEdit({ target: session.target, run, ...range, fit });
     if (outcome.ok) {
-      close();
+      finish(true);
       return;
     }
     setBusy(false);
@@ -207,7 +211,7 @@ export function TextEditor({
     } else if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
-      close();
+      finish(false);
     }
   };
 
