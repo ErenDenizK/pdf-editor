@@ -1,8 +1,14 @@
+import type { EngineEdit } from '@pdf-editor/document-model';
 import type { ReconciliationReport } from '@pdf-editor/engine';
 import { describe, expect, it } from 'vitest';
 
-import { sourceNoteWarnings } from './export-service';
-import { summarizeReport } from './summary';
+import {
+  type RedactionExportSummary,
+  sourceNoteWarnings,
+  type TextEditExportSummary,
+  textEditFontsOf,
+} from './export-service';
+import { notSearchedKind, summarizeReport } from './summary';
 
 const empty: ReconciliationReport = {
   outlineNodesKept: 0,
@@ -161,5 +167,189 @@ describe('summarizeReport', () => {
       tone: 'kept',
       text: 'Bookmarks: all 1 bookmark kept.',
     });
+  });
+});
+
+/** A recorded `text.edit` with the outcome fields the edit runner adds. */
+function recorded(payload: Record<string, unknown>): EngineEdit {
+  return {
+    id: globalThis.crypto.randomUUID(),
+    source: 'a' as EngineEdit['source'],
+    pageIndex: 0,
+    kind: 'text.edit',
+    payload,
+  };
+}
+
+describe('text edits by font outcome (spec §2.1, §5.3)', () => {
+  it('counts same font, substituted per face, fell back per face and moved out of form', () => {
+    const fonts = textEditFontsOf([
+      recorded({ tier: 2, honesty: 'same-font', fellBack: false }),
+      recorded({ tier: 2, honesty: 'same-font-not-embedded', fellBack: false }),
+      recorded({ tier: 1, face: 'NotoSans-Regular', honesty: 'font-substituted', fellBack: false }),
+      recorded({ tier: 1, face: 'NotoSans-Regular', honesty: 'font-substituted', fellBack: false }),
+      recorded({ tier: 1, face: 'NotoSerif-Bold', honesty: 'font-substituted', fellBack: true }),
+      recorded({
+        tier: 1,
+        face: 'NotoSans-Regular',
+        honesty: 'moved-out-of-form',
+        fellBack: false,
+      }),
+      // Recorded without an outcome: counted by tier.
+      recorded({ tier: 2 }),
+      recorded({ tier: 1, face: 'JetBrainsMono-Regular' }),
+      { ...recorded({ tier: 2 }), kind: 'annotation.create' },
+    ]);
+    expect(fonts).toEqual({
+      sameFont: 2,
+      sameFontNotEmbedded: 1,
+      substituted: { 'NotoSans-Regular': 2, 'JetBrainsMono-Regular': 1 },
+      fellBack: { 'NotoSerif-Bold': 1 },
+      movedOutOfForm: 1,
+    });
+  });
+
+  it('says per source how every text edit was typeset', () => {
+    const textEdits: TextEditExportSummary = {
+      edits: 7,
+      fontsRenamed: 2,
+      mcidsReassigned: 0,
+      unreachableRemoved: 3,
+      sources: [
+        {
+          name: 'a.pdf',
+          edits: 6,
+          fontsRenamed: 2,
+          mcidsReassigned: 0,
+          unreachableRemoved: 3,
+          fonts: {
+            sameFont: 1,
+            sameFontNotEmbedded: 0,
+            substituted: { 'NotoSans-Regular': 2, 'JetBrainsMono-Regular': 1 },
+            fellBack: { 'NotoSerif-Bold': 1 },
+            movedOutOfForm: 1,
+          },
+        },
+        {
+          name: 'b.pdf',
+          edits: 1,
+          fontsRenamed: 0,
+          mcidsReassigned: 0,
+          unreachableRemoved: 0,
+          fonts: {
+            sameFont: 1,
+            sameFontNotEmbedded: 0,
+            substituted: {},
+            fellBack: {},
+            movedOutOfForm: 0,
+          },
+        },
+      ],
+    };
+    const items = summarizeReport(empty, undefined, undefined, { textEdits });
+    expect(items.map((i) => i.id)).toEqual([
+      'text-edits',
+      'text-edit-fonts-0',
+      'text-edit-fonts-1',
+    ]);
+    expect(items[0]?.details).toEqual(['a.pdf: 6', 'b.pdf: 1']);
+    expect(items[1]).toEqual({
+      id: 'text-edit-fonts-0',
+      tone: 'changed',
+      text:
+        'a.pdf: 1 in the original font; 3 with a substituted font (JetBrains Mono: 1, Noto Sans: 2); ' +
+        '1 fell back from the original font to Noto Serif Bold; 1 moved out of its form.',
+    });
+    expect(items[2]).toEqual({
+      id: 'text-edit-fonts-1',
+      tone: 'kept',
+      text: 'b.pdf: 1 in the original font.',
+    });
+  });
+});
+
+describe('redaction self-check limits', () => {
+  const redaction = (
+    notSearched: readonly string[],
+    areaOnlyStrings: readonly string[],
+  ): RedactionExportSummary => ({
+    areas: 1,
+    areasByPage: { 0: 1 },
+    unmappedAreas: 0,
+    report: { ok: true, checks: [], notSearched, unverifiedAttachments: [] },
+    areaOnlyStrings,
+  });
+
+  it('groups the streams it could not search by filter', () => {
+    expect(notSearchedKind('object 12 (JBIG2Decode)')).toBe('jbig2');
+    expect(notSearchedKind('object 13 (FlateDecode, CCITTFaxDecode)')).toBe('ccitt');
+    expect(notSearchedKind('object 14 (JPXDecode)')).toBe('jpx');
+    expect(notSearchedKind('object 15 (DCTDecode)')).toBe('dct');
+    expect(notSearchedKind('object 16 (LZWDecode)')).toBe('undecodable');
+    expect(notSearchedKind('object 17 (unreadable)')).toBe('undecodable');
+    // With the reason the stream could not be decoded.
+    expect(notSearchedKind('object 18 (FlateDecode, JPXDecode not decodable here)')).toBe('jpx');
+    expect(notSearchedKind('object 19 (FlateDecode: corrupt data (incorrect header check))')).toBe(
+      'undecodable',
+    );
+
+    const items = summarizeReport(empty, undefined, undefined, {
+      redaction: redaction(
+        [
+          'object 16 (unreadable)',
+          'object 12 (JBIG2Decode)',
+          'object 15 (DCTDecode)',
+          'object 14 (JBIG2Decode)',
+          'object 13 (CCITTFaxDecode)',
+          'object 18 (JPXDecode)',
+        ],
+        [],
+      ),
+    });
+    expect(items.map((i) => i.id)).toEqual(['redaction', 'redaction-not-searched']);
+    expect(items[1]).toEqual({
+      id: 'redaction-not-searched',
+      tone: 'changed',
+      text:
+        '6 streams could not be checked for the redacted strings, because their encoding cannot ' +
+        'be searched (JBIG2 images: 2, CCITT fax images: 1, JPEG 2000 images: 1, JPEG images: 1, ' +
+        'streams that could not be decoded: 1).',
+      details: [
+        'object 12 (JBIG2Decode)',
+        'object 14 (JBIG2Decode)',
+        'object 13 (CCITTFaxDecode)',
+        'object 18 (JPXDecode)',
+        'object 15 (DCTDecode)',
+        'object 16 (unreadable)',
+      ],
+    });
+  });
+
+  it('lists the short strings removed inside the marked areas only', () => {
+    const items = summarizeReport(empty, undefined, undefined, {
+      redaction: redaction(['object 12 (JBIG2Decode)'], ['ab', '12']),
+    });
+    expect(items.map((i) => i.id)).toEqual([
+      'redaction',
+      'redaction-not-searched',
+      'redaction-area-only',
+    ]);
+    expect(items[1]?.text).toBe(
+      '1 stream could not be checked for the redacted strings, because its encoding cannot be ' +
+        'searched (JBIG2 images: 1).',
+    );
+    expect(items[2]).toEqual({
+      id: 'redaction-area-only',
+      tone: 'changed',
+      text:
+        '2 short redacted strings (under 4 characters) were removed inside the marked areas ' +
+        'only; they were not searched for elsewhere in the document.',
+      details: ['“ab”', '“12”'],
+    });
+  });
+
+  it('says nothing more when every stream was searched and every string checked', () => {
+    const items = summarizeReport(empty, undefined, undefined, { redaction: redaction([], []) });
+    expect(items.map((i) => i.id)).toEqual(['redaction']);
   });
 });

@@ -115,9 +115,13 @@ interface WorkspaceState {
   /** Files being read or opened by the engine right now. */
   readonly opening: number;
   /**
-   * Sources whose engine document was changed by an engine edit (annotations) at any
-   * point in this session, even if the edit was undone since: export must serialize them
-   * through the engine (`needsEngineSave`) rather than reuse the original bytes.
+   * Sources whose engine document currently holds at least one engine edit (annotations,
+   * form values, text, image and redaction edits), so export serializes them through the
+   * engine (`needsEngineSave`) rather than reusing the original bytes. `applyEngineEdit`
+   * adds the sources of a committed edit; the edit runner then keeps the set equal to the
+   * sources it holds edits for (`syncDirtySources` in annotations/edit-runner.ts), so a
+   * source leaves it once every edit was undone in the engine (inverse edits, or a reopen
+   * from the original bytes) and when it is closed or released.
    */
   readonly dirtySources: ReadonlySet<SourceId>;
   /**

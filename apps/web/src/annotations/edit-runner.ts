@@ -26,7 +26,16 @@
  * such an edit must be undone (a history move, or reverting a dropped action), the source
  * is reopened from its original bytes (`EngineService.reopenSource`) and the edits that
  * remain are replayed in order; redo simply applies the forward edit again. Replay
- * reproduces the same bytes (the applied payload records tier, face and size).
+ * reproduces the same bytes (the applied payload records tier, face and size). The recorded
+ * payload also carries the result's `honesty` and `fellBack` (`RecordedTextEditOutcome`),
+ * which the editor ignores on replay and the export summary reports per source (spec §2.1,
+ * §5.3). A recorded `redaction.apply` carries the captured strings too short to search
+ * document-wide (`areaOnlyStrings`, `RedactionCapture.skipped`) for the same summary.
+ *
+ * When a replay fails, the engine holds a prefix of the workspace's edits. User actions still
+ * run (the next one tries the replay again), but `runExclusive` (export) refuses to run its
+ * task on such an engine: it rejects with `EditsNotAppliedError` instead, so an export never
+ * offers bytes that lack edits the history shows.
  *
  * Ids: the edit log records annotation ids as first created (the /NM the user saw). The
  * PDFium adapter writes a requested /NM, so a redone create keeps its id. Should an engine
@@ -34,7 +43,7 @@
  * translated on their way to the engine, so the log and the UI keep the original id.
  */
 import type { EngineEdit, SourceId, Workspace } from '@pdf-editor/document-model';
-import type { Annotation, PdfEditor, TextEditResult } from '@pdf-editor/engine';
+import type { Annotation, AppliedEdit, PdfEditor, TextEditResult } from '@pdf-editor/engine';
 
 import { getEngineService } from '../engine/engine-service';
 import { announce } from '../shell/announcer';
@@ -240,6 +249,40 @@ async function hydrate(edit: EngineEdit): Promise<EngineEdit> {
 // Executing edits
 // ---------------------------------------------------------------------------
 
+/** What a recorded `text.edit` payload adds to `TextEditPayload`: the editor's outcome. */
+export interface RecordedTextEditOutcome {
+  readonly honesty: TextEditResult['honesty'];
+  readonly fellBack: boolean;
+}
+
+/** What a recorded `redaction.apply` payload adds: captured strings kept to the areas. */
+export interface RecordedRedactionOutcome {
+  /** `RedactionCapture.skipped`: too short to search document-wide, removed in the areas only. */
+  readonly areaOnlyStrings?: readonly string[];
+}
+
+/**
+ * The recorded edit with what the engine's result says about it (see the module comment);
+ * the engine reads only the fields it knows, so replay is unaffected.
+ */
+function withOutcome(edit: EngineEdit, result: AppliedEdit): EngineEdit {
+  const payload = edit.payload as Record<string, unknown> | null | undefined;
+  if (!payload || typeof payload !== 'object') return edit;
+  if (edit.kind === 'text.edit' && result.textEdit) {
+    const outcome: RecordedTextEditOutcome = {
+      honesty: result.textEdit.honesty,
+      fellBack: result.textEdit.fellBack,
+    };
+    return { ...edit, payload: { ...payload, ...outcome } };
+  }
+  const skipped = result.redaction?.captured.skipped ?? [];
+  if (edit.kind === 'redaction.apply' && skipped.length > 0) {
+    const outcome: RecordedRedactionOutcome = { areaOnlyStrings: [...skipped] };
+    return { ...edit, payload: { ...payload, ...outcome } };
+  }
+  return edit;
+}
+
 /** Result of executing an edit: the edit to record (with its inverse) and the annotation. */
 export interface ExecutedEdit {
   readonly recorded: EngineEdit;
@@ -267,7 +310,7 @@ export async function executeEdit(ctx: EngineContext, edit: EngineEdit): Promise
   }
   const toOriginal = (id: string) => annotationIds.originalId(source, id);
   const recorded = await dehydrate({
-    ...mapIds(result.applied, toOriginal),
+    ...withOutcome(mapIds(result.applied, toOriginal), result),
     inverse: mapIds(result.inverse, toOriginal),
   });
   executedDuringAction?.push(recorded);
@@ -413,9 +456,11 @@ function syncDirtySources(): void {
 /**
  * Brings the engine to the workspace's edits (see the module comment). When the engine
  * refuses a step, `applied` records exactly what it did apply and the user is told; the
- * next action or history move tries again.
+ * next action, history move or export tries again. Resolves to whether the engine now holds
+ * exactly the workspace's edits for every source of the workspace (false after a refused
+ * step, or when the history moved while the replay ran).
  */
-async function reconcileNow(ctx: EngineContext): Promise<void> {
+async function reconcileNow(ctx: EngineContext): Promise<boolean> {
   const ws = useWorkspaceStore.getState().workspace;
   const target = annotationEdits(ws);
   const touched: EngineEdit[] = [];
@@ -462,7 +507,11 @@ async function reconcileNow(ctx: EngineContext): Promise<void> {
   }
   syncDirtySources();
   pagesChanged(touched);
-  if (failed) announce(m.annot_replay_failed());
+  if (failed) {
+    announce(m.annot_replay_failed());
+    return false;
+  }
+  return sameAsApplied(useWorkspaceStore.getState().workspace);
 }
 
 let reconcileQueued = false;
@@ -618,13 +667,34 @@ export function runAction<T>(
   });
 }
 
+/** The engine could not be brought to the workspace's edits: an exclusive task did not run. */
+export class EditsNotAppliedError extends Error {
+  override readonly name = 'EditsNotAppliedError';
+
+  constructor() {
+    super(m.export_error_edits_not_applied());
+  }
+}
+
 /**
  * Runs `task` with the engine in step with the workspace and no annotation edit able to
- * run meanwhile: export reads annotation counts and saves sources inside it.
+ * run meanwhile: export reads annotation counts and saves sources inside it. Rejects with
+ * `EditsNotAppliedError`, without running `task`, when the replay failed and the engine
+ * does not hold every edit of the workspace (a task reading the engine would see a state
+ * the history does not show). The replay is tried again on every call, so a transient
+ * failure heals.
  */
 export function runExclusive<T>(task: () => Promise<T>): Promise<T> {
   return enqueue(async () => {
-    await reconcileNow(await engineContext());
+    const ctx = await engineContext();
+    // A history move while the replay ran leaves the engine behind without any failure:
+    // catch up (bounded); a refused step fails at once.
+    for (let attempt = 0; ; attempt++) {
+      const edits = useWorkspaceStore.getState().workspace.engineEdits;
+      if (await reconcileNow(ctx)) break;
+      const moved = useWorkspaceStore.getState().workspace.engineEdits !== edits;
+      if (!moved || attempt >= 2) throw new EditsNotAppliedError();
+    }
     return task();
   });
 }
@@ -663,6 +733,14 @@ getEngineService().onSourceClosed(forgetSource);
 /** Ids of the edits the engine holds for a source (diagnostics and tests). */
 export function appliedEditIds(source: SourceId): string[] {
   return (applied.get(source) ?? []).map((edit) => edit.id);
+}
+
+/**
+ * The edits the engine holds for a source, oldest first, as recorded (export: the summary
+ * counts what the saved bytes contain, not what the history lists).
+ */
+export function appliedEdits(source: SourceId): readonly EngineEdit[] {
+  return applied.get(source) ?? [];
 }
 
 /** Tests: forget everything the engine was told (after `resetWorkspace`). */

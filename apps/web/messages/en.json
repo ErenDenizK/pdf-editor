@@ -933,6 +933,7 @@
   "export_error_cancelled": "Export cancelled.",
   "export_error_read": "Could not read {name}: {reason}",
   "export_error_check": "The output could not be checked: {reason}",
+  "export_error_edits_not_applied": "The document’s edits could not be re-applied, so the export is blocked until they are. Try again; if it keeps failing, undo the last change.",
   "export_error_image_missing": "An image page lost its image data; undo or delete that page and try again.",
   "summary_bookmarks_dropped": "Bookmarks: {kept} kept, {dropped} dropped because their pages are not in this document.",
   "summary_bookmarks_kept": [
@@ -1867,6 +1868,55 @@
     }
   ],
   "summary_text_edits_source": "{name}: {count}",
+  "summary_text_edits_fonts": "{name}: {parts}.",
+  "summary_text_edits_same_font": "{countText} in the original font",
+  "summary_text_edits_same_font_not_embedded": "{countText} in the original font (not embedded)",
+  "summary_text_edits_substituted": "{countText} with a substituted font ({faces})",
+  "summary_text_edits_fell_back": "{countText} fell back from the original font to {faces}",
+  "summary_text_edits_moved_out_of_form": [
+    {
+      "declarations": ["input count", "input countText", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{countText} moved out of its form",
+        "countPlural=*": "{countText} moved out of their forms"
+      }
+    }
+  ],
+  "summary_text_edits_face_count": "{face}: {count}",
+  "summary_text_edits_face_unknown": "a bundled font",
+  "summary_redaction_not_searched": [
+    {
+      "declarations": [
+        "input count",
+        "input countText",
+        "input groups",
+        "local countPlural = count: plural"
+      ],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{countText} stream could not be checked for the redacted strings, because its encoding cannot be searched ({groups}).",
+        "countPlural=*": "{countText} streams could not be checked for the redacted strings, because their encoding cannot be searched ({groups})."
+      }
+    }
+  ],
+  "summary_redaction_not_searched_group": "{kind}: {count}",
+  "summary_filter_jbig2": "JBIG2 images",
+  "summary_filter_ccitt": "CCITT fax images",
+  "summary_filter_jpx": "JPEG 2000 images",
+  "summary_filter_dct": "JPEG images",
+  "summary_filter_undecodable": "streams that could not be decoded",
+  "summary_redaction_area_only": [
+    {
+      "declarations": ["input count", "input countText", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{countText} short redacted string (under 4 characters) was removed inside the marked areas only; it was not searched for elsewhere in the document.",
+        "countPlural=*": "{countText} short redacted strings (under 4 characters) were removed inside the marked areas only; they were not searched for elsewhere in the document."
+      }
+    }
+  ],
+  "summary_redaction_area_only_string": "“{text}”",
   "export_progress_redaction": "Running the redaction self-check on the final file…",
   "export_failed_redaction": "The redaction self-check found redacted content in the exported file, so it is not offered for download.",
   "cmd_resize_pages": "Resize pages…",

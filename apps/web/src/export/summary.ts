@@ -11,11 +11,13 @@ import { STRIP_ITEMS } from '../document/strip-items';
 import { formatNumber, m } from '../i18n';
 import { pagesPhrase } from '../state/workspace-store';
 import { checkName } from '../redaction/report-text';
+import { familyOfFace } from '../text-edit/model';
 import type {
   ExportOutcome,
   RedactionExportSummary,
   SourceNotes,
   TextEditExportSummary,
+  TextEditFonts,
 } from './export-service';
 
 export interface SummaryItem {
@@ -87,24 +89,158 @@ function redactionItems(redaction: RedactionExportSummary): SummaryItem[] {
       text: m.summary_redaction_unverified({ names: report.unverifiedAttachments.join(', ') }),
     });
   }
+  if (report.notSearched.length > 0) items.push(notSearchedItem(report.notSearched));
+  const short = redaction.areaOnlyStrings;
+  if (short.length > 0) {
+    items.push({
+      id: 'redaction-area-only',
+      tone: 'changed',
+      text: m.summary_redaction_area_only({
+        count: short.length,
+        countText: formatNumber(short.length),
+      }),
+      details: short.map((text) => m.summary_redaction_area_only_string({ text })),
+    });
+  }
   return items;
 }
 
-function textEditItem(textEdits: TextEditExportSummary): SummaryItem {
+/** Stream kinds the self-check cannot search, in summary order. */
+export type NotSearchedKind = 'jbig2' | 'ccitt' | 'jpx' | 'dct' | 'undecodable';
+
+const FILTER_KINDS: readonly (readonly [string, NotSearchedKind])[] = [
+  ['JBIG2Decode', 'jbig2'],
+  ['CCITTFaxDecode', 'ccitt'],
+  ['JPXDecode', 'jpx'],
+  ['DCTDecode', 'dct'],
+];
+
+/**
+ * The kind of a `ForensicReport.notSearched` entry ("object 12 (JBIG2Decode)", "object 12
+ * (DCTDecode not decodable here)": the stream and, in parentheses, its filters or why it could
+ * not be decoded): the image codec it names, else a stream that could not be decoded.
+ */
+export function notSearchedKind(entry: string): NotSearchedKind {
+  const words = new Set(entry.split(/[^A-Za-z0-9]+/));
+  return FILTER_KINDS.find(([filter]) => words.has(filter))?.[1] ?? 'undecodable';
+}
+
+const KIND_LABEL: Readonly<Record<NotSearchedKind, () => string>> = {
+  jbig2: () => m.summary_filter_jbig2(),
+  ccitt: () => m.summary_filter_ccitt(),
+  jpx: () => m.summary_filter_jpx(),
+  dct: () => m.summary_filter_dct(),
+  undecodable: () => m.summary_filter_undecodable(),
+};
+
+/** "3 streams could not be checked for the redacted strings (JBIG2 images: 2, …)". */
+function notSearchedItem(entries: readonly string[]): SummaryItem {
+  const byKind = new Map<NotSearchedKind, string[]>();
+  for (const entry of entries) {
+    const kind = notSearchedKind(entry);
+    byKind.set(kind, [...(byKind.get(kind) ?? []), entry]);
+  }
+  const kinds = (Object.keys(KIND_LABEL) as NotSearchedKind[]).filter((kind) => byKind.has(kind));
   return {
-    id: 'text-edits',
+    id: 'redaction-not-searched',
     tone: 'changed',
-    text: m.summary_text_edits({
-      count: textEdits.edits,
-      countText: formatNumber(textEdits.edits),
-      fonts: formatNumber(textEdits.fontsRenamed),
-      mcids: formatNumber(textEdits.mcidsReassigned),
-      objects: formatNumber(textEdits.unreachableRemoved),
+    text: m.summary_redaction_not_searched({
+      count: entries.length,
+      countText: formatNumber(entries.length),
+      groups: kinds
+        .map((kind) =>
+          m.summary_redaction_not_searched_group({
+            kind: KIND_LABEL[kind](),
+            count: formatNumber(byKind.get(kind)?.length ?? 0),
+          }),
+        )
+        .join(', '),
     }),
-    details: textEdits.sources.map((s) =>
-      m.summary_text_edits_source({ name: s.name, count: formatNumber(s.edits) }),
-    ),
+    // The streams as the check names them, grouped.
+    details: kinds.flatMap((kind) => byKind.get(kind) ?? []),
   };
+}
+
+/** A bundled face key as a name: `NotoSerif-Bold` → "Noto Serif Bold". */
+function faceName(face: string): string {
+  if (face === '') return m.summary_text_edits_face_unknown();
+  const style = face.split('-').slice(1).join(' ');
+  const family = familyOfFace(face);
+  return style === '' || style === 'Regular' ? family : `${family} ${style}`;
+}
+
+/** "Noto Sans" for one face, "Noto Sans: 2, JetBrains Mono: 1" for several. */
+function facesText(faces: Readonly<Record<string, number>>): string {
+  const entries = Object.entries(faces).sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 1) return faceName(entries[0]?.[0] ?? '');
+  return entries
+    .map(([face, count]) =>
+      m.summary_text_edits_face_count({ face: faceName(face), count: formatNumber(count) }),
+    )
+    .join(', ');
+}
+
+const total = (counts: Readonly<Record<string, number>>) =>
+  Object.values(counts).reduce((n, c) => n + c, 0);
+
+/**
+ * "report.pdf: 2 in the original font; 1 with a substituted font (Noto Sans); 1 fell back
+ * from the original font to Noto Sans." (spec §2.1, §5.3: the export summary says how every
+ * text edit was typeset).
+ */
+function textEditFontsText(name: string, fonts: TextEditFonts): string {
+  const parts: string[] = [];
+  const count = (n: number) => ({ count: n, countText: formatNumber(n) });
+  if (fonts.sameFont > 0) parts.push(m.summary_text_edits_same_font(count(fonts.sameFont)));
+  if (fonts.sameFontNotEmbedded > 0) {
+    parts.push(m.summary_text_edits_same_font_not_embedded(count(fonts.sameFontNotEmbedded)));
+  }
+  const substituted = total(fonts.substituted);
+  if (substituted > 0) {
+    parts.push(
+      m.summary_text_edits_substituted({
+        ...count(substituted),
+        faces: facesText(fonts.substituted),
+      }),
+    );
+  }
+  const fellBack = total(fonts.fellBack);
+  if (fellBack > 0) {
+    parts.push(
+      m.summary_text_edits_fell_back({ ...count(fellBack), faces: facesText(fonts.fellBack) }),
+    );
+  }
+  if (fonts.movedOutOfForm > 0) {
+    parts.push(m.summary_text_edits_moved_out_of_form(count(fonts.movedOutOfForm)));
+  }
+  return m.summary_text_edits_fonts({ name, parts: parts.join('; ') });
+}
+
+function textEditItems(textEdits: TextEditExportSummary): SummaryItem[] {
+  return [
+    {
+      id: 'text-edits',
+      tone: 'changed',
+      text: m.summary_text_edits({
+        count: textEdits.edits,
+        countText: formatNumber(textEdits.edits),
+        fonts: formatNumber(textEdits.fontsRenamed),
+        mcids: formatNumber(textEdits.mcidsReassigned),
+        objects: formatNumber(textEdits.unreachableRemoved),
+      }),
+      details: textEdits.sources.map((s) =>
+        m.summary_text_edits_source({ name: s.name, count: formatNumber(s.edits) }),
+      ),
+    },
+    // One visible line per source: which edits kept their font, which did not.
+    ...textEdits.sources.map(
+      (s, index): SummaryItem => ({
+        id: `text-edit-fonts-${index}`,
+        tone: s.fonts.sameFont === s.edits ? 'kept' : 'changed',
+        text: textEditFontsText(s.name, s.fonts),
+      }),
+    ),
+  ];
 }
 
 export function summarizeReport(
@@ -116,7 +252,7 @@ export function summarizeReport(
   const items: SummaryItem[] = [];
   // Output: what the content edits became, first.
   if (content.redaction) items.push(...redactionItems(content.redaction));
-  if (content.textEdits) items.push(textEditItem(content.textEdits));
+  if (content.textEdits) items.push(...textEditItems(content.textEdits));
   if (outcome?.security) {
     const restricted = restrictionList(outcome.security.permissions);
     items.push({

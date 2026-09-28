@@ -20,6 +20,10 @@
  *    get the garbage collection alone (`finalizeContentEdits`). Sources with applied redactions
  *    (`plan.redaction`) are always saved by PDFium too: the engine holds their redacted
  *    document, never the original bytes kept at open.
+ *    Content edits (text, image, redaction) are read from the edits the engine holds
+ *    (`appliedEdits`), not from the history: the export fails when the two differ (a replay
+ *    the engine refused; the edit runner's `runExclusive` refuses first), and the summary's
+ *    text-edit counts, per source and by font outcome, are those of the saved bytes.
  * 3. Assemble in the assembly worker, with progress. Image pages take their bytes from the
  *    workspace store's blobs (PNG or JPEG; WebP was re-encoded to PNG when inserted). The
  *    assembler always writes a new file (pdf-lib `copyPages`): there is no incremental or
@@ -43,6 +47,7 @@ import {
   type BlobId,
   type DocumentId,
   type DocumentMetadata,
+  type EngineEdit,
   type SecurityPolicy,
   type SourceId,
   type VirtualDocument,
@@ -59,7 +64,7 @@ import type {
   VerificationResult,
 } from '@pdf-editor/engine';
 
-import { runExclusive } from '../annotations/edit-runner';
+import { appliedEdits, runExclusive } from '../annotations/edit-runner';
 import { getAssembler } from '../engine/assembler-client';
 import {
   type EngineResult,
@@ -107,6 +112,25 @@ export interface RedactionExportSummary {
   readonly unmappedAreas: number;
   /** The self-check on the exact bytes offered. */
   readonly report: ForensicReport;
+  /**
+   * Captured strings too short to search document-wide (`RedactionCapture.skipped`): removed
+   * inside the marked areas only.
+   */
+  readonly areaOnlyStrings: readonly string[];
+}
+
+/** How the text edits of a source were typeset (spec §2.1, §5.3; summary data). */
+export interface TextEditFonts {
+  /** Tier 2 in the original, embedded font. */
+  readonly sameFont: number;
+  /** Tier 2 in the original font, which the file does not embed. */
+  readonly sameFontNotEmbedded: number;
+  /** Tier 1 in a bundled face (tier 2 was not possible), count per face key. */
+  readonly substituted: Readonly<Record<string, number>>;
+  /** Tier 2 failed its read-back and fell back to tier 1: count per bundled face key. */
+  readonly fellBack: Readonly<Record<string, number>>;
+  /** Tier 1 for text inside a form XObject: the line moved out of its form. */
+  readonly movedOutOfForm: number;
 }
 
 /** What `finalizeTextEdits` did for the sources with text edits (summary data). */
@@ -116,13 +140,17 @@ export interface TextEditExportSummary {
   readonly fontsRenamed: number;
   readonly mcidsReassigned: number;
   readonly unreachableRemoved: number;
-  readonly sources: readonly {
-    readonly name: string;
-    readonly edits: number;
-    readonly fontsRenamed: number;
-    readonly mcidsReassigned: number;
-    readonly unreachableRemoved: number;
-  }[];
+  readonly sources: readonly TextEditSourceSummary[];
+}
+
+export interface TextEditSourceSummary {
+  readonly name: string;
+  readonly edits: number;
+  readonly fontsRenamed: number;
+  readonly mcidsReassigned: number;
+  readonly unreachableRemoved: number;
+  /** The edits by font outcome (same font, substituted, fell back, moved out of form). */
+  readonly fonts: TextEditFonts;
 }
 
 export interface PreparedExport {
@@ -190,6 +218,12 @@ export interface ExportDependencies {
    */
   readonly dirtySources?: () => ReadonlySet<SourceId> | undefined;
   /**
+   * The edits the engine holds for a source (annotations/edit-runner.ts `appliedEdits`).
+   * Content edits and the summary counts come from them; without it the workspace's edits
+   * are taken as held (engines that keep no history, tests).
+   */
+  readonly appliedEdits?: (source: SourceId) => readonly EngineEdit[];
+  /**
    * Runs the export once queued engine edits (annotations) have finished and the engine
    * matches the workspace, with no edit able to run until it is done, so the model read,
    * the annotation counts and the saved sources agree (annotations/edit-runner.ts
@@ -216,6 +250,7 @@ const defaultDependencies = (): ExportDependencies => ({
   dirtySources: () =>
     (useWorkspaceStore.getState() as { readonly dirtySources?: ReadonlySet<SourceId> })
       .dirtySources,
+  appliedEdits,
   exclusive: runExclusive,
   compress: compressExport,
   compressionFor: exportCompressionFor,
@@ -301,21 +336,78 @@ async function expectedAnnotationCounts(
   return any ? counts : undefined;
 }
 
-/**
- * Sources with image edits (`image.transform`, `image.remove`, `image.replace`): their page
- * content was rewritten, so their saved bytes are garbage-collected (ADR-0011 §5).
- */
-function imageEditedSources(ws: Workspace): Set<SourceId> {
-  return new Set(ws.engineEdits.filter((e) => e.kind.startsWith('image.')).map((e) => e.source));
+/** Edits that rewrite page content and cannot be undone in place (replayed after a reopen). */
+function isContentEdit(edit: EngineEdit): boolean {
+  return (
+    edit.kind === 'text.edit' || edit.kind === 'redaction.apply' || edit.kind.startsWith('image.')
+  );
 }
 
-/** `text.edit` edits per source. */
-function textEditCounts(ws: Workspace): Map<SourceId, number> {
-  const counts = new Map<SourceId, number>();
-  for (const edit of ws.engineEdits) {
-    if (edit.kind === 'text.edit') counts.set(edit.source, (counts.get(edit.source) ?? 0) + 1);
+/** Whether two edit lists hold the same content edits, in the same order. */
+function sameContentEdits(a: readonly EngineEdit[], b: readonly EngineEdit[]): boolean {
+  const ids = (edits: readonly EngineEdit[]) =>
+    edits
+      .filter(isContentEdit)
+      .map((edit) => edit.id)
+      .join('\u0000');
+  return ids(a) === ids(b);
+}
+
+type Honesty = 'same-font' | 'same-font-not-embedded' | 'font-substituted' | 'moved-out-of-form';
+const HONESTY: readonly string[] = [
+  'same-font',
+  'same-font-not-embedded',
+  'font-substituted',
+  'moved-out-of-form',
+];
+
+/**
+ * The font outcome of recorded `text.edit` edits: the `honesty`, `fellBack` and `face` the
+ * edit runner records with each applied edit. An edit recorded without them counts by its
+ * tier (2: same font; 1: font substituted).
+ */
+export function textEditFontsOf(edits: readonly EngineEdit[]): TextEditFonts {
+  let sameFont = 0;
+  let sameFontNotEmbedded = 0;
+  let movedOutOfForm = 0;
+  const substituted: Record<string, number> = {};
+  const fellBack: Record<string, number> = {};
+  for (const edit of edits) {
+    if (edit.kind !== 'text.edit') continue;
+    const payload = (edit.payload ?? {}) as {
+      readonly tier?: unknown;
+      readonly face?: unknown;
+      readonly honesty?: unknown;
+      readonly fellBack?: unknown;
+    };
+    const honesty: Honesty =
+      typeof payload.honesty === 'string' && HONESTY.includes(payload.honesty)
+        ? (payload.honesty as Honesty)
+        : payload.tier === 2
+          ? 'same-font'
+          : 'font-substituted';
+    if (honesty === 'same-font') sameFont += 1;
+    else if (honesty === 'same-font-not-embedded') sameFontNotEmbedded += 1;
+    else if (honesty === 'moved-out-of-form') movedOutOfForm += 1;
+    else {
+      const face = typeof payload.face === 'string' ? payload.face : '';
+      const into = payload.fellBack === true ? fellBack : substituted;
+      into[face] = (into[face] ?? 0) + 1;
+    }
   }
-  return counts;
+  return { sameFont, sameFontNotEmbedded, substituted, fellBack, movedOutOfForm };
+}
+
+/** Captured strings of recorded `redaction.apply` edits kept to their areas (deduplicated). */
+function areaOnlyStringsOf(edits: readonly EngineEdit[]): string[] {
+  const strings = new Set<string>();
+  for (const edit of edits) {
+    if (edit.kind !== 'redaction.apply') continue;
+    const list = (edit.payload as { readonly areaOnlyStrings?: unknown } | null)?.areaOnlyStrings;
+    if (!Array.isArray(list)) continue;
+    for (const value of list) if (typeof value === 'string') strings.add(value);
+  }
+  return [...strings];
 }
 
 /** English report warnings for the source notes (the summary shows localized lines). */
@@ -372,16 +464,21 @@ async function prepareExportNow(
     // A redacted export that cannot be checked is never offered.
     if (redaction && !redactor) return failed(m.export_failed_redaction());
     const redacted = new Set<SourceId>(redaction?.sources ?? []);
-    const textEdits = textEditCounts(ws);
-    const imageEdited = imageEditedSources(ws);
+    // What the engine holds: the saved bytes contain these edits, whatever the history says.
+    const modelEdits = (source: SourceId) => ws.engineEdits.filter((e) => e.source === source);
+    const held = new Map<SourceId, readonly EngineEdit[]>();
+    for (const source of plan.sources) {
+      const edits = deps.appliedEdits ? deps.appliedEdits(source) : modelEdits(source);
+      // Edits the history shows but the engine lacks (or the reverse) would be missing from
+      // (or extra in) the file: never offer it. The edit runner refuses before this point.
+      if (!sameContentEdits(edits, modelEdits(source))) {
+        return failed(m.export_error_edits_not_applied());
+      }
+      held.set(source, edits);
+    }
+    const heldOf = (source: SourceId) => held.get(source) ?? [];
     const { finalizeContentEdits, finalizeTextEdits } = await import('@pdf-editor/engine');
-    const textEditSources: {
-      name: string;
-      edits: number;
-      fontsRenamed: number;
-      mcidsReassigned: number;
-      unreachableRemoved: number;
-    }[] = [];
+    const textEditSources: TextEditSourceSummary[] = [];
 
     const dirty = deps.dirtySources?.();
     const edited = new Set(plan.sources.filter((id) => hasEngineEdits(ws, id, dirty)));
@@ -423,7 +520,8 @@ async function prepareExportNow(
       const source = ws.sources[sourceId];
       const name = source?.name ?? m.unknown_file();
       const encrypted = source?.flags.encrypted === true;
-      const edits = textEdits.get(sourceId) ?? 0;
+      const textEdits = heldOf(sourceId).filter((e) => e.kind === 'text.edit');
+      const edits = textEdits.length;
       // Redacted and text-edited sources: the engine's document, never the bytes kept at
       // open (they would bring the removed content or the old text back).
       const viaEngine =
@@ -454,8 +552,9 @@ async function prepareExportNow(
           fontsRenamed: finalized.fontsRenamed,
           mcidsReassigned: finalized.mcidsReassigned,
           unreachableRemoved: finalized.unreachableRemoved,
+          fonts: textEditFontsOf(textEdits),
         });
-      } else if (imageEdited.has(sourceId)) {
+      } else if (heldOf(sourceId).some((e) => e.kind.startsWith('image.'))) {
         // Image edits rewrote page content: drop the orphaned streams (the old content, a
         // removed or replaced image) so nothing removed survives in the file.
         bytes = (await finalizeContentEdits(bytes)).bytes;
@@ -543,6 +642,7 @@ async function prepareExportNow(
         areasByPage,
         unmappedAreas: redaction.unmappedAreas,
         report: check,
+        areaOnlyStrings: areaOnlyStringsOf(redaction.sources.flatMap(heldOf)),
       };
       if (!check.ok) {
         // Marks left unapplied are flagged by the check (any /Redact in a redacted file).

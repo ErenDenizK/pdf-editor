@@ -2,8 +2,13 @@
  * Export of a source with text edits (ADR-0011 §5, spec redaction-and-text-editing §2.5):
  * the edited source is saved by the engine and finalized (`finalizeTextEdits`) before
  * assembly, so the output has no `/Untitled` subset font, and the summary data counts the
- * edits. Fixture: text-edit-fonts.pdf, the Identity-H Inter subset line on y = 650 (upper
- * case other than "T" is not in the subset, so the edit is tier 1 with a bundled face).
+ * edits by font outcome (spec §2.1, §5.3). Fixture: text-edit-fonts.pdf, the Identity-H Inter
+ * subset line on y = 650 (upper case other than "T" is not in the subset, so the edit is
+ * tier 1 with a bundled face), the whole JetBrains Mono line on y = 600 (tier 2) and the
+ * Helvetica line on y = 700 (tier 2, not embedded).
+ *
+ * An export after a replay the engine refused is blocked (the engine lacks edits the history
+ * shows), and allowed again once a replay succeeds.
  */
 import {
   PDFArray,
@@ -22,14 +27,23 @@ import {
   newFormField,
   type SourceId,
 } from '@pdf-editor/document-model';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import imagesUrl from '../../../../test/fixtures/images.pdf?url';
 import simpleTextUrl from '../../../../test/fixtures/simple-text.pdf?url';
 import fontsUrl from '../../../../test/fixtures/text-edit-fonts.pdf?url';
 import { fixtureFile } from '../../test/store-harness';
 import { resetAnnotationStore } from '../annotations/annotation-store';
-import { executeEdit, resetEditRunner, runAction, whenIdle } from '../annotations/edit-runner';
+import {
+  appliedEditIds,
+  EditsNotAppliedError,
+  engineContext,
+  executeEdit,
+  resetEditRunner,
+  runAction,
+  runExclusive,
+  whenIdle,
+} from '../annotations/edit-runner';
 import { getEngineService } from '../engine/engine-service';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { prepareExport } from './export-service';
@@ -84,15 +98,41 @@ describe('export of text-edited sources', () => {
     if (!doc || first?.ref.kind !== 'source') throw new Error('not opened');
     const result = await textEdit(first.ref.source, 650, 'fox', 'FOX');
     expect(result?.tier).toBe(1);
+    // The recorded edit carries the outcome the summary reports.
+    expect(model().workspace.engineEdits[0]?.payload).toMatchObject({
+      tier: 1,
+      face: result?.substitute,
+      honesty: 'font-substituted',
+      fellBack: false,
+    });
+    // Tier 2 in the embedded JetBrains Mono, and in the Helvetica the file does not embed.
+    expect(await textEdit(first.ref.source, 600, 'fox', 'cat')).toMatchObject({
+      tier: 2,
+      honesty: 'same-font',
+    });
+    expect(await textEdit(first.ref.source, 700, 'fox', 'cat')).toMatchObject({
+      tier: 2,
+      honesty: 'same-font-not-embedded',
+    });
 
     const prepared = await prepareExport(doc.id, { compression: null });
     if (!prepared.ok) throw new Error(prepared.error.message);
     expect(prepared.value.verification.ok).toBe(true);
     expect(prepared.value.redaction).toBeUndefined();
-    expect(prepared.value.textEdits).toMatchObject({ edits: 1 });
+    expect(prepared.value.textEdits).toMatchObject({ edits: 3 });
     expect(prepared.value.textEdits?.fontsRenamed).toBeGreaterThanOrEqual(1);
     expect(prepared.value.textEdits?.sources).toEqual([
-      expect.objectContaining({ name: 'text-edit-fonts.pdf', edits: 1 }),
+      expect.objectContaining({
+        name: 'text-edit-fonts.pdf',
+        edits: 3,
+        fonts: {
+          sameFont: 1,
+          sameFontNotEmbedded: 1,
+          substituted: { [result?.substitute ?? '?']: 1 },
+          fellBack: {},
+          movedOutOfForm: 0,
+        },
+      }),
     ]);
     const text = new TextDecoder('latin1').decode(new Uint8Array(prepared.value.bytes));
     expect(text).not.toContain('/Untitled');
@@ -104,8 +144,89 @@ describe('export of text-edited sources', () => {
       prepared.value.textEdits ? { textEdits: prepared.value.textEdits } : {},
     );
     expect(items[0]?.id).toBe('text-edits');
-    expect(items[0]?.text).toMatch(/^Text edits: 1 \(fonts renamed: [1-9]/);
-    expect(items[0]?.details).toEqual(['text-edit-fonts.pdf: 1']);
+    expect(items[0]?.text).toMatch(/^Text edits: 3 \(fonts renamed: [1-9]/);
+    expect(items[0]?.details).toEqual(['text-edit-fonts.pdf: 3']);
+    expect(items[1]).toEqual({
+      id: 'text-edit-fonts-0',
+      tone: 'changed',
+      text:
+        'text-edit-fonts.pdf: 1 in the original font; 1 in the original font (not embedded); ' +
+        '1 with a substituted font (Inter).',
+    });
+  });
+});
+
+/** The text of page 1 of `bytes`, opened as a new source of the engine service. */
+async function pageTextOf(bytes: ArrayBuffer): Promise<string> {
+  const service = getEngineService();
+  const opened = await service.open(new File([bytes], 'out.pdf', { type: 'application/pdf' }));
+  if (!opened.ok) throw new Error(opened.error.message);
+  const runs = await service.getPageText(opened.value.id, 0);
+  await service.close(opened.value.id);
+  if (!runs.ok) throw new Error(runs.error.message);
+  return runs.value.map((r) => r.text).join(' | ');
+}
+
+describe('export after a replay the engine refused', () => {
+  beforeEach(() => {
+    resetWorkspace();
+    resetEditRunner();
+    resetAnnotationStore();
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await whenIdle();
+    resetWorkspace();
+  });
+
+  it('is blocked while the engine lacks an edit of the history, and heals once a replay succeeds', async () => {
+    await model().openFiles([await fixtureFile(fontsUrl, 'text-edit-fonts.pdf')]);
+    const doc = getActiveDocument(model().workspace);
+    const first = doc?.pages[0];
+    if (!doc || first?.ref.kind !== 'source') throw new Error('not opened');
+    const source = first.ref.source;
+    expect((await textEdit(source, 650, 'fox', 'FOX'))?.tier).toBe(1);
+    expect(await textEdit(source, 600, 'fox', 'cat')).toBeDefined();
+    const [kept] = model().workspace.engineEdits;
+    if (!kept) throw new Error('no edit recorded');
+
+    // The engine refuses text edits from now on (a worker hiccup, a font that fails to load).
+    const ctx = await engineContext();
+    const refuse = vi
+      .spyOn(
+        ctx.editor as unknown as { applyTextEdit: (...a: unknown[]) => unknown },
+        'applyTextEdit',
+      )
+      .mockRejectedValue(new Error('injected: engine refused'));
+    // Undo the second edit: reopen + replay of the first, which fails.
+    model().undo();
+    await whenIdle();
+    expect(refuse).toHaveBeenCalled();
+    expect(model().workspace.engineEdits.map((e) => e.id)).toEqual([kept.id]);
+    expect(appliedEditIds(source)).toEqual([]);
+
+    // Persistent failure: the export does not run (the replay is tried again and fails).
+    const calls = refuse.mock.calls.length;
+    const blocked = await prepareExport(doc.id, { compression: null });
+    expect(blocked.ok).toBe(false);
+    if (blocked.ok) throw new Error('exported');
+    expect(blocked.error.message).toMatch(/edits could not be re-applied.*export is blocked/);
+    expect(refuse.mock.calls.length).toBeGreaterThan(calls);
+    // Any exclusive task is refused the same way, and never runs.
+    const task = vi.fn(() => Promise.resolve(true));
+    await expect(runExclusive(task)).rejects.toBeInstanceOf(EditsNotAppliedError);
+    expect(task).not.toHaveBeenCalled();
+
+    // Transient failure: once the engine accepts the edit again, the export replays it first.
+    refuse.mockRestore();
+    const prepared = await prepareExport(doc.id, { compression: null });
+    if (!prepared.ok) throw new Error(prepared.error.message);
+    expect(appliedEditIds(source)).toEqual([kept.id]);
+    expect(prepared.value.verification.ok).toBe(true);
+    expect(prepared.value.textEdits).toMatchObject({ edits: 1 });
+    const text = await pageTextOf(prepared.value.bytes);
+    expect(text).toContain('The quick brown FOX jumps');
+    expect(text).not.toContain('brown cat');
   });
 });
 

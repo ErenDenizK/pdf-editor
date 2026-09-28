@@ -272,6 +272,34 @@ describe('prepareExport', () => {
     });
   });
 
+  it('refuses when the engine does not hold the content edits the history shows', async () => {
+    const pages = getDocument(merged, mergedId).pages;
+    const first = pages[0];
+    if (first?.ref.kind !== 'source') throw new Error('merged page 1 is a source page');
+    const edit = {
+      id: 'held-nowhere',
+      source: first.ref.source,
+      pageIndex: first.ref.index,
+      kind: 'image.remove',
+      payload: {},
+    } as const;
+    const ws: Workspace = { ...merged, engineEdits: [edit] };
+    const saveSource = vi.fn(() =>
+      Promise.resolve({ ok: false, error: { code: 'internal', message: 'not reached' } } as const),
+    );
+    const result = await prepareExport(
+      mergedId,
+      {},
+      {
+        ...deps(ws, { saveSource }),
+        appliedEdits: () => [],
+      },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok ? '' : result.error.message).toMatch(/edits could not be re-applied/);
+    expect(saveSource).not.toHaveBeenCalled();
+  });
+
   describe('annotations', () => {
     /** simple-text.pdf with a commented highlight and a note recorded as engine edits. */
     async function annotated(id: string) {
