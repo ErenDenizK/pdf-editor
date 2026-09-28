@@ -18,6 +18,12 @@
  *   verification) is reported and the batch goes on.
  * - **Concurrency:** the plan's (one file at a time with OCR, else two); one with a
  *   continuous Bates step, whose numbers depend on the files before.
+ * - **OCR** (ocr-step.ts): an `ocr` step is the one step that is not a model operation. The
+ *   recognizer lease is taken and the recipe's languages ensured once, before the first
+ *   file (a pack that cannot be fetched fails the batch then: `BatchRunError`); each file's
+ *   step recognises its pages and applies the `ocr.apply` edit to the private source, so the
+ *   export writes the layered bytes. The lease is released when the run ends. An image
+ *   output carries no text layer: the step is skipped there (with the images notice).
  * - **Cancel:** the signal stops the files in progress and no further file starts; files
  *   not started are reported as skipped (`cancelled`).
  * - **Secrets:** the run-time passwords (the output password asked once per batch, the
@@ -27,8 +33,9 @@
  *   computed once for the ZIP; the export's buffers are released as soon as they are.
  *
  * Dependency injection: `BatchRunnerDependencies` names the engine (the PDFium worker
- * proxy, `appBatchEngine`), the assembler, the compressor, the export pipeline, the
- * rasterizer and the converter; tests replace any of them.
+ * proxy, `appBatchEngine`), the OCR layer and recognizer pool (`appBatchOcr`), the
+ * assembler, the compressor, the export pipeline, the rasterizer and the converter; tests
+ * replace any of them.
  */
 import {
   type BlobId,
@@ -46,6 +53,7 @@ import {
   recipeRunTotals,
   type RecipeRuntimeValues,
   type RecipeStepKind,
+  type RecipeStepOf,
   type SourceId,
 } from '@pdf-editor/document-model';
 import type { PdfAssembler } from '@pdf-editor/engine';
@@ -65,6 +73,16 @@ import { m } from '../i18n';
 import { compressExport, type ExportCompressor } from '../tools/export-compression';
 import { rasterizeWorkspaceDocument } from '../tools/rasterize';
 import { pageBoxIn } from '../crop/plan';
+import type { OcrRunProgress } from '../ocr/ocr-run';
+import {
+  appBatchOcr,
+  type BatchOcr,
+  BatchOcrError,
+  type BatchOcrSession,
+  openBatchOcr,
+  recipeOcrLanguages,
+  runOcrStep,
+} from './ocr-step';
 import {
   appBatchEngine,
   type BatchEngine,
@@ -89,6 +107,8 @@ import { type ZipEntry, zipEntry } from './zip';
 
 export interface BatchRunnerDependencies {
   readonly engine: () => Promise<BatchEngine>;
+  /** OCR steps: the layer and the recognizer pool (only asked for when a step needs it). */
+  readonly ocr?: () => Promise<BatchOcr>;
   readonly assembler: () => Promise<PdfAssembler>;
   readonly compress?: ExportCompressor;
   readonly prepare?: typeof prepareExport;
@@ -100,6 +120,7 @@ export interface BatchRunnerDependencies {
 export function defaultBatchDependencies(): BatchRunnerDependencies {
   return {
     engine: appBatchEngine,
+    ocr: appBatchOcr,
     assembler: getAssembler,
     compress: compressExport,
     prepare: prepareExport,
@@ -126,6 +147,8 @@ export interface BatchFileState {
   readonly phase: BatchFilePhase;
   /** `steps`: the step being applied. */
   readonly stepIndex?: number;
+  /** `steps`, an OCR step recognising: pages done of the pages it recognises. */
+  readonly ocr?: { readonly done: number; readonly total: number };
   readonly exportPhase?: ExportPhase;
   /** Final phases: the outcome as the report lists it. */
   readonly outcome?: RecipeFileOutcome;
@@ -152,6 +175,11 @@ export interface BatchRunOptions {
   readonly askPassword?: SourcePasswordPrompt;
   readonly signal?: AbortSignal;
   readonly onFile?: (state: BatchFileState) => void;
+  /**
+   * Before the first file of a recipe with OCR: the recognizer starting and its languages
+   * loading (downloaded once for the batch when the device lacks them).
+   */
+  readonly onOcrPrepare?: (progress: OcrRunProgress) => void;
 }
 
 /** Thrown when a run cannot start (a blocked plan, missing answers); per-file problems never throw. */
@@ -212,6 +240,7 @@ async function engineCall<T>(call: () => Promise<T>): Promise<EngineResult<T>> {
 
 /** Kinds of steps an image output cannot carry (they only shape the PDF file). */
 const PDF_ONLY: readonly RecipeStepKind[] = [
+  'ocr',
   'flatten',
   'compress',
   'metadata-strip',
@@ -250,13 +279,35 @@ export async function runRecipe(
   const askInTurn = serial();
   const knownPasswords: string[] = [];
   const continuousBates = plan.files[0]?.steps.some((s) => s.continuesFromPreviousFile) === true;
-  const concurrency = continuousBates ? 1 : plan.concurrency;
+  const ocrSteps = plan.recipe.steps.filter((s): s is RecipeStepOf<'ocr'> => s.kind === 'ocr');
+  // Images carry no text layer: recognising for them would only cost time.
+  const runsOcr = ocrSteps.length > 0 && plan.output.format !== 'images';
+  // One file at a time with OCR (spec §5), whatever the plan says.
+  const concurrency = continuousBates || runsOcr ? 1 : plan.concurrency;
   let batesNumbered = 0;
 
   const outcomes: (RecipeFileOutcome | undefined)[] = plan.files.map(() => undefined);
   const outputs: (BatchOutput | undefined)[] = plan.files.map(() => undefined);
   const report = (state: BatchFileState) => onFile?.(state);
   for (const file of plan.files) report({ index: file.index, name: file.name, phase: 'queued' });
+
+  // The recognizer and the languages, once for the batch, before the first file.
+  let ocr: BatchOcrSession | undefined;
+  if (runsOcr && plan.files.length > 0 && signal?.aborted !== true) {
+    if (!deps.ocr) throw new BatchRunError(m.batch_error_ocr_start({ reason: 'unavailable' }));
+    try {
+      ocr = await openBatchOcr(await deps.ocr(), recipeOcrLanguages(ocrSteps), {
+        ...(signal ? { signal } : {}),
+        ...(options.onOcrPrepare ? { onProgress: options.onOcrPrepare } : {}),
+      });
+    } catch (error) {
+      if (error instanceof BatchOcrError) throw new BatchRunError(error.message);
+      // Cancelled while loading: every file is reported skipped below.
+      if (!signal?.aborted) {
+        throw new BatchRunError(m.batch_error_ocr_start({ reason: toFailure(error).message }));
+      }
+    }
+  }
 
   const runFile = async (position: number): Promise<void> => {
     const filePlan = plan.files[position];
@@ -329,6 +380,54 @@ export async function runRecipe(
         }
         report({ index, name, phase: 'steps', stepIndex: planned.stepIndex });
         const notes: StepNote[] = [];
+        if (planned.step.kind === 'ocr') {
+          if (!runsOcr) continue;
+          if (ocr === undefined) {
+            fail('aborted', m.batch_failure_cancelled());
+            return;
+          }
+          try {
+            const stepIndex = planned.stepIndex;
+            const done = await runOcrStep(
+              ocr,
+              {
+                workspace: state.workspace,
+                documentId,
+                source: source.id,
+                options: planned.step.options,
+              },
+              {
+                ...(signal ? { signal } : {}),
+                onProgress: (pagesDone, total) =>
+                  report({
+                    index,
+                    name,
+                    phase: 'steps',
+                    stepIndex,
+                    ocr: { done: pagesDone, total },
+                  }),
+              },
+            );
+            state = { ...state, workspace: done.workspace };
+            notes.push(...done.notes);
+          } catch (error) {
+            // Cancelled: nothing was applied and the file writes no output.
+            if (signal?.aborted || toFailure(error).code === 'aborted') {
+              fail('aborted', m.batch_failure_cancelled());
+            } else {
+              fail(
+                'step',
+                m.batch_failure_step({ reason: toFailure(error).message }),
+                planned.stepIndex,
+              );
+            }
+            return;
+          }
+          for (const note of notes) {
+            stepNotes.push({ stepIndex: planned.stepIndex, kind: planned.step.kind, note });
+          }
+          continue;
+        }
         try {
           state = applyRecipeStep(
             state,
@@ -556,6 +655,9 @@ export async function runRecipe(
       for (const item of summarizeReport(result.report, result.sourceNotes, result.outcome, {
         ...(result.redaction ? { redaction: result.redaction } : {}),
         ...(result.textEdits ? { textEdits: result.textEdits } : {}),
+        // The OCR step's run, worded as the export dialog words it (with its honesty line).
+        ...(result.ocr ? { ocr: result.ocr } : {}),
+        ...(result.signaturesRemoved ? { signaturesRemoved: result.signaturesRemoved } : {}),
       })) {
         if (item.tone !== 'changed') continue;
         // Stripping what the recipe asked to strip is the result, not a note.
@@ -606,6 +708,7 @@ export async function runRecipe(
     await Promise.all(Array.from({ length: Math.min(concurrency, plan.files.length) }, worker));
   } finally {
     knownPasswords.length = 0;
+    ocr?.release();
   }
 
   const listed: RecipeFileOutcome[] = plan.files.map((filePlan, position) => {

@@ -12,8 +12,11 @@ import {
   PAPER_SIZES,
   type PaperSizeId,
   RECIPE_FONT_FAMILIES,
+  RECIPE_DEFAULT_OCR_REPLACE,
   RECIPE_SLOTS,
   type RecipeConvertCommon,
+  type RecipeOcrOptions,
+  type RecipeOcrReplace,
   type RecipeFontFamily,
   type RecipePageSelection,
   type RecipeRange,
@@ -23,14 +26,17 @@ import {
   RESIZE_MODES,
   type ResizeMode,
 } from '@pdf-editor/document-model';
-import { type ReactNode, useId, useState } from 'react';
+import type { OcrLanguagePack } from '@pdf-editor/engine';
+import { type ReactNode, useEffect, useId, useState } from 'react';
 
 import { PERMISSION_KEYS, permissionLabel } from '../document/security-text';
 import { STRIP_ITEMS } from '../document/strip-items';
-import { m } from '../i18n';
+import { getLocale, m } from '../i18n';
+import { ocrDependencies } from '../ocr/ocr-deps';
+import { formatMegabytes, languageName, languagesKey } from '../ocr/ocr-model';
 import tool from '../tools/ToolDialog.module.css';
 import styles from './Batch.module.css';
-import { anchorLabel, compressPresetLabel } from './labels';
+import { anchorLabel, compressPresetLabel, OCR_HIGH_DPI, OCR_STANDARD_DPI } from './labels';
 import { formatRanges, parseRanges } from './step-defaults';
 
 // ---------------------------------------------------------------------------
@@ -927,44 +933,178 @@ export function StepForm({
     case 'remove-password':
       return <p className={styles.muted}>{m.batch_remove_password_hint()}</p>;
     case 'ocr':
-      return (
-        <>
-          <p className={styles.notice}>{m.batch_waiting_ocr()}</p>
-          <Row>
-            <TextField
-              label={m.batch_field_languages()}
-              value={step.options.languages.join(', ')}
-              onChange={(text) =>
-                update(step, {
-                  languages: text
-                    .split(',')
-                    .map((l) => l.trim())
-                    .filter((l) => l !== ''),
-                })
-              }
-            />
-            <NumberField
-              label={m.batch_field_dpi()}
-              value={step.options.dpi}
-              min={200}
-              max={400}
-              onChange={(dpi) => update(step, { dpi })}
-            />
-            <SelectField<'without-text' | 'all'>
-              label={m.furniture_pages()}
-              value={step.options.scope}
-              options={[
-                ['without-text', m.batch_ocr_scope_without_text()],
-                ['all', m.furniture_range_all()],
-              ]}
-              onChange={(scope) => update(step, { scope })}
-            />
-          </Row>
-        </>
-      );
+      return <OcrForm step={step} onChange={onChange} />;
     case 'export':
       return <ExportForm step={step} onChange={onChange} />;
   }
+}
+
+/** The language packs, as the OCR dialog lists them (loaded once per form). */
+type PacksState = readonly OcrLanguagePack[] | 'loading' | { readonly failed: string };
+
+function usePacks(): PacksState {
+  const [packs, setPacks] = useState<PacksState>('loading');
+  useEffect(() => {
+    let live = true;
+    ocrDependencies()
+      .packs()
+      .then((store) => store.list())
+      .then(
+        (list) => {
+          if (live) setPacks(list);
+        },
+        (error: unknown) => {
+          if (live) setPacks({ failed: error instanceof Error ? error.message : String(error) });
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, []);
+  return packs;
+}
+
+type OcrQualityChoice = 'standard' | 'high' | 'custom';
+
+/**
+ * The OCR step: languages from the same pack list as the OCR dialog (size and whether each
+ * is on this device), quality (Standard 300 dpi, High 400 dpi, or the recipe's own
+ * resolution), the pages, and what happens to invisible text already there.
+ */
+function OcrForm({
+  step,
+  onChange,
+}: {
+  readonly step: RecipeStepOf<'ocr'>;
+  readonly onChange: (step: RecipeStep) => void;
+}) {
+  const o = step.options;
+  const locale = getLocale();
+  const packs = usePacks();
+  const failed = typeof packs === 'object' && 'failed' in packs ? packs.failed : undefined;
+  const listed: readonly OcrLanguagePack[] =
+    typeof packs === 'string' || 'failed' in packs ? [] : packs;
+  const [custom, setCustom] = useState(o.dpi !== OCR_STANDARD_DPI && o.dpi !== OCR_HIGH_DPI);
+  const quality: OcrQualityChoice = custom
+    ? 'custom'
+    : o.dpi === OCR_HIGH_DPI
+      ? 'high'
+      : 'standard';
+  // The recipe's languages this device does not list (an imported pack elsewhere).
+  const missing = o.languages.filter((code) => !listed.some((p) => p.code === code));
+  const setOptions = (next: Partial<RecipeOcrOptions>) =>
+    onChange({ kind: 'ocr', options: { ...o, ...next } });
+  // As in the OCR dialog: a language ticked later comes after the others (the first leads).
+  const toggle = (code: string, on: boolean) =>
+    setOptions({
+      languages: on
+        ? [...o.languages.filter((c) => c !== code), code]
+        : o.languages.filter((c) => c !== code),
+    });
+  return (
+    <>
+      <fieldset className={tool.fieldset}>
+        <legend className={tool.legend}>{m.batch_field_languages()}</legend>
+        {failed === undefined ? null : (
+          <p className={styles.error}>{m.ocr_packs_failed({ reason: failed })}</p>
+        )}
+        <ul className={styles.languages} aria-label={m.batch_field_languages()}>
+          {listed.map((pack) => (
+            <li key={pack.code}>
+              <label className={styles.language}>
+                <input
+                  type="checkbox"
+                  checked={o.languages.includes(pack.code)}
+                  onChange={(event) => toggle(pack.code, event.target.checked)}
+                />
+                <span className={styles.languageName}>{languageName(pack.code, locale)}</span>
+                <span className={styles.languageMeta}>
+                  {pack.onDevice
+                    ? m.ocr_pack_on_device({ size: formatMegabytes(pack.bytes, locale) })
+                    : m.ocr_pack_downloads({ size: formatMegabytes(pack.downloadBytes, locale) })}
+                </span>
+              </label>
+            </li>
+          ))}
+          {packs === 'loading'
+            ? null
+            : missing.map((code) => (
+                <li key={code}>
+                  <label className={styles.language}>
+                    <input
+                      type="checkbox"
+                      checked
+                      onChange={(event) => toggle(code, event.target.checked)}
+                    />
+                    <span className={styles.languageName}>{languageName(code, locale)}</span>
+                    <span className={styles.languageMeta}>{m.batch_ocr_language_missing()}</span>
+                  </label>
+                </li>
+              ))}
+        </ul>
+        <p className={styles.muted}>
+          {o.languages.length > 0
+            ? m.ocr_languages_order({ languages: languagesKey(o.languages) })
+            : m.ocr_languages_none()}{' '}
+          {m.batch_ocr_languages_hint()}
+        </p>
+      </fieldset>
+      <Row>
+        <SelectField<OcrQualityChoice>
+          label={m.batch_ocr_quality()}
+          value={quality}
+          options={[
+            ['standard', m.batch_ocr_quality_standard()],
+            ['high', m.batch_ocr_quality_high()],
+            ['custom', m.batch_ocr_quality_custom()],
+          ]}
+          onChange={(choice) => {
+            setCustom(choice === 'custom');
+            if (choice === 'standard') setOptions({ dpi: OCR_STANDARD_DPI });
+            if (choice === 'high') setOptions({ dpi: OCR_HIGH_DPI });
+          }}
+        />
+        {custom ? (
+          <NumberField
+            label={m.batch_field_dpi()}
+            value={o.dpi}
+            min={200}
+            max={400}
+            onChange={(dpi) => setOptions({ dpi })}
+          />
+        ) : null}
+      </Row>
+      <Row>
+        <SelectField<RecipeOcrOptions['scope']>
+          label={m.furniture_pages()}
+          value={o.scope}
+          options={[
+            ['without-text', m.batch_ocr_scope_without_text()],
+            ['all', m.furniture_range_all()],
+          ]}
+          onChange={(scope) => setOptions({ scope })}
+        />
+        <SelectField<RecipeOcrReplace>
+          label={m.batch_ocr_replace()}
+          value={o.replace ?? RECIPE_DEFAULT_OCR_REPLACE}
+          options={[
+            ['ours', m.batch_ocr_replace_ours()],
+            ['all-invisible', m.batch_ocr_replace_all()],
+            ['none', m.batch_ocr_replace_none()],
+          ]}
+          onChange={(replace) => {
+            // The default stays out of the file (recipes written before the option read
+            // the same).
+            const { replace: _previous, ...rest } = o;
+            onChange({
+              kind: 'ocr',
+              options: replace === RECIPE_DEFAULT_OCR_REPLACE ? rest : { ...rest, replace },
+            });
+          }}
+        />
+      </Row>
+    </>
+  );
 }
 
 type FieldMode = 'keep' | 'set' | 'remove';

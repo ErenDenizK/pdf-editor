@@ -21,6 +21,7 @@ import {
   ocrDpiFor,
   type OcrLayerPlan,
   type OcrPageResult,
+  type OcrRecognizer,
   ocrReportOf,
   type PdfOcrLayer,
 } from '@pdf-editor/engine';
@@ -51,17 +52,30 @@ function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw new EngineError('aborted', 'OCR was cancelled');
 }
 
-/** Recognises every target; results in target order. */
-async function recognizeAll(
-  request: OcrRunRequest,
-  layer: PdfOcrLayer,
-  recognize: (
-    raster: Awaited<ReturnType<PdfOcrLayer['renderForOcr']>>,
-    target: OcrTarget,
-  ) => Promise<OcrPageResult>,
+/** Pages recognised, in target order, and how many the 40 MP cap rendered below the asked DPI. */
+export interface OcrRecognition {
+  readonly results: OcrPageResult[];
+  readonly reducedDpi: number;
+}
+
+/**
+ * Renders and recognises `targets` with a recognizer the caller holds (a lease from
+ * `getOcrRecognizers()`, its languages ensured): `LANES` pages in flight, rasters from
+ * `layer.renderForOcr` at `dpiOf(target)`. Shared by the OCR dialog's run and the batch
+ * runner's OCR step (batch/ocr-step.ts), which opens its sources privately. Throws an
+ * `aborted` EngineError once `signal` fires; nothing is written here.
+ */
+export async function recognizeTargets(
+  targets: readonly OcrTarget[],
+  options: {
+    readonly recognizer: Pick<OcrRecognizer, 'recognize'>;
+    readonly layer: Pick<PdfOcrLayer, 'renderForOcr'>;
+    readonly languages: readonly string[];
+    readonly dpiOf: (target: OcrTarget) => number;
+  },
   { signal, onProgress }: OcrRunCallbacks,
-): Promise<{ results: OcrPageResult[]; reducedDpi: number }> {
-  const { targets } = request;
+): Promise<OcrRecognition> {
+  const { recognizer, layer, languages, dpiOf } = options;
   const results: OcrPageResult[] = new Array<OcrPageResult>(targets.length);
   let next = 0;
   let done = 0;
@@ -74,12 +88,12 @@ async function recognizeAll(
       const target = targets[at];
       if (target === undefined) return;
       const raster = await layer.renderForOcr(target.source, target.index, {
-        dpi: ocrDpiFor(factsOf(request.facts, target), request.quality),
+        dpi: dpiOf(target),
         rotation: target.rotation,
         signal,
       });
       if (raster.requestedDpi !== undefined) reducedDpi += 1;
-      results[at] = await recognize(raster, target);
+      results[at] = await recognizer.recognize(raster, target.index, languages, { signal });
       done += 1;
       onProgress({ phase: 'recognize', done, total: targets.length });
     }
@@ -88,6 +102,30 @@ async function recognizeAll(
   await Promise.all(Array.from({ length: Math.min(LANES, targets.length) }, lane));
   throwIfAborted(signal);
   return { results, reducedDpi };
+}
+
+/**
+ * Downloads (or reads from the device) and checks `codes` through the recognizer's pack
+ * loader (`OcrPackStore`, our origin only, ADR-0012 §4), reporting the download and the
+ * recognizer's start as run phases.
+ */
+export async function ensureRunLanguages(
+  recognizer: Pick<OcrRecognizer, 'ensureLanguages'>,
+  codes: readonly string[],
+  { signal, onProgress }: OcrRunCallbacks,
+): Promise<void> {
+  onProgress({ phase: 'download' });
+  await recognizer.ensureLanguages(codes, {
+    signal,
+    onProgress: (progress) => {
+      if (progress.phase === 'download') {
+        onProgress({
+          phase: 'download',
+          download: { done: progress.done, total: progress.total },
+        });
+      } else onProgress({ phase: 'start' });
+    },
+  });
 }
 
 /** The layer plans of a run, one per source, pages in source order. */
@@ -129,23 +167,16 @@ export async function recognizeAndApply(
   const lease = await getOcrRecognizers().acquire();
   try {
     const { recognizer } = lease;
-    onProgress({ phase: 'download' });
-    await recognizer.ensureLanguages(codes, {
-      signal,
-      onProgress: (progress) => {
-        if (progress.phase === 'download') {
-          onProgress({
-            phase: 'download',
-            download: { done: progress.done, total: progress.total },
-          });
-        } else onProgress({ phase: 'start' });
-      },
-    });
+    await ensureRunLanguages(recognizer, codes, callbacks);
     const layer = await getEngineService().ocrLayer();
-    const { results, reducedDpi } = await recognizeAll(
-      request,
-      layer,
-      (raster, target) => recognizer.recognize(raster, target.index, codes, { signal }),
+    const { results, reducedDpi } = await recognizeTargets(
+      request.targets,
+      {
+        recognizer,
+        layer,
+        languages: codes,
+        dpiOf: (target) => ocrDpiFor(factsOf(request.facts, target), request.quality),
+      },
       callbacks,
     );
     throwIfAborted(signal);

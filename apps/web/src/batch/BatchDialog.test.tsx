@@ -1,9 +1,11 @@
 /**
  * The Batch dialog in the browser: pick a built-in recipe, add files, run with the real
  * engines, see every file's status, download the ZIP; build a plain-text recipe and
- * download its .txt; the recipe editor refuses an invalid recipe with the reader's precise
- * error; the palette command opens the dialog.
+ * download its .txt; build an OCR step from the language packs on offer; the recipe editor
+ * refuses an invalid recipe with the reader's precise error; the palette command opens the
+ * dialog.
  */
+import type { OcrLanguagePack } from '@pdf-editor/engine';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
@@ -12,6 +14,7 @@ import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
 import imagesUrl from '../../../../test/fixtures/images.pdf?url';
 import { fixtureFile } from '../../test/store-harness';
 import { commandRegistry } from '../commands/registry';
+import { setOcrDependencies } from '../ocr/ocr-deps';
 import BatchDialog from './BatchDialog';
 import { registerBatchCommands } from './batch-commands';
 import { closeBatchDialog, openBatchDialog, useBatchStore } from './batch-store';
@@ -190,6 +193,61 @@ describe('Batch dialog', () => {
     // Kept: the running "PAGE n OF simple-text" line the defaults leave out.
     expect(text).toContain('PAGE 1 OF simple-text');
     expect(text).toContain('This is page 3 of a three-page US Letter document');
+  });
+
+  it('builds an OCR step from the languages on offer, with quality, pages and replace', async () => {
+    const packs: OcrLanguagePack[] = [
+      { code: 'eng', source: 'origin', bytes: 4_110_000, downloadBytes: 0, onDevice: true },
+      { code: 'deu', source: 'origin', bytes: 1_530_000, downloadBytes: 850_000, onDevice: false },
+    ];
+    setOcrDependencies({
+      facts: () => Promise.reject(new Error('not used')),
+      packs: () =>
+        Promise.resolve({
+          list: () => Promise.resolve(packs),
+          keepOffline: () => Promise.resolve(),
+          remove: () => Promise.resolve(),
+          importFile: () => Promise.reject(new Error('not used')),
+        }),
+      engineFiles: () => Promise.resolve([]),
+    });
+    try {
+      render(<BatchDialog />);
+      const dialog = await screen.findByTestId('batch-dialog');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'New' }));
+      const editor = await within(dialog).findByTestId('batch-editor');
+      await userEvent.fill(within(editor).getByRole('textbox', { name: 'Name' }), 'Searchable');
+      await userEvent.selectOptions(
+        within(editor).getByRole('combobox', { name: 'Step to add' }),
+        'ocr',
+      );
+      await userEvent.click(within(editor).getByRole('button', { name: 'Add step' }));
+      // The OCR dialog's list: name, size and whether the pack is on this device.
+      const english = await within(editor).findByRole('checkbox', { name: /English/ });
+      expect(english).toBeChecked();
+      expect(english.closest('label')).toHaveTextContent('On this device · 4.1 MB');
+      const german = within(editor).getByRole('checkbox', { name: /German/ });
+      expect(german.closest('label')).toHaveTextContent('Downloads 0.9 MB');
+      await userEvent.click(german);
+      expect(editor).toHaveTextContent('Recognized as eng+deu; the first language leads.');
+      await userEvent.selectOptions(
+        within(editor).getByRole('combobox', { name: 'Quality' }),
+        'high',
+      );
+      await userEvent.selectOptions(within(editor).getByRole('combobox', { name: 'Pages' }), 'all');
+      await userEvent.selectOptions(
+        within(editor).getByRole('combobox', { name: 'Existing invisible text' }),
+        'none',
+      );
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Save recipe' }));
+
+      const steps = await within(dialog).findByTestId('batch-recipe-steps');
+      expect(steps).toHaveTextContent(
+        'Recognize text (OCR)eng+deu · High · 400 dpi · All pages · Keeps invisible text',
+      );
+    } finally {
+      setOcrDependencies(undefined);
+    }
   });
 
   it('shows the reader’s error when a recipe cannot be saved', async () => {

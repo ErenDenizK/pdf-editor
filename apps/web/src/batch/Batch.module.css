@@ -406,3 +406,52 @@
     border-bottom: 1px solid var(--border-hairline);
   }
 }
+
+/* The OCR step's languages: the OCR dialog's list (ocr/Ocr.module.css), name, size, state. */
+.languages {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.language {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.language input {
+  accent-color: var(--accent);
+}
+
+.language:has(input:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) {
+  .language:hover {
+    background: var(--surface-hover);
+  }
+}
+
+.languageName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.languageMeta {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

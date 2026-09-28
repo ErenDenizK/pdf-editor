@@ -1712,6 +1712,8 @@
     }
   ],
   "batch_run_progress": "{done} of {total} files finished",
+  "batch_run_ocr_prepare": "Starting text recognition…",
+  "batch_run_ocr_download": "Loading OCR languages… {done} of {total}",
   "batch_run_progress_label": "Batch progress",
   "batch_run_summary": "Finished: {done} done ({notes} with notes), {failed} failed, {skipped} skipped.",
   "batch_running_note": "Files are processed on this device. Cancel stops the run; finished files are kept.",
@@ -1719,6 +1721,7 @@
   "batch_phase_queued": "Waiting",
   "batch_phase_opening": "Opening",
   "batch_phase_step": "Step {number} of {total}: {kind}",
+  "batch_phase_ocr": "Step {number} of {total}: recognizing text, page {done} of {pages}",
   "batch_phase_exporting": "Writing the PDF",
   "batch_phase_converting": "Converting to text",
   "batch_phase_verifying": "Verifying",
@@ -1810,6 +1813,16 @@
   "batch_security_hint": "Each output requires a password to open, asked when the recipe runs. Choose what readers may do:",
   "batch_remove_password_hint": "Outputs of protected files are saved without a password (their password is asked when each file opens).",
   "batch_ocr_scope_without_text": "Pages without text",
+  "batch_ocr_quality": "Quality",
+  "batch_ocr_quality_standard": "Standard · 300 dpi",
+  "batch_ocr_quality_high": "High · 400 dpi",
+  "batch_ocr_quality_custom": "Custom resolution",
+  "batch_ocr_replace": "Existing invisible text",
+  "batch_ocr_replace_ours": "Replace this app’s earlier text",
+  "batch_ocr_replace_all": "Replace all invisible text, other tools’ too",
+  "batch_ocr_replace_none": "Keep it next to the new text",
+  "batch_ocr_language_missing": "Not available on this device",
+  "batch_ocr_languages_hint": "Languages missing on this device download once per batch, from this site only. Nothing is sent anywhere.",
   "batch_pages_first": "First page",
   "batch_pages_last": "Last page",
   "batch_pages_landscape": "Landscape pages",
@@ -1819,8 +1832,10 @@
   "batch_pages_ranges_label": "Page numbers",
   "batch_pages_ranges_hint": "For example 1-3, 5, 8- (8 to the end).",
   "batch_pages_ranges_invalid": "Type page numbers or ranges, for example 1-3, 5, 8-.",
-  "batch_waiting_ocr": "Needs text recognition (OCR), which arrives in a later update.",
   "batch_detail_margins": "Margins {margins} pt",
+  "batch_detail_ocr_replace_ours": "Replaces this app’s text",
+  "batch_detail_ocr_replace_all": "Replaces all invisible text",
+  "batch_detail_ocr_replace_none": "Keeps invisible text",
   "batch_detail_headers_kept": "Running lines kept",
   "batch_detail_hyphens_kept": "Line-end hyphens kept",
   "batch_detail_no_images": "Without images",
@@ -1906,6 +1921,8 @@
   "batch_error_delete_all": "This would delete every page of the file.",
   "batch_error_no_password": "No password was given for this step.",
   "batch_error_unavailable": "This step is not available in this version.",
+  "batch_error_ocr_languages": "The OCR languages ({languages}) could not be loaded, so no file was processed: {reason}. Connect once to download them, or keep them available offline under OCR languages.",
+  "batch_error_ocr_start": "Text recognition could not start, so no file was processed: {reason}",
   "batch_notice_no_pages": "No page matched this step’s pages; nothing changed.",
   "batch_notice_crop_too_small": [
     {
@@ -1917,7 +1934,39 @@
       }
     }
   ],
-  "batch_notice_images_ignored": "Compression, flattening, metadata and password steps do not apply to images: the images carry none of them.",
+  "batch_notice_images_ignored": "Text recognition, compression, flattening, metadata and password steps do not apply to images: the images carry none of them.",
+  "batch_notice_ocr_pages": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Recognized {count} page ({pages}) as {languages}. Quality: {quality}.",
+        "countPlural=*": "Recognized {count} pages ({pages}) as {languages}. Quality: {quality}."
+      }
+    }
+  ],
+  "batch_notice_ocr_without_text": "No text was found on these pages: {pages}. They may be blank or in another language.",
+  "batch_notice_ocr_reduced_dpi": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} page was too large for the recipe’s resolution and was recognized at a lower one (40-megapixel limit).",
+        "countPlural=*": "{count} pages were too large for the recipe’s resolution and were recognized at a lower one (40-megapixel limit)."
+      }
+    }
+  ],
+  "batch_notice_ocr_kept_invisible": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} recognized page already had invisible text, kept next to the new text: search may find its words twice.",
+        "countPlural=*": "{count} recognized pages already had invisible text, kept next to the new text: search may find their words twice."
+      }
+    }
+  ],
+  "batch_notice_ocr_nothing": "No page needed text recognition: every page already has text.",
   "batch_notice_text_ignored": "Compression, metadata and password steps do not apply to Markdown or text: the text files carry none of them.",
   "batch_notice_not_smaller": "Compression did not make this file smaller.",
   "batch_failure_password": "It needs a password to open, and none was given.",

@@ -4,7 +4,10 @@
  * encrypted input asks its password once, a failing file never stops the batch, cancel
  * stops between files, continuous Bates numbers run across files, the output password
  * never reaches the report, and Markdown / text outputs come from the analysis worker with
- * the conversion's honesty notes.
+ * the conversion's honesty notes. OCR steps recognise scans with tesseract.js served from
+ * this origin, one lease and one language check per batch, and the exported PDF carries the
+ * words; a cancelled recognition writes nothing, and a language that cannot be loaded stops
+ * the batch before its first file.
  */
 import {
   assertNoSecrets,
@@ -17,7 +20,7 @@ import {
   type SourceId,
   sourceId,
 } from '@pdf-editor/document-model';
-import type { PdfRenderer } from '@pdf-editor/engine';
+import type { OcrRecognizer, PdfRenderer } from '@pdf-editor/engine';
 import { PDFDocument } from '@cantoo/pdf-lib';
 import { afterAll, describe, expect, it } from 'vitest';
 
@@ -26,11 +29,13 @@ import formsUrl from '../../../../test/fixtures/forms-a.pdf?url';
 import imagesUrl from '../../../../test/fixtures/images.pdf?url';
 import manifest from '../../../../test/fixtures/manifest.json';
 import markdownUrl from '../../../../test/fixtures/markdown-source.pdf?url';
+import scanUrl from '../../../../test/fixtures/scan-text.pdf?url';
 import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
 import truncatedUrl from '../../../../test/fixtures/truncated.pdf?url';
 import { fixtureFile, pngBlob } from '../../test/store-harness';
 import { convertWorkspaceDocument } from '../convert/convert-run';
-import { getAnalysisWorkers, getEngineService } from '../engine/engine-service';
+import { getAnalysisWorkers, getEngineService, getOcrRecognizers } from '../engine/engine-service';
+import { appBatchOcr, type BatchOcr } from './ocr-step';
 import { appBatchEngine } from './private-source';
 import {
   type BatchFileState,
@@ -45,7 +50,10 @@ const golden = (
   }
 ).markdown.golden;
 
-afterAll(() => getAnalysisWorkers().terminate());
+afterAll(() => {
+  getAnalysisWorkers().terminate();
+  getOcrRecognizers().dispose();
+});
 
 function builtIn(id: string): Recipe {
   const found = BUILT_IN_RECIPES.find((b) => b.id === id);
@@ -356,9 +364,14 @@ describe('run control', () => {
 
   it('refuses a plan with steps this build cannot run', async () => {
     const files = [await fixtureFile(simpleUrl, 'simple-text.pdf')];
-    const plan = planFor(builtIn('scan-to-searchable'), files);
-    expect(plan.runnable).toBe(false);
-    await expect(runRecipe(plan, files)).rejects.toThrow(/cannot run/);
+    const plan = planFor(builtIn('number-pages'), files);
+    // No step is reserved in this build: a plan the model blocked, as a future one would be.
+    const blocked: RecipeRunPlan = {
+      ...plan,
+      runnable: false,
+      blocked: [{ stepIndex: 0, kind: 'page-numbers', waitingFor: 'later' as never }],
+    };
+    await expect(runRecipe(blocked, files)).rejects.toThrow(/cannot run/);
   });
 });
 
@@ -658,4 +671,197 @@ describe('other outputs and steps', () => {
     });
     expect(result.outputs).toHaveLength(0);
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// OCR (spec recognize-and-compare §5 and §1)
+// ---------------------------------------------------------------------------
+
+/** The manifest's words of scan-text.pdf, per page. */
+const scanWords: string[][] = (
+  manifest.fixtures.find((f) => f.file === 'scan-text.pdf')?.expect as unknown as {
+    ocr: { pages: { text: string }[] };
+  }
+).ocr.pages.map((page) => page.text.split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '')));
+
+/** The share of `words` found (as whole words, case-insensitive) in `text`. */
+function found(words: readonly string[], text: string): number {
+  const have = new Set(
+    text.split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase()),
+  );
+  const wanted = words.filter((w) => w !== '');
+  return wanted.filter((w) => have.has(w.toLowerCase())).length / wanted.length;
+}
+
+/** The app's OCR, counting leases, language checks and recognised pages. */
+function countingOcr(): {
+  readonly ocr: () => Promise<BatchOcr>;
+  readonly counts: { acquired: number; released: number; ensured: string[][]; pages: number };
+} {
+  const counts = { acquired: 0, released: 0, ensured: [] as string[][], pages: 0 };
+  const ocr = async (): Promise<BatchOcr> => {
+    const app = await appBatchOcr();
+    return {
+      layer: app.layer,
+      acquire: async () => {
+        counts.acquired += 1;
+        const lease = await app.acquire();
+        const real = lease.recognizer;
+        const recognizer: OcrRecognizer = {
+          engine: real.engine,
+          ensureLanguages: (codes, options) => {
+            counts.ensured.push([...codes]);
+            return real.ensureLanguages(codes, options);
+          },
+          recognize: (raster, pageIndex, codes, options) => {
+            counts.pages += 1;
+            return real.recognize(raster, pageIndex, codes, options);
+          },
+          dispose: () => real.dispose(),
+        };
+        return {
+          recognizer,
+          release: () => {
+            counts.released += 1;
+            lease.release();
+          },
+        };
+      },
+    };
+  };
+  return { ocr, counts };
+}
+
+describe('OCR steps', () => {
+  it('runs "Scan to searchable" one file at a time with one lease and the words in the output', async () => {
+    const files = [
+      await fixtureFile(scanUrl, 'scan-text.pdf'),
+      await fixtureFile(simpleUrl, 'simple-text.pdf'),
+    ];
+    const plan = planFor(builtIn('scan-to-searchable'), files);
+    expect(plan.runnable).toBe(true);
+    expect(plan.concurrency).toBe(1);
+    const { ocr, counts } = countingOcr();
+    const events: string[] = [];
+    const states: BatchFileState[] = [];
+    const result = await runRecipe(
+      plan,
+      files,
+      {
+        onOcrPrepare: (progress) => events.push(`prepare:${progress.phase}`),
+        onFile: (state) => {
+          states.push(state);
+          if (state.phase !== 'queued') events.push(`${state.index}:${state.phase}`);
+        },
+      },
+      { ...defaultBatchDependencies(), ocr },
+    );
+
+    // The recognizer and the language, once for the batch, before the first file.
+    expect(counts).toEqual({ acquired: 1, released: 1, ensured: [['eng']], pages: 2 });
+    expect(events[0]).toBe('prepare:download');
+    expect(events.indexOf('0:opening')).toBeGreaterThan(events.lastIndexOf('prepare:download'));
+    // One file at a time: the second opens after the first has finished.
+    expect(events.indexOf('1:opening')).toBeGreaterThan(events.indexOf('0:done-with-notes'));
+    expect(getOcrRecognizers().busy).toBe(false);
+    expect(states).toContainEqual(
+      expect.objectContaining({ index: 0, phase: 'steps', ocr: { done: 2, total: 2 } }),
+    );
+
+    const [scan, text] = result.report.files;
+    expect(result.report.totals).toMatchObject({ files: 2, failed: 0 });
+    expect(scan?.status).toBe('done-with-notes');
+    const pages = scan?.notices.find((n) => n.code === 'ocr.pages');
+    expect(pages).toMatchObject({ stepIndex: 0, kind: 'ocr' });
+    expect(pages?.message).toMatch(/^Recognized 2 pages \(1, 2\) as eng\. Quality: Good 2\.$/);
+    expect(scan?.notices.map((n) => n.code)).not.toContain('ocr.without-text');
+    // The export's own summary names the run, as for a tab.
+    expect(scan?.notices.find((n) => n.code === 'export.ocr')?.message).toContain(
+      'Recognized text (OCR) on 2 pages: English',
+    );
+    // A born-digital file: nothing to recognise, said so.
+    expect(text?.notices.map((n) => n.code)).toContain('ocr.nothing');
+
+    // The exported PDF carries the words: PDFium reads them from the invisible layer.
+    const bytes = await outputBytes(result, 0);
+    const pdf = await PDFDocument.load(bytes, { updateMetadata: false });
+    expect(pdf.getPageCount()).toBe(2);
+    for (const [page, words] of scanWords.entries()) {
+      expect(found(words, await pageText(bytes, page)), `page ${page + 1}`).toBeGreaterThan(0.9);
+    }
+    expect(await pageText(bytes, 0)).toContain('quick brown fox');
+  }, 240_000);
+
+  it('commits nothing for a file whose recognition is cancelled', async () => {
+    const files = [await fixtureFile(scanUrl, 'scan-text.pdf')];
+    const ocrOnly = recipe('Only OCR', [
+      { kind: 'ocr', options: { languages: ['eng'], dpi: 300, scope: 'all' } },
+    ]);
+    const { ocr, counts } = countingOcr();
+    const controller = new AbortController();
+    const result = await runRecipe(
+      planFor(ocrOnly, files),
+      files,
+      {
+        signal: controller.signal,
+        // Cancel as soon as recognition starts.
+        onFile: (state) => {
+          if (state.ocr !== undefined) controller.abort();
+        },
+      },
+      { ...defaultBatchDependencies(), ocr },
+    );
+    expect(result.report.cancelled).toBe(true);
+    expect(result.report.files[0]).toMatchObject({
+      status: 'failed',
+      failure: { reason: 'aborted' },
+    });
+    expect(result.report.files[0]?.notices).toEqual([]);
+    expect(result.outputs).toHaveLength(0);
+    // The lease went back; no page finished recognising after the cancel.
+    expect(counts.released).toBe(1);
+    expect(counts.pages).toBeLessThanOrEqual(2);
+    expect(getOcrRecognizers().busy).toBe(false);
+  }, 120_000);
+
+  it('fails the batch before the first file when a language cannot be loaded', async () => {
+    const files = [
+      await fixtureFile(scanUrl, 'scan-text.pdf'),
+      await fixtureFile(simpleUrl, 'simple-text.pdf'),
+    ];
+    let released = 0;
+    const offline: BatchOcr = {
+      layer: {
+        ocrPageFacts: () => Promise.reject(new Error('not reached')),
+        renderForOcr: () => Promise.reject(new Error('not reached')),
+        applyOcrLayer: () => Promise.reject(new Error('not reached')),
+      },
+      acquire: () =>
+        Promise.resolve({
+          recognizer: {
+            engine: 'offline',
+            ensureLanguages: () => Promise.reject(new TypeError('Failed to fetch')),
+            recognize: () => Promise.reject(new Error('not reached')),
+            dispose: () => Promise.resolve(),
+          },
+          release: () => {
+            released += 1;
+          },
+        }),
+    };
+    const phases: string[] = [];
+    await expect(
+      runRecipe(
+        planFor(builtIn('scan-to-searchable'), files),
+        files,
+        { onFile: (state) => phases.push(state.phase) },
+        { ...defaultBatchDependencies(), ocr: () => Promise.resolve(offline) },
+      ),
+    ).rejects.toThrow(
+      /^The OCR languages \(eng\) could not be loaded, so no file was processed: Failed to fetch\./,
+    );
+    expect(released).toBe(1);
+    // No file was opened.
+    expect(phases).toEqual(['queued', 'queued']);
+  });
 });

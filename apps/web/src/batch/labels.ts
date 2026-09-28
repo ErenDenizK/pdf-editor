@@ -150,11 +150,12 @@ export function anchorLabel(anchor: Anchor): string {
   }
 }
 
+/**
+ * Why a reserved step cannot run yet. No step is reserved in this build (`RecipeWaitingFor`
+ * is empty since OCR runs); a future one adds its words here.
+ */
 export function waitingForLabel(waiting: RecipeWaitingFor): string {
-  switch (waiting) {
-    case 'ocr':
-      return m.batch_waiting_ocr();
-  }
+  return waiting;
 }
 
 function fact(summary: RecipeStepSummary, key: string): unknown {
@@ -252,7 +253,15 @@ export function stepDetail(summary: RecipeStepSummary): string {
       return '';
     case 'ocr': {
       const languages = fact(summary, 'languages');
-      return Array.isArray(languages) ? languages.join(', ') : '';
+      const replace = fact(summary, 'replace');
+      return join([
+        Array.isArray(languages) ? languages.join('+') : '',
+        ocrQualityLabel(Number(fact(summary, 'dpi'))),
+        fact(summary, 'scope') === 'all'
+          ? m.furniture_range_all()
+          : m.batch_ocr_scope_without_text(),
+        typeof replace === 'string' ? ocrReplaceDetail(replace) : '',
+      ]);
     }
     case 'export': {
       const breaks = fact(summary, 'pageBreaks');
@@ -265,6 +274,29 @@ export function stepDetail(summary: RecipeStepSummary): string {
         fact(summary, 'images') === false ? m.batch_detail_no_images() : '',
       ]);
     }
+  }
+}
+
+/** An OCR step's resolution as the OCR dialog words its quality ("Standard · 300 dpi"). */
+export function ocrQualityLabel(dpi: number): string {
+  if (dpi === OCR_STANDARD_DPI) return m.batch_ocr_quality_standard();
+  if (dpi === OCR_HIGH_DPI) return m.batch_ocr_quality_high();
+  return m.ocr_dpi({ dpi });
+}
+
+/** The OCR dialog's Standard and High resolutions (spec §1.2), as a recipe stores them. */
+export const OCR_STANDARD_DPI = 300;
+export const OCR_HIGH_DPI = 400;
+
+/** What an OCR step does with invisible text already there, short (the step's detail). */
+export function ocrReplaceDetail(replace: string): string {
+  switch (replace) {
+    case 'none':
+      return m.batch_detail_ocr_replace_none();
+    case 'all-invisible':
+      return m.batch_detail_ocr_replace_all();
+    default:
+      return m.batch_detail_ocr_replace_ours();
   }
 }
 

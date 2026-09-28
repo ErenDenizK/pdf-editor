@@ -401,16 +401,43 @@ export interface RecipeSecurityOptions {
 export type RecipeRemovePasswordOptions = Readonly<Record<string, never>>;
 
 /**
- * OCR (spec §1; reserved until workstream W1 lands: validated, but steps of this kind do
- * not run yet, see `recipeStepAvailability`).
+ * What an OCR step does with invisible text already on a recognised page (the engine's
+ * `OcrLayerPlan.replace`, spec §1.2): keep it (`none`), drop this app's earlier layer
+ * (`ours`, the default: a re-run must not put the words in twice), or remove every
+ * invisible text object (`all-invisible`, e.g. another tool's OCR layer).
+ */
+export type RecipeOcrReplace = 'none' | 'ours' | 'all-invisible';
+
+export const RECIPE_OCR_REPLACE_MODES: readonly RecipeOcrReplace[] = [
+  'none',
+  'ours',
+  'all-invisible',
+];
+
+/** `RecipeOcrOptions.replace` when the recipe leaves it out. */
+export const RECIPE_DEFAULT_OCR_REPLACE: RecipeOcrReplace = 'ours';
+
+/**
+ * OCR (spec §1, §5): the batch runner recognises the pages in the same way as the OCR
+ * dialog (apps/web/src/batch/ocr-step.ts) and writes the `ocr.apply` layer before the
+ * export.
  */
 export interface RecipeOcrOptions {
   /** Tesseract language codes (`eng`, `tur`, `chi_sim`, …), 1–8, no duplicates. */
   readonly languages: readonly string[];
-  /** Render resolution for recognition, 200–400 dpi (spec §1.2: 300, High 400). */
+  /**
+   * Render resolution for recognition, 200–400 dpi (spec §1.2: Standard 300, High 400).
+   * Always this resolution: a recipe runs the same on every file, whatever its scans.
+   */
   readonly dpi: number;
   /** Pages to recognize: those without visible text (the default), or all. */
   readonly scope: 'without-text' | 'all';
+  /**
+   * Existing invisible text on the recognised pages; `RECIPE_DEFAULT_OCR_REPLACE` (this
+   * app's own layer is replaced) when absent. Optional, so recipes written before it read
+   * unchanged (no version change, ADR-0014 §4).
+   */
+  readonly replace?: RecipeOcrReplace;
 }
 
 /** `RasterFormat` of the engine (rasterize/plan.ts). */
@@ -1409,7 +1436,7 @@ const STEP_READERS: { readonly [K in RecipeStepKind]: StepReader<K> } = {
   },
 
   ocr: (o, at) => {
-    only(o, at, ['languages', 'dpi', 'scope']);
+    only(o, at, ['languages', 'dpi', 'scope', 'replace']);
     const languages = field(o, 'languages', at, (v, a) => {
       const list = arr(v, a, 1, 8).map((item, i) => {
         const ia: At = a.item(i);
@@ -1426,6 +1453,7 @@ const STEP_READERS: { readonly [K in RecipeStepKind]: StepReader<K> } = {
       languages,
       dpi: field(o, 'dpi', at, (v, a) => int(v, a, 200, 400)),
       scope: field(o, 'scope', at, (v, a) => oneOf(v, a, ['without-text', 'all'] as const)),
+      ...opt(o, 'replace', at, (v, a) => oneOf(v, a, RECIPE_OCR_REPLACE_MODES)),
     };
   },
 
@@ -1614,10 +1642,12 @@ export function recipeEquals(a: Recipe, b: Recipe): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * What a reserved step waits for: OCR (workstream W1). Derived from the step on every read,
- * never stored in a recipe, so the list can shrink as workstreams land.
+ * What a reserved step waits for. Derived from the step on every read, never stored in a
+ * recipe, so the list shrinks as workstreams land: OCR (workstream W1) was the last one, and
+ * every step runs in this build. The type stays (empty) so a future reserved step keeps the
+ * same path through the plan (`blocked`), the summary (`waitingFor`) and the UI.
  */
-export type RecipeWaitingFor = 'ocr';
+export type RecipeWaitingFor = never;
 
 export type RecipeStepAvailability =
   | { readonly available: true }
@@ -1625,10 +1655,10 @@ export type RecipeStepAvailability =
 
 /**
  * Whether the runner can execute a step in this build. Reserved steps are valid (a
- * recipe saved later keeps them) but block the run until their workstream lands.
+ * recipe saved later keeps them) but block the run until their workstream lands; none is
+ * reserved today (OCR runs since W1 landed).
  */
-export function recipeStepAvailability(step: RecipeStep): RecipeStepAvailability {
-  if (step.kind === 'ocr') return { available: false, waitingFor: 'ocr' };
+export function recipeStepAvailability(_step: RecipeStep): RecipeStepAvailability {
   return { available: true };
 }
 
@@ -1756,6 +1786,7 @@ export type RecipeFactKey =
   | 'denied'
   | 'languages'
   | 'scope'
+  | 'replace'
   | 'format'
   | 'imageFormat'
   | 'background'
@@ -1926,6 +1957,7 @@ function stepFacts(step: RecipeStep): RecipeFact[] {
         f('languages', step.options.languages),
         f('dpi', step.options.dpi),
         f('scope', step.options.scope),
+        f('replace', step.options.replace ?? RECIPE_DEFAULT_OCR_REPLACE),
       ];
     case 'export': {
       const o = step.options;

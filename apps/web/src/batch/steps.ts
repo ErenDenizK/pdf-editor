@@ -17,7 +17,7 @@
  * | export (pdf) | `prepareExport` options |
  * | export (images) | `rasterizeWorkspaceDocument` |
  * | export (markdown, text) | `convertWorkspaceDocument` (convert/convert-run.ts), `convertChoiceFor` |
- * | ocr | not runnable in this build (`recipeStepAvailability`) |
+ * | ocr | not a model operation: the runner recognises and applies `ocr.apply` (ocr-step.ts) |
  *
  * An image watermark goes on the pages rather than into the document's furniture: a batch
  * file gains no pages later, so both draw the same, and the page form keeps every overlay
@@ -398,7 +398,8 @@ export function applyRecipeStep(
       };
     }
     case 'ocr':
-      // planRecipeRun blocks plans with steps this build cannot run; runRecipe refuses them.
+      // Recognition needs the engine and the recognizer: the runner runs it (runOcrStep in
+      // ocr-step.ts) and never passes an OCR step here.
       throw new StepError(m.batch_error_unavailable());
   }
 }

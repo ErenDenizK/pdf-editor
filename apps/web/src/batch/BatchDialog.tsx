@@ -94,6 +94,8 @@ interface RunState {
   readonly error?: string;
   readonly ask?: PasswordAsk;
   readonly delivered?: string;
+  /** Before the first file of an OCR recipe: the recognizer starting, languages loading. */
+  readonly preparing?: string;
 }
 
 interface Status {
@@ -298,8 +300,19 @@ function BatchFlow() {
             },
           }));
         }),
-      onFile: (fileState) =>
+      onOcrPrepare: (progress) =>
         update((state) => ({
+          ...state,
+          preparing:
+            progress.phase === 'download' && progress.download
+              ? m.batch_run_ocr_download({
+                  done: formatBytes(progress.download.done),
+                  total: formatBytes(progress.download.total),
+                })
+              : m.batch_run_ocr_prepare(),
+        })),
+      onFile: (fileState) =>
+        update(({ preparing: _ready, ...state }) => ({
           ...state,
           files: state.files.map((f) => (f.index === fileState.index ? fileState : f)),
         })),
@@ -793,6 +806,14 @@ function phaseText(state: BatchFileState, plan: RecipeRunPlan): string {
       return m.batch_phase_opening();
     case 'steps': {
       const step = plan.recipe.steps[state.stepIndex ?? 0];
+      if (state.ocr !== undefined) {
+        return m.batch_phase_ocr({
+          number: (state.stepIndex ?? 0) + 1,
+          total: plan.recipe.steps.length,
+          done: state.ocr.done,
+          pages: state.ocr.total,
+        });
+      }
       return m.batch_phase_step({
         number: (state.stepIndex ?? 0) + 1,
         total: plan.recipe.steps.length,
@@ -897,7 +918,9 @@ function RunView({
                   failed: totals.failed,
                   skipped: totals.skipped,
                 })
-              : (run.error ?? m.batch_run_progress({ done: settled, total: plan.files.length }))}
+              : (run.error ??
+                run.preparing ??
+                m.batch_run_progress({ done: settled, total: plan.files.length }))}
           </p>
           <progress
             className={tool.progress}

@@ -5,12 +5,22 @@
  * carries the page-number furniture (a Form XObject drawing with the embedded Inter
  * subset). Then a recipe whose output is Markdown (§4): import it, drop two files, run,
  * and check the ZIP's `.md` file and the Markdown-with-images ZIP against the fixture's
- * golden. No tab opens along the way.
+ * golden. Then the built-in "Scan to searchable" over scan-text.pdf: tesseract.js and the
+ * English pack come from this origin, the downloaded PDF carries the recognised words in its
+ * invisible layer (read back with pdf-lib), and no request leaves the origin. No tab opens
+ * along the way.
  */
 import { readFile } from 'node:fs/promises';
 import { inflateRawSync } from 'node:zlib';
 
-import { PDFDict, PDFDocument, PDFName, PDFStream } from '@cantoo/pdf-lib';
+import {
+  decodePDFRawStream,
+  PDFDict,
+  PDFDocument,
+  PDFName,
+  PDFRawStream,
+  PDFStream,
+} from '@cantoo/pdf-lib';
 import { expect, test } from '@playwright/test';
 
 import { fixturePath, useFileInputPicker } from './helpers';
@@ -68,6 +78,30 @@ function furnitureFonts(pdf: PDFDocument, pageIndex: number): string[] {
     }
   }
   return fonts;
+}
+
+/** The words of every `/PdfEditorOCR` layer of a PDF (as e2e/ocr.spec.ts reads them). */
+async function layerWords(bytes: Uint8Array): Promise<string[][]> {
+  const pdf = await PDFDocument.load(bytes, { updateMetadata: false });
+  return pdf.getPages().map((page) => {
+    const words: string[] = [];
+    const xobjects = page.node.Resources()?.lookupMaybe(PDFName.of('XObject'), PDFDict);
+    for (const [, ref] of xobjects?.entries() ?? []) {
+      const stream = pdf.context.lookup(ref);
+      if (!(stream instanceof PDFRawStream)) continue;
+      if (!stream.dict.has(PDFName.of('PdfEditorOCR'))) continue;
+      const content = new TextDecoder('latin1').decode(decodePDFRawStream(stream).decode());
+      for (const match of content.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) {
+        const hex = match[1] ?? '';
+        let text = '';
+        for (let i = 0; i + 4 <= hex.length; i += 4) {
+          text += String.fromCharCode(parseInt(hex.slice(i, i + 4), 16));
+        }
+        words.push(text.trim());
+      }
+    }
+    return words;
+  });
 }
 
 test('runs "Number pages" over two files and downloads a ZIP of numbered PDFs', async ({
@@ -224,6 +258,77 @@ test('runs a Markdown recipe over dropped files and downloads the text', async (
   expect(inner.get('document.md')?.toString('utf8')).toBe(golden);
 
   // Files never became tabs.
+  await dialog.getByRole('button', { name: 'Close' }).first().click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'Drop PDFs to start' })).toBeVisible();
+});
+
+test('runs "Scan to searchable" over a scan and downloads a searchable PDF', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  const origin = new URL(baseURL ?? 'http://localhost').origin;
+  const foreign: string[] = [];
+  const ocrFiles: string[] = [];
+  context.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+    if (url.origin !== origin) foreign.push(url.href);
+    if (url.pathname.includes('/ocr/')) ocrFiles.push(url.pathname);
+  });
+  await page.addInitScript({
+    content:
+      "Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true });",
+  });
+  await useFileInputPicker(page);
+  await page.goto('./?lang=en');
+  await expect(page.getByRole('heading', { name: 'Drop PDFs to start' })).toBeVisible();
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByRole('combobox', { name: 'Search commands' }).fill('batch');
+  await expect(page.getByRole('option', { name: /Batch…/, selected: true })).toBeVisible();
+  await page.keyboard.press('Enter');
+  const dialog = page.getByTestId('batch-dialog');
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByRole('button', { name: /^Scan to searchable/ }).click();
+  const steps = dialog.getByTestId('batch-recipe-steps');
+  await expect(steps).toContainText('Recognize text (OCR)');
+  await expect(steps).toContainText('eng · Standard · 300 dpi · Pages without text');
+
+  const chooser = page.waitForEvent('filechooser');
+  await dialog.getByRole('button', { name: 'Add files…' }).click();
+  await (await chooser).setFiles([fixturePath('scan-text.pdf')]);
+  await expect(dialog.getByTestId('batch-files').getByRole('listitem')).toHaveCount(1);
+  await expect(dialog.getByTestId('batch-blocked')).toHaveCount(0);
+  // Nothing OCR-related is fetched before the run.
+  expect(ocrFiles).toEqual([]);
+
+  await dialog.getByTestId('batch-run').click();
+  await expect(dialog.getByTestId('batch-run-status')).toContainText('Finished: 1 done', {
+    timeout: 180_000,
+  });
+  const row = dialog.getByTestId('batch-file-row');
+  await expect(row).toContainText('scan-text-Scan to searchable.pdf');
+  await expect(row).toContainText('Recognized 2 pages (1, 2) as eng.');
+  await expect(row).toContainText('Recognized text (OCR) on 2 pages: English');
+
+  const downloadPromise = page.waitForEvent('download');
+  await dialog.getByTestId('batch-download').click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('scan-text-Scan to searchable.pdf');
+  const words = await layerWords(await readFile(await download.path()));
+  expect(words).toHaveLength(2);
+  expect(words[0]).toEqual(expect.arrayContaining(['quick', 'brown', 'fox', 'recognition']));
+  expect(words[1]?.length).toBeGreaterThan(0);
+
+  // The engine and the pack came from this origin; nothing went anywhere else.
+  expect(ocrFiles.some((path) => path.endsWith('/lang/eng.traineddata.gz'))).toBe(true);
+  expect(foreign).toEqual([]);
+
+  // The file never became a tab.
   await dialog.getByRole('button', { name: 'Close' }).first().click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('heading', { name: 'Drop PDFs to start' })).toBeVisible();

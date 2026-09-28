@@ -281,6 +281,19 @@ describe('readRecipe / writeRecipe', () => {
     expect(readRecipe(writeRecipe(r)).description).toBe('Everything at once');
   });
 
+  it('reads OCR steps without a replace mode unchanged and keeps a chosen one', () => {
+    const ocr = everyKind()[KIND_INDEX.ocr] as RecipeStep;
+    // Written before the option existed: read as it is, the default applies at run time.
+    const old = readRecipe(writeRecipe(recipe([ocr])));
+    expect(old.steps[0]).toEqual(ocr);
+    expect(writeRecipe(old)).not.toContain('replace');
+    if (ocr.kind !== 'ocr') throw new Error('fixture');
+    const chosen: RecipeStep = { kind: 'ocr', options: { ...ocr.options, replace: 'none' } };
+    const text = writeRecipe(recipe([chosen]));
+    expect(text).toContain('"replace": "none"');
+    expect(readRecipe(text).steps[0]).toEqual(chosen);
+  });
+
   it('reads every built-in recipe with the same reader', () => {
     for (const { recipe: r } of BUILT_IN_RECIPES) {
       expect(recipeEquals(readRecipe(writeRecipe(r)), r)).toBe(true);
@@ -670,6 +683,14 @@ const ERROR_CASES: readonly ErrorCase[] = [
     },
     problem: 'invalid-value',
     message: 'Step 15 (ocr), options.dpi: expected an integer from 200 to 400',
+  },
+  {
+    name: 'an OCR replace mode the engine does not know',
+    mutate: (d) => {
+      opts('ocr')(d).replace = 'foreign';
+    },
+    problem: 'invalid-value',
+    message: 'Step 15 (ocr), options.replace: expected one of "none", "ours"',
   },
   {
     name: 'transparent JPEG images',
@@ -1201,6 +1222,9 @@ class Gen {
             ],
             dpi: this.int(200, 400),
             scope: this.pick(['without-text', 'all'] as const),
+            ...(this.bool()
+              ? { replace: this.pick(['none', 'ours', 'all-invisible'] as const) }
+              : {}),
           },
         };
       case 'export':
@@ -1404,9 +1428,9 @@ describe('built-in recipes', () => {
     });
   });
 
-  it('are runnable today except the OCR one', () => {
+  it('are all runnable today, Scan to searchable included', () => {
     for (const { id, recipe: r } of BUILT_IN_RECIPES) {
-      expect(describeRecipe(r).runnable, id).toBe(id !== 'scan-to-searchable');
+      expect(describeRecipe(r).runnable, id).toBe(true);
     }
   });
 });
@@ -1483,11 +1507,12 @@ describe('describeRecipe', () => {
     ]);
   });
 
-  it('gives facts for every kind and marks reserved steps', () => {
+  it('gives facts for every kind; no step is reserved any more', () => {
     const summary = describeRecipe({ ...recipe(everyKind()), description: 'd' });
     expect(summary.description).toBe('d');
     expect(summary.output).toBe('images');
-    expect(summary.waitingFor).toEqual(['ocr']);
+    expect(summary.waitingFor).toEqual([]);
+    expect(summary.runnable).toBe(true);
     const facts = (kind: RecipeStepKind) =>
       Object.fromEntries(summary.steps[KIND_INDEX[kind]]?.facts.map((f) => [f.key, f.value]) ?? []);
     expect(facts('rotate')).toEqual({ degrees: 90, pages: 'landscape' });
@@ -1516,11 +1541,14 @@ describe('describeRecipe', () => {
       removed: ['author'],
       custom: ['Alpha', 'Zeta'],
     });
-    expect(facts('ocr')).toEqual({ languages: ['eng', 'tur'], dpi: 300, scope: 'without-text' });
-    expect(summary.steps[KIND_INDEX.ocr]?.availability).toEqual({
-      available: false,
-      waitingFor: 'ocr',
+    // The replace mode is a fact even when the recipe leaves it to the default.
+    expect(facts('ocr')).toEqual({
+      languages: ['eng', 'tur'],
+      dpi: 300,
+      scope: 'without-text',
+      replace: 'ours',
     });
+    expect(summary.steps[KIND_INDEX.ocr]?.availability).toEqual({ available: true });
   });
 
   it('runs Markdown and text output, with the dialog’s defaults as facts', () => {
@@ -1694,12 +1722,13 @@ describe('planRecipeRun', () => {
     expect(plan.inputs).toEqual([]);
   });
 
-  it('blocks reserved steps and runs OCR one file at a time', () => {
+  it('runs OCR one file at a time, without blocking the plan', () => {
     const scan = BUILT_IN_RECIPES.find((b) => b.id === 'scan-to-searchable')?.recipe as Recipe;
     const plan = planRecipeRun(scan, [{ name: 'a.pdf', size: 1 }]);
-    expect(plan.blocked).toEqual([{ stepIndex: 0, kind: 'ocr', waitingFor: 'ocr' }]);
-    expect(plan.runnable).toBe(false);
+    expect(plan.blocked).toEqual([]);
+    expect(plan.runnable).toBe(true);
     expect(plan.concurrency).toBe(1);
+    expect(plan.files[0]?.steps[0]?.availability).toEqual({ available: true });
     expect(planRecipeRun(share, []).runnable).toBe(false);
   });
 
