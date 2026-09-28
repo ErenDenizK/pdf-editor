@@ -2054,6 +2054,2790 @@
         "xref": "table",
         "fileIdDeterministic": true
       }
+    },
+    {
+      "file": "scan-text.pdf",
+      "bytes": 125062,
+      "sha256": "60102c4a6a36e9496adf46160ea9f54a7aef5162884f191efff08710f57d802d",
+      "pageCount": 2,
+      "tags": ["ocr", "scan", "image-only"],
+      "summary": "2 Letter pages, each one 1700x2200 DeviceGray image at 200 dpi and no text: English text in Inter (20/14 pt). Page 1 clean; page 2 skewed 1.5° counter-clockwise with 2500 seeded dust specks.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 2,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792]
+          }
+        ],
+        "info": {
+          "Title": "Scan fixture: English text"
+        },
+        "images": [
+          {
+            "page": 1,
+            "filter": "FlateDecode",
+            "width": 1700,
+            "height": 2200,
+            "smask": false
+          },
+          {
+            "page": 2,
+            "filter": "FlateDecode",
+            "width": 1700,
+            "height": 2200,
+            "smask": false
+          }
+        ],
+        "ocr": {
+          "languages": ["eng"],
+          "font": "Inter Regular (Inter-Regular.ttf), glyph outlines rasterised by lib/raster.ts",
+          "pages": [
+            {
+              "page": 1,
+              "rotate": 0,
+              "image": {
+                "resource": "Im1",
+                "width": 1700,
+                "height": 2200,
+                "dpi": 200,
+                "colorSpace": "DeviceGray",
+                "bitsPerComponent": 8,
+                "filter": "FlateDecode",
+                "matrix": [612, 0, 0, 792, 0, 0]
+              },
+              "skewDegrees": 0,
+              "text": "Scanned Document Test\nThis page is an image of printed text with no text layer.\nOptical character recognition should find every word here.\nThe quick brown fox jumps over the lazy dog near the river.\nNumbers such as 2024 and 7731 must be read correctly too.\nEach line is set in Inter at fourteen points and scanned.",
+              "lines": [
+                {
+                  "text": "Scanned Document Test",
+                  "fontSize": 20,
+                  "baseline": 700,
+                  "box": [73.13, 699.75, 230.26, 15]
+                },
+                {
+                  "text": "This page is an image of printed text with no text layer.",
+                  "fontSize": 14,
+                  "baseline": 664,
+                  "box": [72.67, 660.98, 359.71, 13.69]
+                },
+                {
+                  "text": "Optical character recognition should find every word here.",
+                  "fontSize": 14,
+                  "baseline": 640,
+                  "box": [72.83, 636.98, 383.5, 13.69]
+                },
+                {
+                  "text": "The quick brown fox jumps over the lazy dog near the river.",
+                  "fontSize": 14,
+                  "baseline": 616,
+                  "box": [72.67, 612.98, 391.1, 13.69]
+                },
+                {
+                  "text": "Numbers such as 2024 and 7731 must be read correctly too.",
+                  "fontSize": 14,
+                  "baseline": 592,
+                  "box": [73.23, 589.09, 397.67, 13.23]
+                },
+                {
+                  "text": "Each line is set in Inter at fourteen points and scanned.",
+                  "fontSize": 14,
+                  "baseline": 568,
+                  "box": [73.23, 565.14, 359.58, 13.52]
+                }
+              ],
+              "words": [
+                {
+                  "text": "Scanned",
+                  "box": [73.13, 699.75, 80.55, 15],
+                  "px": [203, 214, 224, 43]
+                },
+                {
+                  "text": "Document",
+                  "box": [162.61, 699.77, 95.06, 14.79],
+                  "px": [451, 215, 265, 42]
+                },
+                {
+                  "text": "Test",
+                  "box": [264.65, 699.77, 38.75, 14.79],
+                  "px": [735, 215, 108, 42]
+                },
+                {
+                  "text": "This",
+                  "box": [72.67, 663.84, 26.73, 10.68],
+                  "px": [201, 326, 76, 31]
+                },
+                {
+                  "text": "page",
+                  "box": [105.11, 660.98, 31.55, 10.76],
+                  "px": [291, 334, 89, 30]
+                },
+                {
+                  "text": "is",
+                  "box": [142.14, 663.84, 9.24, 10.68],
+                  "px": [394, 326, 27, 31]
+                },
+                {
+                  "text": "an",
+                  "box": [156.62, 663.82, 14.44, 7.92],
+                  "px": [435, 334, 41, 23]
+                },
+                {
+                  "text": "image",
+                  "box": [176.92, 660.98, 38.73, 13.54],
+                  "px": [491, 326, 109, 38]
+                },
+                {
+                  "text": "of",
+                  "box": [220.99, 663.84, 12.65, 10.83],
+                  "px": [613, 325, 36, 32]
+                },
+                {
+                  "text": "printed",
+                  "box": [238.87, 661.14, 44.66, 13.38],
+                  "px": [663, 326, 125, 38]
+                },
+                {
+                  "text": "text",
+                  "box": [288.69, 663.84, 24.37, 9.63],
+                  "px": [801, 329, 69, 28]
+                },
+                {
+                  "text": "with",
+                  "box": [317.75, 663.9, 26.15, 10.62],
+                  "px": [882, 326, 74, 30]
+                },
+                {
+                  "text": "no",
+                  "box": [350, 663.84, 14.88, 7.9],
+                  "px": [972, 334, 42, 23]
+                },
+                {
+                  "text": "text",
+                  "box": [369.66, 663.84, 24.37, 9.63],
+                  "px": [1026, 329, 69, 28]
+                },
+                {
+                  "text": "layer.",
+                  "box": [399.33, 661.09, 33.06, 13.1],
+                  "px": [1109, 327, 93, 37]
+                },
+                {
+                  "text": "Optical",
+                  "box": [72.83, 637.14, 44.72, 13.38],
+                  "px": [202, 392, 125, 39]
+                },
+                {
+                  "text": "character",
+                  "box": [123.28, 639.82, 62.12, 10.36],
+                  "px": [342, 393, 174, 30]
+                },
+                {
+                  "text": "recognition",
+                  "box": [190.73, 636.98, 72.32, 13.54],
+                  "px": [529, 392, 202, 39]
+                },
+                {
+                  "text": "should",
+                  "box": [268.81, 639.84, 42.49, 10.35],
+                  "px": [746, 393, 119, 30]
+                },
+                {
+                  "text": "find",
+                  "box": [316.45, 639.84, 24.2, 10.83],
+                  "px": [879, 392, 68, 31]
+                },
+                {
+                  "text": "every",
+                  "box": [346.37, 637.09, 35.92, 10.66],
+                  "px": [962, 400, 100, 31]
+                },
+                {
+                  "text": "word",
+                  "box": [387.08, 639.84, 31.65, 10.35],
+                  "px": [1075, 393, 89, 30]
+                },
+                {
+                  "text": "here.",
+                  "box": [424.83, 639.84, 31.5, 10.35],
+                  "px": [1180, 393, 88, 30]
+                },
+                {
+                  "text": "The",
+                  "box": [72.67, 615.84, 24.12, 10.35],
+                  "px": [201, 460, 68, 30]
+                },
+                {
+                  "text": "quick",
+                  "box": [102.13, 613.14, 35.02, 13.38],
+                  "px": [283, 459, 98, 38]
+                },
+                {
+                  "text": "brown",
+                  "box": [142.36, 615.84, 39.32, 10.35],
+                  "px": [395, 460, 110, 30]
+                },
+                {
+                  "text": "fox",
+                  "box": [186.83, 615.84, 19.91, 10.83],
+                  "px": [518, 459, 57, 31]
+                },
+                {
+                  "text": "jumps",
+                  "box": [210.95, 613.14, 39.38, 13.38],
+                  "px": [585, 459, 111, 38]
+                },
+                {
+                  "text": "over",
+                  "box": [255.67, 615.84, 28.12, 7.92],
+                  "px": [710, 467, 79, 23]
+                },
+                {
+                  "text": "the",
+                  "box": [288.18, 615.84, 20.2, 10.35],
+                  "px": [800, 460, 57, 30]
+                },
+                {
+                  "text": "lazy",
+                  "box": [314.08, 613.09, 25.4, 13.1],
+                  "px": [872, 460, 72, 37]
+                },
+                {
+                  "text": "dog",
+                  "box": [344.5, 612.98, 23.76, 13.21],
+                  "px": [956, 460, 67, 38]
+                },
+                {
+                  "text": "near",
+                  "box": [374.36, 615.82, 28.31, 7.93],
+                  "px": [1039, 467, 80, 23]
+                },
+                {
+                  "text": "the",
+                  "box": [407.06, 615.84, 20.2, 10.35],
+                  "px": [1130, 460, 57, 30]
+                },
+                {
+                  "text": "river.",
+                  "box": [432.96, 615.84, 30.81, 10.68],
+                  "px": [1202, 459, 87, 31]
+                },
+                {
+                  "text": "Numbers",
+                  "box": [73.23, 591.84, 58.56, 10.35],
+                  "px": [203, 527, 164, 30]
+                },
+                {
+                  "text": "such",
+                  "box": [137.16, 591.84, 30.13, 10.35],
+                  "px": [381, 527, 84, 30]
+                },
+                {
+                  "text": "as",
+                  "box": [172.92, 591.82, 13.94, 7.92],
+                  "px": [480, 534, 40, 23]
+                },
+                {
+                  "text": "2024",
+                  "box": [192.54, 591.86, 32.87, 10.46],
+                  "px": [534, 526, 93, 30]
+                },
+                {
+                  "text": "and",
+                  "box": [230.78, 591.82, 23.01, 10.36],
+                  "px": [641, 527, 64, 30]
+                },
+                {
+                  "text": "7731",
+                  "box": [259.48, 591.86, 28.33, 10.46],
+                  "px": [720, 526, 80, 30]
+                },
+                {
+                  "text": "must",
+                  "box": [294.05, 591.84, 31.15, 9.63],
+                  "px": [816, 529, 88, 28]
+                },
+                {
+                  "text": "be",
+                  "box": [330.5, 591.84, 14.97, 10.35],
+                  "px": [918, 527, 42, 30]
+                },
+                {
+                  "text": "read",
+                  "box": [351.17, 591.82, 27.61, 10.36],
+                  "px": [975, 527, 78, 30]
+                },
+                {
+                  "text": "correctly",
+                  "box": [384.51, 589.09, 57.91, 13.1],
+                  "px": [1068, 527, 161, 37]
+                },
+                {
+                  "text": "too.",
+                  "box": [446.86, 591.84, 24.04, 9.63],
+                  "px": [1241, 529, 68, 28]
+                },
+                {
+                  "text": "Each",
+                  "box": [73.23, 567.82, 30.24, 10.36],
+                  "px": [203, 593, 85, 30]
+                },
+                {
+                  "text": "line",
+                  "box": [109.57, 567.84, 21.45, 10.68],
+                  "px": [304, 592, 60, 31]
+                },
+                {
+                  "text": "is",
+                  "box": [136.49, 567.84, 9.24, 10.68],
+                  "px": [379, 592, 26, 31]
+                },
+                {
+                  "text": "set",
+                  "box": [151.1, 567.84, 19.11, 9.63],
+                  "px": [419, 595, 54, 28]
+                },
+                {
+                  "text": "in",
+                  "box": [175.28, 568, 9.73, 10.52],
+                  "px": [486, 592, 28, 31]
+                },
+                {
+                  "text": "Inter",
+                  "box": [191.26, 567.84, 28.36, 10.35],
+                  "px": [531, 593, 80, 30]
+                },
+                {
+                  "text": "at",
+                  "box": [224.49, 567.82, 11.55, 9.64],
+                  "px": [623, 595, 33, 28]
+                },
+                {
+                  "text": "fourteen",
+                  "box": [240.39, 567.84, 54.76, 10.83],
+                  "px": [667, 592, 153, 31]
+                },
+                {
+                  "text": "points",
+                  "box": [301.24, 565.14, 38.68, 13.38],
+                  "px": [836, 592, 109, 39]
+                },
+                {
+                  "text": "and",
+                  "box": [345.18, 567.82, 23.01, 10.36],
+                  "px": [958, 593, 65, 30]
+                },
+                {
+                  "text": "scanned.",
+                  "box": [373.94, 567.82, 58.86, 10.36],
+                  "px": [1038, 593, 165, 30]
+                }
+              ]
+            },
+            {
+              "page": 2,
+              "rotate": 0,
+              "image": {
+                "resource": "Im1",
+                "width": 1700,
+                "height": 2200,
+                "dpi": 200,
+                "colorSpace": "DeviceGray",
+                "bitsPerComponent": 8,
+                "filter": "FlateDecode",
+                "matrix": [612, 0, 0, 792, 0, 0]
+              },
+              "skewDegrees": 1.5,
+              "text": "Second Page, Slightly Skewed\nThis page was turned by one and a half degrees.\nLight speckle noise imitates dust on the scanner glass.\nA good recognizer straightens the page and still reads it.\nPack my box with five dozen liquor jugs.",
+              "lines": [
+                {
+                  "text": "Second Page, Slightly Skewed",
+                  "fontSize": 20,
+                  "baseline": 700,
+                  "box": [64.86, 689.49, 284.18, 26.77]
+                },
+                {
+                  "text": "This page was turned by one and a half degrees.",
+                  "fontSize": 14,
+                  "baseline": 664,
+                  "box": [65.46, 654.78, 321.78, 22.1]
+                },
+                {
+                  "text": "Light speckle noise imitates dust on the scanner glass.",
+                  "fontSize": 14,
+                  "baseline": 640,
+                  "box": [66.65, 630.8, 359.19, 22.93]
+                },
+                {
+                  "text": "A good recognizer straightens the page and still reads it.",
+                  "fontSize": 14,
+                  "baseline": 616,
+                  "box": [66.4, 606.79, 372.59, 23.28]
+                },
+                {
+                  "text": "Pack my box with five dozen liquor jugs.",
+                  "fontSize": 14,
+                  "baseline": 592,
+                  "box": [67.9, 582.82, 263.94, 20.58]
+                }
+              ],
+              "words": [
+                {
+                  "text": "Second",
+                  "box": [64.87, 693.55, 69.67, 16.81],
+                  "px": [180, 226, 194, 48]
+                },
+                {
+                  "text": "Page,",
+                  "box": [143.07, 691.53, 50.77, 20.18],
+                  "px": [397, 223, 142, 57]
+                },
+                {
+                  "text": "Slightly",
+                  "box": [201.73, 693.07, 68.16, 21.11],
+                  "px": [560, 216, 190, 59]
+                },
+                {
+                  "text": "Skewed",
+                  "box": [276.67, 699.09, 72.26, 16.88],
+                  "px": [768, 211, 202, 48]
+                },
+                {
+                  "text": "This",
+                  "box": [65.46, 657.64, 27, 11.38],
+                  "px": [181, 341, 76, 33]
+                },
+                {
+                  "text": "page",
+                  "box": [97.96, 655.63, 31.83, 11.58],
+                  "px": [272, 346, 89, 33]
+                },
+                {
+                  "text": "was",
+                  "box": [134.61, 659.43, 25.73, 8.58],
+                  "px": [373, 344, 73, 25]
+                },
+                {
+                  "text": "turned",
+                  "box": [164.84, 660.24, 42.39, 11.45],
+                  "px": [457, 334, 119, 33]
+                },
+                {
+                  "text": "by",
+                  "box": [213.05, 658.75, 15.06, 13.48],
+                  "px": [591, 332, 43, 39]
+                },
+                {
+                  "text": "one",
+                  "box": [232.85, 662.02, 23.63, 8.51],
+                  "px": [646, 337, 67, 25]
+                },
+                {
+                  "text": "and",
+                  "box": [261.44, 662.75, 23.27, 10.96],
+                  "px": [726, 328, 65, 32]
+                },
+                {
+                  "text": "a",
+                  "box": [290.14, 663.5, 6.37, 8.07],
+                  "px": [805, 334, 19, 23]
+                },
+                {
+                  "text": "half",
+                  "box": [302.32, 663.83, 23.69, 11.45],
+                  "px": [839, 324, 67, 33]
+                },
+                {
+                  "text": "degrees.",
+                  "box": [330.6, 661.72, 56.63, 14.68],
+                  "px": [918, 321, 158, 41]
+                },
+                {
+                  "text": "Light",
+                  "box": [66.65, 630.8, 31.58, 14.36],
+                  "px": [185, 407, 88, 41]
+                },
+                {
+                  "text": "speckle",
+                  "box": [102.84, 631.91, 50.26, 14.35],
+                  "px": [285, 404, 141, 41]
+                },
+                {
+                  "text": "noise",
+                  "box": [158.45, 636.06, 34.11, 11.57],
+                  "px": [440, 401, 95, 33]
+                },
+                {
+                  "text": "imitates",
+                  "box": [197.75, 637.08, 50.27, 12],
+                  "px": [549, 396, 140, 35]
+                },
+                {
+                  "text": "dust",
+                  "box": [253.09, 638.54, 28.09, 11.07],
+                  "px": [703, 395, 79, 32]
+                },
+                {
+                  "text": "on",
+                  "box": [285.9, 639.4, 15.08, 8.29],
+                  "px": [794, 400, 43, 24]
+                },
+                {
+                  "text": "the",
+                  "box": [305.86, 639.92, 20.46, 10.87],
+                  "px": [849, 392, 58, 31]
+                },
+                {
+                  "text": "scanner",
+                  "box": [331.47, 640.58, 52.5, 9.3],
+                  "px": [920, 394, 147, 27]
+                },
+                {
+                  "text": "glass.",
+                  "box": [388.66, 639.23, 37.18, 14.17],
+                  "px": [1079, 384, 104, 41]
+                },
+                {
+                  "text": "A",
+                  "box": [66.41, 609.81, 9.21, 10.42],
+                  "px": [184, 477, 27, 30]
+                },
+                {
+                  "text": "good",
+                  "box": [80.36, 607.15, 32.49, 14.04],
+                  "px": [223, 474, 91, 40]
+                },
+                {
+                  "text": "recognizer",
+                  "box": [118.59, 608.15, 69.74, 15.35],
+                  "px": [329, 468, 195, 43]
+                },
+                {
+                  "text": "straightens",
+                  "box": [192.96, 610.1, 72.52, 15.43],
+                  "px": [535, 462, 203, 44]
+                },
+                {
+                  "text": "the",
+                  "box": [269.9, 614.97, 20.46, 10.87],
+                  "px": [749, 461, 58, 31]
+                },
+                {
+                  "text": "page",
+                  "box": [295.86, 612.79, 31.83, 11.58],
+                  "px": [821, 465, 90, 33]
+                },
+                {
+                  "text": "and",
+                  "box": [332.57, 616.6, 23.27, 10.96],
+                  "px": [923, 456, 66, 32]
+                },
+                {
+                  "text": "still",
+                  "box": [361.32, 617.37, 20.6, 11.21],
+                  "px": [1003, 453, 58, 33]
+                },
+                {
+                  "text": "reads",
+                  "box": [387.74, 618.05, 35.64, 11.29],
+                  "px": [1077, 451, 100, 33]
+                },
+                {
+                  "text": "it.",
+                  "box": [428.58, 619.2, 10.34, 10.88],
+                  "px": [1190, 449, 30, 32]
+                },
+                {
+                  "text": "Pack",
+                  "box": [67.91, 585.66, 31.32, 11.17],
+                  "px": [188, 542, 88, 32]
+                },
+                {
+                  "text": "my",
+                  "box": [104.23, 583.88, 18.75, 11.17],
+                  "px": [289, 547, 53, 32]
+                },
+                {
+                  "text": "box",
+                  "box": [128.03, 587.25, 23.03, 10.94],
+                  "px": [355, 538, 65, 31]
+                },
+                {
+                  "text": "with",
+                  "box": [155.64, 588.04, 26.42, 11.3],
+                  "px": [432, 535, 74, 32]
+                },
+                {
+                  "text": "five",
+                  "box": [186.93, 588.79, 23.78, 11.44],
+                  "px": [519, 532, 67, 33]
+                },
+                {
+                  "text": "dozen",
+                  "box": [215.77, 589.55, 39.19, 11.37],
+                  "px": [599, 530, 110, 33]
+                },
+                {
+                  "text": "liquor",
+                  "box": [260.78, 588.03, 36.24, 14.31],
+                  "px": [724, 526, 102, 41]
+                },
+                {
+                  "text": "jugs.",
+                  "box": [300.74, 588.92, 31.11, 14.34],
+                  "px": [835, 524, 87, 41]
+                }
+              ],
+              "noise": {
+                "kind": "speckle",
+                "specks": 2500,
+                "seed": "scan-text.pdf#page-2"
+              }
+            }
+          ]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "scan-turkish.pdf",
+      "bytes": 38126,
+      "sha256": "a66f71d6250754f7de863b1067990c17cd1d09223a18dfb75b9a6bf9616a43b7",
+      "pageCount": 1,
+      "tags": ["ocr", "scan", "image-only", "turkish"],
+      "summary": "1 Letter page, one 1700x2200 DeviceGray image at 200 dpi: a Turkish pangram, a capitals line and a dotted/dotless i line in Inter (22/16 pt), covering çğıöşüÇĞIİÖŞÜ.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 1,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792]
+          }
+        ],
+        "info": {
+          "Title": "Scan fixture: Turkish text"
+        },
+        "images": [
+          {
+            "page": 1,
+            "filter": "FlateDecode",
+            "width": 1700,
+            "height": 2200,
+            "smask": false
+          }
+        ],
+        "ocr": {
+          "languages": ["tur"],
+          "letters": "çğıöşüÇĞIİÖŞÜ",
+          "font": "Inter Regular (Inter-Regular.ttf), glyph outlines rasterised by lib/raster.ts",
+          "pages": [
+            {
+              "page": 1,
+              "rotate": 0,
+              "image": {
+                "resource": "Im1",
+                "width": 1700,
+                "height": 2200,
+                "dpi": 200,
+                "colorSpace": "DeviceGray",
+                "bitsPerComponent": 8,
+                "filter": "FlateDecode",
+                "matrix": [612, 0, 0, 792, 0, 0]
+              },
+              "skewDegrees": 0,
+              "text": "Türkçe Metin Taraması\nPijamalı hasta yağız şoföre çabucak güvendi.\nİSTANBUL, ÇANAKKALE, ÖDEMİŞ, ŞİLE, ÜRGÜP VE IĞDIR\nIşık ılık, iğne iplik; göz, söz, üzüm.",
+              "lines": [
+                {
+                  "text": "Türkçe Metin Taraması",
+                  "fontSize": 22,
+                  "baseline": 700,
+                  "box": [73.05, 695.51, 233.69, 21.02]
+                },
+                {
+                  "text": "Pijamalı hasta yağız şoföre çabucak güvendi.",
+                  "fontSize": 16,
+                  "baseline": 660,
+                  "box": [73.41, 656.55, 336.95, 15.64]
+                },
+                {
+                  "text": "İSTANBUL, ÇANAKKALE, ÖDEMİŞ, ŞİLE, ÜRGÜP VE IĞDIR",
+                  "fontSize": 16,
+                  "baseline": 632,
+                  "box": [73.17, 628.65, 433.4, 18.43]
+                },
+                {
+                  "text": "Işık ılık, iğne iplik; göz, söz, üzüm.",
+                  "fontSize": 16,
+                  "baseline": 604,
+                  "box": [73.41, 600.55, 252.51, 15.63]
+                }
+              ],
+              "words": [
+                {
+                  "text": "Türkçe",
+                  "box": [73.05, 695.51, 69.57, 21.01],
+                  "px": [202, 209, 195, 60]
+                },
+                {
+                  "text": "Metin",
+                  "box": [151.81, 699.74, 54.59, 16.79],
+                  "px": [421, 209, 153, 48]
+                },
+                {
+                  "text": "Taraması",
+                  "box": [215.34, 699.72, 91.39, 16.29],
+                  "px": [598, 211, 255, 46]
+                },
+                {
+                  "text": "Pijamalı",
+                  "box": [73.41, 656.73, 55.06, 15.29],
+                  "px": [203, 333, 154, 43]
+                },
+                {
+                  "text": "hasta",
+                  "box": [135.44, 659.8, 38.72, 11.84],
+                  "px": [376, 334, 108, 34]
+                },
+                {
+                  "text": "yağız",
+                  "box": [180.31, 656.55, 39.02, 15.63],
+                  "px": [500, 332, 110, 45]
+                },
+                {
+                  "text": "şoföre",
+                  "box": [225.66, 656.73, 46.55, 15.45],
+                  "px": [626, 332, 131, 44]
+                },
+                {
+                  "text": "çabucak",
+                  "box": [278.3, 656.73, 63.57, 14.91],
+                  "px": [773, 334, 177, 42]
+                },
+                {
+                  "text": "güvendi.",
+                  "box": [347.4, 656.55, 62.95, 15.48],
+                  "px": [964, 333, 176, 44]
+                },
+                {
+                  "text": "İSTANBUL,",
+                  "box": [73.17, 629.2, 80.09, 17.73],
+                  "px": [203, 402, 223, 51]
+                },
+                {
+                  "text": "ÇANAKKALE,",
+                  "box": [160.03, 628.65, 99.05, 15.15],
+                  "px": [444, 411, 276, 43]
+                },
+                {
+                  "text": "ÖDEMİŞ,",
+                  "box": [265.85, 628.73, 64.76, 18.2],
+                  "px": [738, 402, 181, 52]
+                },
+                {
+                  "text": "ŞİLE,",
+                  "box": [337.33, 628.73, 35.62, 18.2],
+                  "px": [937, 402, 99, 52]
+                },
+                {
+                  "text": "ÜRGÜP",
+                  "box": [380.16, 631.81, 54, 15.11],
+                  "px": [1056, 402, 151, 43]
+                },
+                {
+                  "text": "VE",
+                  "box": [439.93, 632, 19.2, 11.64],
+                  "px": [1222, 412, 54, 33]
+                },
+                {
+                  "text": "IĞDIR",
+                  "box": [466.09, 631.84, 40.48, 15.23],
+                  "px": [1294, 402, 114, 43]
+                },
+                {
+                  "text": "Işık",
+                  "box": [73.41, 600.73, 23.77, 14.91],
+                  "px": [203, 489, 67, 43]
+                },
+                {
+                  "text": "ılık,",
+                  "box": [103.13, 601.2, 22.47, 14.45],
+                  "px": [286, 489, 63, 42]
+                },
+                {
+                  "text": "iğne",
+                  "box": [132.38, 600.55, 30.72, 15.63],
+                  "px": [367, 488, 87, 44]
+                },
+                {
+                  "text": "iplik;",
+                  "box": [169.35, 600.73, 32.81, 15.29],
+                  "px": [470, 488, 92, 44]
+                },
+                {
+                  "text": "göz,",
+                  "box": [208.73, 600.55, 30.49, 15.47],
+                  "px": [579, 488, 86, 44]
+                },
+                {
+                  "text": "söz,",
+                  "box": [245.88, 601.2, 29.09, 14.82],
+                  "px": [682, 488, 82, 43]
+                },
+                {
+                  "text": "üzüm.",
+                  "box": [282.02, 603.89, 43.9, 12.13],
+                  "px": [783, 488, 123, 35]
+                }
+              ]
+            }
+          ]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "scan-rotated.pdf",
+      "bytes": 36754,
+      "sha256": "4ae6cc394f6896b4276dc31632a055c078f18e239ed622b39381967849d73f0f",
+      "pageCount": 1,
+      "tags": ["ocr", "scan", "image-only", "rotation"],
+      "summary": "1 Letter page with /Rotate 90: one 2200x1700 DeviceGray image at 200 dpi painted sideways (cm 0 792 -612 0 612 0), so the displayed landscape page reads upright. English text in Inter (20/14 pt).",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 1,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 90,
+            "displayedSize": [792, 612]
+          }
+        ],
+        "info": {
+          "Title": "Scan fixture: rotated page"
+        },
+        "images": [
+          {
+            "page": 1,
+            "filter": "FlateDecode",
+            "width": 2200,
+            "height": 1700,
+            "smask": false
+          }
+        ],
+        "ocr": {
+          "languages": ["eng"],
+          "font": "Inter Regular (Inter-Regular.ttf), glyph outlines rasterised by lib/raster.ts",
+          "pages": [
+            {
+              "page": 1,
+              "rotate": 90,
+              "image": {
+                "resource": "Im1",
+                "width": 2200,
+                "height": 1700,
+                "dpi": 200,
+                "colorSpace": "DeviceGray",
+                "bitsPerComponent": 8,
+                "filter": "FlateDecode",
+                "matrix": [0, 792, -612, 0, 612, 0]
+              },
+              "skewDegrees": 0,
+              "text": "Sideways Page\nThis page has a Rotate entry of ninety degrees.\nThe image is stored sideways and displayed upright.\nRecognition must run on the page as it is displayed.",
+              "lines": [
+                {
+                  "text": "Sideways Page",
+                  "fontSize": 20,
+                  "baseline": 540,
+                  "box": [56.97, 73.13, 19.35, 141.77]
+                },
+                {
+                  "text": "This page has a Rotate entry of ninety degrees.",
+                  "fontSize": 14,
+                  "baseline": 504,
+                  "box": [97.34, 72.67, 13.69, 311.73]
+                },
+                {
+                  "text": "The image is stored sideways and displayed upright.",
+                  "fontSize": 14,
+                  "baseline": 480,
+                  "box": [121.48, 72.67, 13.54, 345.08]
+                },
+                {
+                  "text": "Recognition must run on the page as it is displayed.",
+                  "fontSize": 14,
+                  "baseline": 456,
+                  "box": [145.48, 73.23, 13.54, 338.03]
+                }
+              ],
+              "words": [
+                {
+                  "text": "Sideways",
+                  "box": [56.97, 73.13, 19.19, 88.19],
+                  "px": [203, 158, 246, 54]
+                },
+                {
+                  "text": "Page",
+                  "box": [57.45, 169.71, 18.87, 45.2],
+                  "px": [471, 159, 126, 53]
+                },
+                {
+                  "text": "This",
+                  "box": [97.48, 72.67, 10.68, 26.73],
+                  "px": [201, 270, 76, 31]
+                },
+                {
+                  "text": "page",
+                  "box": [100.26, 105.11, 10.76, 31.55],
+                  "px": [291, 278, 89, 31]
+                },
+                {
+                  "text": "has",
+                  "box": [97.81, 142.37, 10.36, 21.75],
+                  "px": [395, 271, 61, 30]
+                },
+                {
+                  "text": "a",
+                  "box": [100.26, 169.37, 7.92, 6.17],
+                  "px": [470, 278, 18, 23]
+                },
+                {
+                  "text": "Rotate",
+                  "box": [97.81, 181.79, 10.36, 40.4],
+                  "px": [504, 271, 114, 30]
+                },
+                {
+                  "text": "entry",
+                  "box": [98.54, 227.52, 12.37, 33.29],
+                  "px": [631, 273, 94, 36]
+                },
+                {
+                  "text": "of",
+                  "box": [97.34, 265.83, 10.83, 12.65],
+                  "px": [738, 270, 36, 31]
+                },
+                {
+                  "text": "ninety",
+                  "box": [97.48, 283.71, 13.43, 39.37],
+                  "px": [788, 270, 110, 39]
+                },
+                {
+                  "text": "degrees.",
+                  "box": [97.81, 328.09, 13.21, 56.3],
+                  "px": [911, 271, 157, 38]
+                },
+                {
+                  "text": "The",
+                  "box": [121.81, 72.67, 10.35, 24.12],
+                  "px": [201, 338, 68, 30]
+                },
+                {
+                  "text": "image",
+                  "box": [121.48, 102.26, 13.54, 38.73],
+                  "px": [284, 337, 108, 39]
+                },
+                {
+                  "text": "is",
+                  "box": [121.48, 146.46, 10.68, 9.24],
+                  "px": [406, 337, 27, 31]
+                },
+                {
+                  "text": "stored",
+                  "box": [121.81, 161.07, 10.35, 40.18],
+                  "px": [447, 338, 113, 30]
+                },
+                {
+                  "text": "sideways",
+                  "box": [121.48, 207.01, 13.43, 60.2],
+                  "px": [575, 337, 168, 38]
+                },
+                {
+                  "text": "and",
+                  "box": [121.81, 272.46, 10.36, 23.01],
+                  "px": [756, 338, 65, 30]
+                },
+                {
+                  "text": "displayed",
+                  "box": [121.48, 301.2, 13.43, 61.51],
+                  "px": [836, 337, 172, 38]
+                },
+                {
+                  "text": "upright.",
+                  "box": [121.48, 368.8, 13.54, 48.95],
+                  "px": [1024, 337, 137, 39]
+                },
+                {
+                  "text": "Recognition",
+                  "box": [145.48, 73.23, 13.54, 75.93],
+                  "px": [203, 404, 212, 38]
+                },
+                {
+                  "text": "must",
+                  "box": [146.54, 155.26, 9.63, 31.15],
+                  "px": [431, 407, 87, 27]
+                },
+                {
+                  "text": "run",
+                  "box": [148.25, 191.71, 7.85, 19.66],
+                  "px": [532, 411, 56, 23]
+                },
+                {
+                  "text": "on",
+                  "box": [148.26, 217.1, 7.9, 14.88],
+                  "px": [603, 411, 42, 23]
+                },
+                {
+                  "text": "the",
+                  "box": [145.81, 237.13, 10.35, 20.2],
+                  "px": [658, 405, 57, 29]
+                },
+                {
+                  "text": "page",
+                  "box": [148.26, 263.03, 10.76, 31.55],
+                  "px": [730, 411, 89, 31]
+                },
+                {
+                  "text": "as",
+                  "box": [148.26, 299.82, 7.92, 13.94],
+                  "px": [832, 411, 40, 23]
+                },
+                {
+                  "text": "it",
+                  "box": [145.48, 319.24, 10.62, 6.84],
+                  "px": [886, 404, 20, 30]
+                },
+                {
+                  "text": "is",
+                  "box": [145.48, 331.15, 10.68, 9.24],
+                  "px": [919, 404, 27, 30]
+                },
+                {
+                  "text": "displayed.",
+                  "box": [145.48, 345.73, 13.43, 65.53],
+                  "px": [960, 404, 183, 38]
+                }
+              ]
+            }
+          ]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "scan-foreign-ocr.pdf",
+      "bytes": 57661,
+      "sha256": "68a1b5f282be5dbbbfe9d43635be20693142e39c9b65ef8359376f0073f5b3de",
+      "pageCount": 1,
+      "tags": ["ocr", "scan", "ocr-layer", "render-mode-3"],
+      "summary": "scan-text page 1 (same pixels) plus another tool's invisible text layer: one Helvetica line per text line, 3 Tr, stretched with Tz to the ink width, no /PdfEditorOCR tag, with two deliberate errors (\"recognitlon\", \"Iazy\").",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 1,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792]
+          }
+        ],
+        "info": {
+          "Title": "Scan fixture: foreign OCR layer"
+        },
+        "images": [
+          {
+            "page": 1,
+            "filter": "FlateDecode",
+            "width": 1700,
+            "height": 2200,
+            "smask": false
+          }
+        ],
+        "ocr": {
+          "languages": ["eng"],
+          "font": "Inter Regular (Inter-Regular.ttf), glyph outlines rasterised by lib/raster.ts",
+          "pages": [
+            {
+              "page": 1,
+              "rotate": 0,
+              "image": {
+                "resource": "Im1",
+                "width": 1700,
+                "height": 2200,
+                "dpi": 200,
+                "colorSpace": "DeviceGray",
+                "bitsPerComponent": 8,
+                "filter": "FlateDecode",
+                "matrix": [612, 0, 0, 792, 0, 0]
+              },
+              "skewDegrees": 0,
+              "text": "Scanned Document Test\nThis page is an image of printed text with no text layer.\nOptical character recognition should find every word here.\nThe quick brown fox jumps over the lazy dog near the river.\nNumbers such as 2024 and 7731 must be read correctly too.\nEach line is set in Inter at fourteen points and scanned.",
+              "lines": [
+                {
+                  "text": "Scanned Document Test",
+                  "fontSize": 20,
+                  "baseline": 700,
+                  "box": [73.13, 699.75, 230.26, 15]
+                },
+                {
+                  "text": "This page is an image of printed text with no text layer.",
+                  "fontSize": 14,
+                  "baseline": 664,
+                  "box": [72.67, 660.98, 359.71, 13.69]
+                },
+                {
+                  "text": "Optical character recognition should find every word here.",
+                  "fontSize": 14,
+                  "baseline": 640,
+                  "box": [72.83, 636.98, 383.5, 13.69]
+                },
+                {
+                  "text": "The quick brown fox jumps over the lazy dog near the river.",
+                  "fontSize": 14,
+                  "baseline": 616,
+                  "box": [72.67, 612.98, 391.1, 13.69]
+                },
+                {
+                  "text": "Numbers such as 2024 and 7731 must be read correctly too.",
+                  "fontSize": 14,
+                  "baseline": 592,
+                  "box": [73.23, 589.09, 397.67, 13.23]
+                },
+                {
+                  "text": "Each line is set in Inter at fourteen points and scanned.",
+                  "fontSize": 14,
+                  "baseline": 568,
+                  "box": [73.23, 565.14, 359.58, 13.52]
+                }
+              ],
+              "words": [
+                {
+                  "text": "Scanned",
+                  "box": [73.13, 699.75, 80.55, 15],
+                  "px": [203, 214, 224, 43]
+                },
+                {
+                  "text": "Document",
+                  "box": [162.61, 699.77, 95.06, 14.79],
+                  "px": [451, 215, 265, 42]
+                },
+                {
+                  "text": "Test",
+                  "box": [264.65, 699.77, 38.75, 14.79],
+                  "px": [735, 215, 108, 42]
+                },
+                {
+                  "text": "This",
+                  "box": [72.67, 663.84, 26.73, 10.68],
+                  "px": [201, 326, 76, 31]
+                },
+                {
+                  "text": "page",
+                  "box": [105.11, 660.98, 31.55, 10.76],
+                  "px": [291, 334, 89, 30]
+                },
+                {
+                  "text": "is",
+                  "box": [142.14, 663.84, 9.24, 10.68],
+                  "px": [394, 326, 27, 31]
+                },
+                {
+                  "text": "an",
+                  "box": [156.62, 663.82, 14.44, 7.92],
+                  "px": [435, 334, 41, 23]
+                },
+                {
+                  "text": "image",
+                  "box": [176.92, 660.98, 38.73, 13.54],
+                  "px": [491, 326, 109, 38]
+                },
+                {
+                  "text": "of",
+                  "box": [220.99, 663.84, 12.65, 10.83],
+                  "px": [613, 325, 36, 32]
+                },
+                {
+                  "text": "printed",
+                  "box": [238.87, 661.14, 44.66, 13.38],
+                  "px": [663, 326, 125, 38]
+                },
+                {
+                  "text": "text",
+                  "box": [288.69, 663.84, 24.37, 9.63],
+                  "px": [801, 329, 69, 28]
+                },
+                {
+                  "text": "with",
+                  "box": [317.75, 663.9, 26.15, 10.62],
+                  "px": [882, 326, 74, 30]
+                },
+                {
+                  "text": "no",
+                  "box": [350, 663.84, 14.88, 7.9],
+                  "px": [972, 334, 42, 23]
+                },
+                {
+                  "text": "text",
+                  "box": [369.66, 663.84, 24.37, 9.63],
+                  "px": [1026, 329, 69, 28]
+                },
+                {
+                  "text": "layer.",
+                  "box": [399.33, 661.09, 33.06, 13.1],
+                  "px": [1109, 327, 93, 37]
+                },
+                {
+                  "text": "Optical",
+                  "box": [72.83, 637.14, 44.72, 13.38],
+                  "px": [202, 392, 125, 39]
+                },
+                {
+                  "text": "character",
+                  "box": [123.28, 639.82, 62.12, 10.36],
+                  "px": [342, 393, 174, 30]
+                },
+                {
+                  "text": "recognition",
+                  "box": [190.73, 636.98, 72.32, 13.54],
+                  "px": [529, 392, 202, 39]
+                },
+                {
+                  "text": "should",
+                  "box": [268.81, 639.84, 42.49, 10.35],
+                  "px": [746, 393, 119, 30]
+                },
+                {
+                  "text": "find",
+                  "box": [316.45, 639.84, 24.2, 10.83],
+                  "px": [879, 392, 68, 31]
+                },
+                {
+                  "text": "every",
+                  "box": [346.37, 637.09, 35.92, 10.66],
+                  "px": [962, 400, 100, 31]
+                },
+                {
+                  "text": "word",
+                  "box": [387.08, 639.84, 31.65, 10.35],
+                  "px": [1075, 393, 89, 30]
+                },
+                {
+                  "text": "here.",
+                  "box": [424.83, 639.84, 31.5, 10.35],
+                  "px": [1180, 393, 88, 30]
+                },
+                {
+                  "text": "The",
+                  "box": [72.67, 615.84, 24.12, 10.35],
+                  "px": [201, 460, 68, 30]
+                },
+                {
+                  "text": "quick",
+                  "box": [102.13, 613.14, 35.02, 13.38],
+                  "px": [283, 459, 98, 38]
+                },
+                {
+                  "text": "brown",
+                  "box": [142.36, 615.84, 39.32, 10.35],
+                  "px": [395, 460, 110, 30]
+                },
+                {
+                  "text": "fox",
+                  "box": [186.83, 615.84, 19.91, 10.83],
+                  "px": [518, 459, 57, 31]
+                },
+                {
+                  "text": "jumps",
+                  "box": [210.95, 613.14, 39.38, 13.38],
+                  "px": [585, 459, 111, 38]
+                },
+                {
+                  "text": "over",
+                  "box": [255.67, 615.84, 28.12, 7.92],
+                  "px": [710, 467, 79, 23]
+                },
+                {
+                  "text": "the",
+                  "box": [288.18, 615.84, 20.2, 10.35],
+                  "px": [800, 460, 57, 30]
+                },
+                {
+                  "text": "lazy",
+                  "box": [314.08, 613.09, 25.4, 13.1],
+                  "px": [872, 460, 72, 37]
+                },
+                {
+                  "text": "dog",
+                  "box": [344.5, 612.98, 23.76, 13.21],
+                  "px": [956, 460, 67, 38]
+                },
+                {
+                  "text": "near",
+                  "box": [374.36, 615.82, 28.31, 7.93],
+                  "px": [1039, 467, 80, 23]
+                },
+                {
+                  "text": "the",
+                  "box": [407.06, 615.84, 20.2, 10.35],
+                  "px": [1130, 460, 57, 30]
+                },
+                {
+                  "text": "river.",
+                  "box": [432.96, 615.84, 30.81, 10.68],
+                  "px": [1202, 459, 87, 31]
+                },
+                {
+                  "text": "Numbers",
+                  "box": [73.23, 591.84, 58.56, 10.35],
+                  "px": [203, 527, 164, 30]
+                },
+                {
+                  "text": "such",
+                  "box": [137.16, 591.84, 30.13, 10.35],
+                  "px": [381, 527, 84, 30]
+                },
+                {
+                  "text": "as",
+                  "box": [172.92, 591.82, 13.94, 7.92],
+                  "px": [480, 534, 40, 23]
+                },
+                {
+                  "text": "2024",
+                  "box": [192.54, 591.86, 32.87, 10.46],
+                  "px": [534, 526, 93, 30]
+                },
+                {
+                  "text": "and",
+                  "box": [230.78, 591.82, 23.01, 10.36],
+                  "px": [641, 527, 64, 30]
+                },
+                {
+                  "text": "7731",
+                  "box": [259.48, 591.86, 28.33, 10.46],
+                  "px": [720, 526, 80, 30]
+                },
+                {
+                  "text": "must",
+                  "box": [294.05, 591.84, 31.15, 9.63],
+                  "px": [816, 529, 88, 28]
+                },
+                {
+                  "text": "be",
+                  "box": [330.5, 591.84, 14.97, 10.35],
+                  "px": [918, 527, 42, 30]
+                },
+                {
+                  "text": "read",
+                  "box": [351.17, 591.82, 27.61, 10.36],
+                  "px": [975, 527, 78, 30]
+                },
+                {
+                  "text": "correctly",
+                  "box": [384.51, 589.09, 57.91, 13.1],
+                  "px": [1068, 527, 161, 37]
+                },
+                {
+                  "text": "too.",
+                  "box": [446.86, 591.84, 24.04, 9.63],
+                  "px": [1241, 529, 68, 28]
+                },
+                {
+                  "text": "Each",
+                  "box": [73.23, 567.82, 30.24, 10.36],
+                  "px": [203, 593, 85, 30]
+                },
+                {
+                  "text": "line",
+                  "box": [109.57, 567.84, 21.45, 10.68],
+                  "px": [304, 592, 60, 31]
+                },
+                {
+                  "text": "is",
+                  "box": [136.49, 567.84, 9.24, 10.68],
+                  "px": [379, 592, 26, 31]
+                },
+                {
+                  "text": "set",
+                  "box": [151.1, 567.84, 19.11, 9.63],
+                  "px": [419, 595, 54, 28]
+                },
+                {
+                  "text": "in",
+                  "box": [175.28, 568, 9.73, 10.52],
+                  "px": [486, 592, 28, 31]
+                },
+                {
+                  "text": "Inter",
+                  "box": [191.26, 567.84, 28.36, 10.35],
+                  "px": [531, 593, 80, 30]
+                },
+                {
+                  "text": "at",
+                  "box": [224.49, 567.82, 11.55, 9.64],
+                  "px": [623, 595, 33, 28]
+                },
+                {
+                  "text": "fourteen",
+                  "box": [240.39, 567.84, 54.76, 10.83],
+                  "px": [667, 592, 153, 31]
+                },
+                {
+                  "text": "points",
+                  "box": [301.24, 565.14, 38.68, 13.38],
+                  "px": [836, 592, 109, 39]
+                },
+                {
+                  "text": "and",
+                  "box": [345.18, 567.82, 23.01, 10.36],
+                  "px": [958, 593, 65, 30]
+                },
+                {
+                  "text": "scanned.",
+                  "box": [373.94, 567.82, 58.86, 10.36],
+                  "px": [1038, 593, 165, 30]
+                }
+              ],
+              "foreignLayer": {
+                "font": "Helvetica",
+                "renderMode": 3,
+                "lines": [
+                  {
+                    "text": "Scanned Document Test",
+                    "x": 73.13,
+                    "baseline": 700,
+                    "fontSize": 20,
+                    "horizontalScale": 104.62
+                  },
+                  {
+                    "text": "This page is an image of printed text with no text layer.",
+                    "x": 72.67,
+                    "baseline": 664,
+                    "fontSize": 14,
+                    "horizontalScale": 106.27
+                  },
+                  {
+                    "text": "Optical character recognitlon should find every word here.",
+                    "x": 72.83,
+                    "baseline": 640,
+                    "fontSize": 14,
+                    "horizontalScale": 107.15
+                  },
+                  {
+                    "text": "The quick brown fox jumps over the Iazy dog near the river.",
+                    "x": 72.67,
+                    "baseline": 616,
+                    "fontSize": 14,
+                    "horizontalScale": 106.26
+                  },
+                  {
+                    "text": "Numbers such as 2024 and 7731 must be read correctly too.",
+                    "x": 73.23,
+                    "baseline": 592,
+                    "fontSize": 14,
+                    "horizontalScale": 105.81
+                  },
+                  {
+                    "text": "Each line is set in Inter at fourteen points and scanned.",
+                    "x": 73.23,
+                    "baseline": 568,
+                    "fontSize": 14,
+                    "horizontalScale": 105.49
+                  }
+                ],
+                "errors": [
+                  {
+                    "expected": "recognition",
+                    "actual": "recognitlon"
+                  },
+                  {
+                    "expected": "lazy",
+                    "actual": "Iazy"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      },
+      "derivedFrom": "scan-text.pdf"
+    },
+    {
+      "file": "compare-a.pdf",
+      "bytes": 3489,
+      "sha256": "4d2fbc42e54a105dd6c1e8a816d29227830233623e1fbdcfeff6379571861898",
+      "pageCount": 4,
+      "tags": ["compare"],
+      "summary": "4 Letter pages (Helvetica, raw content): summary, figures with a 144x96 pt image at (72, 480), an appendix, contacts. Title \"Quarterly report\". The \"before\" side of the compare pair.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 4,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["Quarterly report: summary"]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["Figures and images"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["Appendix to be removed"]
+          },
+          {
+            "page": 4,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["Contacts"]
+          }
+        ],
+        "info": {
+          "Title": "Quarterly report"
+        },
+        "images": [
+          {
+            "page": 2,
+            "filter": "FlateDecode",
+            "width": 48,
+            "height": 32,
+            "smask": false
+          }
+        ],
+        "compare": {
+          "role": "a",
+          "a": "compare-a.pdf",
+          "b": "compare-b.pdf",
+          "pageMap": [
+            {
+              "a": 1,
+              "b": 1
+            },
+            {
+              "a": 2,
+              "b": 2
+            },
+            {
+              "a": 3,
+              "b": null
+            },
+            {
+              "a": 4,
+              "b": 3
+            },
+            {
+              "a": null,
+              "b": 4
+            }
+          ],
+          "changes": [
+            {
+              "kind": "text-changed",
+              "aPage": 1,
+              "bPage": 1,
+              "a": {
+                "text": "Monday",
+                "box": [284.78, 687.52, 42.68, 11.1]
+              },
+              "b": {
+                "text": "Tuesday",
+                "box": [284.78, 687.52, 46.02, 11.1]
+              },
+              "lineA": "The committee approved the budget on Monday after a short debate.",
+              "lineB": "The committee approved the budget on Tuesday after a short debate."
+            },
+            {
+              "kind": "image-moved",
+              "aPage": 2,
+              "bPage": 2,
+              "resource": "Im1",
+              "a": [72, 480, 144, 96],
+              "b": [92, 480, 144, 96],
+              "delta": [20, 0]
+            },
+            {
+              "kind": "page-deleted",
+              "aPage": 3,
+              "heading": "Appendix to be removed",
+              "words": 22
+            },
+            {
+              "kind": "page-inserted",
+              "bPage": 4,
+              "heading": "Added in revision",
+              "words": 22
+            },
+            {
+              "kind": "metadata",
+              "key": "Title",
+              "a": "Quarterly report",
+              "b": "Quarterly report (revised)"
+            }
+          ],
+          "identicalPairs": [
+            {
+              "a": 4,
+              "b": 3
+            }
+          ]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "compare-b.pdf",
+      "bytes": 3522,
+      "sha256": "a36e3ec05a283baf78df02ccd863f26762cc93fb0af217c5e078ffce8ec0f746",
+      "pageCount": 4,
+      "tags": ["compare"],
+      "summary": "compare-a with one word changed on page 1 (Monday -> Tuesday), the image moved 20 pt right on page 2, page 3 deleted, a new page added at the end and the title changed to \"Quarterly report (revised)\".",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 4,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["Quarterly report: summary"]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["Figures and images"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["Contacts"]
+          },
+          {
+            "page": 4,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["Added in revision"]
+          }
+        ],
+        "info": {
+          "Title": "Quarterly report (revised)"
+        },
+        "images": [
+          {
+            "page": 2,
+            "filter": "FlateDecode",
+            "width": 48,
+            "height": 32,
+            "smask": false
+          }
+        ],
+        "compare": {
+          "role": "b",
+          "a": "compare-a.pdf",
+          "b": "compare-b.pdf",
+          "pageMap": [
+            {
+              "a": 1,
+              "b": 1
+            },
+            {
+              "a": 2,
+              "b": 2
+            },
+            {
+              "a": 3,
+              "b": null
+            },
+            {
+              "a": 4,
+              "b": 3
+            },
+            {
+              "a": null,
+              "b": 4
+            }
+          ],
+          "changes": [
+            {
+              "kind": "text-changed",
+              "aPage": 1,
+              "bPage": 1,
+              "a": {
+                "text": "Monday",
+                "box": [284.78, 687.52, 42.68, 11.1]
+              },
+              "b": {
+                "text": "Tuesday",
+                "box": [284.78, 687.52, 46.02, 11.1]
+              },
+              "lineA": "The committee approved the budget on Monday after a short debate.",
+              "lineB": "The committee approved the budget on Tuesday after a short debate."
+            },
+            {
+              "kind": "image-moved",
+              "aPage": 2,
+              "bPage": 2,
+              "resource": "Im1",
+              "a": [72, 480, 144, 96],
+              "b": [92, 480, 144, 96],
+              "delta": [20, 0]
+            },
+            {
+              "kind": "page-deleted",
+              "aPage": 3,
+              "heading": "Appendix to be removed",
+              "words": 22
+            },
+            {
+              "kind": "page-inserted",
+              "bPage": 4,
+              "heading": "Added in revision",
+              "words": 22
+            },
+            {
+              "kind": "metadata",
+              "key": "Title",
+              "a": "Quarterly report",
+              "b": "Quarterly report (revised)"
+            }
+          ],
+          "identicalPairs": [
+            {
+              "a": 4,
+              "b": 3
+            }
+          ]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "markdown-source.pdf",
+      "bytes": 3850,
+      "sha256": "4da9b2dc4a7e7d99c540e8fbd695253b63e41a58535ca747a58a38a64e86a54d",
+      "pageCount": 2,
+      "tags": ["markdown", "reading-order", "headings", "lists", "columns", "links"],
+      "summary": "2 Letter pages: H1/H2/H3 in Helvetica-Bold 24/18/14 pt, two 11 pt paragraphs (one line-end hyphen, one URI link), a 3-item bulleted list, an image; page 2 an H2 and a two-column block on shared baselines; running header and page number on both pages.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 2,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["Working with PDF Fixtures"]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["Two columns"]
+          }
+        ],
+        "info": {
+          "Title": "Working with PDF Fixtures"
+        },
+        "links": [
+          {
+            "page": 1,
+            "kind": "uri",
+            "uri": "https://example.org/fixtures"
+          }
+        ],
+        "images": [
+          {
+            "page": 1,
+            "filter": "FlateDecode",
+            "width": 80,
+            "height": 50,
+            "smask": false
+          }
+        ],
+        "markdown": {
+          "bodyFontSize": 11,
+          "headingSizes": {
+            "1": 24,
+            "2": 18,
+            "3": 14
+          },
+          "outline": [
+            "# Working with PDF Fixtures",
+            "## Why fixtures matter",
+            "### What a good fixture has",
+            "- Known text in a known place",
+            "- A documented reason to exist",
+            "- A size of a few kilobytes",
+            "## Two columns"
+          ],
+          "blocks": [
+            {
+              "kind": "heading",
+              "page": 1,
+              "level": 1,
+              "text": "Working with PDF Fixtures",
+              "fontSize": 24,
+              "box": [72, 685.03, 305.38, 22.2]
+            },
+            {
+              "kind": "paragraph",
+              "page": 1,
+              "text": "Test fixtures are small PDF files with known content. Each one is generated by a script, so its text, fonts and positions are documented and can be checked by tests without looking at the pages.",
+              "lines": [
+                "Test fixtures are small PDF files with known content. Each one is gener-",
+                "ated by a script, so its text, fonts and positions are documented and can",
+                "be checked by tests without looking at the pages."
+              ],
+              "box": [72, 627.72, 350.3, 40.18]
+            },
+            {
+              "kind": "heading",
+              "page": 1,
+              "level": 2,
+              "text": "Why fixtures matter",
+              "fontSize": 18,
+              "box": [72, 592.27, 168.03, 16.65]
+            },
+            {
+              "kind": "paragraph",
+              "page": 1,
+              "text": "Real documents are messy and rarely redistributable. The project site at [example.org](https://example.org/fixtures) explains how the corpus is regenerated and verified.",
+              "lines": [
+                "Real documents are messy and rarely redistributable. The project site at",
+                "example.org explains how the corpus is regenerated and verified."
+              ],
+              "box": [72, 552.72, 350.91, 25.18]
+            },
+            {
+              "kind": "heading",
+              "page": 1,
+              "level": 3,
+              "text": "What a good fixture has",
+              "fontSize": 14,
+              "box": [72, 519.1, 158.69, 12.95]
+            },
+            {
+              "kind": "list-item",
+              "page": 1,
+              "level": 1,
+              "text": "Known text in a known place",
+              "bullet": "•",
+              "box": [80, 495.72, 153.4, 10.17]
+            },
+            {
+              "kind": "list-item",
+              "page": 1,
+              "level": 1,
+              "text": "A documented reason to exist",
+              "bullet": "•",
+              "box": [80, 477.72, 159.52, 10.17]
+            },
+            {
+              "kind": "list-item",
+              "page": 1,
+              "level": 1,
+              "text": "A size of a few kilobytes",
+              "bullet": "•",
+              "box": [80, 459.72, 131.38, 10.17]
+            },
+            {
+              "kind": "image",
+              "page": 1,
+              "resource": "Im1",
+              "box": [72, 300, 160, 100],
+              "markdown": "![Page 1, image 1](images/p1-1.png)"
+            },
+            {
+              "kind": "heading",
+              "page": 2,
+              "level": 2,
+              "text": "Two columns",
+              "fontSize": 18,
+              "box": [72, 686.27, 115.02, 16.65]
+            },
+            {
+              "kind": "paragraph",
+              "page": 2,
+              "text": "The left column is read first, from top to bottom, before the reader moves to the right column.",
+              "lines": [
+                "The left column is read first,",
+                "from top to bottom, before the",
+                "reader moves to the right column."
+              ],
+              "box": [72, 627.72, 163.85, 40.18],
+              "column": "left"
+            },
+            {
+              "kind": "paragraph",
+              "page": 2,
+              "text": "The right column comes second. Its lines sit on the same baselines as the left column.",
+              "lines": [
+                "The right column comes second.",
+                "Its lines sit on the same",
+                "baselines as the left column."
+              ],
+              "box": [324, 627.72, 158.95, 40.18],
+              "column": "right"
+            }
+          ],
+          "dropped": [
+            {
+              "page": 1,
+              "text": "Fixture Handbook",
+              "reason": "running-header"
+            },
+            {
+              "page": 1,
+              "text": "Page 1",
+              "reason": "page-number"
+            },
+            {
+              "page": 2,
+              "text": "Fixture Handbook",
+              "reason": "running-header"
+            },
+            {
+              "page": 2,
+              "text": "Page 2",
+              "reason": "page-number"
+            }
+          ],
+          "links": [
+            {
+              "page": 1,
+              "text": "example.org",
+              "uri": "https://example.org/fixtures",
+              "rect": [72, 552.72, 60.52, 10.17]
+            }
+          ],
+          "golden": "# Working with PDF Fixtures\n\nTest fixtures are small PDF files with known content. Each one is generated by a script, so its text, fonts and positions are documented and can be checked by tests without looking at the pages.\n\n## Why fixtures matter\n\nReal documents are messy and rarely redistributable. The project site at [example.org](https://example.org/fixtures) explains how the corpus is regenerated and verified.\n\n### What a good fixture has\n\n- Known text in a known place\n- A documented reason to exist\n- A size of a few kilobytes\n\n![Page 1, image 1](images/p1-1.png)\n\n## Two columns\n\nThe left column is read first, from top to bottom, before the reader moves to the right column.\n\nThe right column comes second. Its lines sit on the same baselines as the left column.\n"
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      }
+    },
+    {
+      "file": "signed-approval.pdf",
+      "bytes": 20273,
+      "sha256": "9a607d4964431db3b9d06aa6c3f8e62ba72a7bf00210aa28aae2e4bb124f60f8",
+      "pageCount": 3,
+      "tags": ["signatures", "pades", "incremental-update"],
+      "summary": "simple-text.pdf plus one incremental update with an invisible approval signature: /ETSI.CAdES.detached, SHA-256, RSA PKCS#1 v1.5, signingCertificateV2, chain signer -> intermediate -> root in the CMS; the /ByteRange covers the whole file.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 3,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 1 OF simple-text"]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 2 OF simple-text"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 3 OF simple-text"]
+          }
+        ],
+        "info": {
+          "Title": "Simple text fixture"
+        },
+        "signatures": [
+          {
+            "field": "Approval",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "intact",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "ETSI.CAdES.detached",
+            "revision": 2,
+            "byteRange": [0, 3335, 19721, 552],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3356,
+            "coversWholeFile": true,
+            "digestAlgorithm": "SHA-256",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest", "signingCertificateV2"],
+            "claimedTime": "2024-01-01T00:00:00.000Z",
+            "reason": "Approved (pdf-editor test fixture)",
+            "signer": {
+              "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "3001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "pass",
+              "signature": "pass",
+              "signingCertificate": "pass",
+              "chain": "pass"
+            }
+          }
+        ],
+        "revisions": {
+          "count": 2,
+          "startxrefs": [2500, 19999],
+          "ends": [2878, 20273]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      },
+      "derivedFrom": "simple-text.pdf"
+    },
+    {
+      "file": "signed-then-modified.pdf",
+      "bytes": 20929,
+      "sha256": "a753d61ea1b0088daa88743e6a92185b013162b5ad7a41451bea24baf450f91f",
+      "pageCount": 3,
+      "tags": ["signatures", "pades", "incremental-update", "annotations"],
+      "summary": "signed-approval.pdf plus a third revision that adds a /Text note to page 1 (page redefined, new annotation), so the signature no longer covers the whole file.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 3,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 1 OF simple-text"]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 2 OF simple-text"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 3 OF simple-text"]
+          }
+        ],
+        "info": {
+          "Title": "Simple text fixture"
+        },
+        "signatures": [
+          {
+            "field": "Approval",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "intact-changed-later",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "ETSI.CAdES.detached",
+            "revision": 2,
+            "byteRange": [0, 3335, 19721, 552],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3356,
+            "coversWholeFile": false,
+            "digestAlgorithm": "SHA-256",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest", "signingCertificateV2"],
+            "claimedTime": "2024-01-01T00:00:00.000Z",
+            "reason": "Approved (pdf-editor test fixture)",
+            "signer": {
+              "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "3001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "pass",
+              "signature": "pass",
+              "signingCertificate": "pass",
+              "chain": "pass"
+            },
+            "laterChanges": [
+              {
+                "revision": 3,
+                "kind": "annotations",
+                "pages": [1],
+                "objects": ["14 0 R", "5 0 R"]
+              }
+            ]
+          }
+        ],
+        "revisions": {
+          "count": 3,
+          "startxrefs": [2500, 19999, 20718],
+          "ends": [2878, 20273, 20929]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      },
+      "derivedFrom": "signed-approval.pdf"
+    },
+    {
+      "file": "signed-then-changed.pdf",
+      "bytes": 21006,
+      "sha256": "bb89b35df02c855287fafe9928cc8c27552a4f04cfd737d8a33d85ef5e24551b",
+      "pageCount": 3,
+      "tags": ["signatures", "pades", "incremental-update"],
+      "summary": "signed-approval.pdf plus a third revision that redefines page 1's content stream (the fox sentence replaced, uncompressed).",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 3,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 1 OF simple-text"]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 2 OF simple-text"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 3 OF simple-text"]
+          }
+        ],
+        "info": {
+          "Title": "Simple text fixture"
+        },
+        "signatures": [
+          {
+            "field": "Approval",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "changed-after-signing",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "ETSI.CAdES.detached",
+            "revision": 2,
+            "byteRange": [0, 3335, 19721, 552],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3356,
+            "coversWholeFile": false,
+            "digestAlgorithm": "SHA-256",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest", "signingCertificateV2"],
+            "claimedTime": "2024-01-01T00:00:00.000Z",
+            "reason": "Approved (pdf-editor test fixture)",
+            "signer": {
+              "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "3001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "pass",
+              "signature": "pass",
+              "signingCertificate": "pass",
+              "chain": "pass"
+            },
+            "laterChanges": [
+              {
+                "revision": 3,
+                "kind": "content",
+                "pages": [1],
+                "objects": ["6 0 R"]
+              }
+            ]
+          }
+        ],
+        "revisions": {
+          "count": 3,
+          "startxrefs": [2500, 19999, 20820],
+          "ends": [2878, 20273, 21006]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      },
+      "derivedFrom": "signed-approval.pdf"
+    },
+    {
+      "file": "signed-tampered.pdf",
+      "bytes": 20273,
+      "sha256": "de24aa071759395e6fa06306cf69fbe0355791f5f24017c50daaaf7861e570d3",
+      "pageCount": 3,
+      "tags": ["signatures", "pades", "tampered"],
+      "summary": "signed-approval.pdf with one bit flipped inside the first signed range: page 1 now reads \"brown box\" instead of \"brown fox\" (compressed stream, Adler-32 fixed so it still inflates).",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 3,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 1 OF simple-text"]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 2 OF simple-text"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 3 OF simple-text"]
+          }
+        ],
+        "info": {
+          "Title": "Simple text fixture"
+        },
+        "signatures": [
+          {
+            "field": "Approval",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "broken",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "ETSI.CAdES.detached",
+            "revision": 2,
+            "byteRange": [0, 3335, 19721, 552],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3356,
+            "coversWholeFile": true,
+            "digestAlgorithm": "SHA-256",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest", "signingCertificateV2"],
+            "claimedTime": "2024-01-01T00:00:00.000Z",
+            "reason": "Approved (pdf-editor test fixture)",
+            "signer": {
+              "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "3001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "fail",
+              "signature": "pass",
+              "signingCertificate": "pass",
+              "chain": "pass"
+            }
+          }
+        ],
+        "revisions": {
+          "count": 2,
+          "startxrefs": [2500, 19999],
+          "ends": [2878, 20273]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true,
+        "tamper": {
+          "offset": 1290,
+          "before": 231,
+          "after": 229,
+          "object": "6 0 R (page 1 content stream, FlateDecode)",
+          "adlerOffset": 1317,
+          "textBefore": "The quick brown fox jumps over the lazy dog.",
+          "textAfter": "The quick brown box jumps over the lazy dog."
+        }
+      },
+      "derivedFrom": "signed-approval.pdf"
+    },
+    {
+      "file": "signed-twice.pdf",
+      "bytes": 37600,
+      "sha256": "d3b3b81e68ea3661ff1e38839850ef75177221b81a4a9c90300deeac5de87655",
+      "pageCount": 3,
+      "tags": ["signatures", "pades", "incremental-update"],
+      "summary": "signed-approval.pdf plus a third revision with a second approval signature (claimed 2024-01-02) covering the whole file.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 3,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 1 OF simple-text"]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 2 OF simple-text"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 3 OF simple-text"]
+          }
+        ],
+        "info": {
+          "Title": "Simple text fixture"
+        },
+        "signatures": [
+          {
+            "field": "Approval",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "intact-changed-later",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "ETSI.CAdES.detached",
+            "revision": 2,
+            "byteRange": [0, 3335, 19721, 552],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3356,
+            "coversWholeFile": false,
+            "digestAlgorithm": "SHA-256",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest", "signingCertificateV2"],
+            "claimedTime": "2024-01-01T00:00:00.000Z",
+            "reason": "Approved (pdf-editor test fixture)",
+            "signer": {
+              "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "3001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "pass",
+              "signature": "pass",
+              "signingCertificate": "pass",
+              "chain": "pass"
+            },
+            "laterChanges": [
+              {
+                "revision": 3,
+                "kind": "signature",
+                "pages": [1],
+                "objects": ["13 0 R", "14 0 R", "15 0 R", "5 0 R"]
+              }
+            ]
+          },
+          {
+            "field": "Second approval",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "intact",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "ETSI.CAdES.detached",
+            "revision": 3,
+            "byteRange": [0, 20729, 37115, 485],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3356,
+            "coversWholeFile": true,
+            "digestAlgorithm": "SHA-256",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest", "signingCertificateV2"],
+            "claimedTime": "2024-01-02T00:00:00.000Z",
+            "reason": "Approved (pdf-editor test fixture)",
+            "signer": {
+              "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "3001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "pass",
+              "signature": "pass",
+              "signingCertificate": "pass",
+              "chain": "pass"
+            }
+          }
+        ],
+        "revisions": {
+          "count": 3,
+          "startxrefs": [2500, 19999, 37349],
+          "ends": [2878, 20273, 37600]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      },
+      "derivedFrom": "signed-approval.pdf"
+    },
+    {
+      "file": "signed-sha1.pdf",
+      "bytes": 20269,
+      "sha256": "b25b28851ac5b1e92523f939da48c8b37e91e0e22a740295b487165489dc098c",
+      "pageCount": 3,
+      "tags": ["signatures", "pkcs7", "sha1"],
+      "summary": "Like signed-approval.pdf but /adbe.pkcs7.sha1: the SHA-1 of the ranges is the encapsulated content; SHA-1 signed attributes.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 3,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 1 OF simple-text"]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 2 OF simple-text"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 3 OF simple-text"]
+          }
+        ],
+        "info": {
+          "Title": "Simple text fixture"
+        },
+        "signatures": [
+          {
+            "field": "Approval",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "intact",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "adbe.pkcs7.sha1",
+            "revision": 2,
+            "byteRange": [0, 3331, 19717, 552],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3199,
+            "coversWholeFile": true,
+            "digestAlgorithm": "SHA-1",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest"],
+            "claimedTime": "2024-01-01T00:00:00.000Z",
+            "reason": "Approved (pdf-editor test fixture)",
+            "signer": {
+              "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "3001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "pass",
+              "signature": "pass",
+              "signingCertificate": "not-checked",
+              "chain": "pass"
+            },
+            "weakDigest": true
+          }
+        ],
+        "revisions": {
+          "count": 2,
+          "startxrefs": [2500, 19995],
+          "ends": [2878, 20269]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      },
+      "derivedFrom": "simple-text.pdf"
+    },
+    {
+      "file": "signed-empty-field.pdf",
+      "bytes": 20419,
+      "sha256": "db2b6c2b91bb70305e3596b2b8238a438fe12b0ab4b5520013db95573c3ce6ef",
+      "pageCount": 3,
+      "tags": ["signatures", "pades", "acroform"],
+      "summary": "simple-text.pdf plus a revision with two /Sig fields: \"Reviewer\" (unsigned, visible box, listed first) and \"Approval\" (signed, whole file).",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 3,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 1 OF simple-text"]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 2 OF simple-text"]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 612, 792],
+            "rotate": 0,
+            "displayedSize": [612, 792],
+            "markers": ["PAGE 3 OF simple-text"]
+          }
+        ],
+        "info": {
+          "Title": "Simple text fixture"
+        },
+        "signatures": [
+          {
+            "field": "Reviewer",
+            "page": 1,
+            "rect": [72, 520, 200, 60],
+            "signed": false,
+            "status": "unsigned"
+          },
+          {
+            "field": "Approval",
+            "page": 1,
+            "rect": [0, 0, 0, 0],
+            "signed": true,
+            "status": "intact",
+            "filter": "Adobe.PPKLite",
+            "subFilter": "ETSI.CAdES.detached",
+            "revision": 2,
+            "byteRange": [0, 3342, 19728, 691],
+            "contentsHexLength": 16384,
+            "cmsBytes": 3356,
+            "coversWholeFile": true,
+            "digestAlgorithm": "SHA-256",
+            "signatureAlgorithm": "RSASSA-PKCS1-v1_5",
+            "signedAttributes": ["contentType", "messageDigest", "signingCertificateV2"],
+            "claimedTime": "2024-01-01T00:00:00.000Z",
+            "reason": "Approved (pdf-editor test fixture)",
+            "signer": {
+              "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "serial": "3001",
+              "notBefore": "2023-01-01T00:00:00.000Z",
+              "notAfter": "2036-01-01T00:00:00.000Z"
+            },
+            "chain": [
+              "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+              "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)"
+            ],
+            "checks": {
+              "byteRange": "pass",
+              "digest": "pass",
+              "signature": "pass",
+              "signingCertificate": "pass",
+              "chain": "pass"
+            }
+          }
+        ],
+        "revisions": {
+          "count": 2,
+          "startxrefs": [2500, 20125],
+          "ends": [2878, 20419]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true
+      },
+      "derivedFrom": "simple-text.pdf"
     }
-  ]
+  ],
+  "pki": {
+    "$comment": "Test-only PKI (tools/fixtures/keys/, lib/pki.ts): nothing here is secret or trusted. Validity starts 2023-01-01.",
+    "password": "test-only",
+    "files": [
+      {
+        "file": "pki/root-ca.cert.pem",
+        "sha256": "d944397a59311982de1d8ca7b538dac5589ddd14fceb02888565e468024bc5c4",
+        "kind": "certificate",
+        "subject": "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)",
+        "issuer": "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)",
+        "serial": "1001",
+        "keyType": "RSA-2048"
+      },
+      {
+        "file": "pki/intermediate-ca.cert.pem",
+        "sha256": "78247692662b3d7fa1e25697449a0c0c161da73a476d3a5e5487bc50ae6fe055",
+        "kind": "certificate",
+        "subject": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+        "issuer": "CN=pdf-editor Test Root CA,O=pdf-editor test PKI (not trusted)",
+        "serial": "2001",
+        "keyType": "RSA-2048"
+      },
+      {
+        "file": "pki/signer-rsa.cert.pem",
+        "sha256": "529eae1a3a94c2d96da830f23ae791606541da58cc90041b029187db8f180291",
+        "kind": "certificate",
+        "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+        "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+        "serial": "3001",
+        "keyType": "RSA-2048"
+      },
+      {
+        "file": "pki/signer-p256.cert.pem",
+        "sha256": "61721f3d2863108df4821c9018c9d36fcc403363dea173ac05c3899f589238e7",
+        "kind": "certificate",
+        "subject": "CN=pdf-editor Test Signer P-256,O=pdf-editor test PKI (not trusted)",
+        "issuer": "CN=pdf-editor Test Intermediate CA,O=pdf-editor test PKI (not trusted)",
+        "serial": "3002",
+        "keyType": "EC P-256"
+      },
+      {
+        "file": "pki/chain.pem",
+        "sha256": "497b82c486bd96d70c52000dc6925d1db84d8d1faf9bee033157997256fe107e",
+        "kind": "certificate-chain",
+        "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+        "note": "signer-rsa, intermediate, root (PEM, in that order)"
+      },
+      {
+        "file": "pki/signer-rsa.key.pem",
+        "sha256": "5b1b5e8a67459478e7ac1f12d4f98bdaa2c1c2efac8e6b7f6c9d36f3c4d5dbb7",
+        "kind": "private-key",
+        "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+        "keyType": "RSA-2048",
+        "note": "PKCS#8 PEM, unencrypted (copy of tools/fixtures/keys/)"
+      },
+      {
+        "file": "pki/signer-p256.key.pem",
+        "sha256": "a62f1a03a5774f95775b5411bdf654ebf61e7b82042c55af75afb0b08cf9659a",
+        "kind": "private-key",
+        "subject": "CN=pdf-editor Test Signer P-256,O=pdf-editor test PKI (not trusted)",
+        "keyType": "EC P-256",
+        "note": "PKCS#8 PEM, unencrypted (copy of tools/fixtures/keys/)"
+      },
+      {
+        "file": "pki/signer-rsa.p12",
+        "sha256": "243acd56ab39b674e56fc5ca60ee40c1c650f6cfd20722075ca8cfc9be63db53",
+        "kind": "pkcs12",
+        "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+        "keyType": "RSA-2048",
+        "password": "test-only",
+        "scheme": "pbes2",
+        "macAlgorithm": "SHA-256",
+        "iterations": 2048,
+        "friendlyName": "pdf-editor Test Signer",
+        "certificates": 3,
+        "note": "OpenSSL 3 default layout: PBES2 (PBKDF2-HMAC-SHA256, AES-256-CBC) for key and certificates; pkijs can open it"
+      },
+      {
+        "file": "pki/signer-p256.p12",
+        "sha256": "3b359f3b39735407352b898a47c791d75999c5dfc846cc5868076cc8600ced5e",
+        "kind": "pkcs12",
+        "subject": "CN=pdf-editor Test Signer P-256,O=pdf-editor test PKI (not trusted)",
+        "keyType": "EC P-256",
+        "password": "test-only",
+        "scheme": "pbes2",
+        "macAlgorithm": "SHA-256",
+        "iterations": 2048,
+        "friendlyName": "pdf-editor Test Signer P-256",
+        "certificates": 3,
+        "note": "OpenSSL 3 default layout: PBES2 (PBKDF2-HMAC-SHA256, AES-256-CBC) for key and certificates; pkijs can open it"
+      },
+      {
+        "file": "pki/signer-rsa-legacy-3des.p12",
+        "sha256": "d92425a2dd7ceb37c971f745203ec43cbee834ed77681011e6d97b57061e519f",
+        "kind": "pkcs12",
+        "subject": "CN=pdf-editor Test Signer,O=pdf-editor test PKI (not trusted)",
+        "keyType": "RSA-2048",
+        "password": "test-only",
+        "scheme": "legacy-3des",
+        "macAlgorithm": "SHA-1",
+        "iterations": 2048,
+        "friendlyName": "pdf-editor Test Signer",
+        "certificates": 3,
+        "note": "pbeWithSHAAnd3-KeyTripleDES-CBC for key and certificates, SHA-1 MAC; pkijs cannot decrypt it, so the product refuses it with re-export instructions (spec §3.2)"
+      }
+    ]
+  }
 }

@@ -1,0 +1,178 @@
+%PDF-1.7
+%
+
+1 0 obj
+<<
+/Type /Pages
+/Kids [ 7 0 R 10 0 R ]
+/Count 2
+>>
+endobj
+
+2 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+>>
+endobj
+
+3 0 obj
+<<
+/Title <FEFF0057006F0072006B0069006E0067002000770069007400680020005000440046002000460069007800740075007200650073>
+/Creator <FEFF007000640066002D0065006400690074006F007200200066006900780074007500720065002000670065006E0065007200610074006F0072002000280074006F006F006C0073002F00660069007800740075007200650073002F00670065006E00650072006100740065002E007400730029>
+/Producer <FEFF004000630061006E0074006F006F002F007000640066002D006C0069006200200032002E00310031002E0031>
+/CreationDate (D:20240101000000Z)
+/ModDate (D:20240101000000Z)
+>>
+endobj
+
+4 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica
+/Encoding /WinAnsiEncoding
+>>
+endobj
+
+5 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica-Bold
+/Encoding /WinAnsiEncoding
+>>
+endobj
+
+6 0 obj
+<<
+/Type /XObject
+/Subtype /Image
+/Width 80
+/Height 50
+/ColorSpace /DeviceRGB
+/BitsPerComponent 8
+/Filter /FlateDecode
+/Length 251
+>>
+stream
+xœåÒ±Â0DÑ&h…„Œ€ŒZ:¢j¡*Àc%[–tk%ûuóØ7s§ù¾·«Ğï}–»¿r—ÇGnšÈ‚ÚÔ+“}½šÚİ%¼!5ÆÛ¨†y«d·¬¦z÷È`oV÷®Ôƒx»½¼ÇÕŞi¶L6õ¦µµWP¼!2ÃÛ®&y[È0oUôÔ`o–ÌönÕ#x—äA¼]ÔvŞôÏ²ÚÔ+“}½šÚİ%¼!5ÆÛ¨†y«d·¬¦z÷È`oV÷®Ôƒx»½¼ÇÕŞi¶L6õ¦µµWP¼!2ÃÛ®&y[È0oUôÔ`o–ÌönÕ#x—ä?+-a
+endstream
+endobj
+
+7 0 obj
+<<
+/Type /Page
+/Parent 1 0 R
+/Resources <<
+/Font <<
+/F1 4 0 R
+/F2 5 0 R
+>>
+/XObject <<
+/Im1 6 0 R
+>>
+>>
+/MediaBox [ 0 0 612 792 ]
+/Contents 8 0 R
+/Annots [ 9 0 R ]
+>>
+endobj
+
+8 0 obj
+<<
+/Length 1057
+>>
+stream
+BT /F1 9 Tf 72 752 Td (Fixture Handbook) Tj ET
+BT /F1 9 Tf 291.74 40 Td (Page 1) Tj ET
+BT /F2 24 Tf 72 690 Td (Working with PDF Fixtures) Tj ET
+BT /F1 11 Tf 72 660 Td (Test fixtures are small PDF files with known content. Each one is gener-) Tj ET
+BT /F1 11 Tf 72 645 Td (ated by a script, so its text, fonts and positions are documented and can) Tj ET
+BT /F1 11 Tf 72 630 Td (be checked by tests without looking at the pages.) Tj ET
+BT /F2 18 Tf 72 596 Td (Why fixtures matter) Tj ET
+BT /F1 11 Tf 72 570 Td (Real documents are messy and rarely redistributable. The project site at) Tj ET
+BT /F1 11 Tf 72 555 Td (example.org explains how the corpus is regenerated and verified.) Tj ET
+BT /F2 14 Tf 72 522 Td (What a good fixture has) Tj ET
+BT /F1 11 Tf 80 498 Td (\225) Tj ET
+BT /F1 11 Tf 94 498 Td (Known text in a known place) Tj ET
+BT /F1 11 Tf 80 480 Td (\225) Tj ET
+BT /F1 11 Tf 94 480 Td (A documented reason to exist) Tj ET
+BT /F1 11 Tf 80 462 Td (\225) Tj ET
+BT /F1 11 Tf 94 462 Td (A size of a few kilobytes) Tj ET
+q 160 0 0 100 72 300 cm /Im1 Do Q
+endstream
+endobj
+
+9 0 obj
+<<
+/Type /Annot
+/Subtype /Link
+/Rect [ 72 552.72 132.52 562.89 ]
+/Border [ 0 0 0 ]
+/A <<
+/S /URI
+/URI (https://example.org/fixtures)
+>>
+/P 7 0 R
+>>
+endobj
+
+10 0 obj
+<<
+/Type /Page
+/Parent 1 0 R
+/Resources <<
+/Font <<
+/F1 4 0 R
+/F2 5 0 R
+>>
+>>
+/MediaBox [ 0 0 612 792 ]
+/Contents 11 0 R
+>>
+endobj
+
+11 0 obj
+<<
+/Length 501
+>>
+stream
+BT /F1 9 Tf 72 752 Td (Fixture Handbook) Tj ET
+BT /F1 9 Tf 291.74 40 Td (Page 2) Tj ET
+BT /F2 18 Tf 72 690 Td (Two columns) Tj ET
+BT /F1 11 Tf 72 660 Td (The left column is read first,) Tj ET
+BT /F1 11 Tf 72 645 Td (from top to bottom, before the) Tj ET
+BT /F1 11 Tf 72 630 Td (reader moves to the right column.) Tj ET
+BT /F1 11 Tf 324 660 Td (The right column comes second.) Tj ET
+BT /F1 11 Tf 324 645 Td (Its lines sit on the same) Tj ET
+BT /F1 11 Tf 324 630 Td (baselines as the left column.) Tj ET
+endstream
+endobj
+
+xref
+0 12
+0000000000 65535 f 
+0000000016 00000 n 
+0000000083 00000 n 
+0000000133 00000 n 
+0000000681 00000 n 
+0000000779 00000 n 
+0000000882 00000 n 
+0000001301 00000 n 
+0000001484 00000 n 
+0000002594 00000 n 
+0000002758 00000 n 
+0000002899 00000 n 
+
+trailer
+<<
+/Size 12
+/Root 2 0 R
+/Info 3 0 R
+/ID [ <41530afba2d07d6bba7d9f92150dac05> <41530afba2d07d6bba7d9f92150dac05> ]
+>>
+
+startxref
+3453
+%%EOF

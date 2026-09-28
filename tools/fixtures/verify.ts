@@ -41,6 +41,7 @@ import {
   sha256,
 } from './lib/common.ts';
 import { findToken } from './lib/scan.ts';
+import { checkM5, checkPki } from './m5-verify.ts';
 
 // pdf-lib logs parse recoveries with console.warn; keep the report readable.
 const warnings: string[] = [];
@@ -697,6 +698,7 @@ async function checkEntry(entry: ManifestEntry, c: Checker): Promise<void> {
   }
 
   await checkM4(entry, doc, bytes, c);
+  await checkM5(entry, doc, bytes, c);
 }
 
 /** M4 fixtures: token locations, revision history, fonts and images behind regions. */
@@ -852,6 +854,25 @@ async function main(): Promise<void> {
       for (const f of c.failures) console.log(`        - ${f}`);
     } else {
       console.log(`ok    ${entry.file.padEnd(36)} ${String(c.checks).padStart(4)} checks${note}`);
+    }
+  }
+  if (manifest.pki) {
+    const c = new Checker('pki/');
+    try {
+      checkPki(manifest.pki, c);
+    } catch (error) {
+      c.ok(
+        false,
+        `verifier crashed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+      );
+    }
+    checks += c.checks;
+    if (c.failures.length) {
+      failed++;
+      console.log('FAIL  pki/');
+      for (const f of c.failures) console.log(`        - ${f}`);
+    } else {
+      console.log(`ok    ${'pki/ (test PKI)'.padEnd(36)} ${String(c.checks).padStart(4)} checks`);
     }
   }
   console.log(
