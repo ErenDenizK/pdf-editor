@@ -592,6 +592,7 @@ const EDIT_KINDS: readonly EngineEdit['kind'][] = [
   'image.transform',
   'image.remove',
   'image.replace',
+  'ocr.apply',
 ];
 
 function readEdit(value: unknown, path: string, depth = 0): EngineEdit {

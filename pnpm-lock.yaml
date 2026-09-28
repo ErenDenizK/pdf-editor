@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  tesseract.js@7.0.0:
+    hash: b107066cec012c4eff99d9c970e1411407c3e7030be56150af41cabbf620a03a
+    path: patches/tesseract.js@7.0.0.patch
+
 importers:
 
   .:
@@ -188,6 +193,16 @@ importers:
       pkijs:
         specifier: 3.4.1
         version: 3.4.1
+      tesseract.js:
+        specifier: 7.0.0
+        version: 7.0.0(patch_hash=b107066cec012c4eff99d9c970e1411407c3e7030be56150af41cabbf620a03a)
+      tesseract.js-core:
+        specifier: 7.0.0
+        version: 7.0.0
+    devDependencies:
+      pdfjs-dist:
+        specifier: 6.3.289
+        version: 6.3.289
 
   tools/fixtures:
     dependencies:
@@ -223,7 +238,7 @@ importers:
         version: 6.3.289
       tesseract.js:
         specifier: 7.0.0
-        version: 7.0.0
+        version: 7.0.0(patch_hash=b107066cec012c4eff99d9c970e1411407c3e7030be56150af41cabbf620a03a)
       tesseract.js-core:
         specifier: 7.0.0
         version: 7.0.0
@@ -8053,7 +8068,7 @@ snapshots:
 
   tesseract.js-core@7.0.0: {}
 
-  tesseract.js@7.0.0:
+  tesseract.js@7.0.0(patch_hash=b107066cec012c4eff99d9c970e1411407c3e7030be56150af41cabbf620a03a):
     dependencies:
       bmp-js: 0.1.0
       idb-keyval: 6.3.0

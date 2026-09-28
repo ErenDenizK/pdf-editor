@@ -41,5 +41,10 @@
     "typescript-eslint": "^8.70.1",
     "vite": "^8.3.1",
     "vitest": "^5.0.2"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "tesseract.js@7.0.0": "patches/tesseract.js@7.0.0.patch"
+    }
   }
 }

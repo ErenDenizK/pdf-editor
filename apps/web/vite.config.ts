@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import babel from '@rolldown/plugin-babel';
+import { ocrAssetsPlugin } from '@pdf-editor/engine/ocr/assets';
 import react, { reactCompilerPreset } from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -46,6 +47,11 @@ export default defineConfig({
       // Same output as `pnpm i18n` (typecheck and lint run it without Vite).
       emitTsDeclarations: true,
     }),
+    // OCR engine and language packs (ADR-0012 §2–§3): serves `ocr/**` in dev and emits it
+    // into dist/ocr/ unhashed (`tesseract-<version>/` worker and cores,
+    // `lang/<code>.traineddata.gz`), each file checked against
+    // packages/engine/ocr/langs.lock.json. Never precached (below).
+    ocrAssetsPlugin(),
     // Offline support (ARCHITECTURE.md §7, ADR-0010). Disabled under Vitest, where
     // `virtual:pwa-register` resolves to a no-op and no service worker is generated.
     VitePWA({
@@ -84,8 +90,10 @@ export default defineConfig({
         globPatterns: ['**/*.{html,js,css,woff2}'],
         // Wasm is runtime-cached (below); the 404 page is not part of the app shell.
         // `worker-engine-*.js` is EmbedPDF's own worker engine, the adapter's lazy default
-        // factory: the app always passes a factory (ADR-0011), so it is never loaded.
-        globIgnores: ['**/*.wasm', '404.html', '**/worker-engine-*.js'],
+        // factory: the app always passes a factory (ADR-0011), so it is never loaded. `ocr/`
+        // (tesseract's worker, cores and ~22 MB of packs) downloads only when OCR is used
+        // (ADR-0012 §4).
+        globIgnores: ['**/*.wasm', '404.html', '**/worker-engine-*.js', 'ocr/**'],
         maximumFileSizeToCacheInBytes: MAX_PRECACHE_BYTES,
         manifestTransforms: [
           (entries) => {
@@ -105,10 +113,28 @@ export default defineConfig({
         // still wait for the user (registerType 'prompt').
         clientsClaim: true,
         cleanupOutdatedCaches: true,
+        // Match callbacks are serialized into the service worker, so they cannot close over
+        // `base`: `location` there is the worker script's URL, which sits at `base`.
         runtimeCaching: [
           {
-            // Content-hashed engine wasm: fetched once, then served from cache.
-            urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.endsWith('.wasm'),
+            // OCR (ADR-0012 §4): the versioned tesseract directory and the language packs,
+            // added on first use or by "Keep available offline" (the pack loader writes the
+            // same cache and deletes old versions). No expiration: evicting a pack the user
+            // kept offline would silently break offline OCR. Matched before the wasm rule.
+            urlPattern: ({ url }) => url.href.startsWith(new URL('ocr/', location.href).href),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'pdf-editor-ocr',
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+          {
+            // Content-hashed engine wasm: fetched once, then served from cache. The OCR cores
+            // are not (their cache is above), so they cannot evict PDFium or qpdf.
+            urlPattern: ({ url, sameOrigin }) =>
+              sameOrigin &&
+              url.pathname.endsWith('.wasm') &&
+              !url.href.startsWith(new URL('ocr/', location.href).href),
             handler: 'CacheFirst',
             options: {
               cacheName: 'pdf-editor-wasm',

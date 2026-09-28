@@ -73,6 +73,12 @@ jobs:
             docs/qa/samples/annotations-matrix-*.png
           retention-days: 14
 
+      # OCR files (ADR-0012 §3): the committed language packs and tesseract's worker (with its
+      # pnpm patch) and cores from node_modules must match packages/engine/ocr/langs.lock.json.
+      # Offline; the web build re-checks every file it emits into dist/ocr/.
+      - name: OCR files match their lock
+        run: pnpm --filter @pdf-editor/engine ocr:verify
+
       - name: Build
         run: pnpm build
 

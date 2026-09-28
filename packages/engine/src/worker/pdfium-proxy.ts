@@ -28,6 +28,7 @@ import {
   type PdfRedactor,
   type PdfRenderer,
   type PdfImageEditor,
+  type PdfOcrLayer,
   type PdfTextEditor,
   type PdfVerifier,
   type RenderResult,
@@ -62,7 +63,8 @@ export interface PdfiumProxy
     PdfVerifier,
     PdfTextEditor,
     PdfImageEditor,
-    PdfRedactor {
+    PdfRedactor,
+    PdfOcrLayer {
   getAnnotationAppearance(
     id: SourceId,
     pageIndex: number,
@@ -403,6 +405,24 @@ export function createPdfiumProxy(worker: Worker, options: PdfiumProxyOptions): 
       const { signal, wire } = split(callOptions);
       return invoke('verifyRedactedOutput', signal, (port) =>
         remote.verifyRedactedOutput(bytes, plans, wire, withPort(port, port)),
+      );
+    },
+    ocrPageFacts(id, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke('ocrPageFacts', signal, (port) =>
+        remote.ocrPageFacts(id, wire, withPort(port, port)),
+      );
+    },
+    renderForOcr(id, pageIndex, renderOptions) {
+      const { signal, wire } = split(renderOptions);
+      return invoke('renderForOcr', signal, (port) =>
+        remote.renderForOcr(id, pageIndex, wire, withPort(port, port)),
+      );
+    },
+    applyOcrLayer(id, plan, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke('applyOcrLayer', signal, (port) =>
+        remote.applyOcrLayer(id, plan, wire, withPort(port, port)),
       );
     },
     destroy() {

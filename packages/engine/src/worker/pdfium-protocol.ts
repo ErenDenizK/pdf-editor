@@ -27,9 +27,14 @@ import type {
   LocatedImage,
   LocatedRun,
   NewAnnotation,
+  OcrApplyResult,
+  OcrLayerPlan,
+  OcrPageFacts,
+  OcrRaster,
   OpenedDocument,
   OpenOptions,
   RedactionPlan,
+  RenderForOcrOptions,
   RenderOptions,
   RenderResult,
   SaveOptions,
@@ -77,6 +82,7 @@ export type WireSearchOptions = Omit<SearchOptions, 'signal' | 'onProgress'>;
 export type WireSaveOptions = Omit<SaveOptions, 'signal'>;
 export type WireApplyRedactionsOptions = Omit<ApplyRedactionsOptions, 'signal'>;
 export type WireVerifyRedactedOutputOptions = Omit<VerifyRedactedOutputOptions, 'signal'>;
+export type WireRenderForOcrOptions = Omit<RenderForOcrOptions, 'signal'>;
 
 /**
  * The caller's `SourceInspector` (in the app: the assembly worker's proxy), reached from the
@@ -258,6 +264,29 @@ export interface PdfiumWorkerApi {
     options: WireVerifyRedactedOutputOptions,
     abortPort?: MessagePort,
   ): Promise<Wire<ForensicReport>>;
+  // PdfOcrLayer (ocr/): facts and rasters under raw access, the layer like a redaction.
+  ocrPageFacts(
+    id: SourceId,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<readonly OcrPageFacts[]>>;
+  /** The PGM bytes are transferred to the caller. */
+  renderForOcr(
+    id: SourceId,
+    pageIndex: number,
+    options: WireRenderForOcrOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<OcrRaster>>;
+  /**
+   * Saves the source, writes and verifies the layer in scratch documents and replaces the
+   * open document with the result (exclusive per source). The result's bytes are transferred.
+   */
+  applyOcrLayer(
+    id: SourceId,
+    plan: OcrLayerPlan,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<OcrApplyResult>>;
   /** Closes every document and releases the engine; the worker stays usable. */
   destroy(): Promise<void>;
 }

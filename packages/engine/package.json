@@ -27,6 +27,10 @@
       "import": "./src/worker/pdfium.worker.ts"
     },
     "./qpdf.wasm": "./qpdf/dist/qpdf.wasm",
+    "./ocr/assets": {
+      "types": "./ocr/assets.ts",
+      "import": "./ocr/assets.ts"
+    },
     "./overlay-geometry": {
       "types": "./src/pdflib/overlay-public.ts",
       "import": "./src/pdflib/overlay-public.ts"
@@ -43,6 +47,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
+    "ocr:verify": "node --experimental-strip-types --no-warnings=ExperimentalWarning ocr/fetch.ts --verify",
     "build": "echo 'source package; built by the consuming app'"
   },
   "dependencies": {
@@ -57,6 +62,11 @@
     "diff": "9.0.0",
     "fflate": "0.8.3",
     "pixelmatch": "7.2.0",
-    "pkijs": "3.4.1"
+    "pkijs": "3.4.1",
+    "tesseract.js": "7.0.0",
+    "tesseract.js-core": "7.0.0"
+  },
+  "devDependencies": {
+    "pdfjs-dist": "6.3.289"
   }
 }

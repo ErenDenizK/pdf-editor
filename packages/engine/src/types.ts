@@ -2182,3 +2182,266 @@ export interface ConvertResult {
   readonly zip?: Uint8Array;
   readonly report: ConvertReport;
 }
+
+// ---------------------------------------------------------------------------
+// OCR to searchable PDF (M5 §1, ADR-0012, research 07)
+// ---------------------------------------------------------------------------
+
+/**
+ * Page quality from the mean confidence of the kept words (confidence ≥
+ * `OCR_MIN_WORD_CONFIDENCE`): good ≥ 90, review 80–90, poor < 80, `no-text` when no word is
+ * kept (thresholds from spike S1, research 07 §7).
+ */
+export type OcrQuality = 'good' | 'review' | 'poor' | 'no-text';
+
+/** Words below this confidence are dropped as noise (counted in `OcrPageResult.dropped`). */
+export const OCR_MIN_WORD_CONFIDENCE = 30;
+/** Kept words below this confidence are listed as low-confidence (research 07: 84–87% right). */
+export const OCR_LOW_CONFIDENCE = 90;
+/** Mean confidence at or above which a page is `good`, and at or above which it is `review`. */
+export const OCR_QUALITY_THRESHOLDS = { good: 90, review: 80 } as const;
+
+/** What a page already has, so the dialog can propose "pages without text" (spec §1.2). */
+export interface OcrPageFacts {
+  readonly pageIndex: number;
+  /** Any text drawn visibly (render mode other than 3 and 7), whitespace aside. */
+  readonly visibleText: boolean;
+  /**
+   * Invisible (render mode 3 or 7) text: none, only this app's layer, or other text (another
+   * tool's OCR layer, possibly next to ours: see `ourLayer`).
+   */
+  readonly invisibleText: 'none' | 'ours' | 'foreign';
+  /** This app's OCR layer (marked content `/PdfEditorOCR`) is on the page. */
+  readonly ourLayer: boolean;
+  /** Image objects on the page, Form XObjects included. */
+  readonly images: number;
+  /** Images and no visible text: a scan. */
+  readonly imageOnly: boolean;
+  /** Effective DPI of the largest image (the lower of its two axes), rounded. */
+  readonly imageDpi?: number;
+}
+
+/**
+ * An 8-bit greyscale page raster for OCR (binary PGM, `P5`), in display orientation (the
+ * page's /Rotate plus the requested extra rotation), without annotations or form widgets.
+ */
+export interface OcrRaster {
+  readonly pageIndex: number;
+  /** The PGM file: a short header and `width × height` bytes, rows top-down. */
+  readonly bytes: ArrayBuffer;
+  readonly width: number;
+  readonly height: number;
+  readonly dpi: number;
+  /** The DPI asked for, when the 40 MP cap lowered it. */
+  readonly requestedDpi?: number;
+  /**
+   * Pixel (x right, y down, 0…width × 0…height) → unrotated user space: `x' = a·x + c·y + e`,
+   * `y' = b·x + d·y + f`. Always orientation-reversing (the pixel y axis points down).
+   */
+  readonly toUser: TextMatrix;
+}
+
+export interface RenderForOcrOptions extends EngineCallOptions {
+  /** Raster resolution; 200 (fast), 300 (standard), 400 (high). */
+  readonly dpi: number;
+  /** Extra clockwise rotation on top of /Rotate (the virtual page's delta). */
+  readonly rotation?: Rotation;
+  /** Pixel cap; the DPI is lowered to fit (default `OCR_MAX_PIXELS`). */
+  readonly maxPixels?: number;
+}
+
+/** Default pixel cap of `renderForOcr` (spec §1.2: 40 MP per page). */
+export const OCR_MAX_PIXELS = 40_000_000;
+
+/** A pixel box of the raster: left, top, right, bottom (y down). */
+export interface OcrPixelBox {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+}
+
+/**
+ * What the invisible layer needs of a word (and what an `ocr.apply` edit stores): the text,
+ * its baseline origin at the descender line, its advance along the baseline, the text size
+ * and the baseline's angle, all in unrotated user space.
+ */
+export interface OcrLayerWord {
+  readonly text: string;
+  /** Start of the word on its line's descender line, user space. */
+  readonly origin: { readonly x: number; readonly y: number };
+  /** Advance along the baseline, points (the ink box's width). */
+  readonly width: number;
+  /** Text size, points (the line's row height: descender to ascender). */
+  readonly fontSize: number;
+  /** Baseline direction, degrees counter-clockwise in user space. */
+  readonly angle: number;
+  readonly confidence?: number;
+}
+
+/** A recognised word (spec §1.4, extended with pixel geometry and the line). */
+export interface OcrWord extends OcrLayerWord {
+  /** Ink box, unrotated user space (axis-aligned bounds of the pixel box). */
+  readonly rect: Rect;
+  readonly pixelBox: OcrPixelBox;
+  readonly confidence: number;
+  /** Index into `OcrPageResult.lines`. */
+  readonly line: number;
+  /** Confidence below `OCR_LOW_CONFIDENCE`: listed for review. */
+  readonly lowConfidence: boolean;
+}
+
+/** A text line as Tesseract found it. */
+export interface OcrLine {
+  /** Baseline end points, raster pixels. */
+  readonly baseline: OcrPixelBox;
+  /** Baseline direction, degrees counter-clockwise in user space. */
+  readonly angle: number;
+  /** Row height (descender to ascender), points. */
+  readonly fontSize: number;
+}
+
+/** What the layer writer needs of a page (`OcrPageResult` is one). */
+export interface OcrLayerPage {
+  readonly pageIndex: number;
+  readonly words: readonly OcrLayerWord[];
+  readonly languages: readonly string[];
+  readonly dpi?: number;
+  readonly quality?: OcrQuality;
+  readonly meanConfidence?: number;
+  readonly engine?: string;
+}
+
+export interface OcrPageResult extends OcrLayerPage {
+  readonly dpi: number;
+  /** Kept words (confidence ≥ `OCR_MIN_WORD_CONFIDENCE`), in reading order. */
+  readonly words: readonly OcrWord[];
+  readonly lines: readonly OcrLine[];
+  /** Mean confidence of the kept words; 0 without any. */
+  readonly meanConfidence: number;
+  readonly quality: OcrQuality;
+  /** Engine, core variant and model, e.g. "tesseract.js 7.0.0 relaxedsimd-lstm, tessdata_fast 87416418". */
+  readonly engine: string;
+  /** Words dropped as noise (confidence below `OCR_MIN_WORD_CONFIDENCE`). */
+  readonly dropped: number;
+  /** Kept words flagged `lowConfidence`. */
+  readonly lowConfidence: number;
+  /** Recognition time (not the render), ms. */
+  readonly durationMs: number;
+  /**
+   * The per-page time budget ran out: the recognizer was terminated and replaced, no words
+   * are kept and the page is `poor`.
+   */
+  readonly timedOut?: boolean;
+}
+
+/** An OCR run to write as invisible text (the payload of an `ocr.apply` edit, spec §1.3). */
+export interface OcrLayerPlan {
+  readonly pages: readonly OcrLayerPage[];
+  /**
+   * Existing invisible text on the plan's pages: keep it (`none`), drop this app's earlier
+   * layer (`ours`, a re-run), or remove all render-mode-3/7 text (`all-invisible`, e.g.
+   * another tool's layer; the page content is regenerated by PDFium for that).
+   */
+  readonly replace: 'none' | 'ours' | 'all-invisible';
+  /** BCP 47 tag for the catalog's /Lang when it has none; default from the first language. */
+  readonly lang?: string;
+}
+
+/** Checks of a written layer on a scratch copy of the output (per page). */
+export interface OcrLayerPageCheck {
+  readonly pageIndex: number;
+  readonly words: number;
+  /** Words found in order in PDFium's page text. */
+  readonly found: number;
+  /** Found words whose PDFium box is within 2 pt of the planned box on every edge. */
+  readonly within2pt: number;
+  /** Largest edge deviation of a found word, points. */
+  readonly worstDeviation: number;
+  /** Pixels that differ between renders before and after at 150 dpi (must be 0). */
+  readonly pixelsDiffering: number;
+}
+
+export interface OcrLayerVerification {
+  /** Every word found and no pixel changed. */
+  readonly ok: boolean;
+  readonly pages: readonly OcrLayerPageCheck[];
+  readonly problems: readonly string[];
+}
+
+export interface OcrApplyResult {
+  /** The layered file (transferred across the worker boundary). */
+  readonly bytes: ArrayBuffer;
+  readonly pages: readonly { readonly pageIndex: number; readonly words: number }[];
+  readonly wordsWritten: number;
+  /** Words without text or width, not written. */
+  readonly wordsSkipped: number;
+  /** Earlier layers of this app removed, and foreign invisible text objects removed. */
+  readonly removed: { readonly ourLayers: number; readonly invisibleTextObjects: number };
+  /** The source was encrypted; the layered output is not (as for redaction). */
+  readonly decrypted: boolean;
+  readonly verification: OcrLayerVerification;
+  readonly durationMs: number;
+}
+
+/** OCR in the PDFium worker (spec §1.4), exposed by `PdfiumProxy`. */
+export interface PdfOcrLayer {
+  ocrPageFacts(id: SourceId, options?: EngineCallOptions): Promise<readonly OcrPageFacts[]>;
+  renderForOcr(id: SourceId, pageIndex: number, options: RenderForOcrOptions): Promise<OcrRaster>;
+  /**
+   * Writes `plan` as invisible text: the source is saved as it is (security removed), the
+   * layer added with pdf-lib, the result verified on scratch copies (every word found, the
+   * render at 150 dpi pixel-identical) and, once verified, the open document is replaced
+   * under the same id. Throws `EngineError` and leaves the source as it was otherwise.
+   */
+  applyOcrLayer(
+    id: SourceId,
+    plan: OcrLayerPlan,
+    options?: EngineCallOptions,
+  ): Promise<OcrApplyResult>;
+}
+
+/** Progress of `OcrRecognizer` calls. */
+export interface OcrProgress {
+  readonly phase: 'download' | 'start' | 'recognize';
+  /** Bytes (download) or 0–1 (start, recognize). */
+  readonly done: number;
+  readonly total: number;
+  readonly language?: string;
+}
+
+export interface OcrRecognizeOptions extends EngineCallOptions {
+  readonly onProgress?: (progress: OcrProgress) => void;
+}
+
+/** The browser adapter over tesseract.js (spec §1.4, ADR-0007); runs on the main thread. */
+export interface OcrRecognizer {
+  /** Engine and model, as `OcrPageResult.engine` reports it. */
+  readonly engine: string;
+  /** Downloads (or reads from the device) and checks the packs; starts a recognizer. */
+  ensureLanguages(codes: readonly string[], options?: OcrRecognizeOptions): Promise<void>;
+  recognize(
+    raster: OcrRaster,
+    pageIndex: number,
+    codes: readonly string[],
+    options?: OcrRecognizeOptions,
+  ): Promise<OcrPageResult>;
+  /** Terminates every recognizer; the next call starts new ones. */
+  dispose(): Promise<void>;
+}
+
+/** Summary of a finished run for the history label and the export summary. */
+export interface OcrReport {
+  readonly pages: number;
+  readonly languages: readonly string[];
+  readonly quality: readonly { readonly pageIndex: number; readonly quality: OcrQuality }[];
+  /** Pages per quality. */
+  readonly byQuality: Readonly<Record<OcrQuality, number>>;
+  readonly words: number;
+  readonly lowConfidence: number;
+  readonly dropped: number;
+  readonly timedOut: number;
+  /** Recognition time summed over pages (ms), and the wall time the caller measured. */
+  readonly recognizeMs: number;
+  readonly totalMs?: number;
+}

@@ -20,8 +20,10 @@ import {
   type EngineCallOptions,
   EngineError,
   type ImageEditResult,
+  type OcrApplyResult,
   type PdfEditor,
   type PdfImageEditor,
+  type PdfOcrLayer,
   type PdfRedactor,
   type PdfTextEditor,
   type TextEditResult,
@@ -43,6 +45,7 @@ import {
 import { applyImageEdit, type ImageReplayPayload } from './image-edit';
 import { applyRedactionEdit, type RedactionReplayPayload } from './redaction-apply';
 import { applyTextEditEdit, type TextEditReplayPayload } from './text-edit';
+import { applyOcrEdit, type OcrReplayPayload } from '../ocr/edit';
 
 /**
  * The parts of `PdfEditor` edits use (`getAnnotationAppearance` for stamps),
@@ -61,7 +64,8 @@ export type EditTarget = Pick<
 > &
   Partial<Pick<PdfTextEditor, 'applyTextEdit'>> &
   Partial<Pick<PdfRedactor, 'applyRedactionPlan'>> &
-  Partial<Pick<PdfImageEditor, 'transformImage' | 'removeImage' | 'replaceImage'>>;
+  Partial<Pick<PdfImageEditor, 'transformImage' | 'removeImage' | 'replaceImage'>> &
+  Partial<Pick<PdfOcrLayer, 'applyOcrLayer'>>;
 
 export interface AppliedEdit {
   /** The edit as applied: a create's payload carries the annotation id actually used. */
@@ -76,6 +80,8 @@ export interface AppliedEdit {
   readonly redaction?: ApplyRedactionsResult;
   /** `image.*`: the image editor's result (the image as located after the edit). */
   readonly image?: ImageEditResult;
+  /** `ocr.apply`: the layer's result (and the layered bytes). */
+  readonly ocr?: OcrApplyResult;
 }
 
 const UNDO_SUFFIX = ':undo';
@@ -229,6 +235,13 @@ export async function applyEngineEditWithResult(
           : inverseOf(applied, edit.kind, inverse),
         image: done.result,
       };
+    }
+    case 'ocr.apply': {
+      // Non-invertible, as redactions: undo reopens the source and replays the rest.
+      const { payload, result } = await applyOcrEdit(editor, edit, options);
+      const applied: EngineEdit = { ...edit, payload };
+      const inverse: OcrReplayPayload = { replayRequired: true, of: edit.id };
+      return { applied, inverse: inverseOf(applied, 'ocr.apply', inverse), ocr: result };
     }
     case 'redaction.mark':
       throw new EngineError(

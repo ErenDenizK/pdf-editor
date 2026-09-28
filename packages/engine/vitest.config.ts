@@ -9,6 +9,7 @@ import { searchForWorkspaceRoot } from 'vite';
 import { defineConfig } from 'vitest/config';
 
 import { chromiumLaunchOptions } from '../../tooling/playwright-chromium.ts';
+import { ocrAssetsPlugin } from './ocr/assets.ts';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -58,6 +59,9 @@ function opensslCmsVerify(
 // Engine tests run in a real browser (Vitest browser mode) so that PDFium's WASM, workers
 // and OPFS behave exactly as in production. See docs/ARCHITECTURE.md §8.
 export default defineConfig({
+  // OCR (ADR-0012): serves `/ocr/**` (tesseract's worker and cores from node_modules, the
+  // committed packs), each file checked against ocr/langs.lock.json as it is served.
+  plugins: [ocrAssetsPlugin()],
   server: {
     fs: {
       // PDFium's `.wasm` is served straight from node_modules; with pnpm that lives at the
@@ -80,7 +84,17 @@ export default defineConfig({
   // ever does, add: optimizeDeps: { exclude: ['@embedpdf/pdfium', '@embedpdf/engines'] }.
   // Pre-bundle fontkit up front: discovering it mid-run (first overlay export) makes Vite
   // reload the browser and can fail tests that are already running.
-  optimizeDeps: { include: ['@cantoo/fontkit', 'pkijs', 'asn1js', 'diff', 'pixelmatch'] },
+  optimizeDeps: {
+    include: [
+      '@cantoo/fontkit',
+      'pkijs',
+      'asn1js',
+      'diff',
+      'pixelmatch',
+      'tesseract.js',
+      'pdfjs-dist/legacy/build/pdf.mjs',
+    ],
+  },
   test: {
     include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
     passWithNoTests: true,

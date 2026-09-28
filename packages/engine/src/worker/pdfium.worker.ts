@@ -31,7 +31,16 @@ import { verifyRedactedOutput } from '../redaction/verify-output';
 import { createImageEditor, type HostedImageEditor } from '../image-objects/editor';
 import { createTextEditor, type HostedTextEditor } from '../text-edit/editor';
 import { throwIfAborted } from '../pdfium/task-bridge';
-import { EngineError, type SearchHit, type SourceInspector } from '../types';
+import { applyOcrLayerToBytes } from '../ocr/apply';
+import { encodePgm } from '../ocr/pgm';
+import { pageFacts, renderGreyPage } from '../ocr/raw';
+import {
+  EngineError,
+  OCR_MAX_PIXELS,
+  type OcrRaster,
+  type SearchHit,
+  type SourceInspector,
+} from '../types';
 import {
   type InspectorBridge,
   type InspectorCapabilities,
@@ -426,6 +435,88 @@ const api: PdfiumWorkerApi = {
         withSignal(password === undefined ? {} : { password }, signal),
       );
     });
+  },
+  ocrPageFacts(id, _options, abortPort) {
+    // Raw access takes the source's lock itself (exclusive; not re-entrant): no `onSource`.
+    return call(abortPort, async (signal) => {
+      const hosted = await host();
+      return hosted.withRawAccess(
+        id,
+        (raw) => {
+          const count = raw.module.FPDF_GetPageCount(raw.docPtr);
+          return Array.from({ length: count }, (_, pageIndex) => pageFacts(raw, pageIndex));
+        },
+        signal ? { signal } : {},
+      );
+    });
+  },
+  renderForOcr(id, pageIndex, options, abortPort) {
+    return call(
+      abortPort,
+      async (signal): Promise<OcrRaster> => {
+        const hosted = await host();
+        const raster = await hosted.withRawAccess(
+          id,
+          (raw) => {
+            const count = raw.module.FPDF_GetPageCount(raw.docPtr);
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= count) {
+              throw new EngineError('internal', `Page ${pageIndex} out of range for ${id}`);
+            }
+            return renderGreyPage(raw, pageIndex, {
+              dpi: options.dpi,
+              quarterTurns: ((options.rotation ?? 0) / 90) & 3,
+              maxPixels: options.maxPixels ?? OCR_MAX_PIXELS,
+            });
+          },
+          signal ? { signal } : {},
+        );
+        const pgm = encodePgm(raster.grey, raster.width, raster.height);
+        return {
+          pageIndex,
+          bytes: pgm.buffer as ArrayBuffer,
+          width: raster.width,
+          height: raster.height,
+          dpi: raster.dpi,
+          ...(raster.requestedDpi === undefined ? {} : { requestedDpi: raster.requestedDpi }),
+          toUser: raster.toUser,
+        };
+      },
+      (raster) => [raster.bytes],
+    );
+  },
+  applyOcrLayer(id, plan, _options, abortPort) {
+    return call(
+      abortPort,
+      async (signal) => {
+        const hosted = await host();
+        const a = getAdapter();
+        const encrypted = await hosted.withRawAccess(
+          id,
+          (raw) => raw.module.EPDF_IsEncrypted(raw.docPtr),
+          signal ? { signal } : {},
+        );
+        // Exclusive, as a redaction: nothing of this source runs between the save and the swap.
+        return locks.run(
+          id,
+          'exclusive',
+          async () => {
+            const input = await a.save(id, withSignal({ removeSecurity: true }, signal));
+            const result = await applyOcrLayerToBytes(
+              hosted,
+              input,
+              plan,
+              signal ? { signal } : {},
+            );
+            // Verified: the open document becomes the layered one, under the same id.
+            await a.close(id);
+            await a.open(id, result.bytes.slice(0), {});
+            return { ...result, decrypted: encrypted };
+          },
+          signal,
+        );
+      },
+      (result) => [result.bytes],
+    );
   },
   async destroy() {
     const current = adapter;

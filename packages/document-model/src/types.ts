@@ -532,7 +532,8 @@ export interface EngineEdit {
     // and replace are not invertible (their inverse is marked "replay required").
     | 'image.transform'
     | 'image.remove'
-    | 'image.replace';
+    | 'image.replace'
+    | 'ocr.apply';
   readonly payload: unknown;
   readonly inverse?: EngineEdit;
 }

@@ -12,3 +12,9 @@ declare module '*.pdf?url' {
   const url: string;
   export default url;
 }
+
+/** Module workers served by Vite (pdf.js's worker in the OCR layer test). */
+declare module '*.mjs?url' {
+  const url: string;
+  export default url;
+}

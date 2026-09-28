@@ -33,6 +33,8 @@ const nodeFiles = [
   '**/*.config.{js,ts}',
   'tooling/**/*.ts',
   'tools/**/*.{js,ts}',
+  // The OCR asset pinning script and Vite plugin (ADR-0012), run by Node like tooling/.
+  'packages/engine/ocr/*.ts',
   'apps/web/e2e/**/*.ts',
 ];
 

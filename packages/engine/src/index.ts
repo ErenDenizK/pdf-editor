@@ -155,3 +155,7 @@ export {
   type ComparisonReportOptions,
 } from './pdflib/compare-report';
 export { type AnalysisProxy, createAnalysisProxy } from './worker/create-analysis-proxy';
+// OCR (M5 §1, ADR-0012): the recognizer over tesseract.js (main thread; the API is a lazy
+// chunk), the language pack loader, the invisible layer writer and the `ocr.apply` edit.
+// `PdfOcrLayer` (facts, rasters, the layer) runs in the PDFium worker behind `PdfiumProxy`.
+export * from './ocr';

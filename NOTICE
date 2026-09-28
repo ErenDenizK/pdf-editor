@@ -88,3 +88,29 @@ and are reproduced in the application's "About and licenses" view.
   License: BSD-3-Clause.
   Used for digital signature validation and PAdES-B signing.
 
+
+- tesseract.js
+  Copyright (c) 2016-2025 Kevin Kwok, Guillermo Webster, Jerome Wu and contributors.
+  License: Apache-2.0.
+  Its worker script is served from this app's origin with a one-line patch
+  (patches/tesseract.js@7.0.0.patch: the language list is joined by code, not by data).
+  Used for OCR (text recognition into an invisible text layer).
+
+- tesseract.js-core (Tesseract OCR compiled to WebAssembly)
+  Tesseract: Copyright (c) Google Inc., Ray Smith and contributors. License: Apache-2.0.
+  Bundles Leptonica (Copyright (C) 2001-2016 Leptonica, BSD-2-Clause), zlib (Copyright
+  (C) 1995-2024 Jean-loup Gailly and Mark Adler, zlib license), libpng (Copyright (c)
+  1995-2024 The PNG Reference Library Authors, PNG Reference Library License 2), the
+  Independent JPEG Group's libjpeg (IJG license), libtiff (Copyright (c) 1988-1997 Sam
+  Leffler and Silicon Graphics, libtiff license), libwebp (Copyright (c) Google Inc.,
+  BSD-3-Clause) and giflib (MIT).
+
+- tessdata_fast language packs (eng, tur, deu, fra, spa, ita, por, nld, rus), served
+  gzipped from packages/engine/ocr/lang and pinned in langs.lock.json
+  Copyright (c) Google Inc. and the Tesseract OCR contributors.
+  License: Apache-2.0.
+
+- pdf.ttf (Tesseract's glyphless font, from tesseract-ocr/tessconfigs), embedded in
+  exported PDFs as the invisible OCR text layer's font
+  Copyright (c) Google Inc. and the Tesseract OCR contributors.
+  License: Apache-2.0.
