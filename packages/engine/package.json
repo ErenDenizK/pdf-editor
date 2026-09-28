@@ -18,6 +18,10 @@
       "types": "./src/worker/compress.worker.ts",
       "import": "./src/worker/compress.worker.ts"
     },
+    "./pdfium.worker": {
+      "types": "./src/worker/pdfium.worker.ts",
+      "import": "./src/worker/pdfium.worker.ts"
+    },
     "./qpdf.wasm": "./qpdf/dist/qpdf.wasm",
     "./overlay-geometry": {
       "types": "./src/pdflib/overlay-public.ts",

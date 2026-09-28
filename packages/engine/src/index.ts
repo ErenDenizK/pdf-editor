@@ -40,6 +40,23 @@ export { stampLabel } from './annotations/stamp-appearance';
 export { NOTE_ICONS, STAMP_NAMES } from './pdfium/annotation-mapping';
 export * from './edits';
 export { type AssemblerProxy, createAssemblerProxy } from './worker/create-assembler-proxy';
+// The viewer's PDFium engine in our own worker (ADR-0011). The worker entry is
+// `@pdf-editor/engine/pdfium.worker`; `createHostedEngine` runs the same engine on the
+// calling thread (tests, and the home of raw PDFium access for the M4 editors).
+export {
+  createPdfiumProxy,
+  type PdfiumProxy,
+  type PdfiumProxyOptions,
+} from './worker/pdfium-proxy';
+export type { PdfiumWorkerConfig } from './worker/pdfium-protocol';
+export {
+  createHostedEngine,
+  type HostedEngine,
+  type HostedEngineOptions,
+  PINNED_EMBEDPDF_VERSION,
+  type RawAccess,
+  type RawAccessOptions,
+} from './pdfium/host';
 // Compression, PDF → images and qpdf plumbing (M3). The worker entry is
 // `@pdf-editor/engine/compress.worker`; qpdf and PDFium's decoder load only inside it.
 export * from './compress';
