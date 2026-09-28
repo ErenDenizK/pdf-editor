@@ -9,10 +9,9 @@
  * - All geometry crossing this class is PDF user space (see coords.ts for EmbedPDF's space).
  */
 
-import {
-  type CreatePdfiumEngineOptions,
-  createPdfiumEngine,
-  type FontFallbackConfig,
+import type {
+  CreatePdfiumEngineOptions,
+  FontFallbackConfig,
 } from '@embedpdf/engines/pdfium-worker-engine';
 import {
   type FormFieldValue,
@@ -112,6 +111,13 @@ export type PdfiumEngineFactory = (
   options: CreatePdfiumEngineOptions,
 ) => PdfEngine | Promise<PdfEngine>;
 
+/**
+ * EmbedPDF's own worker engine, imported only when no `engineFactory` is given, so bundles
+ * that pass one (our PDFium worker, ADR-0011) leave out its blob worker and CDN font table.
+ */
+const defaultEngineFactory: PdfiumEngineFactory = async (wasmUrl, options) =>
+  (await import('@embedpdf/engines/pdfium-worker-engine')).createPdfiumEngine(wasmUrl, options);
+
 export interface PdfiumAdapterOptions {
   /**
    * URL of `pdfium.wasm`, injected by the app (e.g. Vite `?url` import of
@@ -209,7 +215,7 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     this.wasmUrl = options.wasmUrl;
     this.fontFallback = options.fontFallback ?? null;
     this.logger = options.logger;
-    this.engineFactory = options.engineFactory ?? createPdfiumEngine;
+    this.engineFactory = options.engineFactory ?? defaultEngineFactory;
     this.inspector = options.inspector;
   }
 
@@ -1438,6 +1444,25 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
           ? await inspector.checkAnnotations(conformanceCopy, conformanceOptions, options)
           : await checkAnnotationConformance(conformanceCopy, conformanceOptions);
         problems.push(...describeProblems(report.problems));
+      }
+      for (const pageIndex of expectation.annotationsInsidePages ?? []) {
+        const page = opened.pages[pageIndex];
+        if (!page) continue;
+        const box = page.cropBox ?? { x: 0, y: 0, ...page.size };
+        const tolerance = 1;
+        const outside = (await this.listAnnotations(scratchId, pageIndex, options)).filter(
+          (a) =>
+            a.flags?.hidden !== true &&
+            (a.rect.x < box.x - tolerance ||
+              a.rect.y < box.y - tolerance ||
+              a.rect.x + a.rect.width > box.x + box.width + tolerance ||
+              a.rect.y + a.rect.height > box.y + box.height + tolerance),
+        );
+        if (outside.length > 0) {
+          problems.push(
+            `Page ${pageIndex + 1}: ${outside.length} annotation${outside.length === 1 ? '' : 's'} outside the resized page`,
+          );
+        }
       }
       for (const region of expectation.redactedRegions ?? []) {
         if (region.pageIndex >= opened.pageCount) continue;

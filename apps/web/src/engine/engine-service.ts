@@ -1,8 +1,9 @@
 /**
- * Engine service: the app's single entry point to the PDFium adapter (ADR-0002).
+ * Engine service: the app's single entry point to the PDFium engine (ADR-0002, ADR-0011).
  *
- * - Lazily loads and constructs one `PdfiumAdapter` (its PDFium worker starts on first
- *   use) with a self-hosted wasm URL and font fallback disabled (no CDN; engine README).
+ * - Lazily starts our own PDFium worker (`@pdf-editor/engine/pdfium.worker`, which hosts the
+ *   `PdfiumAdapter`) on first use and talks to it through `createPdfiumProxy`, with a
+ *   self-hosted wasm URL and font fallback disabled (no CDN; engine README).
  * - Renders through a small priority queue: Read-mode pages > visible thumbnails >
  *   offscreen thumbnails. Requests for the same bitmap share one job; a job is cancelled
  *   (AbortSignal) once every requester has lost interest.
@@ -10,15 +11,17 @@
  * - Never rejects: every public method resolves to an `EngineResult`.
  * - Password-protected files call back into the UI through `setPasswordPrompt`.
  * - Keeps a copy of every open source's original bytes (a Blob, which the browser may page
- *   to disk) because the adapter transfers the buffer to PDFium's worker; export reads it
+ *   to disk) because the proxy transfers the buffer to the PDFium worker; export reads it
  *   back with `sourceBytes`. The copy is dropped on `close`.
  * - Page labels and /Lang are read by the assembly worker (`assembler-client.ts`), which
- *   the adapter uses as its inspector.
+ *   the PDFium worker reaches through this thread as the adapter's inspector.
  *
  * Render timings are recorded in development with `performance.mark`/`measure` only
  * (entries named `render …`, `open …`).
  */
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
+// Vite's `?worker` constructor: the worker script is fetched only when one is constructed.
+import PdfiumWorker from '@pdf-editor/engine/pdfium.worker?worker';
 import {
   createRandomIdGenerator,
   type Rect,
@@ -855,17 +858,25 @@ function readCropBoxes(document: OpenedDocument): readonly (Rect | undefined)[] 
 let instance: EngineService | undefined;
 
 /**
- * The app-wide engine service. The adapter code is loaded on first use (its own chunk) and
+ * The app-wide engine service. The engine code is loaded on first use (its own chunk) and
  * the PDFium worker starts then (ARCHITECTURE.md §2: loaded on first document open).
  */
 export function getEngineService(): EngineService {
   instance ??= new EngineService({
     createRenderer: async () => {
-      const [{ PdfiumAdapter }, inspector] = await Promise.all([
-        import('@pdf-editor/engine'),
-        getAssembler(),
-      ]);
-      return new PdfiumAdapter({ wasmUrl, fontFallback: null, inspector });
+      // ADR-0011: our own PDFium worker; `destroy()` terminates it. Constructed first so its
+      // script (and then the wasm) loads while the engine chunk and the assembler do.
+      const worker = new PdfiumWorker({ name: 'pdf-editor pdfium' });
+      try {
+        const [{ createPdfiumProxy }, inspector] = await Promise.all([
+          import('@pdf-editor/engine'),
+          getAssembler(),
+        ]);
+        return createPdfiumProxy(worker, { wasmUrl, fontFallback: null, inspector });
+      } catch (error) {
+        worker.terminate();
+        throw error;
+      }
     },
   });
   return instance;

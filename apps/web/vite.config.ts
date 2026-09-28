@@ -17,6 +17,15 @@ const MAX_PRECACHE_BYTES = 4 * 1024 * 1024;
 const MAX_PRECACHED_FONT_BYTES = 1024 * 1024;
 const DAY_SECONDS = 24 * 60 * 60;
 
+/**
+ * `@embedpdf/engines` declares no `sideEffects`, so importing `PdfiumNative` and `PdfEngine`
+ * from its root (the PDFium host, ADR-0011) would keep everything the root re-exports:
+ * EmbedPDF's own blob-worker engine (~700 KB, a second copy of the PDFium glue) and its CDN
+ * font tables, which the app never uses. Its modules only declare classes and functions, so
+ * unused ones can be dropped. Other modules keep their default side-effect handling.
+ */
+const EMBEDPDF_ENGINES_PURE = [{ test: /[\\/]@embedpdf[\\/]engines[\\/]/, sideEffects: false }];
+
 /** Escapes a string for use inside a RegExp. */
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -74,7 +83,9 @@ export default defineConfig({
         // manifest and its icons are added by the plugin (`includeManifestIcons`).
         globPatterns: ['**/*.{html,js,css,woff2}'],
         // Wasm is runtime-cached (below); the 404 page is not part of the app shell.
-        globIgnores: ['**/*.wasm', '404.html'],
+        // `worker-engine-*.js` is EmbedPDF's own worker engine, the adapter's lazy default
+        // factory: the app always passes a factory (ADR-0011), so it is never loaded.
+        globIgnores: ['**/*.wasm', '404.html', '**/worker-engine-*.js'],
         maximumFileSizeToCacheInBytes: MAX_PRECACHE_BYTES,
         manifestTransforms: [
           (entries) => {
@@ -127,6 +138,7 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
+    rolldownOptions: { treeshake: { moduleSideEffects: EMBEDPDF_ENGINES_PURE } },
   },
   build: {
     // Never inline fonts or wasm as data: URLs: the CSP allows `font-src 'self'` only, and
@@ -134,6 +146,7 @@ export default defineConfig({
     assetsInlineLimit: (filePath) =>
       /\.(woff2?|ttf|otf|wasm)$/.test(filePath) ? false : undefined,
     rolldownOptions: {
+      treeshake: { moduleSideEffects: EMBEDPDF_ENGINES_PURE },
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         // Static "not found" page for GitHub Pages. Built as an HTML entry (not copied from
