@@ -72,3 +72,19 @@ and are reproduced in the application's "About and licenses" view.
   - Noto Serif Regular and Bold 2.015
     Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic).
   License: SIL Open Font License 1.1 (modified versions: subset, hinting removed).
+
+- jsdiff (diff)
+  Copyright (c) 2009-2015, Kevin Decker.
+  License: BSD-3-Clause.
+  Used by the document comparison (word-level text diff).
+
+- pixelmatch
+  Copyright (c) 2019, Mapbox.
+  License: ISC.
+  Used by the document comparison (pixel diff).
+
+- PKI.js (pkijs), ASN1.js (asn1js) and pvutils
+  Copyright (c) 2014-2025, Peculiar Ventures.
+  License: BSD-3-Clause.
+  Used for digital signature validation and PAdES-B signing.
+
