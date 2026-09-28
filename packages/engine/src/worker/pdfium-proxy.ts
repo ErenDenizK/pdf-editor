@@ -8,6 +8,9 @@
  * - Cancellation mirrors the adapter: when the signal fires, the call rejects at once with
  *   `EngineError('aborted')` and the worker is told on a MessagePort; a bitmap that still
  *   arrives for an aborted render is closed.
+ * - `applyRedactionPlan` rejects with a `RedactionFailedError` (stage and reports rebuilt
+ *   from the wire) when the gate or the self-check stops it; its result bytes are
+ *   transferred. `verifyRedactedOutput` copies its bytes, as `verify` does.
  * - `destroy()`/`dispose()` terminate the worker; calls still pending reject with
  *   `EngineError('aborted')`, later calls with `EngineError('internal')`.
  */
@@ -16,10 +19,12 @@ import type { SourceId } from '@pdf-editor/document-model';
 import { proxy, releaseProxy, transfer, wrap } from 'comlink';
 
 import { abortedError } from '../pdfium/task-bridge';
+import { RedactionFailedError } from '../redaction/apply';
 import {
   type EngineCallOptions,
   EngineError,
   type PdfEditor,
+  type PdfRedactor,
   type PdfRenderer,
   type PdfTextEditor,
   type PdfVerifier,
@@ -49,7 +54,12 @@ export interface PdfiumProxyOptions {
   readonly inspector?: SourceInspector;
 }
 
-export interface PdfiumProxy extends PdfRenderer, PdfEditor, PdfVerifier, PdfTextEditor {
+export interface PdfiumProxy
+  extends PdfRenderer,
+    PdfEditor,
+    PdfVerifier,
+    PdfTextEditor,
+    PdfRedactor {
   getAnnotationAppearance(
     id: SourceId,
     pageIndex: number,
@@ -74,7 +84,12 @@ function failure(error: unknown): Wire<never> {
 }
 
 function unwrap<T>(reply: Wire<T>): T {
-  if (!reply.ok) throw new EngineError(reply.code, reply.message);
+  if (!reply.ok) {
+    if (reply.redaction) {
+      throw new RedactionFailedError(reply.redaction.stage, reply.message, reply.redaction.failure);
+    }
+    throw new EngineError(reply.code, reply.message);
+  }
   return reply.value;
 }
 
@@ -342,6 +357,18 @@ export function createPdfiumProxy(worker: Worker, options: PdfiumProxyOptions): 
       const { signal, wire } = split(callOptions);
       return invoke('applyTextEdit', signal, (port) =>
         remote.applyTextEdit(request, wire, withPort(port, port)),
+      );
+    },
+    applyRedactionPlan(id, plan, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke('applyRedactionPlan', signal, (port) =>
+        remote.applyRedactionPlan(id, plan, wire, withPort(port, port)),
+      );
+    },
+    verifyRedactedOutput(bytes, plans, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke('verifyRedactedOutput', signal, (port) =>
+        remote.verifyRedactedOutput(bytes, plans, wire, withPort(port, port)),
       );
     },
     destroy() {

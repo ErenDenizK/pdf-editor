@@ -8,17 +8,22 @@
 import type { FontFallbackConfig } from '@embedpdf/engines';
 import type { SourceId } from '@pdf-editor/document-model';
 
+import type { RedactionFailure } from '../redaction/apply';
 import type {
   Annotation,
   AnnotationConformanceReport,
   AnnotationFinalizeRequest,
+  ApplyRedactionsOptions,
+  ApplyRedactionsResult,
   EngineCallOptions,
   EngineErrorCode,
+  ForensicReport,
   FormField,
   LocatedRun,
   NewAnnotation,
   OpenedDocument,
   OpenOptions,
+  RedactionPlan,
   RenderOptions,
   RenderResult,
   SaveOptions,
@@ -32,6 +37,7 @@ import type {
   TextRun,
   VerificationExpectation,
   VerificationResult,
+  VerifyRedactedOutputOptions,
 } from '../types';
 
 export interface PdfiumWorkerConfig {
@@ -46,7 +52,16 @@ export interface PdfiumWorkerConfig {
 
 export type Wire<T> =
   | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly code: EngineErrorCode; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly code: EngineErrorCode;
+      readonly message: string;
+      /** A `RedactionFailedError`: which gate stopped it and its reports (no bytes). */
+      readonly redaction?: {
+        readonly stage: 'gate' | 'forensic';
+        readonly failure: RedactionFailure;
+      };
+    };
 
 /** Call options minus what cannot cross a thread boundary. */
 export type WireCallOptions = Omit<EngineCallOptions, 'signal'>;
@@ -54,6 +69,8 @@ export type WireOpenOptions = Omit<OpenOptions, 'signal'>;
 export type WireRenderOptions = Omit<RenderOptions, 'signal'>;
 export type WireSearchOptions = Omit<SearchOptions, 'signal' | 'onProgress'>;
 export type WireSaveOptions = Omit<SaveOptions, 'signal'>;
+export type WireApplyRedactionsOptions = Omit<ApplyRedactionsOptions, 'signal'>;
+export type WireVerifyRedactedOutputOptions = Omit<VerifyRedactedOutputOptions, 'signal'>;
 
 /**
  * The caller's `SourceInspector` (in the app: the assembly worker's proxy), reached from the
@@ -186,6 +203,24 @@ export interface PdfiumWorkerApi {
     options: WireCallOptions,
     abortPort?: MessagePort,
   ): Promise<Wire<TextEditResult>>;
+  // PdfRedactor (redaction/): the whole apply on the hosted engine, and the export check.
+  /**
+   * Saves the source, applies `plan` in scratch documents and replaces the open document
+   * with the verified result (exclusive per source). The result's bytes are transferred.
+   */
+  applyRedactionPlan(
+    id: SourceId,
+    plan: RedactionPlan,
+    options: WireApplyRedactionsOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<ApplyRedactionsResult>>;
+  /** `verifyRedactedOutput` on a scratch copy of `bytes` (the caller keeps its copy). */
+  verifyRedactedOutput(
+    bytes: ArrayBuffer,
+    plans: readonly RedactionPlan[],
+    options: WireVerifyRedactedOutputOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<ForensicReport>>;
   /** Closes every document and releases the engine; the worker stays usable. */
   destroy(): Promise<void>;
 }

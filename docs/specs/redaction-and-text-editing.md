@@ -83,6 +83,28 @@ tests assert every channel is clean.
   annotation left in any area, area pixels equal the fill colour, and hex-encoded string
   variants in the byte grep (PDFium writes text as hex).
 
+### 1.5 Apply flow and export as built (2026-09-28)
+
+Deviations from and additions to §1.2–§1.4, found while wiring the apply flow:
+
+- **Worker method name.** The PDFium worker exposes `applyRedactionPlan(sourceId, plan)`
+  and `verifyRedactedOutput(bytes, plans, { password })` (`PdfRedactor`);
+  `PdfEditor.applyRedactions(id)` already names the in-place `/Redact` apply without scrub
+  or self-check. `RedactionFailedError` keeps its stage and reports across the worker.
+- **Areas.** Each ticked mark becomes one area per line (quads of a mark on one line are
+  joined: a token split across text runs gives several quads with nothing between them).
+- **Captured strings.** By default the text under the marks is searched in the whole file,
+  so an unmarked copy of it elsewhere stops the apply (`no-search-hits`, with the pages);
+  "Area only" turns capture off.
+- **Kept attachments** whose content still shows the redacted text are stopped by the
+  self-check at apply time, so such a redaction never reaches the export.
+- **Model copies.** Metadata and bookmark titles are written at export from the model, so
+  applying replaces the redacted strings there too, in the same history entry.
+- **Unticked marks** stay marks, but a pending `/Redact` in a redacted file fails the
+  export check; the user applies or deletes them first (the dialog and the export say so).
+- **Undo** is reopen + replay, as for text edits (`redaction.apply` inverse is
+  replay-required); the edit runner treats `redaction.apply` like `text.edit`.
+
 ## 2. Text editing
 
 ### 2.1 Tiers (docs/research/04 §5)

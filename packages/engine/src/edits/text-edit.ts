@@ -58,10 +58,15 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Whether `edit` is the inverse of a text edit (undo needs reopen + replay). */
+/**
+ * Whether `edit` is the inverse of a text edit or of an applied redaction
+ * (edits/redaction-apply.ts): undo needs reopen + replay.
+ */
 export function isReplayRequired(edit: EngineEdit): boolean {
   return (
-    edit.kind === 'text.edit' && isObject(edit.payload) && edit.payload.replayRequired === true
+    (edit.kind === 'text.edit' || edit.kind === 'redaction.apply') &&
+    isObject(edit.payload) &&
+    edit.payload.replayRequired === true
   );
 }
 

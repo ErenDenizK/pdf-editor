@@ -9,6 +9,12 @@
  * `import PdfiumWorker from '@pdf-editor/engine/pdfium.worker?worker'`, and wraps it with
  * `createPdfiumProxy`. The engine (wasm fetch + init) starts as soon as the proxy configures it.
  *
+ * Redaction (`PdfRedactor`, ADR-0011 §3) runs here too: `applyRedactionPlan` saves the open
+ * source, runs `applyRedactions` in private scratch documents and replaces the open document
+ * with the verified bytes, all under the source's exclusive lock; `verifyRedactedOutput`
+ * checks export bytes in a scratch document. A `RedactionFailedError` keeps its stage and
+ * reports across the boundary (`Wire.redaction`).
+ *
  * Every adapter call on a source runs under that source's shared lock, so raw edits
  * (`HostedEngine.withRawAccess`, exclusive) never land between the tasks of one call.
  */
@@ -18,6 +24,9 @@ import type { SourceId } from '@pdf-editor/document-model';
 import { createHostedEngine, type HostedEngine } from '../pdfium/host/hosted-engine';
 import { SourceLocks } from '../pdfium/host/source-lock';
 import { PdfiumAdapter } from '../pdfium/pdfium-adapter';
+import { applyRedactions, RedactionFailedError } from '../redaction/apply';
+import { withForensicDeps } from '../redaction/engine-session';
+import { verifyRedactedOutput } from '../redaction/verify-output';
 import { createTextEditor, type HostedTextEditor } from '../text-edit/editor';
 import { throwIfAborted } from '../pdfium/task-bridge';
 import { EngineError, type SearchHit, type SourceInspector } from '../types';
@@ -89,6 +98,14 @@ function getTextEditor(): Promise<HostedTextEditor> {
 }
 
 function failure(error: unknown): Wire<never> {
+  if (error instanceof RedactionFailedError) {
+    return {
+      ok: false,
+      code: error.code,
+      message: error.message,
+      redaction: { stage: error.stage, failure: error.failure },
+    };
+  }
   if (error instanceof EngineError) return { ok: false, code: error.code, message: error.message };
   const message = error instanceof Error ? error.message : String(error);
   return {
@@ -322,6 +339,48 @@ const api: PdfiumWorkerApi = {
     return call(abortPort, async (signal) =>
       (await getTextEditor()).applyTextEdit(request, withSignal(options, signal)),
     );
+  },
+  applyRedactionPlan(id, plan, options, abortPort) {
+    return call(
+      abortPort,
+      async (signal) => {
+        const hosted = await host();
+        const a = getAdapter();
+        // Exclusive: no render, save or edit of this source runs between the save and the
+        // swap. The pipeline itself works on scratch ids, which have their own locks.
+        return locks.run(
+          id,
+          'exclusive',
+          async () => {
+            // The source as it is now (edits included). Security is removed: the redacted
+            // output is never encrypted, and pdf-lib's post-pass cannot write encryption.
+            const input = await a.save(id, withSignal({ removeSecurity: true }, signal));
+            const result = await applyRedactions(hosted, input, plan, withSignal(options, signal));
+            // Verified: the open document becomes the redacted one, under the same id. Not
+            // abortable from here on (a half-swapped source would be closed).
+            await a.close(id);
+            await a.open(id, result.bytes.slice(0), {});
+            return result;
+          },
+          signal,
+        );
+      },
+      (result) => [result.bytes],
+    );
+  },
+  verifyRedactedOutput(bytes, plans, options, abortPort) {
+    // A scratch document only: no source lock.
+    return call(abortPort, async (signal) => {
+      const hosted = await host();
+      const { password } = options;
+      return withForensicDeps(
+        hosted,
+        bytes,
+        (deps) =>
+          verifyRedactedOutput(bytes, plans, deps, password === undefined ? {} : { password }),
+        withSignal(password === undefined ? {} : { password }, signal),
+      );
+    });
   },
   async destroy() {
     const current = adapter;

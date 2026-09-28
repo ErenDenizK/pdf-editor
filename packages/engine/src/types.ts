@@ -487,6 +487,12 @@ export interface AssemblyOptions extends EngineCallOptions {
   /** Emit PDF 1.4-compatible output: no object streams, no xref streams. */
   readonly compatibility?: boolean;
   readonly security?: SecurityPolicy;
+  /**
+   * Flatten the form fields created in the app (`VirtualDocument.fields`): their
+   * appearances are drawn into the pages and no field is written. Source fields are
+   * flattened before assembly (`SaveOptions.flattenForms`).
+   */
+  readonly flattenForms?: boolean;
 }
 
 export interface ReconciliationReport {
@@ -507,6 +513,12 @@ export interface ReconciliationReport {
    * when nothing was to be stripped.
    */
   readonly metadataStripped?: MetadataStripReport;
+  /**
+   * Form fields created in the app (`VirtualDocument.fields`) as written: final name (after
+   * the form merge policy), kind and output pages. Absent when the document has none;
+   * empty when they were flattened.
+   */
+  readonly createdFields?: readonly CreatedFieldExpectation[];
   readonly warnings: readonly string[];
 }
 
@@ -723,6 +735,20 @@ export interface VerificationExpectation {
    * wrong annotation transform is caught before the download.
    */
   readonly annotationsInsidePages?: readonly number[];
+  /**
+   * Form fields created in the app: each must be listed with its kind and a widget on each
+   * of the given output pages, under its name or the name the form merge policy gave it
+   * (`name_2`, `name_3`, …; see `ReconciliationReport.formFieldsRenamed`).
+   */
+  readonly createdFields?: readonly CreatedFieldExpectation[];
+}
+
+/** A form field created in the app, as the verification pass must find it. */
+export interface CreatedFieldExpectation {
+  readonly name: string;
+  readonly kind: FormFieldKind;
+  /** Output page index of each widget. */
+  readonly pageIndices: readonly number[];
 }
 
 export interface VerificationResult {
@@ -1345,4 +1371,39 @@ export interface ApplyRedactionsResult {
  */
 export interface RedactionApplyPayload {
   readonly plan: RedactionPlan;
+}
+
+/** Options of `PdfRedactor.verifyRedactedOutput`. */
+export interface VerifyRedactedOutputOptions extends EngineCallOptions {
+  /** User password of an encrypted output. */
+  readonly password?: string;
+}
+
+/**
+ * Redaction on the hosted engine (ADR-0011 §3), exposed across the worker by `PdfiumProxy`.
+ * Named apart from `PdfEditor.applyRedactions` (which applies /Redact annotations in place,
+ * without the scrub or the self-check).
+ */
+export interface PdfRedactor {
+  /**
+   * Applies `plan` to the open source (`applyRedactions`, redaction/apply.ts): the source
+   * is saved as it is now (security removed), redacted in private scratch documents and,
+   * once verified, replaces the open document under the same id. Throws
+   * `RedactionFailedError` (stage and reports kept across the worker) and leaves the open
+   * document's content as it was when the gate or the self-check fails.
+   */
+  applyRedactionPlan(
+    id: SourceId,
+    plan: RedactionPlan,
+    options?: ApplyRedactionsOptions,
+  ): Promise<ApplyRedactionsResult>;
+  /**
+   * The export's self-check (`verifyRedactedOutput`) on `bytes`, opened in a scratch
+   * document with `options.password`. Never throws for a failed check (see `ok`).
+   */
+  verifyRedactedOutput(
+    bytes: ArrayBuffer,
+    plans: readonly RedactionPlan[],
+    options?: VerifyRedactedOutputOptions,
+  ): Promise<ForensicReport>;
 }

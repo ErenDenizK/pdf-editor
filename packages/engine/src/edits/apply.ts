@@ -16,9 +16,11 @@ import type { EngineEdit } from '@pdf-editor/document-model';
 
 import {
   type Annotation,
+  type ApplyRedactionsResult,
   type EngineCallOptions,
   EngineError,
   type PdfEditor,
+  type PdfRedactor,
   type PdfTextEditor,
   type TextEditResult,
 } from '../types';
@@ -36,11 +38,13 @@ import {
   type SerializedAnnotation,
   serializeAnnotation,
 } from './payloads';
+import { applyRedactionEdit, type RedactionReplayPayload } from './redaction-apply';
 import { applyTextEditEdit, type TextEditReplayPayload } from './text-edit';
 
 /**
- * The parts of `PdfEditor` edits use (`getAnnotationAppearance` for stamps), and
- * `PdfTextEditor.applyTextEdit` for `text.edit` (`PdfiumProxy` has both).
+ * The parts of `PdfEditor` edits use (`getAnnotationAppearance` for stamps),
+ * `PdfTextEditor.applyTextEdit` for `text.edit` and `PdfRedactor.applyRedactionPlan` for
+ * `redaction.apply` (`PdfiumProxy` has all of them).
  */
 export type EditTarget = Pick<
   PdfEditor,
@@ -52,7 +56,8 @@ export type EditTarget = Pick<
   | 'setFormFieldValue'
   | 'getAnnotationAppearance'
 > &
-  Partial<Pick<PdfTextEditor, 'applyTextEdit'>>;
+  Partial<Pick<PdfTextEditor, 'applyTextEdit'>> &
+  Partial<Pick<PdfRedactor, 'applyRedactionPlan'>>;
 
 export interface AppliedEdit {
   /** The edit as applied: a create's payload carries the annotation id actually used. */
@@ -63,6 +68,8 @@ export interface AppliedEdit {
   readonly annotation?: Annotation;
   /** `text.edit`: the editor's result (tier, honesty, verification). */
   readonly textEdit?: TextEditResult;
+  /** `redaction.apply`: every report of the apply (and the redacted bytes). */
+  readonly redaction?: ApplyRedactionsResult;
 }
 
 const UNDO_SUFFIX = ':undo';
@@ -191,8 +198,18 @@ export async function applyEngineEditWithResult(
       const inverse: TextEditReplayPayload = { replayRequired: true, of: edit.id };
       return { applied, inverse: inverseOf(applied, 'text.edit', inverse), textEdit: result };
     }
+    case 'redaction.apply': {
+      // Non-invertible, as text edits: the inverse tells history to reopen and replay.
+      const { payload, result } = await applyRedactionEdit(editor, edit, options);
+      const applied: EngineEdit = { ...edit, payload };
+      const inverse: RedactionReplayPayload = { replayRequired: true, of: edit.id };
+      return {
+        applied,
+        inverse: inverseOf(applied, 'redaction.apply', inverse),
+        redaction: result,
+      };
+    }
     case 'redaction.mark':
-    case 'redaction.apply':
       throw new EngineError(
         'unsupported',
         `${edit.kind} edits are not replayable yet (redaction is M4); use PdfEditor directly`,

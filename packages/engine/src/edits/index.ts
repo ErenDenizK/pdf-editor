@@ -21,6 +21,12 @@ export {
   serializeAnnotation,
 } from './payloads';
 export {
+  applyRedactionEdit,
+  type RedactionApplyEditPayload,
+  type RedactionReplayPayload,
+  readRedactionApplyPayload,
+} from './redaction-apply';
+export {
   appliedTextEditPayload,
   isReplayRequired,
   readTextEditPayload,
