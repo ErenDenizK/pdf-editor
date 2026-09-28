@@ -16,6 +16,8 @@ import {
   hasAnnotationToolState,
   registerAnnotationCommands,
 } from '../annotations';
+import { registerCompareCommands } from '../compare/compare-commands';
+import { registerConvertCommands } from '../convert/convert-commands';
 import type { EngineFailure } from '../engine/engine-service';
 import { partitionFiles, pickFiles } from '../files/open-files';
 import { registerFurnitureCommands } from '../furniture';
@@ -460,6 +462,8 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     registerExportCommands(registry),
     registerViewerCommands(registry),
     registerToolCommands(registry),
+    registerConvertCommands(registry),
+    registerCompareCommands(registry),
     registerFurnitureCommands(registry),
     registerFormCommands(registry),
   ];

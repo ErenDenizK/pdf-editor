@@ -10,7 +10,8 @@ import { create } from 'zustand';
 
 import { readJson, writeJson } from './safe-storage';
 
-export type ViewMode = 'read' | 'arrange';
+/** `compare`: the Compare view (spec recognize-and-compare §2.2), a third stage view. */
+export type ViewMode = 'read' | 'arrange' | 'compare';
 export type LeftPanelView =
   | 'pages'
   | 'outline'
@@ -18,7 +19,9 @@ export type LeftPanelView =
   | 'comments'
   | 'redactions'
   | 'forms'
-  | 'files';
+  | 'files'
+  /** The Compare view's Changes list; not persisted (a comparison lives for the session). */
+  | 'changes';
 /** Placeholder tool ids; the tool state machine (ARCHITECTURE.md §6) will own these. */
 export type ToolId = 'select' | 'highlight' | 'ink' | 'text' | 'shapes' | 'note';
 

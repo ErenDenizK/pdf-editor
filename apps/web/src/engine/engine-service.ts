@@ -21,6 +21,7 @@
  */
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
 // Vite's `?worker` constructor: the worker script is fetched only when one is constructed.
+import AnalysisWorker from '@pdf-editor/engine/analysis.worker?worker';
 import PdfiumWorker from '@pdf-editor/engine/pdfium.worker?worker';
 import SignatureWorker from '@pdf-editor/engine/signature.worker?worker';
 import {
@@ -30,6 +31,7 @@ import {
   type SourceId,
 } from '@pdf-editor/document-model';
 import type {
+  AnalysisProxy,
   EngineErrorCode,
   OpenedDocument,
   PdfEditor,
@@ -1096,4 +1098,94 @@ let signatureHost: SignatureWorkerHost | undefined;
 export function getSignatureWorkers(): SignatureWorkerHost {
   signatureHost ??= new SignatureWorkerHost();
   return signatureHost;
+}
+
+// ---------------------------------------------------------------------------
+// Analysis worker (M5 spec recognize-and-compare §2, §4): compare and convert
+// ---------------------------------------------------------------------------
+
+/** The analysis worker ends after this long with no lease held. */
+export const ANALYSIS_IDLE_MS = 2 * 60_000;
+
+/** A hold on the analysis worker: it stays alive until every lease is released. */
+export interface AnalysisLease {
+  readonly proxy: AnalysisProxy;
+  /** Idempotent; the worker ends `ANALYSIS_IDLE_MS` after the last lease is released. */
+  release(): void;
+}
+
+/**
+ * The analysis worker (`@pdf-editor/engine/analysis.worker`, pure JS), started on first use
+ * and terminated after `idleMs` without a lease. A comparison holds its lease while its
+ * result (heat maps) is on screen; a conversion for the length of the run.
+ */
+export class AnalysisWorkerHost {
+  private shared: Promise<AnalysisProxy> | undefined;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private leases = 0;
+
+  constructor(
+    private readonly create: () => Promise<AnalysisProxy> = async () => {
+      const worker = new AnalysisWorker({ name: 'pdf-editor analysis' });
+      try {
+        const { createAnalysisProxy } = await import('@pdf-editor/engine');
+        return createAnalysisProxy(worker);
+      } catch (error) {
+        worker.terminate();
+        throw error;
+      }
+    },
+    private readonly idleMs: number = ANALYSIS_IDLE_MS,
+  ) {}
+
+  get alive(): boolean {
+    return this.shared !== undefined;
+  }
+
+  async acquire(): Promise<AnalysisLease> {
+    this.leases += 1;
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.leases -= 1;
+      if (this.leases > 0) return;
+      this.timer = setTimeout(() => this.terminate(), this.idleMs);
+    };
+    if (this.shared === undefined) {
+      const created = this.create();
+      created.catch(() => {
+        if (this.shared === created) this.shared = undefined;
+      });
+      this.shared = created;
+    }
+    try {
+      return { proxy: await this.shared, release };
+    } catch (error) {
+      release();
+      throw error;
+    }
+  }
+
+  /** Ends the worker now; calls in flight reject with `aborted`. */
+  terminate(): void {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    const current = this.shared;
+    this.shared = undefined;
+    void current?.then(
+      (proxy) => proxy.dispose(),
+      () => undefined,
+    );
+  }
+}
+
+let analysisHost: AnalysisWorkerHost | undefined;
+
+/** The app-wide analysis worker host (the worker itself starts on first `acquire`). */
+export function getAnalysisWorkers(): AnalysisWorkerHost {
+  analysisHost ??= new AnalysisWorkerHost();
+  return analysisHost;
 }

@@ -6,6 +6,7 @@
  */
 import {
   EyeOff,
+  FileDiff,
   FileStack,
   Files,
   Keyboard,
@@ -14,7 +15,7 @@ import {
   Search,
   TextCursorInput,
 } from 'lucide-react';
-import { type KeyboardEvent, useRef } from 'react';
+import { type KeyboardEvent, lazy, Suspense, useRef } from 'react';
 
 import { type SourceId, sourceReferences } from '@pdf-editor/document-model';
 
@@ -45,6 +46,13 @@ const VIEWS: readonly { id: LeftPanelView; label: () => string; Icon: typeof Fil
   { id: 'files', label: m.view_files, Icon: Files },
 ];
 
+/** Shown only in the Compare view (spec recognize-and-compare §2.2). */
+const COMPARE_VIEWS: readonly { id: LeftPanelView; label: () => string; Icon: typeof FileStack }[] =
+  [{ id: 'changes', label: m.compare_changes, Icon: FileDiff }];
+
+// The Changes list loads with the Compare view.
+const ChangesPanel = lazy(() => import('../compare/ChangesPanel'));
+
 const PANEL_ID = 'left-panel';
 
 export function LeftRail() {
@@ -56,6 +64,8 @@ export function LeftRail() {
   const toggleShortcut = useCommandShortcut('view.toggleLeftPanel');
   const shortcutsShortcut = useCommandShortcut('help.shortcuts');
   const railRef = useRef<HTMLDivElement>(null);
+  const comparing = useUiStore((s) => s.viewMode === 'compare');
+  const views = comparing ? [...COMPARE_VIEWS, ...VIEWS] : VIEWS;
 
   const onRailKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
@@ -71,7 +81,7 @@ export function LeftRail() {
     tabs[next]?.focus();
   };
 
-  const activeLabel = VIEWS.find((v) => v.id === view)?.label() ?? '';
+  const activeLabel = views.find((v) => v.id === view)?.label() ?? '';
 
   return (
     <aside className={styles.left} aria-label={m.nav_label()}>
@@ -83,7 +93,7 @@ export function LeftRail() {
           aria-label={m.nav_views_label()}
           className={styles.railTabs}
         >
-          {VIEWS.map(({ id, label, Icon }) => {
+          {views.map(({ id, label, Icon }) => {
             const selected = open && view === id;
             return (
               <IconButton
@@ -133,6 +143,11 @@ export function LeftRail() {
             {view === 'redactions' ? <RedactionsPanel /> : null}
             {view === 'forms' ? <FormsPanel /> : null}
             {view === 'files' ? <FilesView /> : null}
+            {view === 'changes' && comparing ? (
+              <Suspense fallback={null}>
+                <ChangesPanel />
+              </Suspense>
+            ) : null}
           </div>
           <ResizeHandle
             label={m.nav_resize()}

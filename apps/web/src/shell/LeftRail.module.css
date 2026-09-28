@@ -57,7 +57,8 @@
 
 .panelBody[data-view='pages'],
 .panelBody[data-view='outline'],
-.panelBody[data-view='search'] {
+.panelBody[data-view='search'],
+.panelBody[data-view='changes'] {
   display: flex;
   flex-direction: column;
   overflow: hidden;

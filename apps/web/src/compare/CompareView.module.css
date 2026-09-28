@@ -1,0 +1,472 @@
+/*
+ * The Compare view (DESIGN.md §2–3): the stage canvas stays surface-0 and the pages are the
+ * bright things; the setup card and the page map strip are docked and opaque; the tool bar
+ * and the progress card float over the pages as glass.
+ */
+
+/* Setup ---------------------------------------------------------------------------- */
+
+.setup {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  place-items: start center;
+  padding: var(--space-6) var(--space-4) var(--space-12);
+}
+
+.card {
+  display: grid;
+  gap: var(--space-4);
+  width: min(620px, 100%);
+  padding: var(--space-6);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-3);
+  background: var(--surface-1);
+}
+
+.cardTitle {
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  font-weight: 500;
+  letter-spacing: var(--tracking-display);
+}
+
+.presets3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.dropZone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  /* Dashed, like every file-drop target (design audit J6). */
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.dropZone[data-active] {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.buttonIcon {
+  width: var(--icon-chrome);
+  height: var(--icon-chrome);
+  margin-right: var(--space-2);
+  stroke-width: 1.5;
+}
+
+/* An honesty notice: one recipe, a warning hairline, no tint (DESIGN.md §3). */
+.note {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning-line);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+/* Results --------------------------------------------------------------------------- */
+
+.results {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.strip {
+  overflow-x: auto;
+  padding: 2px 0;
+}
+
+.stripList {
+  display: flex;
+  justify-content: safe center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stripCell {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 24px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-1);
+  background: var(--surface-1);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+.stripCell[data-status='changed'],
+.stripCell[data-status='inserted'],
+.stripCell[data-status='deleted'] {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.stripCell[data-status='inserted'],
+.stripCell[data-status='deleted'] {
+  background: var(--surface-3);
+}
+
+.stripCell[aria-current='true'] {
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+
+@media (hover: hover) {
+  .stripCell:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.stripCell:focus-visible {
+  outline-offset: 1px;
+}
+
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.viewport:focus-visible {
+  outline-offset: -2px;
+}
+
+.canvas {
+  position: relative;
+  min-width: 100%;
+}
+
+.columnHeader {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-0);
+}
+
+.columnName {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sideTag {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-1);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.row {
+  position: absolute;
+  left: 0;
+}
+
+.rowLabel {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 20px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rowGlyph {
+  width: 12px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
+.rowStatus {
+  color: var(--text-tertiary);
+}
+
+.row[data-status='changed'] .rowStatus,
+.row[data-status='inserted'] .rowStatus,
+.row[data-status='deleted'] .rowStatus {
+  color: var(--text-primary);
+}
+
+.sheet {
+  position: absolute;
+  background: var(--page-background);
+  box-shadow: var(--page-shadow);
+}
+
+.sheet > span,
+.sheet > canvas {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* The page canvas fills the sheet (PageCanvas.module.css sizes it to its parent). */
+.sheet > canvas:first-child {
+  inset: 0;
+}
+
+.missing {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-page);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+/* Changed areas: a 1px on-page ring; the current change's areas get the stronger line. */
+.region {
+  box-shadow: 0 0 0 1px var(--accent-line);
+  border-radius: 1px;
+}
+
+.region[data-current] {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Changed words: the multiply highlight used on the page for search hits. */
+.word {
+  background: var(--accent-highlight);
+  mix-blend-mode: multiply;
+}
+
+.word[data-current] {
+  background: var(--accent-highlight-strong);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.heatmap {
+  top: 0;
+  left: 0;
+  opacity: 0.85;
+  mix-blend-mode: multiply;
+}
+
+/* Floating chrome ------------------------------------------------------------------- */
+
+.toolbar {
+  composes: glass from global;
+  position: absolute;
+  bottom: var(--space-5);
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* Absolutely positioned at left: 50%: without this it would shrink to half the stage. */
+  width: max-content;
+  max-width: calc(100% - 2 * var(--space-4));
+  padding: var(--space-1);
+  overflow-x: auto;
+  border-radius: var(--radius-3);
+  transform: translateX(-50%);
+}
+
+.divider {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 var(--space-1);
+  background: var(--border-hairline);
+}
+
+.segments {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+}
+
+.segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+  white-space: nowrap;
+}
+
+.segmentIcon {
+  width: var(--icon-chrome);
+  height: var(--icon-chrome);
+  stroke-width: 1.5;
+}
+
+@media (hover: hover) {
+  .segment:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+/* An option choice on the bar: accent-muted, no accent border (DESIGN.md §3). */
+.segment[aria-checked='true'] {
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+
+.segment:focus-visible {
+  outline-offset: 1px;
+}
+
+.slider {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.slider input {
+  width: 96px;
+  accent-color: var(--accent);
+}
+
+.zoom {
+  flex: none;
+  min-width: 44px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.glassButton {
+  flex: none;
+  height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .glassButton:hover:not(:disabled) {
+    background: var(--surface-hover);
+  }
+}
+
+.glassButton:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+.progress {
+  composes: glass from global;
+  position: absolute;
+  top: calc(var(--space-12) + var(--space-2));
+  left: 50%;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  width: min(420px, calc(100% - 2 * var(--space-4)));
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border-radius: var(--radius-3);
+  transform: translateX(-50%);
+}
+
+.progress[data-centred] {
+  top: 40%;
+}
+
+.progressLabel {
+  grid-column: 1;
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress > progress {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.progress > button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+@media (max-width: 640px) {
+  .presets3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: none;
+  min-height: 36px;
+  padding: 0 var(--space-4) var(--space-2);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.bar > nav {
+  flex: 1;
+  min-width: 0;
+}
+
+.newButton {
+  flex: none;
+  margin-left: auto;
+}
+
+.fileButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fileButton .buttonIcon {
+  margin-right: 0;
+}

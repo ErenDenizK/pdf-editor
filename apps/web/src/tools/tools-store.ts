@@ -9,7 +9,8 @@ import type { DocumentId } from '@pdf-editor/document-model';
 import type { CompressionSettings } from '@pdf-editor/engine';
 import { create } from 'zustand';
 
-export type ToolDialog = 'compress' | 'images';
+/** `markdown`: PDF → Markdown / text (convert/ConvertDialog.tsx). */
+export type ToolDialog = 'compress' | 'images' | 'markdown';
 
 interface ToolsState {
   readonly dialog: { readonly kind: ToolDialog; readonly documentId: DocumentId } | null;

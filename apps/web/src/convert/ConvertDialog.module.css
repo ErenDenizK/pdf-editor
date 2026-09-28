@@ -1,0 +1,90 @@
+/* The Markdown / text dialog: options on the left, the monospace preview on the right. */
+.layout {
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  grid-auto-rows: auto;
+  column-gap: var(--space-6);
+}
+
+.options,
+.side {
+  display: grid;
+  grid-auto-rows: max-content;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.presets2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.stack {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.previewHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.preview {
+  height: 360px;
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-2);
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.preview[data-state='working'] {
+  color: var(--text-tertiary);
+}
+
+.preview:focus-visible {
+  outline-offset: 0;
+}
+
+/* An honesty notice: one recipe, a warning hairline, no tint (DESIGN.md §3). */
+.notes {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning-line);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.ocr {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
+  padding-top: var(--space-1);
+}
+
+.actions {
+  grid-column: 1 / -1;
+  align-items: center;
+}
+
+@media (max-width: 760px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .preview {
+    height: 240px;
+  }
+}

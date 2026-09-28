@@ -1,0 +1,170 @@
+/* The Changes panel: a docked panel, opaque; rows as in the Comments and Search panels. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.empty {
+  padding: var(--space-1) var(--space-4) var(--space-4);
+}
+
+.header {
+  display: grid;
+  gap: var(--space-2);
+  flex: none;
+  padding: 0 var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.summary {
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  line-height: var(--leading-base);
+  font-variant-numeric: tabular-nums;
+}
+
+/* An honesty notice: one recipe, a warning hairline, no tint (DESIGN.md §3). */
+.notice {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning-line);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.noticeSummary {
+  cursor: pointer;
+}
+
+.noticeSummary:focus-visible {
+  outline-offset: 1px;
+}
+
+.noticeList {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.action {
+  min-height: var(--control-height);
+  padding: var(--space-1) var(--space-3);
+  text-align: left;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .action:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.action:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2) var(--space-2) var(--space-4);
+}
+
+.none {
+  padding: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.group + .group {
+  margin-top: var(--space-3);
+}
+
+.groupTitle {
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+
+.list {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  text-align: left;
+}
+
+@media (hover: hover) {
+  .item:hover {
+    background: var(--surface-hover);
+  }
+}
+
+.item:focus-visible {
+  outline-offset: -2px;
+}
+
+/* A current row is accent-muted; tertiary text steps up to secondary (DESIGN.md §3). */
+.item[aria-current='true'] {
+  background: var(--accent-muted);
+  --text-tertiary: var(--text-secondary);
+}
+
+.glyph {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  line-height: var(--leading-base);
+  text-align: center;
+}
+
+.text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--text-md);
+  line-height: var(--leading-base);
+  overflow-wrap: anywhere;
+}
+
+.detail {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
