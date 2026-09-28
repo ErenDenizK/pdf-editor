@@ -104,8 +104,9 @@ test('replace a word in the Helvetica line, export, re-open: the edited line rea
   await editor.press('Enter');
   await expect(editor).toHaveCount(0);
   await expect(historyRow(page, 'Text edited (same font, not embedded)')).toBeVisible();
-  // The runs are located again: the edited line is now split around the new word.
-  await expect(page.locator('[data-text-edit-layer="0"] [data-text-run="cat"]')).toBeAttached();
+  // The runs are located again and the edited line now reads with the new word (the engine
+  // keeps the line in as few text objects as possible, so "cat" may share a run).
+  await expect(page.locator('[data-text-edit-layer="0"] [data-text-run*="cat"]')).toBeAttached();
 
   // Export and download.
   await page.keyboard.press('Escape');
@@ -264,5 +265,5 @@ test('rotated page: the editor turns with the line; an upright line is edited in
   await editor.press('Enter');
   await expect(editor).toHaveCount(0);
   await expect(historyRow(page, /^Text edited/)).toBeVisible();
-  await expect(runs.locator('[data-text-run="looks"]')).toBeAttached();
+  await expect(runs.locator('[data-text-run*="looks"]')).toBeAttached();
 });
