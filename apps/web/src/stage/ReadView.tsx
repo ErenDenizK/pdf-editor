@@ -24,7 +24,7 @@ import {
 } from '@pdf-editor/document-model';
 import { type RefObject, useEffect, useLayoutEffect, useRef } from 'react';
 
-import { RENDER_PRIORITY } from '../engine/engine-service';
+import { RENDER_PRIORITY, sheetSize } from '../engine/engine-service';
 import { m } from '../i18n';
 import { PageCanvas } from '../pages/PageCanvas';
 import { CSS_PX_PER_PT, displaySize, rotationPhrase } from '../pages/page-geometry';
@@ -633,6 +633,7 @@ function PageColumn({
   const viewTop = el?.scrollTop ?? 0;
   const viewBottom = viewTop + (el?.clientHeight ?? 0);
   const labels = documentLabels(ws, doc);
+  const dpr = window.devicePixelRatio || 1;
 
   return (
     <div
@@ -658,8 +659,8 @@ function PageColumn({
               const page = pages[index];
               const size = sizes[index];
               if (!page || !size) return null;
-              const width = size.width * cssScale;
-              const height = size.height * cssScale;
+              // Whole device pixels, matching the exact-scale bitmap (drawn 1:1).
+              const { width, height } = sheetSize(size.width, size.height, cssScale, dpr);
               const total = pageTotalRotation(ws, page);
               const sourceId = page.ref.kind === 'source' ? page.ref.source : undefined;
               const sourceIndex = page.ref.kind === 'source' ? page.ref.index : 0;
@@ -689,6 +690,7 @@ function PageColumn({
                     widthPt={size.width}
                     heightPt={size.height}
                     cssWidth={width}
+                    exact
                     priority={rowVisible ? RENDER_PRIORITY.page : RENDER_PRIORITY.offscreen}
                     delayMs={ZOOM_RENDER_DELAY_MS}
                   />

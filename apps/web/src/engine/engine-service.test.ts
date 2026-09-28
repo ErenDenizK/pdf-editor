@@ -4,12 +4,18 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { BitmapCache, bitmapBytes, bitmapKey, pageKey } from './bitmap-cache';
 import {
+  bitmapSide,
   chooseBucket,
+  chooseScale,
   EngineService,
+  exactScale,
+  isCapped,
   MAX_BITMAP_PIXELS,
   type RendererLike,
   RENDER_PRIORITY,
   scaleBucket,
+  scaleBucketBelow,
+  sheetSize,
 } from './engine-service';
 
 /** A stand-in ImageBitmap: only width/height/close are used by the cache. */
@@ -83,6 +89,36 @@ describe('BitmapCache', () => {
     expect(cache.best(pageKey('s', 3, 0), 2, true)).toBeUndefined();
   });
 
+  it('mixes exact scales and buckets, and evicts exact scales within the budget', () => {
+    const page = pageKey('s', 0, 0);
+    const cache = new BitmapCache(bitmapBytes(40, 40) * 2);
+    const thumb = entry(bitmapKey('s', 0, 0, 0.3536), 4, 4, 0.3536);
+    const at100 = entry(bitmapKey('s', 0, 0, 2.6667), 27, 27, 2.6667);
+    cache.set(page, thumb.entry);
+    cache.set(page, at100.entry);
+    // Zooming to 133% (3.5474): the 100% render is the best preview.
+    expect(cache.best(page, 3.5474, true)?.bucket).toBe(2.6667);
+    // Zooming out below every render: the smallest above (the thumbnail) if allowed.
+    expect(cache.best(page, 0.2, true)?.bucket).toBe(0.3536);
+    // Settling at several zooms accumulates exact entries; the LRU bounds them by bytes.
+    const at133 = entry(bitmapKey('s', 0, 0, 3.5474), 36, 36, 3.5474);
+    const at150 = entry(bitmapKey('s', 0, 0, 4.0003), 40, 40, 4.0003);
+    cache.set(page, at133.entry);
+    cache.set(page, at150.entry);
+    expect(cache.usedBytes).toBeLessThanOrEqual(cache.budgetBytes);
+    // Least recently used first: the 100% render (the thumbnail was used after it).
+    expect(at100.bitmap.closed).toBe(true);
+    expect(thumb.bitmap.closed).toBe(false);
+    expect(cache.has(bitmapKey('s', 0, 0, 4.0003))).toBe(true);
+    // Evicted scales no longer answer previews; keys and the scale index stay consistent.
+    expect(cache.best(page, 3.5, true)?.bucket).toBe(0.3536);
+    expect(cache.best(page, 3.9)?.bucket).toBe(3.5474);
+    cache.removePrefix('s:0:');
+    expect(cache.size).toBe(0);
+    expect(cache.usedBytes).toBe(0);
+    expect(cache.best(page, 8, true)).toBeUndefined();
+  });
+
   it('removes every bitmap of a source', () => {
     const cache = new BitmapCache();
     const a = entry('a:0:0:1', 1, 1);
@@ -109,6 +145,65 @@ describe('scale buckets', () => {
     const bucket = chooseBucket(8, 612, 792);
     expect(612 * bucket * 792 * bucket).toBeLessThanOrEqual(MAX_BITMAP_PIXELS);
     expect(chooseBucket(1, 612, 792)).toBe(1);
+  });
+});
+
+describe('exact render scales', () => {
+  // Letter at 133% on a DPR 2 screen: 612 pt x 1.33 x 96/72 x 2 = 2170.56 device px.
+  const cssScale = 1.33 * (96 / 72);
+
+  it('renders exactly the device scale (4 decimals), not a larger bucket', () => {
+    expect(chooseScale(3.5467, 612, 792)).toBe(3.5467);
+    expect(chooseScale(3.546_666_66, 612, 792)).toBe(3.5467);
+    expect(chooseScale(2, 612, 792)).toBe(2);
+    expect(scaleBucket(3.5467)).toBe(4); // what a bucket would have oversampled to
+    expect(chooseScale(Number.NaN, 612, 792)).toBe(1);
+    expect(chooseScale(-1, 612, 792)).toBe(1);
+  });
+
+  it('above the pixel cap keeps the largest bucket below it (tiles cover the rest)', () => {
+    const capped = chooseScale(8, 612, 792);
+    expect(capped).toBe(scaleBucketBelow(Math.sqrt(MAX_BITMAP_PIXELS / (612 * 792))));
+    expect(612 * capped * 792 * capped).toBeLessThanOrEqual(MAX_BITMAP_PIXELS);
+    expect(isCapped(8, 612, 792)).toBe(true);
+    expect(isCapped(3.5467, 612, 792)).toBe(false);
+  });
+
+  it('derives the scale from the whole device pixels of the sheet', () => {
+    expect(exactScale(1085.28, 612, 2)).toBe(Math.round((2171 / 612) * 10_000) / 10_000);
+    // Floating noise in the CSS width does not change the key.
+    expect(exactScale(2171 / 2 + 1e-9, 612, 2)).toBe(exactScale(2171 / 2, 612, 2));
+  });
+
+  it('snaps the sheet to device pixels and matches the bitmap EmbedPDF renders', () => {
+    for (const dpr of [1, 1.25, 1.5, 2, 3]) {
+      for (const zoom of [0.33, 0.67, 0.9, 1, 1.1, 1.33, 1.75, 2.5]) {
+        for (const [w, h] of [
+          [612, 792],
+          [595.28, 841.89],
+          [841.89, 595.28],
+          [200, 100],
+        ] as const) {
+          const scale = zoom * (96 / 72);
+          const sheet = sheetSize(w, h, scale, dpr);
+          const deviceW = sheet.width * dpr;
+          const deviceH = sheet.height * dpr;
+          expect(Math.abs(deviceW - Math.round(deviceW))).toBeLessThan(1e-6);
+          expect(Math.abs(deviceH - Math.round(deviceH))).toBeLessThan(1e-6);
+          // Within a device pixel of the unsnapped size.
+          expect(Math.abs(deviceW - w * scale * dpr)).toBeLessThanOrEqual(0.5);
+          expect(Math.abs(deviceH - h * scale * dpr)).toBeLessThan(1.5);
+          // The bitmap requested for this sheet is exactly its device size (when uncapped).
+          const exact = exactScale(sheet.width, w, dpr);
+          if (isCapped(exact, w, h)) continue;
+          const render = chooseScale(exact, w, h);
+          expect(bitmapSide(w, render)).toBe(Math.round(deviceW));
+          expect(bitmapSide(h, render)).toBe(Math.round(deviceH));
+        }
+      }
+    }
+    // 792 pt x 3.5474 = 2809.54: the height follows the bitmap, 1 px taller than 2808.96.
+    expect(sheetSize(612, 792, cssScale, 2)).toEqual({ width: 2171 / 2, height: 2810 / 2 });
   });
 });
 

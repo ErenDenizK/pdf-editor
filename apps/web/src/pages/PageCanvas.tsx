@@ -3,10 +3,19 @@
  * page-shaped, white placeholder sheet). The canvas keeps its pixels, so the service's
  * cache may evict the bitmap at any time.
  *
+ * - Scale: with `exact` (Read mode) the page renders at exactly the sheet's device pixels
+ *   per point (`chooseScale`), so the final bitmap is drawn 1:1 and never resampled by the
+ *   browser; the sheet must then be snapped to device pixels (`sheetSize`). Otherwise
+ *   (thumbnails) it renders at a shared quarter-octave bucket (`chooseBucket`).
+ *   Filtering is left at the default: `image-rendering: pixelated` would be exact only if
+ *   the sheet's on-screen origin and CSS size were whole device pixels, which layout cannot
+ *   guarantee (1/64 px layout units at DPR 1.5 and 3, shell and scroll offsets in CSS px),
+ *   and nearest-neighbour sampling then makes strokes uneven.
  * - Exact cache hit: drawn synchronously on mount.
  * - Otherwise the best cached lower (or higher) scale is drawn at once, stretched by CSS,
  *   and the right scale is requested. `delayMs` debounces the request while a bitmap is
- *   already shown (zoom gestures); an empty sheet requests at once.
+ *   already shown (zoom gestures), so only a settled zoom renders; an empty sheet requests
+ *   at once.
  * - Unmounting or changing page/scale aborts the request (after the replacement request
  *   has joined the same job, so a priority change never restarts a running render).
  *
@@ -16,12 +25,20 @@
  * - Content edits (annotations) bump the page's revision in the engine service
  *   (`invalidatePage`): the canvas keeps its current pixels and requests a fresh render.
  *
- * The canvas exposes `data-state`: placeholder | preview | rendered | error.
+ * The canvas exposes `data-state`: placeholder | preview | rendered | error ("rendered"
+ * only while it shows a bitmap at the requested scale; a stretched one is a "preview") and
+ * `data-bucket`: the scale of the bitmap it shows.
  */
 import type { BlobId, Rotation, SourceId } from '@pdf-editor/document-model';
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 
-import { type CachedBitmap, chooseBucket, getEngineService } from '../engine/engine-service';
+import {
+  type CachedBitmap,
+  chooseBucket,
+  chooseScale,
+  exactScale,
+  getEngineService,
+} from '../engine/engine-service';
 import { useWorkspaceStore } from '../state/workspace-store';
 import styles from './PageCanvas.module.css';
 
@@ -82,8 +99,13 @@ export interface PageCanvasProps {
   /** Displayed page size in points (after all rotation), to cap the bitmap size. */
   readonly widthPt: number;
   readonly heightPt: number;
-  /** CSS width the page occupies; with devicePixelRatio this picks the scale bucket. */
+  /** CSS width the page occupies; with devicePixelRatio this picks the render scale. */
   readonly cssWidth: number;
+  /**
+   * Render at the exact device scale of `cssWidth` (drawn 1:1) instead of a shared bucket.
+   * For Read mode, whose sheets are snapped to device pixels; thumbnails leave it off.
+   */
+  readonly exact?: boolean;
   readonly priority: number;
   readonly delayMs?: number;
 }
@@ -116,13 +138,16 @@ export function PageCanvas({
   heightPt,
   cssWidth,
   priority,
+  exact = false,
   delayMs = 0,
 }: PageCanvasProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   /** Which page (source:index:rotation) the canvas currently shows. */
   const shownRef = useRef<string>('');
   const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
-  const bucket = chooseBucket((cssWidth * dpr) / Math.max(1, widthPt), widthPt, heightPt);
+  const bucket = exact
+    ? chooseScale(exactScale(cssWidth, widthPt, dpr), widthPt, heightPt)
+    : chooseBucket((cssWidth * dpr) / Math.max(1, widthPt), widthPt, heightPt);
   const service = getEngineService();
   const revision = useSyncExternalStore(service.subscribeRevisions, () =>
     sourceId === undefined ? 0 : service.pageRevision(sourceId, index),
@@ -146,6 +171,15 @@ export function PageCanvas({
     };
   }, [blobId, rotation, widthPt, heightPt, cssWidth]);
 
+  // Before paint: once the sheet has a new size (zoom), the shown bitmap is stretched, so it
+  // is only a preview until the new scale arrives.
+  useLayoutEffect(() => {
+    const canvas = ref.current;
+    if (!canvas || sourceId === undefined) return;
+    if (canvas.dataset.bucket === String(bucket)) return;
+    if (canvas.dataset.state === 'rendered') canvas.dataset.state = 'preview';
+  }, [sourceId, bucket]);
+
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas || sourceId === undefined) return;
@@ -166,8 +200,8 @@ export function PageCanvas({
       canvas.dataset.bucket = '0';
       canvas.dataset.revision = revisionKey;
     }
-    const exact = service.peek(sourceId, index, rotation, bucket);
-    if (exact && draw(canvas, exact, 'rendered')) return;
+    const hit = service.peek(sourceId, index, rotation, bucket);
+    if (hit && draw(canvas, hit, 'rendered')) return;
     const shownBucket = Number(canvas.dataset.bucket ?? 0);
     const preview = service.preview(sourceId, index, rotation, bucket);
     if (preview && canvas.dataset.state !== 'rendered' && preview.bucket > shownBucket) {

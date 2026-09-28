@@ -2,21 +2,23 @@
  * Sharp rendering at high zoom. When a page's full bitmap would exceed the engine
  * service's single-bitmap cap (`MAX_BITMAP_PIXELS`, 16 MP), `PageCanvas` draws a capped,
  * slightly soft bitmap and this layer covers the visible part of the page with tiles
- * rendered at full resolution through the engine's `clip` option.
+ * rendered at the page's exact device scale through the engine's `clip` option.
  *
  * Tiles are TILE_PX device pixels square in displayed-page space; each is mapped back to an
  * unrotated user-space clip (viewer/geometry.ts, which applies rotation and the CropBox
- * origin). Only tiles intersecting the viewport (plus a margin) are mounted; the engine
- * cache keeps recent ones.
+ * origin). Tiles sit at whole device pixels and are sized like the bitmap EmbedPDF renders
+ * (`bitmapSide`), so their pixels map 1:1 onto the (device-pixel snapped) sheet. Only tiles
+ * intersecting the viewport (plus a margin) are mounted; the engine cache keeps recent ones.
  */
 import type { Rotation, SourceId } from '@pdf-editor/document-model';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import {
-  chooseBucket,
+  bitmapSide,
+  exactScale,
   getEngineService,
+  isCapped,
   RENDER_PRIORITY,
-  scaleBucket,
 } from '../engine/engine-service';
 import { displayedSize, displayRectToUser, type PageFrame } from '../viewer/geometry';
 import styles from './PageCanvas.module.css';
@@ -26,11 +28,21 @@ export const TILE_PX = 1024;
 /** Extra margin (CSS px) around the viewport in which tiles are prepared. */
 const MARGIN_PX = 256;
 
+function devicePixelRatio(): number {
+  return typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
+}
+
+/**
+ * Device pixels per point of a Read-mode page shown at `cssScale` CSS px per point: the
+ * exact scale of its device-pixel snapped sheet, as `PageCanvas` (`exact`) computes it.
+ */
+export function pageDeviceScale(cssScale: number, widthPt: number, dpr = devicePixelRatio()) {
+  return exactScale(widthPt * cssScale, widthPt, dpr);
+}
+
 /** True when the whole page at this scale would be capped (so tiles are needed). */
 export function needsTiles(cssScale: number, widthPt: number, heightPt: number): boolean {
-  const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
-  const wanted = cssScale * dpr;
-  return chooseBucket(wanted, widthPt, heightPt) < scaleBucket(wanted);
+  return isCapped(pageDeviceScale(cssScale, widthPt), widthPt, heightPt);
 }
 
 export interface Tile {
@@ -95,11 +107,11 @@ export function TiledPage({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [tiles, setTiles] = useState<readonly Tile[]>([]);
-  const dpr = window.devicePixelRatio || 1;
-  const bucket = scaleBucket(frame.scale * dpr);
+  const dpr = devicePixelRatio();
   const size = displayedSize(frame);
   const { width: widthPt, height: heightPt } = size;
   const scale = frame.scale;
+  const bucket = pageDeviceScale(scale, widthPt, dpr);
 
   useEffect(() => {
     const layer = ref.current;
@@ -147,6 +159,7 @@ export function TiledPage({
           rotation={rotation}
           frame={frame}
           bucket={bucket}
+          dpr={dpr}
           tile={tile}
         />
       ))}
@@ -160,13 +173,16 @@ function TileCanvas({
   rotation,
   frame,
   bucket,
+  dpr,
   tile,
 }: {
   readonly sourceId: SourceId;
   readonly index: number;
   readonly rotation: Rotation;
   readonly frame: PageFrame;
+  /** Device pixels per point (the page's exact scale). */
   readonly bucket: number;
+  readonly dpr: number;
   readonly tile: Tile;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -233,13 +249,19 @@ function TileCanvas({
     revision,
   ]);
 
-  const scale = frame.scale;
+  // Whole device pixels within the sheet: the tile grid is TILE_PX device pixels, and the
+  // box matches the bitmap EmbedPDF renders for this clip, so the tile maps 1:1.
   return (
     <canvas
       ref={ref}
       className={styles.tile}
       data-state="placeholder"
-      style={{ left: left * scale, top: top * scale, width: width * scale, height: height * scale }}
+      style={{
+        left: Math.round(left * bucket) / dpr,
+        top: Math.round(top * bucket) / dpr,
+        width: bitmapSide(width, bucket) / dpr,
+        height: bitmapSide(height, bucket) / dpr,
+      }}
     />
   );
 }

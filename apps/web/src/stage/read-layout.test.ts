@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { needsTiles, tilesFor, TILE_PX } from '../pages/TiledPage';
+import { exactScale } from '../engine/engine-service';
+import { needsTiles, pageDeviceScale, tilesFor, TILE_PX } from '../pages/TiledPage';
 import { computeRows } from './ReadView';
 
 const sizes = [
@@ -32,6 +33,17 @@ describe('tiling', () => {
     // Letter at 100% (1.33 CSS px/pt) is small; at 500% with DPR 1 it is ~24 MP.
     expect(needsTiles(1.33, 612, 792)).toBe(false);
     expect(needsTiles(5 * (96 / 72) * 2, 612, 792)).toBe(true);
+  });
+
+  it('renders tiles at the exact device scale of the page sheet, not a bucket', () => {
+    const cssScale = 5 * (96 / 72); // 500%
+    // 612 pt x 6.6667 CSS px/pt x DPR 2 = 8160 device px: 13.3333 px per point.
+    expect(pageDeviceScale(cssScale, 612, 2)).toBe(13.3333);
+    expect(pageDeviceScale(cssScale, 612, 2)).toBe(exactScale(612 * cssScale, 612, 2));
+    // 133% at DPR 1.5: 612 x 1.7733 x 1.5 = 1627.92 -> 1628 device px.
+    expect(pageDeviceScale(1.33 * (96 / 72), 612, 1.5)).toBe(
+      Math.round((1628 / 612) * 10_000) / 10_000,
+    );
   });
 
   it('covers only the visible region with TILE_PX tiles, clipped at the page edge', () => {
