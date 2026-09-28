@@ -25,7 +25,9 @@
 }
 
 .left {
-  overflow: hidden;
+  /* Truncates on narrow windows without becoming a scroll container: focusing or
+     scrolling an item into view must never shift the bar's contents (DESIGN §2). */
+  overflow: clip;
 }
 
 .item {

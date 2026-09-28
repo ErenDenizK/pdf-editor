@@ -3,7 +3,10 @@
   align-items: center;
   gap: var(--space-2);
   height: 22px;
-  margin: 0 calc(var(--space-2) * -1);
+  /* The hover fill bleeds into the gap after the preceding dot only: a bleed on the right
+     would overflow the status bar's left group and let it scroll when the trigger is
+     brought into view. */
+  margin-left: calc(var(--space-2) * -1);
   padding: 0 var(--space-2);
   border-radius: var(--radius-1);
   color: var(--text-secondary);
@@ -116,4 +119,10 @@
 
 .swMark[data-status='error'] {
   background: var(--warning);
+}
+
+/* Inset: the status bar clips its overflow, so an outside ring would be cut off. */
+.trigger:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
 }
