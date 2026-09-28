@@ -421,6 +421,7 @@ function ReviewStep({
   const items = summarizeReport(prepared.report, prepared.sourceNotes, prepared.outcome, {
     ...(prepared.redaction ? { redaction: prepared.redaction } : {}),
     ...(prepared.textEdits ? { textEdits: prepared.textEdits } : {}),
+    ...(prepared.ocr ? { ocr: prepared.ocr } : {}),
     ...(prepared.signature ? { signature: prepared.signature } : {}),
     ...(prepared.signaturesRemoved ? { signaturesRemoved: prepared.signaturesRemoved } : {}),
   });

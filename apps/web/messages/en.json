@@ -2735,5 +2735,182 @@
   "convert_ocr_unavailable": "Text recognition (OCR) is not available yet.",
   "convert_output": "Downloads {name}",
   "convert_download": "Download",
-  "convert_failed": "The conversion failed: {reason}"
+  "convert_failed": "The conversion failed: {reason}",
+  "ocr_cmd": "Recognize text (OCR)…",
+  "ocr_cmd_languages": "OCR languages…",
+  "ocr_cmd_next_word": "Next low-confidence word",
+  "ocr_cmd_previous_word": "Previous low-confidence word",
+  "ocr_inspector_title": "OCR",
+  "ocr_title": "Recognize text (OCR)",
+  "ocr_pages": "Pages",
+  "ocr_checking_pages": "Checking which pages have text…",
+  "ocr_facts_failed": "The pages could not be checked: {reason}",
+  "ocr_scope_without_text": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Pages without text ({count} page)",
+        "countPlural=*": "Pages without text ({count} pages)"
+      }
+    }
+  ],
+  "ocr_scope_all": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "All pages ({count} page)",
+        "countPlural=*": "All pages ({count} pages)"
+      }
+    }
+  ],
+  "ocr_scope_current": "Current page ({page})",
+  "ocr_scope_range": "Page range",
+  "ocr_scope_skipped": "Blank and image pages are not recognized: they have no PDF page to add text to.",
+  "ocr_languages": "Languages",
+  "ocr_packs_failed": "The languages could not be read: {reason}",
+  "ocr_pack_on_device": "On this device · {size}",
+  "ocr_pack_downloads": "Downloads {size}",
+  "ocr_pack_imported_state": "Imported · {size}",
+  "ocr_languages_order": "Recognized as {languages}; the first language leads.",
+  "ocr_languages_none": "Choose at least one language.",
+  "ocr_manage_languages": "Manage languages…",
+  "ocr_download_note": "The first run downloads {size} from this site. Nothing is sent anywhere.",
+  "ocr_quality": "Quality",
+  "ocr_quality_standard": "Standard",
+  "ocr_quality_standard_hint": "The scan's own resolution, 200–400 dpi",
+  "ocr_quality_high": "High",
+  "ocr_quality_high_hint": "400 dpi: slower, for small print",
+  "ocr_replace": "Replace existing invisible text",
+  "ocr_replace_ours": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} page already has text this app recognized earlier: replacing it keeps every word from being found twice.",
+        "countPlural=*": "{count} pages already have text this app recognized earlier: replacing it keeps every word from being found twice."
+      }
+    }
+  ],
+  "ocr_replace_foreign": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} page has invisible text from another program, often an earlier OCR. It is kept unless you replace it; replacing removes all invisible text on that page.",
+        "countPlural=*": "{count} pages have invisible text from another program, often an earlier OCR. It is kept unless you replace it; replacing removes all invisible text on those pages."
+      }
+    }
+  ],
+  "ocr_signed_warning": "This document is signed. Recognizing text changes the file, so the export will remove its signatures.",
+  "ocr_honesty": "Recognized text may contain errors. The page image is unchanged; search and copy use the recognized text, which cannot be edited.",
+  "ocr_run": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Recognize {count} page",
+        "countPlural=*": "Recognize {count} pages"
+      }
+    }
+  ],
+  "ocr_phase_prepare": "Preparing…",
+  "ocr_phase_download": "Downloading languages… {done} of {total}",
+  "ocr_phase_start": "Starting text recognition…",
+  "ocr_phase_recognize": "Recognized {done} of {total} pages…",
+  "ocr_phase_write": "Adding the text to the document…",
+  "ocr_progress_label": "Text recognition progress",
+  "ocr_progress_continues": "You can close this: recognition continues and the status bar shows its progress. Nothing changes until every page is done.",
+  "ocr_cancel_run": "Cancel recognition",
+  "ocr_hide": "Continue in background",
+  "ocr_history_label": [
+    {
+      "declarations": ["input count", "input languages", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Recognize text: {count} page, {languages}",
+        "countPlural=*": "Recognize text: {count} pages, {languages}"
+      }
+    }
+  ],
+  "ocr_not_applied": "The recognized text was not added because the document changed meanwhile. Run it again.",
+  "ocr_cancelled": "Recognition cancelled. The document is unchanged.",
+  "ocr_failed_short": "Text recognition failed. The document is unchanged.",
+  "ocr_failed": "Text recognition failed; the document is unchanged. {reason}",
+  "ocr_back": "Back",
+  "ocr_run_again": "Recognize more",
+  "ocr_show_results": "Show results",
+  "ocr_result_words": "Words: {words} · low confidence: {low}",
+  "ocr_result_timed_out": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} page took too long and was left without text.",
+        "countPlural=*": "{count} pages took too long and were left without text."
+      }
+    }
+  ],
+  "ocr_result_reduced_dpi": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} large page was read at a lower resolution (40 megapixel limit).",
+        "countPlural=*": "{count} large pages were read at a lower resolution (40 megapixel limit)."
+      }
+    }
+  ],
+  "ocr_quality_good": "Good",
+  "ocr_quality_review": "Review",
+  "ocr_quality_poor": "Poor",
+  "ocr_quality_no_text": "No text found",
+  "ocr_quality_good_explanation": "Most words were read with high confidence.",
+  "ocr_quality_review_explanation": "Some words may be wrong: check the words listed below.",
+  "ocr_quality_poor_explanation": "Many words may be wrong. A cleaner scan, High quality or another language may help.",
+  "ocr_quality_no_text_explanation": "No words were recognized on this page.",
+  "ocr_section_page": "Page {page}",
+  "ocr_section_quality": "Quality",
+  "ocr_section_languages": "Languages",
+  "ocr_section_dpi": "Resolution",
+  "ocr_dpi": "{dpi} dpi",
+  "ocr_section_words": "Words",
+  "ocr_section_low_words_label": "Low-confidence words on page {page}",
+  "ocr_no_low_words": "No low-confidence words.",
+  "ocr_section_no_layer": "Page {page} has no text recognized by this app.",
+  "ocr_section_document": "Pages by quality",
+  "ocr_word_announce": "Word {index} of {total}: {word}, {confidence}% confidence",
+  "ocr_status": "Recognizing text {done}/{total}",
+  "ocr_languages_title": "OCR languages",
+  "ocr_languages_intro": "Languages come from this site and nowhere else. Each downloads on first use; keep a language available offline to recognize text without a connection.",
+  "ocr_languages_loading": "Reading the languages on this device…",
+  "ocr_pack_offline": "Keep available offline",
+  "ocr_pack_offline_label": "Keep {name} available offline",
+  "ocr_pack_remove": "Remove",
+  "ocr_pack_remove_label": "Remove {name}",
+  "ocr_pack_kept": "{name} is available offline.",
+  "ocr_pack_removed": "{name} was removed from this device.",
+  "ocr_pack_imported": "{name} was imported.",
+  "ocr_pack_offline_failed": "The language could not be changed: {reason}",
+  "ocr_import": "Import language file…",
+  "ocr_import_hint": "Other languages: import a Tesseract .traineddata or .traineddata.gz file named by its language code, e.g. ukr.traineddata. It stays on this device.",
+  "ocr_import_bad_name": "The file must be named like a language file, e.g. ukr.traineddata.",
+  "ocr_import_not_traineddata": "This is not a Tesseract language file.",
+  "ocr_import_failed": "The file could not be imported: {reason}",
+  "ocr_summary": [
+    {
+      "declarations": [
+        "input count",
+        "input countText",
+        "input languages",
+        "local countPlural = count: plural"
+      ],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Recognized text (OCR) on {countText} page: {languages}. It is invisible text over the unchanged page image.",
+        "countPlural=*": "Recognized text (OCR) on {countText} pages: {languages}. It is invisible text over the unchanged page images."
+      }
+    }
+  ]
 }

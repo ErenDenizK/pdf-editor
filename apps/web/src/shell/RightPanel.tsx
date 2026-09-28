@@ -18,6 +18,7 @@ import { AnnotationProperties } from '../annotations/AnnotationProperties';
 import { DiagnosticsDetails } from '../document/Diagnostics';
 import { MetadataEditor } from '../document/MetadataEditor';
 import { SecurityInfo } from '../document/SecurityInfo';
+import { OcrSection, useHasOcrSection } from '../ocr';
 import { SignaturesSection, useHasSignatureSection } from '../signatures/SignaturesSection';
 import { useAnnotationStore } from '../annotations/annotation-store';
 import { formatBytes } from '../files/file-filters';
@@ -81,6 +82,7 @@ export function RightPanel() {
   const setWidth = useUiStore((s) => s.setRightPanelWidth);
   const hasDocuments = useHasDocuments();
   const hasSignatures = useHasSignatureSection();
+  const hasOcr = useHasOcrSection();
   // With nothing open there is nothing to inspect; the empty state gets the whole stage.
   if (!open || !hasDocuments) return null;
 
@@ -114,6 +116,11 @@ export function RightPanel() {
             }
           />
         </Section>
+        {hasOcr ? (
+          <Section id="ocr" title={m.ocr_inspector_title()}>
+            <OcrSection />
+          </Section>
+        ) : null}
         {hasSignatures ? (
           <Section id="signatures" title={m.inspector_signatures()}>
             <SignaturesSection />

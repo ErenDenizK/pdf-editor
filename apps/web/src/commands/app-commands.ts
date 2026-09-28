@@ -24,6 +24,7 @@ import { registerFurnitureCommands } from '../furniture';
 import { registerFormCommands } from '../forms';
 import { m } from '../i18n';
 import { registerLanguageCommands } from '../i18n/language-commands';
+import { registerOcrCommands } from '../ocr';
 import { announce } from '../shell/announcer';
 import { openImagesAsDocument } from '../stage/section-operations';
 import { selectAllOf, useSelectionStore } from '../state/selection-store';
@@ -463,6 +464,7 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     registerViewerCommands(registry),
     registerToolCommands(registry),
     registerConvertCommands(registry),
+    registerOcrCommands(registry),
     registerCompareCommands(registry),
     registerFurnitureCommands(registry),
     registerFormCommands(registry),

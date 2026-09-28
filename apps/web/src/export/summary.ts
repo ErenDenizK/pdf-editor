@@ -8,7 +8,8 @@ import type { ReconciliationReport } from '@pdf-editor/engine';
 
 import { restrictionList } from '../document/security-text';
 import { STRIP_ITEMS } from '../document/strip-items';
-import { formatNumber, m } from '../i18n';
+import { formatNumber, getLocale, m } from '../i18n';
+import { languageName, type OcrExportSummary } from '../ocr/ocr-model';
 import { pagesPhrase } from '../state/workspace-store';
 import { checkName } from '../redaction/report-text';
 import type { SignatureExportSummary } from '../signatures/signing';
@@ -49,6 +50,25 @@ export interface ContentSummary {
   readonly signature?: SignatureExportSummary;
   /** Existing signatures the rewrite removed. */
   readonly signaturesRemoved?: { readonly files: readonly string[]; readonly count: number };
+  /** Recognised pages (OCR, spec recognize-and-compare §1.3). */
+  readonly ocr?: OcrExportSummary;
+}
+
+/** "Recognized text (OCR): 12 pages, Turkish and English …" with the honesty line. */
+function ocrItems(ocr: OcrExportSummary): SummaryItem[] {
+  const locale = getLocale();
+  return [
+    {
+      id: 'ocr',
+      tone: 'changed',
+      text: m.ocr_summary({
+        count: ocr.pages,
+        countText: formatNumber(ocr.pages),
+        languages: ocr.languages.map((code) => languageName(code, locale)).join(', '),
+      }),
+      details: [m.ocr_honesty()],
+    },
+  ];
 }
 
 /** "Signed by …": signer, algorithm, field, and what the signature does not prove. */
@@ -287,6 +307,7 @@ export function summarizeReport(
   // Output: what the content edits became, first.
   if (content.redaction) items.push(...redactionItems(content.redaction));
   if (content.textEdits) items.push(...textEditItems(content.textEdits));
+  if (content.ocr) items.push(...ocrItems(content.ocr));
   items.push(...signatureItems(content));
   if (outcome?.security) {
     const restricted = restrictionList(outcome.security.permissions);

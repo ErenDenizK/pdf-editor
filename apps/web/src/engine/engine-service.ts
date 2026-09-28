@@ -33,9 +33,12 @@ import {
 import type {
   AnalysisProxy,
   EngineErrorCode,
+  OcrPackStore,
+  OcrRecognizer,
   OpenedDocument,
   PdfEditor,
   PdfImageEditor,
+  PdfOcrLayer,
   PdfRedactor,
   PdfRenderer,
   PdfTextEditor,
@@ -425,6 +428,24 @@ export class EngineService {
       throw new Error('The rendering engine cannot redact');
     }
     return engine as RendererLike & PdfRedactor;
+  }
+
+  /**
+   * OCR in the PDFium worker (`PdfOcrLayer`, spec recognize-and-compare §1.2, §1.4): page
+   * facts and greyscale rasters for the recognizer. Writing the layer goes through the edit
+   * runner (`ocr.apply` edits, ocr/ocr-run.ts).
+   */
+  async ocrLayer(): Promise<PdfOcrLayer> {
+    const engine = await this.engine();
+    const candidate = engine as Partial<PdfOcrLayer>;
+    if (
+      typeof candidate.ocrPageFacts !== 'function' ||
+      typeof candidate.renderForOcr !== 'function' ||
+      typeof candidate.applyOcrLayer !== 'function'
+    ) {
+      throw new Error('The rendering engine cannot recognize text');
+    }
+    return engine as RendererLike & PdfOcrLayer;
   }
 
   /** The UI registers how to ask for a password; without one, locked files fail. */
@@ -1188,4 +1209,113 @@ let analysisHost: AnalysisWorkerHost | undefined;
 export function getAnalysisWorkers(): AnalysisWorkerHost {
   analysisHost ??= new AnalysisWorkerHost();
   return analysisHost;
+}
+
+// ---------------------------------------------------------------------------
+// OCR recognizer (M5 spec recognize-and-compare §1.1, ADR-0012)
+// ---------------------------------------------------------------------------
+
+/** The recognizer pool is disposed this long after the last run released it (spec §1.1). */
+export const OCR_RECOGNIZER_IDLE_MS = 60_000;
+
+/** A hold on the recognizer: it stays alive until every lease is released. */
+export interface OcrRecognizerLease {
+  readonly recognizer: OcrRecognizer;
+  /** Idempotent; the pool is disposed `OCR_RECOGNIZER_IDLE_MS` after the last release. */
+  release(): void;
+}
+
+/** What the host creates on first use: the recognizer and the pack loader it reads from. */
+export interface OcrRecognizerParts {
+  readonly recognizer: OcrRecognizer;
+  readonly packs: OcrPackStore;
+}
+
+/** The served `ocr/` directory (ADR-0012 §2): on the app's own origin, under the base path. */
+export function ocrBaseUrl(): string {
+  return `${import.meta.env.BASE_URL}ocr/`;
+}
+
+/**
+ * The OCR recognizer's lifecycle. tesseract.js (a lazy chunk) posts pages to its own
+ * classic workers, served from our origin; the pool of one or two recognizers is started by
+ * the first run and kept `idleMs` after the last lease is released, so a second run right
+ * after the first does not start the engine again. The pack loader (`OcrPackStore`) is
+ * shared with the language manager, which never starts a recognizer.
+ */
+export class OcrRecognizerHost {
+  private parts: Promise<OcrRecognizerParts> | undefined;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private leases = 0;
+
+  constructor(
+    private readonly create: () => Promise<OcrRecognizerParts> = async () => {
+      const { createOcrRecognizer, OcrPackStore } = await import('@pdf-editor/engine');
+      const packs = new OcrPackStore({ baseUrl: ocrBaseUrl() });
+      return { recognizer: createOcrRecognizer({ baseUrl: ocrBaseUrl(), packs }), packs };
+    },
+    private readonly idleMs: number = OCR_RECOGNIZER_IDLE_MS,
+  ) {}
+
+  private load(): Promise<OcrRecognizerParts> {
+    if (this.parts === undefined) {
+      const created = this.create();
+      created.catch(() => {
+        if (this.parts === created) this.parts = undefined;
+      });
+      this.parts = created;
+    }
+    return this.parts;
+  }
+
+  /** The language pack loader (no recognizer is started). */
+  async packs(): Promise<OcrPackStore> {
+    return (await this.load()).packs;
+  }
+
+  /** Whether a lease is held (a run is using the recognizer). */
+  get busy(): boolean {
+    return this.leases > 0;
+  }
+
+  async acquire(): Promise<OcrRecognizerLease> {
+    this.leases += 1;
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.leases -= 1;
+      if (this.leases > 0) return;
+      this.timer = setTimeout(() => {
+        this.timer = undefined;
+        this.dispose();
+      }, this.idleMs);
+    };
+    try {
+      return { recognizer: (await this.load()).recognizer, release };
+    } catch (error) {
+      release();
+      throw error;
+    }
+  }
+
+  /** Terminates the recognizers now (idle timeout, tests); the pack loader stays. */
+  dispose(): void {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    void this.parts?.then(
+      (parts) => parts.recognizer.dispose(),
+      () => undefined,
+    );
+  }
+}
+
+let ocrHost: OcrRecognizerHost | undefined;
+
+/** The app-wide OCR recognizer host (tesseract.js loads on the first run). */
+export function getOcrRecognizers(): OcrRecognizerHost {
+  ocrHost ??= new OcrRecognizerHost();
+  return ocrHost;
 }

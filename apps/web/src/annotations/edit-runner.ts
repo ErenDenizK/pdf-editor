@@ -30,7 +30,9 @@
  * payload also carries the result's `honesty` and `fellBack` (`RecordedTextEditOutcome`),
  * which the editor ignores on replay and the export summary reports per source (spec §2.1,
  * §5.3). A recorded `redaction.apply` carries the captured strings too short to search
- * document-wide (`areaOnlyStrings`, `RedactionCapture.skipped`) for the same summary.
+ * document-wide (`areaOnlyStrings`, `RedactionCapture.skipped`) for the same summary. OCR
+ * runs (`ocr.apply`, spec recognize-and-compare §1.3) are replay-required too: their payload
+ * holds the recognised words, so a replay rebuilds the same layer without recognising again.
  *
  * When a replay fails, the engine holds a prefix of the workspace's edits. User actions still
  * run (the next one tries the replay again), but `runExclusive` (export) refuses to run its
@@ -385,7 +387,9 @@ function annotationEdits(ws: Workspace): Map<SourceId, EngineEdit[]> {
       // Applied redactions (redaction/apply.ts): replay-required like text edits.
       edit.kind !== 'redaction.apply' &&
       // Image objects (image-objects/actions.ts): removal and replacement are replay-required.
-      !edit.kind.startsWith('image.')
+      !edit.kind.startsWith('image.') &&
+      // OCR runs (ocr/ocr-run.ts): replay-required like redactions.
+      edit.kind !== 'ocr.apply'
     ) {
       continue;
     }
@@ -410,7 +414,13 @@ async function tryEdit(ctx: EngineContext, edit: EngineEdit | undefined): Promis
 
 /** Whether undoing `edits` needs a reopen: one of them has a replay-required inverse. */
 async function needsReopen(edits: readonly EngineEdit[]): Promise<boolean> {
-  const replayKinds = ['text.edit', 'redaction.apply', 'image.remove', 'image.replace'];
+  const replayKinds = [
+    'text.edit',
+    'redaction.apply',
+    'image.remove',
+    'image.replace',
+    'ocr.apply',
+  ];
   if (!edits.some((edit) => replayKinds.includes(edit.kind))) {
     return false;
   }

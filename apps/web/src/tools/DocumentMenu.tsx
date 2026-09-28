@@ -2,7 +2,7 @@
  * The tab bar's Document menu (spec: "every tool is an action on the open document,
  * reachable from the command palette and a Document menu"). It lists every registered
  * command of the "Document" group, so tools registered elsewhere join it automatically,
- * and hosts the tool dialogs and the Batch dialog, which load lazily (their code, the
+ * and hosts the tool dialogs, the Batch dialog and the OCR dialog, which load lazily (their code, the
  * compress worker and the wasm stay out of the entry chunk).
  */
 import { Menu } from '@base-ui/react/menu';
@@ -12,6 +12,7 @@ import { lazy, Suspense, useSyncExternalStore } from 'react';
 import { BatchDialogHost } from '../batch/BatchDialogHost';
 import { commandRegistry } from '../commands/registry';
 import { m } from '../i18n';
+import { OcrDialogHost } from '../ocr';
 import menuStyles from '../ui/Menu.module.css';
 import iconStyles from '../ui/IconButton.module.css';
 import { useToolsStore } from './tools-store';
@@ -59,6 +60,7 @@ export function DocumentMenu({ visible }: { readonly visible: boolean }) {
       ) : null}
       <ToolDialogs />
       <BatchDialogHost />
+      <OcrDialogHost />
     </>
   );
 }

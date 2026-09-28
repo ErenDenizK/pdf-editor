@@ -1,0 +1,307 @@
+/* OCR dialog, language manager, right-panel section and page ring (spec
+ * recognize-and-compare §1.5; DESIGN.md §3). The dialog layers on ShortcutOverlay's popup and
+ * ToolDialog's form parts, docked right so the pages stay in view (as the furniture dialogs). */
+.side.side {
+  top: 64px;
+  right: 16px;
+  left: auto;
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 96px);
+  transform: none;
+}
+
+.side.side[data-starting-style],
+.side.side[data-ending-style] {
+  transform: translateX(8px);
+}
+
+/* No scrim: the document stays readable next to the dialog. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+}
+
+.body {
+  gap: var(--space-4);
+}
+
+.stack {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.languages,
+.packs {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.language {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.language input {
+  accent-color: var(--accent);
+}
+
+.language:has(input:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) {
+  .language:hover {
+    background: var(--surface-hover);
+  }
+}
+
+.languageName,
+.packName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.packsHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0 var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.packText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 36px;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.pack:last-child {
+  border-bottom: none;
+}
+
+.code {
+  margin-left: var(--space-2);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.switch input {
+  accent-color: var(--accent);
+}
+
+.link {
+  flex: none;
+  height: 24px;
+  white-space: nowrap;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+@media (hover: hover) {
+  .link:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+/* The one honesty-notice recipe: a warning hairline, no tint, no stripe. */
+.notice {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning-line);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+/* ---- Right panel section ---- */
+
+.section {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.facts dt {
+  color: var(--text-tertiary);
+}
+
+.facts dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.subTitle {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.rows {
+  display: grid;
+  gap: 1px;
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.rowButton {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.rowButton:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+@media (hover: hover) {
+  .rowButton:hover {
+    background: var(--surface-hover);
+  }
+}
+
+/* The current row: accent-muted; tertiary text steps up to secondary (DESIGN §3). */
+.rowButton[aria-current='true'] {
+  background: var(--accent-muted);
+  --text-tertiary: var(--text-secondary);
+}
+
+.word {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+/* ---- Page overlay: the focused word, a 1px accent ring; the page is never tinted ---- */
+
+.layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ring {
+  position: absolute;
+  border-radius: var(--radius-page);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* ---- Status bar: the running recognition, a button that reopens the dialog ---- */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .status:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+/* The form's actions stay in view while the options scroll. */
+.stickyActions {
+  position: sticky;
+  /* The sticky edge is inset by the scroller's bottom padding: reach through it. */
+  bottom: calc(-1 * var(--space-6));
+  margin: 0 calc(-1 * var(--space-6)) calc(-1 * var(--space-6));
+  padding: var(--space-3) var(--space-6) var(--space-6);
+  border-top: 1px solid var(--border-hairline);
+  background: var(--surface-1);
+}

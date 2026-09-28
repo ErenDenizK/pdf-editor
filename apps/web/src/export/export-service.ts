@@ -16,11 +16,12 @@
  *    Sources with text edits (`text.edit`) are always saved by PDFium and then finalized
  *    (`finalizeTextEdits`: `/Untitled` subset fonts renamed, repeated MCIDs repaired,
  *    unreachable objects dropped; ADR-0011 §5) right where their edited bytes are produced,
- *    so the assembler only ever sees finalized bytes. Sources with image edits (`image.*`)
- *    get the garbage collection alone (`finalizeContentEdits`). Sources with applied redactions
+ *    so the assembler only ever sees finalized bytes. Sources with image edits (`image.*`) or
+ *    OCR runs (`ocr.apply`, whose re-runs orphan the layer they replace) get the garbage
+ *    collection alone (`finalizeContentEdits`). Sources with applied redactions
  *    (`plan.redaction`) are always saved by PDFium too: the engine holds their redacted
  *    document, never the original bytes kept at open.
- *    Content edits (text, image, redaction) are read from the edits the engine holds
+ *    Content edits (text, image, redaction, OCR) are read from the edits the engine holds
  *    (`appliedEdits`), not from the history: the export fails when the two differ (a replay
  *    the engine refused; the edit runner's `runExclusive` refuses first), and the summary's
  *    text-edit counts, per source and by font outcome, are those of the saved bytes.
@@ -97,6 +98,7 @@ import {
 } from '../signatures/signing';
 import { blobsOfDocument, useWorkspaceStore } from '../state/workspace-store';
 import { compressExport, type ExportCompressor } from '../tools/export-compression';
+import { type OcrExportSummary, ocrExportSummaryOf, thresholdsOf } from '../ocr/ocr-model';
 import { exportCompressionFor } from '../tools/tools-store';
 
 export type ExportPhase = 'reading' | 'assembling' | 'verifying' | 'redaction' | 'signing';
@@ -189,6 +191,8 @@ export interface PreparedExport {
   readonly redaction?: RedactionExportSummary;
   /** Present when the document shows pages of sources with text edits. */
   readonly textEdits?: TextEditExportSummary;
+  /** Present when the document shows recognised pages (OCR, spec recognize-and-compare §1.3). */
+  readonly ocr?: OcrExportSummary;
   /** Sizes around the compression pass (spec §5, §8), when a preset was applied. */
   readonly compression?: {
     readonly preset: CompressionSettings['preset'];
@@ -396,7 +400,11 @@ async function expectedAnnotationCounts(
 /** Edits that rewrite page content and cannot be undone in place (replayed after a reopen). */
 function isContentEdit(edit: EngineEdit): boolean {
   return (
-    edit.kind === 'text.edit' || edit.kind === 'redaction.apply' || edit.kind.startsWith('image.')
+    edit.kind === 'text.edit' ||
+    edit.kind === 'redaction.apply' ||
+    edit.kind.startsWith('image.') ||
+    // OCR runs (spec recognize-and-compare §1.3): the layer replaced the source's document.
+    edit.kind === 'ocr.apply'
   );
 }
 
@@ -509,7 +517,8 @@ async function prepareExportNow(
   if (doc === undefined) return failed(m.export_error_closed());
   if (doc.pages.length === 0) return failed(m.export_error_no_pages());
   try {
-    const { annotationIdsOfEdits, planExport } = await import('@pdf-editor/engine');
+    const { annotationIdsOfEdits, planExport, OCR_LOW_CONFIDENCE, OCR_QUALITY_THRESHOLDS } =
+      await import('@pdf-editor/engine');
     const plan = planExport(ws, documentId, {
       ...(options.security === undefined ? {} : { security: options.security }),
       // Flattened created fields are not expected in the output.
@@ -617,9 +626,12 @@ async function prepareExportNow(
           unreachableRemoved: finalized.unreachableRemoved,
           fonts: textEditFontsOf(textEdits),
         });
-      } else if (heldOf(sourceId).some((e) => e.kind.startsWith('image.'))) {
+      } else if (
+        heldOf(sourceId).some((e) => e.kind.startsWith('image.') || e.kind === 'ocr.apply')
+      ) {
         // Image edits rewrote page content: drop the orphaned streams (the old content, a
-        // removed or replaced image) so nothing removed survives in the file.
+        // removed or replaced image) so nothing removed survives in the file. An OCR re-run
+        // leaves the replaced layer unreachable the same way (spec recognize-and-compare §1.3).
         bytes = (await finalizeContentEdits(bytes)).bytes;
       }
       if (source?.flags.hasSignatures === true && deps.signatures) {
@@ -800,6 +812,11 @@ async function prepareExportNow(
             sources: textEditSources,
           }
         : undefined;
+    const ocrSummary = ocrExportSummaryOf(
+      doc,
+      plan.sources.flatMap(heldOf),
+      thresholdsOf({ OCR_LOW_CONFIDENCE, OCR_QUALITY_THRESHOLDS }),
+    );
     return {
       ok: true,
       value: {
@@ -813,6 +830,7 @@ async function prepareExportNow(
         ...(compression ? { compression } : {}),
         ...(redactionSummary ? { redaction: redactionSummary } : {}),
         ...(textEditSummary ? { textEdits: textEditSummary } : {}),
+        ...(ocrSummary ? { ocr: ocrSummary } : {}),
         ...(signature ? { signature } : {}),
         ...(signaturesRemoved > 0
           ? { signaturesRemoved: { files: signaturesRemovedFrom, count: signaturesRemoved } }
