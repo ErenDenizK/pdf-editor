@@ -304,12 +304,12 @@ export async function executeEdit(ctx: EngineContext, edit: EngineEdit): Promise
   const { applyEngineEditWithResult } = await import('@pdf-editor/engine');
   const source = edit.source;
   const toEngine = (id: string) => annotationIds.engineId(source, id);
-  let result: Awaited<ReturnType<typeof applyEngineEditWithResult>>;
+  let result: Awaited<ReturnType<typeof applyEngineEditWithResult>> | undefined;
   try {
     result = await applyEngineEditWithResult(ctx.editor, mapIds(await hydrate(edit), toEngine));
   } finally {
-    // Also after a refusal: the engine may have changed part of the document.
-    if (changesContent(edit)) bumpRevision(source);
+    // Also after a refusal: the engine may have changed any part of the document then.
+    if (changesContent(edit)) bumpRevision(source, result ? contentPagesOf(edit) : undefined);
   }
   const wanted = editAnnotationId(edit);
   if (edit.kind === 'annotation.create' && result.annotation) {
@@ -408,13 +408,15 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
 const applied = new Map<SourceId, readonly EngineEdit[]>();
 
 /**
- * Per source, a counter bumped once each engine mutation of the source's page content has
- * finished (an executed content edit, refused or not, a reopen, the source closing).
- * Annotations and form values do not count: they are drawn apart from the page content.
- * Never reset, so a value read before some work and read again later tells whether the
- * engine's page content changed between.
+ * Content revisions: counters bumped once an engine mutation of page content has finished (an
+ * executed content edit, refused or not, a reopen, the source closing). Annotations and form
+ * values do not count: they are drawn apart from the page content. A mutation bumps the
+ * counter of each page it changed when those pages are known (`contentPagesOf`), its source's
+ * counter otherwise. Never reset, so a revision read before some work and compared later
+ * (`contentChanged`) tells whether the engine's content of that page changed between.
  */
-const revisions = new Map<SourceId, number>();
+const sourceRevisions = new Map<SourceId, number>();
+const pageRevisions = new Map<SourceId, Map<number, number>>();
 
 function changesContent(edit: EngineEdit): boolean {
   return !(
@@ -424,19 +426,78 @@ function changesContent(edit: EngineEdit): boolean {
   );
 }
 
-function bumpRevision(source: SourceId): void {
-  revisions.set(source, (revisions.get(source) ?? 0) + 1);
+/**
+ * The source pages a content edit that the engine executed changed, or undefined when it may
+ * have changed others too (the whole source then counts as changed):
+ * - `text.edit`: its page (text in a Form XObject drawn more than once is refused, text-edit
+ *   analysis `shared-form`);
+ * - `image.*`: its page for an image the page draws itself; one inside a Form XObject changes
+ *   the form, which other pages may draw;
+ * - `ocr.apply`: the pages of the layer (invisible text on each page's own resources);
+ * - `redaction.apply`: none known: image pixels under an area are whitened in the image
+ *   XObject itself and paths are removed inside Form XObjects in place, and other pages may
+ *   draw both (research 06 §2 (e), engine redaction/engine-pass.ts).
+ */
+function contentPagesOf(edit: EngineEdit): readonly number[] | undefined {
+  switch (edit.kind) {
+    case 'text.edit':
+      return [edit.pageIndex];
+    case 'image.transform':
+    case 'image.remove':
+    case 'image.replace': {
+      const payload = edit.payload as { readonly image?: { readonly objectPath?: unknown } } | null;
+      const path = payload?.image?.objectPath;
+      return Array.isArray(path) && path.length === 1 ? [edit.pageIndex] : undefined;
+    }
+    case 'ocr.apply':
+      return pagesOf(edit);
+    default:
+      return undefined;
+  }
+}
+
+/** Bumps the revision of `pages` of `source`, or the source's own without them. */
+function bumpRevision(source: SourceId, pages?: readonly number[]): void {
+  if (pages === undefined) {
+    sourceRevisions.set(source, (sourceRevisions.get(source) ?? 0) + 1);
+    return;
+  }
+  let perPage = pageRevisions.get(source);
+  if (!perPage) {
+    perPage = new Map();
+    pageRevisions.set(source, perPage);
+  }
+  for (const pageIndex of pages) perPage.set(pageIndex, (perPage.get(pageIndex) ?? 0) + 1);
+}
+
+/** A source page's content revision: its source's counter and the page's own. */
+export interface ContentRevision {
+  readonly source: number;
+  readonly page: number;
 }
 
 /**
- * The source's content revision (see `revisions`). Work reading the engine outside the queue
- * (OCR renders pages while edits go on, ocr/ocr-run.ts) reads it before it starts; inside a
- * `runAction` action an unchanged value means the engine's document is still the one that
- * work read: every mutation queued before the first read had finished by then, or its bump
- * came after it and changed the value.
+ * The content revision of a source page (see `sourceRevisions`). Work reading the engine
+ * outside the queue (OCR renders pages while edits go on, ocr/ocr-run.ts) reads it before it
+ * starts; inside a `runAction` action, `contentChanged` false means the engine's content of
+ * the page is still the one that work read: every mutation queued before the first read had
+ * finished by then, or its bump came after it and changed one of the counters.
  */
-export function sourceRevision(source: SourceId): number {
-  return revisions.get(source) ?? 0;
+export function contentRevision(source: SourceId, pageIndex: number): ContentRevision {
+  return {
+    source: sourceRevisions.get(source) ?? 0,
+    page: pageRevisions.get(source)?.get(pageIndex) ?? 0,
+  };
+}
+
+/** Whether the page's content changed since `revision` (the whole source or the page). */
+export function contentChanged(
+  source: SourceId,
+  pageIndex: number,
+  revision: ContentRevision,
+): boolean {
+  const now = contentRevision(source, pageIndex);
+  return now.source !== revision.source || now.page !== revision.page;
 }
 
 function annotationEdits(ws: Workspace): Map<SourceId, EngineEdit[]> {

@@ -1,12 +1,14 @@
 /**
  * One OCR run (ocr-run.ts) with the real edit runner and PDFium worker on scan-text.pdf; the
  * recognizer (tesseract.js) is replaced by a stub that reads "TOPSECRET" off any page that is
- * not blacked out. Covered: the layer plans per source; a redaction landing while a page is
- * being recognised (review M5 #1: the page is recognised again from the redacted render, and
- * the redacted word never reaches the page text or the history); a document that keeps
- * changing (the run fails, nothing committed); redacting after the run (the panel's rows and
- * the export summary drop the word, #2); closing the document mid-run (#6); cancelling
- * mid-recognition; a failing page stopping the other lane before the error is passed on (#8).
+ * neither blacked out nor blank. Covered: the layer plans per source; a redaction landing while
+ * a page is being recognised (review M5 #1: the page is recognised again from the redacted
+ * render, and the redacted word never reaches the page text or the history); an edit of one
+ * page recognising only that page again, a whole-source change every page; the content
+ * revisions behind both; a document that keeps changing (the run fails, nothing committed);
+ * redacting after the run (the panel's rows and the export summary drop the word, #2);
+ * closing the document mid-run (#6); cancelling mid-recognition; a failing page stopping the
+ * other lane before the error is passed on (#8).
  */
 import type {
   DocumentId,
@@ -28,10 +30,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import scanUrl from '../../../../test/fixtures/scan-text.pdf?url';
 import { deferred, fixtureFile } from '../../test/store-harness';
-import { resetEditRunner, whenIdle } from '../annotations/edit-runner';
+import {
+  contentChanged,
+  contentRevision,
+  resetEditRunner,
+  whenIdle,
+} from '../annotations/edit-runner';
 import { getEngineService, getOcrRecognizers } from '../engine/engine-service';
 import { prepareExport } from '../export/export-service';
 import { m } from '../i18n';
+import { deleteImage } from '../image-objects/actions';
+import { locatedImages } from '../image-objects/images';
 import { applyRedactionPlans } from '../redaction/apply';
 import { useAnnouncer } from '../shell/announcer';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
@@ -87,16 +96,28 @@ function meanGrey(raster: OcrRaster): number {
   return sum / pixels.length;
 }
 
+/** Whether a PGM raster is all page background (no ink at all). */
+function blankRaster(raster: OcrRaster): boolean {
+  const bytes = new Uint8Array(raster.bytes);
+  return bytes.subarray(bytes.length - raster.width * raster.height).every((value) => value > 250);
+}
+
 interface Stub {
   readonly recognizer: Pick<OcrRecognizer, 'recognize' | 'ensureLanguages' | 'dispose'>;
-  /** Pages recognised, in call order, with whether the render was blacked out. */
-  readonly calls: { page: number; dark: boolean; signal: AbortSignal | undefined }[];
+  /** Pages recognised, in call order, with whether the render was blacked out or blank. */
+  readonly calls: {
+    page: number;
+    dark: boolean;
+    blank: boolean;
+    signal: AbortSignal | undefined;
+  }[];
   readonly released: () => number;
 }
 
 /**
  * Replaces the app's recognizer lease with a stub: `hook` runs inside each `recognize` (to
- * hold it or change the document meanwhile); the word is read unless the page is dark.
+ * hold it or change the document meanwhile); the word is read unless the page is dark or
+ * blank.
  */
 function stubRecognizer(
   hook: (call: number, signal: AbortSignal | undefined) => Promise<void> = () => Promise.resolve(),
@@ -109,10 +130,11 @@ function stubRecognizer(
     dispose: () => Promise.resolve(),
     recognize: async (raster, page, _languages, options) => {
       const dark = meanGrey(raster) < 64;
-      calls.push({ page, dark, signal: options?.signal });
+      const blank = blankRaster(raster);
+      calls.push({ page, dark, blank, signal: options?.signal });
       await hook(calls.length, options?.signal);
       if (options?.signal?.aborted) throw new EngineError('aborted', 'OCR was cancelled');
-      return pageResult(page, dark ? [] : [WORD], confidence);
+      return pageResult(page, dark || blank ? [] : [WORD], confidence);
     },
   };
   vi.spyOn(getOcrRecognizers(), 'acquire').mockResolvedValue({
@@ -131,12 +153,13 @@ const aborted = (signal: AbortSignal | undefined) =>
     else signal.addEventListener('abort', () => resolve(), { once: true });
   });
 
-async function openScan() {
+/** Opens scan-text.pdf (two pages); the request recognises its first `pages` pages. */
+async function openScan(pages = 1) {
   const report = await model().openFiles([await fixtureFile(scanUrl, 'scan-text.pdf')]);
   const documentId = report.opened[0]?.documentId;
   if (!documentId) throw new Error('scan-text.pdf did not open');
   const doc = model().workspace.documents[documentId] as VirtualDocument;
-  const targets = documentTargets(doc).slice(0, 1);
+  const targets = documentTargets(doc).slice(0, pages);
   const source = targets[0]?.source as SourceId;
   const request: OcrRunRequest = {
     documentId,
@@ -156,6 +179,14 @@ const redactPage = (source: SourceId, rect = PAGE) =>
     captureStrings: false,
   });
 
+/** Removes the scan image of source page `pageIndex` (an `image.remove`: the page is blank). */
+async function removeScan(source: SourceId, pageIndex: number): Promise<void> {
+  const [image] = await locatedImages(source, pageIndex);
+  if (!image) throw new Error(`No image on page ${pageIndex + 1}`);
+  const target = { source, pageIndex, pageId: `p${pageIndex}` as PageId, position: pageIndex + 1 };
+  expect((await deleteImage(target, image)).ok).toBe(true);
+}
+
 const kinds = () => model().workspace.engineEdits.map((edit) => edit.kind);
 
 /** Page 1's text as the app reads it (the engine service, memoized per page). */
@@ -170,7 +201,30 @@ function ocrWords(edit: EngineEdit | undefined): string[] {
   return pages.flatMap((page) => page.words.map((word) => word[0]));
 }
 
+/** An OCR payload's words per page. */
+function wordsByPage(edit: EngineEdit | undefined): Record<number, string[]> {
+  const pages =
+    (edit?.payload as { pages?: { pageIndex: number; words: [string][] }[] } | undefined)?.pages ??
+    [];
+  return Object.fromEntries(pages.map((page) => [page.pageIndex, page.words.map((w) => w[0])]));
+}
+
 const noProgress = () => undefined;
+
+/**
+ * A stub whose first two recognitions (pages 1 and 2, one per lane) wait for `gate`;
+ * `holding` resolves once both are in recognition.
+ */
+function holdBothPages() {
+  const gate = deferred();
+  const holding = deferred();
+  const stub = stubRecognizer(async (call) => {
+    if (call > 2) return;
+    if (call === 2) holding.resolve();
+    await gate.promise;
+  });
+  return { stub, gate, holding };
+}
 
 beforeEach(() => {
   resetWorkspace();
@@ -261,6 +315,107 @@ describe('an OCR run against edits made meanwhile', () => {
     expect(exported.value.verification.ok).toBe(true);
     expect(exported.value.redaction?.report.ok).toBe(true);
     expect(stub.released()).toBe(1);
+  }, 120_000);
+
+  it('recognises again only the page an edit changed and writes the other as read', async () => {
+    const { source, request } = await openScan(2);
+    const { stub, gate, holding } = holdBothPages();
+    const said: string[] = [];
+    const unsubscribe = useAnnouncer.subscribe((s) => said.push(s.message));
+    const run = recognizeAndApply(request, {
+      signal: new AbortController().signal,
+      onProgress: noProgress,
+    });
+    await holding.promise;
+    // While both pages are being recognised, the user removes the scan of page 2.
+    await removeScan(source, 1);
+    gate.resolve();
+    const result = await run;
+    unsubscribe();
+
+    const first = stub.calls.slice(0, 2).map((c) => [c.page, c.blank] as const);
+    expect(first.sort(([a], [b]) => a - b)).toEqual([
+      [0, false],
+      [1, false],
+    ]);
+    // Only page 2 is read again, from its blank render.
+    expect(stub.calls.slice(2).map((c) => [c.page, c.blank])).toEqual([[1, true]]);
+    expect(said).toContain(m.ocr_recheck({ count: 1, countText: '1' }));
+    expect(kinds()).toEqual(['image.remove', 'ocr.apply']);
+    const ocr = model().workspace.engineEdits.find((edit) => edit.kind === 'ocr.apply');
+    expect(wordsByPage(ocr)).toEqual({ 0: [WORD], 1: [] });
+    expect(result?.words).toBe(1);
+    expect(await pageText(source)).toContain(WORD);
+    expect(stub.released()).toBe(1);
+  }, 120_000);
+
+  it('recognises every page again after a whole-source change', async () => {
+    const { source, request } = await openScan(2);
+    await removeScan(source, 1);
+    const { stub, gate, holding } = holdBothPages();
+    const said: string[] = [];
+    const unsubscribe = useAnnouncer.subscribe((s) => said.push(s.message));
+    const run = recognizeAndApply(request, {
+      signal: new AbortController().signal,
+      onProgress: noProgress,
+    });
+    await holding.promise;
+    // Undoing the removal reopens the source: page 1 counts as changed too.
+    model().undo();
+    await whenIdle();
+    expect(kinds()).toEqual([]);
+    gate.resolve();
+    const result = await run;
+    unsubscribe();
+
+    const pass = (from: number) =>
+      stub.calls.slice(from, from + 2).map((c) => [c.page, c.blank] as const);
+    expect(pass(0).sort(([a], [b]) => a - b)).toEqual([
+      [0, false],
+      [1, true],
+    ]);
+    expect(stub.calls).toHaveLength(4);
+    expect(pass(2).sort(([a], [b]) => a - b)).toEqual([
+      [0, false],
+      [1, false],
+    ]);
+    expect(said).toContain(m.ocr_recheck({ count: 2, countText: '2' }));
+    expect(kinds()).toEqual(['ocr.apply']);
+    const ocr = model().workspace.engineEdits.find((edit) => edit.kind === 'ocr.apply');
+    expect(wordsByPage(ocr)).toEqual({ 0: [WORD], 1: [WORD] });
+    expect(result?.words).toBe(2);
+    expect(stub.released()).toBe(1);
+  }, 120_000);
+
+  it('keeps content revisions per page for image edits, per source otherwise', async () => {
+    const { source } = await openScan();
+    const read = () => [contentRevision(source, 0), contentRevision(source, 1)] as const;
+    const changed = (before: ReturnType<typeof read>) =>
+      before.map((revision, pageIndex) => contentChanged(source, pageIndex, revision));
+
+    let before = read();
+    await removeScan(source, 1);
+    expect(changed(before)).toEqual([false, true]);
+    // A redaction may change pages drawing the same image or form: the whole source.
+    before = read();
+    const area = { x: 72, y: 600, width: 100, height: 40 };
+    expect((await redactPage(source, area)).kind).toBe('applied');
+    expect(changed(before)).toEqual([true, true]);
+    // Undo reopens the source and replays the rest.
+    before = read();
+    model().undo();
+    await whenIdle();
+    expect(kinds()).toEqual(['image.remove']);
+    expect(changed(before)).toEqual([true, true]);
+    // So does undoing the image removal.
+    before = read();
+    model().undo();
+    await whenIdle();
+    expect(changed(before)).toEqual([true, true]);
+    // Closing the source (no history entry refers to it any more).
+    before = read();
+    resetWorkspace();
+    expect(changed(before)).toEqual([true, true]);
   }, 120_000);
 
   it('fails without writing when the document keeps changing', async () => {

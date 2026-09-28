@@ -15,12 +15,15 @@
  *    fails its verification in the worker makes the action throw, and the runner reverts
  *    what it executed.
  *
- * Pages render outside the queue, so edits go on meanwhile. Each page's render records its
- * source's content revision (edit-runner.ts `sourceRevision`); inside the action, a page whose
- * source changed since (a redaction, a text or image edit, an undo of one) is not written from
- * what was read: those pages are recognised again ("The document changed: recognizing …"),
- * at most `RECHECKS` times, then the run fails and commits nothing. Closing the run's
- * document stops it; a source that left the workspace is not written.
+ * Pages render outside the queue, so edits go on meanwhile. Each page's render records the
+ * page's content revision (edit-runner.ts `contentRevision`: its source's and its own); inside
+ * the action, a page whose content changed since is not written from what was read. A text
+ * edit on another page, or an edit of an image another page draws itself, leaves it alone;
+ * one on the page, a redaction, an image inside a Form XObject, a reopen (the undo of such an
+ * edit) or the source closing marks it changed.
+ * Changed pages are recognised again ("The document changed: recognizing …"), at most
+ * `RECHECKS` times, then the run fails and commits nothing. Closing the run's document stops
+ * it; a source that left the workspace is not written.
  */
 import type { EngineEdit, SourceId } from '@pdf-editor/document-model';
 import {
@@ -34,7 +37,13 @@ import {
   type PdfOcrLayer,
 } from '@pdf-editor/engine';
 
-import { executeEdit, runAction, sourceRevision } from '../annotations/edit-runner';
+import {
+  contentChanged,
+  contentRevision,
+  type ContentRevision,
+  executeEdit,
+  runAction,
+} from '../annotations/edit-runner';
 import {
   getEngineService,
   getOcrRecognizers,
@@ -50,8 +59,11 @@ import type { OcrPhase, OcrRunRequest, OcrRunResult } from './ocr-store';
 /** Pages recognised at once (the recognizer pool has one or two workers). */
 const LANES = 2;
 
-/** Times the pages of a source that changed during the run are recognised again. */
+/** Times the pages that changed during the run are recognised again. */
 export const RECHECKS = 2;
+
+/** The revision recorded for a page not rendered yet, or without `revisionOf`. */
+const UNREAD: ContentRevision = { source: 0, page: 0 };
 
 export interface OcrRunProgress {
   readonly phase: OcrPhase;
@@ -73,8 +85,8 @@ function throwIfAborted(signal: AbortSignal): void {
 export interface OcrRecognition {
   readonly results: OcrPageResult[];
   readonly reducedDpi: number;
-  /** Per target: `revisionOf(source)` read just before its page was rendered (0 without it). */
-  readonly revisions: readonly number[];
+  /** Per target: `revisionOf` its page, read just before it was rendered (zeros without it). */
+  readonly revisions: readonly ContentRevision[];
   /** Per target: whether the 40 MP cap rendered it below the asked DPI. */
   readonly reduced: readonly boolean[];
 }
@@ -94,14 +106,14 @@ export async function recognizeTargets(
     readonly layer: Pick<PdfOcrLayer, 'renderForOcr'>;
     readonly languages: readonly string[];
     readonly dpiOf: (target: OcrTarget) => number;
-    /** The source's content revision, read before each render (see `OcrRecognition`). */
-    readonly revisionOf?: (source: SourceId) => number;
+    /** The page's content revision, read before each render (see `OcrRecognition`). */
+    readonly revisionOf?: (source: SourceId, pageIndex: number) => ContentRevision;
   },
   { signal, onProgress }: OcrRunCallbacks,
 ): Promise<OcrRecognition> {
   const { recognizer, layer, languages, dpiOf, revisionOf } = options;
   const results: OcrPageResult[] = new Array<OcrPageResult>(targets.length);
-  const revisions: number[] = new Array<number>(targets.length).fill(0);
+  const revisions: ContentRevision[] = new Array<ContentRevision>(targets.length).fill(UNREAD);
   const reduced: boolean[] = new Array<boolean>(targets.length).fill(false);
   // Aborted by the caller's signal or by the first page that fails.
   const lanes = new AbortController();
@@ -118,7 +130,7 @@ export async function recognizeTargets(
       next += 1;
       const target = targets[at];
       if (target === undefined) return;
-      revisions[at] = revisionOf?.(target.source) ?? 0;
+      revisions[at] = revisionOf?.(target.source, target.index) ?? UNREAD;
       const raster = await layer.renderForOcr(target.source, target.index, {
         dpi: dpiOf(target),
         rotation: target.rotation,
@@ -244,10 +256,10 @@ export async function recognizeAndApply(
       layer,
       languages: codes,
       dpiOf: (target: OcrTarget) => ocrDpiFor(factsOf(request.facts, target), request.quality),
-      revisionOf: sourceRevision,
+      revisionOf: contentRevision,
     };
     const results = new Array<OcrPageResult>(targets.length);
-    const revisions = new Array<number>(targets.length).fill(0);
+    const revisions = new Array<ContentRevision>(targets.length).fill(UNREAD);
     const reduced = new Array<boolean>(targets.length).fill(false);
     let pending = targets.map((_, i) => i);
     for (let attempt = 0; ; attempt++) {
@@ -260,7 +272,7 @@ export async function recognizeAndApply(
       );
       pending.forEach((at, k) => {
         results[at] = pass.results[k] as OcrPageResult;
-        revisions[at] = pass.revisions[k] ?? 0;
+        revisions[at] = pass.revisions[k] ?? UNREAD;
         reduced[at] = pass.reduced[k] ?? false;
       });
       throwIfAborted(signal);
@@ -279,9 +291,10 @@ export async function recognizeAndApply(
           gone = true;
           return undefined;
         }
-        // Pages whose source changed after they were rendered: recognised again.
+        // Pages whose content changed after they were rendered: recognised again.
         stale = targets.flatMap((target, i) =>
-          ws.sources[target.source] !== undefined && sourceRevision(target.source) !== revisions[i]
+          ws.sources[target.source] !== undefined &&
+          contentChanged(target.source, target.index, revisions[i] ?? UNREAD)
             ? [i]
             : [],
         );
