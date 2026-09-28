@@ -154,7 +154,7 @@ major, 8 minor) is resolved with regression tests (24 findings, 9 fix commits); 
 blank-Read-view bug found on the way is fixed; docs and changesets current → **v1.1.0**
 once the owner merges `develop` into `main` and tags.
 
-## M5 — Recognize and compare  (→ v1.2) — **built 2026-09-28, independent review running**
+## M5 — Recognize and compare  (→ v1.2) — **done 2026-09-28**
 
 Spec: `docs/specs/recognize-and-compare.md`; decisions in ADR-0012 (OCR hosting), ADR-0013
 (signatures), ADR-0014 (recipes); spikes in research 07 (OCR) and 08 (signing). Two new
@@ -163,27 +163,36 @@ Markdown); tesseract's own worker is served from our origin.
 
 | Feature | Engine | Notes | Status |
 |---|---|---|---|
-| OCR to searchable PDF: nine language packs on demand, quality Standard / High, replace existing invisible text | tesseract.js + P + L (layer written in the PDFium worker) | scope defaults to pages without text; greyscale rasters in display orientation; glyphless Type0 font, one Form XObject per page, verified in a scratch document; quality Good ≥ 90 / Review 80–90 / Poor < 80; OCR panel with low-confidence rows (J/K, ring on the page); language manager with Keep available offline and local import; `ocr.apply` stores the words, replay never recognises again | done (Chromium-verified: 98% of words found, render pixel-identical, zero external requests, offline after keeping a pack; export verification does not yet re-read the OCR words; a re-run leaves the replaced layer unreachable until export clean-up) |
+| OCR to searchable PDF: nine language packs on demand, quality Standard / High, replace existing invisible text | tesseract.js + P + L (layer written in the PDFium worker) | scope defaults to pages without text; greyscale rasters in display orientation; glyphless Type0 font, one Form XObject per page, verified in a scratch document; quality Good ≥ 90 / Review 80–90 / Poor < 80; OCR panel with low-confidence rows (J/K, ring on the page); language manager with Keep available offline and local import; `ocr.apply` stores the words, replay never recognises again | done (Chromium-verified: 98% of words found, hit boxes within 2 pt, render pixel-identical, zero external requests, offline after keeping a pack; export verification re-reads every recognised word; a run recognises again the pages that changed under it) |
 | Compare two documents: page map, side by side or onion skin, changed areas, changed words, heat map, Changes panel, report PDF | analysis worker (pixelmatch + jsdiff) + P (render, text) | third stage view (3); auto / by index / best match; 100 or 150 dpi; rows in view diffed first; read-only, released when the view is left or a tab closes | done |
-| Digital signatures: status on open, Sign… on export | signature worker (pkijs + WebCrypto) + L (incremental update) | Intact / Intact but changed later / Changed after signing / Broken / Cannot check with the fixed honesty line; never "valid"; PAdES-B approval signature as the last export step; existing signatures stripped on rewrite and said so | done (no timestamps or LTV; DocMDP, encrypted outputs and legacy 3DES/RC2 PKCS#12 refused with the re-export command) |
+| Digital signatures: status on open, Sign… on export | signature worker (pkijs + WebCrypto) + L (incremental update) | Intact / Intact but changed later / Changed after signing / Broken / Cannot check with the fixed honesty line; never "valid"; PAdES-B approval signature as the last export step; existing signatures stripped on rewrite and said so | done (document timestamps checked, no LTV; later revisions read through the xref chain and the signed pages compared visually; DocMDP, encrypted outputs and legacy 3DES/RC2 PKCS#12 refused with the re-export command) |
 | PDF → Markdown / text | analysis worker | whole document, page or range; page breaks; running headers and footers dropped or kept; hyphens joined; images in a ZIP; preview with honesty notes; "OCR first" opens the OCR dialog | done (reading order is a heuristic; tables are not detected) |
-| Batch: saved recipes over many files | model (`recipe.ts`) + export service | OPFS recipes, import/export, five built-ins, plan review, per-file results with the export summary's notes, ZIP / files / folder delivery, two files at a time; recipes never store a password | done (the OCR step is defined in the model but not yet runnable; Markdown/text steps run) |
+| Batch: saved recipes over many files | model (`recipe.ts`) + export service | OPFS recipes, import/export, five built-ins, plan review, per-file results with the export summary's notes, ZIP / files / folder delivery, two files at a time; recipes never store a password | done (OCR and Markdown/text steps run; one file at a time while OCR is in the recipe; signed inputs are stripped and the notes say so) |
 
 Known behaviours and follow-ups from the workstreams:
 
-- Export verification does not check that an OCR'd output page yields its words
-  (`VerificationExpectation.ocrWords` in the spec); the layer is verified when written.
 - Engine OCR tests run in Chromium only; the spec asks for Firefox and WebKit too.
 - The language manager's switch means "on this device": the pack store cannot tell a pack
   kept offline from one cached on first use.
-- The batch OCR step waits for its runner wiring (recognizer lease and `ocr.apply` per
-  private source).
 - Pure OCR helpers are reachable only through the engine's main index; the UI mirrors the
   language-code table for display names.
+- Signature classification errs towards "Changed after signing" on nonconforming writers
+  (bytes outside any xref, ambiguous duplicate entries); a later revision that restores
+  the signed content byte for byte reads "Intact but changed later" with nothing listed.
+  Objects of later revisions in encrypted files compare as changed (no decryption).
+- The visual comparison of signed revisions renders every page once per signature at
+  50 dpi; bounded and cancellable, redundant for many-signature files.
+- Compare has no "the file as opened" side (spec §2.1); Esc in the Compare view first
+  clears a leftover page selection.
+- A resized page's OCR words are verified by text only at export (the visible-box origin is
+  not in the model); OCR words on a source redacted afterwards are covered by the
+  redaction self-check instead.
 
-Exit: the independent correctness review (engine and web, in progress) resolved with
-regression tests; docs and changesets current → **v1.2.0** once the owner merges `develop`
-into `main` and tags.
+Exit: two independent correctness reviews (engine: 1 blocker, 3 major, 6 minor; web: 1
+blocker, 4 major, 7 minor) and a second pass on the blocker fixes (1 blocker, 1 major, 3
+minor, plus one bypass found while fixing) resolved in six fix commits with regression
+tests and five new attack fixtures; docs and changesets current → **v1.2.0** once the owner
+merges `develop` into `main` and tags.
 
 ## M6 — Ecosystem  (→ v2)
 
