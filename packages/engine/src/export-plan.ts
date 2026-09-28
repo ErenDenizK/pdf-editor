@@ -37,7 +37,8 @@ import {
   type Workspace,
 } from '@pdf-editor/document-model';
 
-import type { VerificationExpectation } from './types';
+import { ENGINE_KIND } from './pdflib/created-field-kinds';
+import type { CreatedFieldExpectation, VerificationExpectation } from './types';
 import { type RedactionExportPlan, redactionExportPlan } from './redaction/export-hooks';
 
 /** The export's redaction check on the exact final bytes (see redaction/verify-output.ts). */
@@ -73,6 +74,11 @@ export interface ExportPlanOptions {
    * exports without a password even when the document has a policy.
    */
   readonly security?: SecurityPolicy | null;
+  /**
+   * Form fields are flattened on export (`AssemblyOptions.flattenForms`): the fields created
+   * in the app are not expected in the output.
+   */
+  readonly flattenForms?: boolean;
 }
 
 /** Whether a resized page's scaled content box lies inside the new page. */
@@ -102,6 +108,26 @@ function insideExpectation(
 ): { annotationsInsidePages?: readonly number[] } {
   const indices = pages.flatMap((page, i) => (contentFitsPage(ws, page) ? [i] : []));
   return indices.length > 0 ? { annotationsInsidePages: indices } : {};
+}
+
+/** Created form fields the output must contain (verified by name, kind and pages). */
+function createdFieldsExpectation(
+  doc: VirtualDocument,
+  flatten: boolean,
+): { createdFields?: readonly CreatedFieldExpectation[] } {
+  const fields = doc.fields ?? [];
+  if (flatten || fields.length === 0) return {};
+  const indexOf = new Map(doc.pages.map((p, i) => [p.id, i] as const));
+  return {
+    createdFields: fields.map((field) => ({
+      name: field.name,
+      kind: ENGINE_KIND[field.kind],
+      pageIndices: field.widgets.flatMap((w) => {
+        const index = indexOf.get(w.page);
+        return index === undefined ? [] : [index];
+      }),
+    })),
+  };
 }
 
 function redactionOf(ws: Workspace, doc: VirtualDocument): { redaction?: RedactionExportPlan } {
@@ -156,6 +182,7 @@ export function planExport(
       outlineTitles: outlineTitles(outline),
       pageLabels: labeled ? effectiveLabels(ws, doc) : null,
       ...insideExpectation(ws, doc.pages),
+      ...createdFieldsExpectation(doc, options.flattenForms === true),
       ...(password ? { password } : {}),
     },
   };

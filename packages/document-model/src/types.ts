@@ -408,8 +408,101 @@ export interface VirtualDocument {
    * range, before the page's own overlays. Pages added later inherit them.
    */
   readonly furniture?: readonly OverlayOp[];
+  /**
+   * Form fields created in this app (fields.ts), in tab order. They reference pages of this
+   * document and become AcroForm fields at export; source fields stay in their sources.
+   */
+  readonly fields?: readonly CreatedField[];
   /** Set when the user has not changed the document since it was opened or exported. */
   readonly clean: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Created form fields (document-level, materialized by the assembler at export)
+// ---------------------------------------------------------------------------
+
+export type FieldId = string & { readonly __brand: 'FieldId' };
+
+/**
+ * What a created field is: a text field (single or multi-line, optionally comb), a check
+ * box, a radio group (several widgets, one field), a dropdown (combo box), a list box, an
+ * unsigned signature field (a placeholder: this app does not sign) or a push button (label
+ * only; no actions).
+ */
+export type CreatedFieldKind =
+  | 'text'
+  | 'checkbox'
+  | 'radio'
+  | 'dropdown'
+  | 'listbox'
+  | 'signature'
+  | 'button';
+
+/** The small palette of field border and background colours (see FIELD_COLORS). */
+export type FieldColor =
+  | 'none'
+  | 'black'
+  | 'gray'
+  | 'blue'
+  | 'red'
+  | 'white'
+  | 'light-gray'
+  | 'light-blue'
+  | 'light-yellow';
+
+export type FieldAlign = 'left' | 'center' | 'right';
+
+/**
+ * Value of a created field: text and dropdown → string; checkbox → boolean; radio → the
+ * export value of the button that is on; list box → string, or every selected option when
+ * `multiSelect`.
+ */
+export type CreatedFieldValue = string | boolean | readonly string[];
+
+/** One on-page appearance of a created field. */
+export interface CreatedFieldWidget {
+  readonly page: PageId;
+  /** Widget rectangle in unrotated user space of the page's content (like annotations). */
+  readonly rect: Rect;
+  /** Radio buttons: the value the group takes when this button is on (unique in the group). */
+  readonly exportValue?: string;
+}
+
+export interface CreatedField {
+  readonly id: FieldId;
+  readonly kind: CreatedFieldKind;
+  /** Partial = fully-qualified name (no periods), unique among the document's created fields. */
+  readonly name: string;
+  /** Exactly one widget, except radio groups (one or more). */
+  readonly widgets: readonly CreatedFieldWidget[];
+  /** Alternate name (/TU), shown by viewers as a tooltip. */
+  readonly tooltip?: string;
+  /** Font size in points, or 'auto' (viewers fit the text to the widget). */
+  readonly fontSize: number | 'auto';
+  readonly border: FieldColor;
+  readonly background: FieldColor;
+  readonly required: boolean;
+  readonly readOnly: boolean;
+  /** Text alignment (/Q) of text, dropdown and list box fields. */
+  readonly align: FieldAlign;
+  /** Text: several lines. */
+  readonly multiline?: boolean;
+  /** Text: characters spread over `maxLength` equal cells (needs `maxLength`, single line). */
+  readonly comb?: boolean;
+  /** Text: /MaxLen. */
+  readonly maxLength?: number;
+  /** Dropdown and list box: the options (display text = export value), non-empty. */
+  readonly options?: readonly string[];
+  /** List box: several options may be selected. */
+  readonly multiSelect?: boolean;
+  /** Dropdown: free text allowed besides the options. */
+  readonly editable?: boolean;
+  /** Push button: its caption. */
+  readonly label?: string;
+  /** Value a form reset restores (/DV). */
+  readonly defaultValue?: CreatedFieldValue;
+  /** Current value (/V); filled in the app like source fields. */
+  readonly value?: CreatedFieldValue;
 }
 
 // ---------------------------------------------------------------------------
@@ -434,7 +527,12 @@ export interface EngineEdit {
     | 'redaction.apply'
     // In-place text edit (spec redaction-and-text-editing §2.5). Not invertible: its
     // inverse is a `text.edit` marked "replay required" (undo = reopen + replay).
-    | 'text.edit';
+    | 'text.edit'
+    // Image objects (M4 §3): a transform's inverse restores the previous matrix; remove
+    // and replace are not invertible (their inverse is marked "replay required").
+    | 'image.transform'
+    | 'image.remove'
+    | 'image.replace';
   readonly payload: unknown;
   readonly inverse?: EngineEdit;
 }

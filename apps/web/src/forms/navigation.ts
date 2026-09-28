@@ -8,6 +8,7 @@ import { useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useToolStore } from '../viewer/tool-store';
+import { useCreateStore } from './create/create-store';
 import {
   type ActiveField,
   type FieldStop,
@@ -18,7 +19,11 @@ import {
 
 function sameStop(a: ActiveField, b: ActiveField): boolean {
   return (
-    a.source === b.source && a.name === b.name && a.widget === b.widget && a.pageId === b.pageId
+    a.source === b.source &&
+    a.fieldId === b.fieldId &&
+    a.name === b.name &&
+    a.widget === b.widget &&
+    a.pageId === b.pageId
   );
 }
 
@@ -34,9 +39,12 @@ export function openField(stop: ActiveField): void {
   const ui = useUiStore.getState();
   if (ui.viewMode !== 'read') ui.setViewMode('read');
   useToolStore.getState().setMode('select');
+  // Filling a field leaves "Edit fields" (created fields fill instead of moving).
+  if (useCreateStore.getState().design) useCreateStore.getState().setDesign(false);
   const current = useFormStore.getState().active;
   useFormStore.getState().setActive({
-    source: stop.source,
+    ...(stop.source === undefined ? {} : { source: stop.source }),
+    ...(stop.fieldId === undefined ? {} : { fieldId: stop.fieldId }),
     name: stop.name,
     widget: stop.widget,
     pageId: stop.pageId,

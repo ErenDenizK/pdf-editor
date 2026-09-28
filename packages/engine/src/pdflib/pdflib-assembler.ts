@@ -100,6 +100,12 @@ import {
   pageOverlays,
 } from './overlay-layout';
 import { checkAnnotationConformance } from '../annotations/conformance';
+import {
+  addCreatedFields,
+  type CreatedFieldPage,
+  winAnsiText,
+  type WrittenField,
+} from './created-fields';
 import { finalizeAnnotations } from '../annotations/finalize';
 import { inspectSource } from './inspect';
 import { applyMetadata } from './metadata';
@@ -165,6 +171,16 @@ interface LoadedSource {
   readonly hasStructTree: boolean;
   readonly acroForm: PDFDict | undefined;
   readonly hasXfa: boolean;
+}
+
+/** Font of created form fields' /DA and appearances (Helvetica; see created-fields.ts). */
+const FIELD_FONT_SPEC: FontSpec = { family: 'Helvetica', size: 12 };
+
+/** What `reconcileAcroForm` needs to add the fields created in the app. */
+interface CreatedFieldsStep {
+  readonly flatten: boolean;
+  readonly helvetica: () => Promise<PDFFont>;
+  readonly fontFor: (text: string) => Promise<PDFFont>;
 }
 
 /** LINK_TAG value for a link whose destination cannot be resolved: dropped on rewrite. */
@@ -510,7 +526,16 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
     const pageIndexById = new Map<PageId, number>(placed.map((p, i) => [p.virtual.id, i]));
     writeOutline(out, vdoc.outline, placed, pageIndexById, counters, warnings);
     writePageLabels(out, vdoc.labels, placed.length);
-    const forms = reconcileAcroForm(out, placed, sources, vdoc, input.sourceNames, warnings);
+    // Field fonts load lazily: an export without created fields embeds nothing for them.
+    const fieldFont = async (spec: ResolvedFont) => (await overlayContext.fonts.get(spec)).font;
+    const forms = await reconcileAcroForm(out, placed, sources, vdoc, input.sourceNames, warnings, {
+      flatten: options.flattenForms === true,
+      helvetica: () => fieldFont(resolveFont(FIELD_FONT_SPEC)),
+      fontFor: (text) =>
+        fieldFont(
+          winAnsiText(text) ? resolveFont(FIELD_FONT_SPEC) : substituteFont(FIELD_FONT_SPEC),
+        ),
+    });
     const structureTreeRemoved = [...sources.values()].some((s) => s.hasStructTree);
     out.catalog.delete(N.StructTreeRoot);
     out.catalog.delete(N.MarkInfo);
@@ -558,6 +583,7 @@ export class PdfLibAssembler implements PdfAssembler, SourceInspector {
       linksDropped: counters.linksDropped,
       formFieldsRenamed: forms.renamed,
       formFieldsUnified: forms.unified,
+      ...(forms.created ? { createdFields: forms.created } : {}),
       structureTreeRemoved,
       xfaRemoved: forms.xfaRemoved,
       ...(metadataStripped ? { metadataStripped } : {}),
@@ -1701,14 +1727,20 @@ function mergeSameName(
  * /NeedAppearances is set (TODO(M2): regenerate appearances instead); JavaScript that
  * references fields by full name breaks after renaming; XFA is dropped.
  */
-function reconcileAcroForm(
+async function reconcileAcroForm(
   out: PDFDocument,
   placed: readonly PlacedPage[],
   sources: ReadonlyMap<SourceId, LoadedSource>,
   vdoc: VirtualDocument,
   sourceNames: ReadonlyMap<SourceId, string> | undefined,
   warnings: Warnings,
-): { renamed: { from: string; to: string }[]; unified: string[]; xfaRemoved: boolean } {
+  created: CreatedFieldsStep,
+): Promise<{
+  renamed: { from: string; to: string }[];
+  unified: string[];
+  xfaRemoved: boolean;
+  created?: readonly WrittenField[];
+}> {
   const { context } = out;
   const xfaRemoved = [...sources.values()].some((s) => s.hasXfa);
   const placedWidgets = new Set<string>();
@@ -1738,7 +1770,10 @@ function reconcileAcroForm(
   if (xfaRemoved) {
     warnings.add('XFA form data was removed; only the AcroForm fields were kept');
   }
-  if (rootsBySource.size === 0) return { renamed: [], unified: [], xfaRemoved };
+  const createdFields = vdoc.fields ?? [];
+  if (rootsBySource.size === 0 && createdFields.length === 0) {
+    return { renamed: [], unified: [], xfaRemoved };
+  }
 
   // Merge /DA, /DR (fonts by key) and /NeedAppearances from contributing sources.
   const acroForm = context.obj({});
@@ -1821,10 +1856,71 @@ function reconcileAcroForm(
       warnings.add('Fields with equal names were joined and now share the first file’s value');
     }
   }
-  if (merge.needAppearances) acroForm.set(N.NeedAppearances, context.obj(true));
-  acroForm.set(N.Fields, context.obj(fields));
+  const fieldList = context.obj(fields);
+  acroForm.set(N.Fields, fieldList);
   out.catalog.set(N.AcroForm, context.register(acroForm));
-  return { renamed: merge.renamed, unified: [...merge.unified], xfaRemoved };
+
+  // Fields created in the app (created-fields.ts), after the source fields: their names
+  // meet the merged source names at the root.
+  let written: readonly WrittenField[] | undefined;
+  if (createdFields.length > 0) {
+    const pages = new Map<PageId, CreatedFieldPage>();
+    placed.forEach((entry, index) => {
+      pages.set(entry.virtual.id, {
+        page: entry.page,
+        index,
+        rotation: entry.rotation,
+        ...(entry.resize ? { matrix: entry.resize.matrix } : {}),
+      });
+    });
+    const root = arrayContainer(fieldList);
+    const result = await addCreatedFields({
+      out,
+      fields: createdFields,
+      pages,
+      policy: vdoc.formMergePolicy,
+      fontFor: created.fontFor,
+      helvetica: created.helvetica,
+      warn: (message) => warnings.add(message),
+      flatten: created.flatten,
+      join: (target, createdRef, name) => {
+        unifyTerminal(merge, root, target, createdRef, name);
+        const at = fieldList.indexOf(createdRef);
+        if (at !== undefined && at >= 0) fieldList.remove(at);
+        context.delete(createdRef);
+        return true;
+      },
+    });
+    merge.renamed.push(...result.renamed);
+    if (result.unified.length > 0) {
+      warnings.add('Fields with equal names were joined and now share the first file’s value');
+    }
+    if (result.skipped > 0) {
+      warnings.add('Some created form fields are on pages that are not exported and were left out');
+    }
+    written = result.written;
+  }
+  if (merge.needAppearances) acroForm.set(N.NeedAppearances, context.obj(true));
+  return {
+    renamed: merge.renamed,
+    unified: [...merge.unified],
+    xfaRemoved,
+    ...(written ? { created: written } : {}),
+  };
+}
+
+/** A FieldContainer over the output's /Fields array. */
+function arrayContainer(array: PDFArray): FieldContainer {
+  return {
+    parent: undefined,
+    refs: () => array.asArray().filter((k): k is PDFRef => k instanceof PDFRef),
+    add: (ref) => array.push(ref),
+    replace: (old, next) => {
+      for (let i = 0; i < array.size(); i++) {
+        if (array.get(i) === old) array.set(i, next);
+      }
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

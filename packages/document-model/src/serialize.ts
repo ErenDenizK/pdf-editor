@@ -4,6 +4,7 @@
  * Input is validated field by field and rebuilt, so unknown properties are dropped.
  */
 import { DocumentModelError } from './errors';
+import { CREATED_FIELD_KINDS, FIELD_ALIGNS, FIELD_COLOR_KEYS } from './fields';
 import { checkWorkspaceInvariants } from './invariants';
 import { PAGE_LABEL_STYLES } from './labels';
 import { RESIZE_MODES, resizeProblem } from './resize';
@@ -11,11 +12,15 @@ import type {
   Anchor,
   BatesConfig,
   BlobId,
+  CreatedField,
+  CreatedFieldValue,
+  CreatedFieldWidget,
   Destination,
   DestinationView,
   DocumentId,
   DocumentMetadata,
   EngineEdit,
+  FieldId,
   FontSpec,
   FormMergePolicy,
   OutlineNode,
@@ -528,7 +533,51 @@ function readDocument(value: unknown, path: string): VirtualDocument {
     ...opt(o, 'furniture', path, (v, p) =>
       arr(v, p).map((overlay, i) => readOverlay(overlay, `${p}[${i}]`)),
     ),
+    ...opt(o, 'fields', path, (v, p) => arr(v, p).map((f, i) => readField(f, `${p}[${i}]`))),
     clean: bool(o.clean, `${path}.clean`),
+  };
+}
+
+function readFieldValue(value: unknown, path: string): CreatedFieldValue {
+  if (typeof value === 'string' || typeof value === 'boolean') return value;
+  return arr(value, path).map((v, i) => str(v, `${path}[${i}]`));
+}
+
+function readFieldWidget(value: unknown, path: string): CreatedFieldWidget {
+  const o = obj(value, path);
+  return {
+    page: nonEmpty(o.page, `${path}.page`) as PageId,
+    rect: readRect(o.rect, `${path}.rect`),
+    ...opt(o, 'exportValue', path, str),
+  };
+}
+
+/** A created form field; semantic checks (options, values, names) run in the invariants. */
+function readField(value: unknown, path: string): CreatedField {
+  const o = obj(value, path);
+  return {
+    id: nonEmpty(o.id, `${path}.id`) as FieldId,
+    kind: oneOf(o.kind, CREATED_FIELD_KINDS, `${path}.kind`),
+    name: str(o.name, `${path}.name`),
+    widgets: arr(o.widgets, `${path}.widgets`).map((w, i) =>
+      readFieldWidget(w, `${path}.widgets[${i}]`),
+    ),
+    ...opt(o, 'tooltip', path, str),
+    fontSize: o.fontSize === 'auto' ? 'auto' : num(o.fontSize, `${path}.fontSize`),
+    border: oneOf(o.border, FIELD_COLOR_KEYS, `${path}.border`),
+    background: oneOf(o.background, FIELD_COLOR_KEYS, `${path}.background`),
+    required: bool(o.required, `${path}.required`),
+    readOnly: bool(o.readOnly, `${path}.readOnly`),
+    align: oneOf(o.align, FIELD_ALIGNS, `${path}.align`),
+    ...opt(o, 'multiline', path, bool),
+    ...opt(o, 'comb', path, bool),
+    ...opt(o, 'maxLength', path, int),
+    ...opt(o, 'options', path, (v, p) => arr(v, p).map((x, i) => str(x, `${p}[${i}]`))),
+    ...opt(o, 'multiSelect', path, bool),
+    ...opt(o, 'editable', path, bool),
+    ...opt(o, 'label', path, str),
+    ...opt(o, 'defaultValue', path, readFieldValue),
+    ...opt(o, 'value', path, readFieldValue),
   };
 }
 
@@ -540,6 +589,9 @@ const EDIT_KINDS: readonly EngineEdit['kind'][] = [
   'redaction.mark',
   'redaction.apply',
   'text.edit',
+  'image.transform',
+  'image.remove',
+  'image.replace',
 ];
 
 function readEdit(value: unknown, path: string, depth = 0): EngineEdit {

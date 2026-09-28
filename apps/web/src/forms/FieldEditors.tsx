@@ -15,7 +15,7 @@ import { type CSSProperties, type KeyboardEvent, useEffect, useId, useRef, useSt
 
 import { m } from '../i18n';
 import type { Box, PageFrame } from '../viewer/geometry';
-import { type FieldValue, fieldLabel, fillField } from './actions';
+import { commitFieldValue, type FieldValue, fieldLabel } from './actions';
 import { type ActiveField, useFormStore } from './form-store';
 import styles from './FormLayer.module.css';
 import { moveField } from './navigation';
@@ -93,13 +93,17 @@ function useCommit(here: ActiveField, original: FieldValue, current: () => Field
     done.current = true;
     const value = current();
     if (JSON.stringify(value ?? null) !== JSON.stringify(original ?? null)) {
-      void fillField(here.source, here.name, value);
+      void commitFieldValue(here, value);
     }
   };
   const revert = () => {
     done.current = true;
     const store = useFormStore.getState();
-    if (store.active?.name === here.name && store.active.pageId === here.pageId) {
+    if (
+      store.active?.name === here.name &&
+      store.active.fieldId === here.fieldId &&
+      store.active.pageId === here.pageId
+    ) {
       store.setActive(null);
     }
   };
@@ -108,6 +112,7 @@ function useCommit(here: ActiveField, original: FieldValue, current: () => Field
     const store = useFormStore.getState();
     if (
       store.active?.name === here.name &&
+      store.active.fieldId === here.fieldId &&
       store.active.pageId === here.pageId &&
       store.active.widget === here.widget
     ) {

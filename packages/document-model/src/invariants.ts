@@ -4,6 +4,7 @@
  */
 import { DocumentModelError } from './errors';
 import { isPositiveFinite, isRotation, lookup } from './internal';
+import { documentFieldProblems } from './fields';
 import { PAGE_LABEL_STYLES } from './labels';
 import { walkOutline } from './outline';
 import { resizeProblem } from './resize';
@@ -42,6 +43,7 @@ export function checkWorkspaceInvariants(ws: Workspace): string[] {
   }
 
   const owner = new Map<PageId, DocumentId>();
+  const fieldOwner = new Map<string, DocumentId>();
   for (const [key, doc] of Object.entries<VirtualDocument>(ws.documents)) {
     if (doc.id !== key) report(`document record key ${key} holds document ${doc.id}`);
     const where = `document ${key}`;
@@ -86,6 +88,16 @@ export function checkWorkspaceInvariants(ws: Workspace): string[] {
         report(`${where}: outline "${node.title}" is unresolved although its page is present`);
       }
     });
+
+    // Created form fields: unique names and ids, valid properties, widgets on own pages.
+    for (const problem of documentFieldProblems(ws, doc)) report(problem);
+    for (const field of doc.fields ?? []) {
+      const previous = fieldOwner.get(field.id);
+      if (previous !== undefined && previous !== doc.id) {
+        report(`field ${field.id} appears in ${previous} and ${key}`);
+      }
+      fieldOwner.set(field.id, doc.id);
+    }
 
     let previousStart = -1;
     for (const range of doc.labels) {

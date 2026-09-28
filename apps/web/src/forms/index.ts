@@ -14,13 +14,17 @@ import { useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useToolStore } from '../viewer/tool-store';
 import { clearAllFields } from './actions';
+import { clearCreatedFields } from './create/field-actions';
 import { documentSources, useFormStore } from './form-store';
+import { CreatedFieldLayer, registerCreateFieldCommands } from './create';
 import { FormLayer } from './FormLayer';
 
 export { clearAllFields, fieldLabel, fillField } from './actions';
 export { useFormStore } from './form-store';
 
 registerPageOverlay(FormLayer);
+// Created fields draw above the source fields' targets (forms/create).
+registerPageOverlay(CreatedFieldLayer);
 
 const close = () => {
   if (useFormStore.getState().active !== null) useFormStore.getState().setActive(null);
@@ -38,18 +42,27 @@ useWorkspaceStore.subscribe((state, previous) => {
 
 const activeDocument = () => getActiveDocument(useWorkspaceStore.getState().workspace);
 
-/** Clears every field of the active document's sources (one history entry). */
+let clears = 0;
+
+/**
+ * Clears every field of the active document: its sources' fields (engine edits) and the
+ * fields created in the app (model), as one history entry.
+ */
 export async function clearActiveForm(): Promise<number> {
   const doc = activeDocument();
   if (!doc) return 0;
   close();
-  const count = await clearAllFields(documentSources(doc));
-  if (count === 0) announce(m.forms_nothing_to_clear());
+  const key = `forms-clear-${++clears}`;
+  const engine = await clearAllFields(documentSources(doc), key);
+  const created = clearCreatedFields(doc.id, engine > 0 ? key : undefined);
+  const count = engine + created;
+  announce(count === 0 ? m.forms_nothing_to_clear() : m.forms_cleared({ count }));
   return count;
 }
 
 export function registerFormCommands(registry: CommandRegistry): () => void {
   const disposers = [
+    registerCreateFieldCommands(registry),
     registry.register({
       id: 'view.show.forms',
       title: m.cmd_show_forms(),

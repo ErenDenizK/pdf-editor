@@ -32,12 +32,14 @@ import {
   shiftLabelsForRemoval,
   sliceLabels,
 } from './labels';
+import { fieldsWithin, joinFields, pruneFields, withDocumentFields } from './fields';
 import { pruneOutline, restrictOutline, wrapOutline } from './outline';
 import { assertResize, type ResizeRequest, resizeForPage, resizeProblem } from './resize';
 import { pageDisplaySize } from './selectors';
 import type {
   BatesConfig,
   BlobId,
+  CreatedField,
   DocumentId,
   OutlineNode,
   OverlayOp,
@@ -64,20 +66,26 @@ export const DEFAULT_PAGE_SIZE: Size = { width: 595.28, height: 841.89 };
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Rebuilds a document after its page list changed; prunes/restores outline targets. */
+/**
+ * Rebuilds a document after its page list changed; prunes/restores outline targets and
+ * drops created form fields whose pages left (fields.ts; undo restores them).
+ */
 function withPages(
   doc: VirtualDocument,
   pages: readonly VirtualPage[],
   labels: readonly PageLabelRange[],
 ): VirtualDocument {
   const live = new Set(pages.map((p) => p.id));
-  return {
-    ...doc,
-    pages,
-    labels: pages.length === 0 ? [] : labels,
-    outline: pruneOutline(doc.outline, live),
-    clean: false,
-  };
+  return withDocumentFields(
+    {
+      ...doc,
+      pages,
+      labels: pages.length === 0 ? [] : labels,
+      outline: pruneOutline(doc.outline, live),
+      clean: false,
+    },
+    pruneFields(doc.fields, live),
+  );
 }
 
 function groupByDocument(located: readonly LocatedPage[]): Map<DocumentId, Set<number>> {
@@ -221,6 +229,9 @@ export function movePages(
   const updated: VirtualDocument[] = [];
   let targetPages = targetDoc.pages;
   let targetLabels = targetDoc.labels;
+  // Created form fields whose widgets all move follow their pages into the target.
+  let adopted = targetDoc.fields;
+  const movedIds = new Set(moved.map((p) => p.id));
   for (const [docId, removed] of groupByDocument(located)) {
     const doc = requireDocument(ws, docId);
     const pages = doc.pages.filter((_, i) => !removed.has(i));
@@ -229,13 +240,14 @@ export function movePages(
       targetPages = pages;
       targetLabels = labels;
     } else {
+      adopted = joinFields(adopted, fieldsWithin(doc, movedIds));
       updated.push(withPages(doc, pages, labels));
     }
   }
   const finalPages = insertAt(targetPages, insertIndex, moved);
   if (updated.length === 0 && sameElements(finalPages, targetDoc.pages)) return ws;
   const finalLabels = shiftLabelsForInsertion(targetLabels, insertIndex, moved.length);
-  updated.push(withPages(targetDoc, finalPages, finalLabels));
+  updated.push(withPages(withDocumentFields(targetDoc, adopted), finalPages, finalLabels));
   return withWorkspace(ws, { documents: putDocuments(ws.documents, updated) });
 }
 
@@ -254,7 +266,9 @@ export function deletePages(ws: Workspace, pageIds: readonly PageId[]): Workspac
 /**
  * Duplicates pages with fresh ids and the same reference, rotation, crop, resize and
  * overlays. Without a target each copy goes right after its original; with a target all
- * copies are inserted there in relative order.
+ * copies are inserted there in relative order. Created form fields stay on the original
+ * pages (copies get none: field names must stay unique, and ADR-0005 leaves the policy
+ * for duplicated widgets open).
  */
 export function duplicatePages(
   ws: Workspace,
@@ -609,16 +623,20 @@ export function interleave(
     a.labels.length > 0 ||
     b.labels.length > 0 ||
     [a, b].some((doc) => effectiveLabels(ws, doc).some((label, i) => label !== String(i + 1)));
-  const doc: VirtualDocument = {
-    ...a,
-    id: ids.document(),
-    title,
-    pages,
-    outline: pruneOutline([...a.outline, ...b.outline], new Set(pages.map((p) => p.id))),
-    labels:
-      hadLabels && pages.length > 0 ? [{ startIndex: 0, style: 'decimal', firstNumber: 1 }] : [],
-    clean: false,
-  };
+  const live = new Set(pages.map((p) => p.id));
+  const doc: VirtualDocument = withDocumentFields(
+    {
+      ...a,
+      id: ids.document(),
+      title,
+      pages,
+      outline: pruneOutline([...a.outline, ...b.outline], live),
+      labels:
+        hadLabels && pages.length > 0 ? [{ startIndex: 0, style: 'decimal', firstNumber: 1 }] : [],
+      clean: false,
+    },
+    pruneFields(joinFields(a.fields, b.fields), live),
+  );
   return replaceDocumentsInOrder(ws, [a.id, b.id], [doc], a.id);
 }
 
@@ -754,22 +772,33 @@ export function splitDocument(
     const pages = doc.pages.slice(start, end);
     const pageSet = new Set(pages.map((p) => p.id));
     const outline = restrictOutline(doc.outline, pageSet, k === 0 && !hasLeftovers);
-    return {
-      ...doc,
-      id: ids.document(),
-      title: titleOf(k),
-      pages,
-      labels: sliceLabels(doc.labels, start, end),
-      outline: pruneOutline(outline, pageSet),
-      clean: false,
-    };
+    return withDocumentFields(
+      {
+        ...doc,
+        id: ids.document(),
+        title: titleOf(k),
+        pages,
+        labels: sliceLabels(doc.labels, start, end),
+        outline: pruneOutline(outline, pageSet),
+        clean: false,
+      },
+      // A field belongs to the part with its first widget (ids stay unique).
+      pruneFields(
+        doc.fields?.filter((f) => pageSet.has(f.widgets[0]?.page as PageId)),
+        pageSet,
+      ),
+    );
   });
 
   if (!hasLeftovers) return replaceDocumentsInOrder(ws, [doc.id], newDocs, doc.id);
 
   const remaining = doc.pages.filter((_, i) => !covered.has(i));
+  const remainingIds = new Set(remaining.map((p) => p.id));
   const rest = withPages(
-    doc,
+    withDocumentFields(
+      doc,
+      doc.fields?.filter((f) => remainingIds.has(f.widgets[0]?.page as PageId)),
+    ),
     remaining,
     shiftLabelsForRemoval(doc.labels, covered, remaining.length),
   );
@@ -824,16 +853,26 @@ export function mergeDocuments(
       offset += d.pages.length;
     }
   }
-  const merged: VirtualDocument = {
-    ...first,
-    id: ids.document(),
-    title,
-    pages,
-    // Nodes that went unresolved when pages left one input may point into another.
-    outline: pruneOutline(outline, new Set(pages.map((p) => p.id))),
-    labels,
-    clean: false,
-  };
+  const live = new Set(pages.map((p) => p.id));
+  const merged: VirtualDocument = withDocumentFields(
+    {
+      ...first,
+      id: ids.document(),
+      title,
+      pages,
+      // Nodes that went unresolved when pages left one input may point into another.
+      outline: pruneOutline(outline, live),
+      labels,
+      clean: false,
+    },
+    pruneFields(
+      docs.reduce<readonly CreatedField[] | undefined>(
+        (all, d) => joinFields(all, d.fields),
+        undefined,
+      ),
+      live,
+    ),
+  );
   return replaceDocumentsInOrder(
     ws,
     docs.map((d) => d.id),

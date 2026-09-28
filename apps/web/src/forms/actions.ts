@@ -11,7 +11,8 @@ import type { FormField } from '@pdf-editor/engine';
 
 import { type ActionResult, executeEdit, runAction } from '../annotations/edit-runner';
 import { m } from '../i18n';
-import { announce } from '../shell/announcer';
+import { fillCreatedField } from './create/field-actions';
+import type { ActiveField } from './form-store';
 
 export type FieldValue = FormField['value'];
 
@@ -59,6 +60,16 @@ export async function fillField(
   }
 }
 
+/**
+ * Commits a value typed or picked in a field editor: created fields (forms/create) are
+ * model operations, source fields engine edits. Resolves to whether a change was committed.
+ */
+export async function commitFieldValue(here: ActiveField, value: FieldValue): Promise<boolean> {
+  if (here.fieldId !== undefined) return fillCreatedField(here.fieldId, value);
+  if (here.source === undefined) return false;
+  return fillField(here.source, here.name, value);
+}
+
 /** The value that empties a field (`{ value: undefined }`: a radio group with none on). */
 export function emptyValue(field: FormField): { readonly value: FieldValue } | undefined {
   switch (field.kind) {
@@ -84,9 +95,13 @@ function isEmpty(field: FormField): boolean {
 
 /**
  * Empties every fillable field of the given sources as one history entry ("Clear all
- * fields"). Resolves to the number of fields cleared.
+ * fields"). Resolves to the number of fields cleared. With `coalesceKey`, a model entry
+ * pushed right after with the same key (created fields) joins this one.
  */
-export async function clearAllFields(sources: readonly SourceId[]): Promise<number> {
+export async function clearAllFields(
+  sources: readonly SourceId[],
+  coalesceKey?: string,
+): Promise<number> {
   try {
     const count = await runAction(async (ctx): Promise<ActionResult<number> | undefined> => {
       const edits: EngineEdit[] = [];
@@ -100,8 +115,12 @@ export async function clearAllFields(sources: readonly SourceId[]): Promise<numb
       }
       if (edits.length === 0) return undefined;
       const label = m.forms_clear_all_label();
-      announce(m.forms_cleared({ count: edits.length }));
-      return { edits, label, value: edits.length };
+      return {
+        edits,
+        label,
+        value: edits.length,
+        ...(coalesceKey === undefined ? {} : { coalesceKey }),
+      };
     });
     return count ?? 0;
   } catch (error) {

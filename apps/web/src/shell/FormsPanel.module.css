@@ -230,3 +230,53 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Field creation (forms/create): the placing hint and tab-order buttons of created rows. */
+.hint {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 18px;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.row > .item {
+  flex: 1;
+  min-width: 0;
+}
+
+.order {
+  display: grid;
+  flex: none;
+  gap: 2px;
+  padding-top: 4px;
+}
+
+.orderButton {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+}
+
+.orderButton svg {
+  width: 14px;
+  height: 14px;
+}
+
+.orderButton:disabled {
+  color: var(--text-disabled);
+}
+
+@media (hover: hover) {
+  .orderButton:not(:disabled):hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}

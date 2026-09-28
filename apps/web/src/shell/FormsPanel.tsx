@@ -10,10 +10,18 @@
  * XFA honesty: a source with /XFA and AcroForm widgets fills through the AcroForm (a
  * badge explains that export removes the XFA part); one without widgets shows that no
  * browser engine can edit it, and the form layer has nothing to offer.
+ *
+ * Field creation (M4, forms/create): "Add field" picks a kind to place on a page; "Edit
+ * fields" makes created fields selectable (a row then selects its field) and shows their
+ * tab-order buttons. Created fields list after the source fields of their page, tagged.
  */
-import type { SourceId, VirtualDocument } from '@pdf-editor/document-model';
+import { Menu } from '@base-ui/react/menu';
+import type { CreatedFieldKind, VirtualDocument } from '@pdf-editor/document-model';
 import type { FormField, FormFieldKind } from '@pdf-editor/engine';
 import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
   CircleDot,
   CircleHelp,
   Eraser,
@@ -22,8 +30,10 @@ import {
   type LucideIcon,
   MousePointerClick,
   PenLine,
+  Plus,
   SquareCheck,
   SquareChevronDown,
+  SquareDashedMousePointer,
   TextCursorInput,
   TriangleAlert,
 } from 'lucide-react';
@@ -31,6 +41,8 @@ import { useEffect, useId } from 'react';
 
 import { clearActiveForm } from '../forms';
 import { fieldLabel } from '../forms/actions';
+import { FIELD_KINDS, kindName, setDesign, startPlacing, useCreateStore } from '../forms/create';
+import { stepTabOrder } from '../forms/create/field-actions';
 import {
   documentSources,
   type FieldStop,
@@ -44,6 +56,7 @@ import { useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 import { useActiveDocument, useWorkspaceStore } from '../state/workspace-store';
 import { Tooltip } from '../ui/Tooltip';
+import menuStyles from '../ui/Menu.module.css';
 import { EmptyNote } from './EmptyNote';
 import styles from './FormsPanel.module.css';
 
@@ -56,6 +69,16 @@ const ICONS: Record<FormFieldKind, LucideIcon> = {
   button: MousePointerClick,
   signature: PenLine,
   unknown: CircleHelp,
+};
+
+const CREATE_ICONS: Record<CreatedFieldKind, LucideIcon> = {
+  text: TextCursorInput,
+  checkbox: SquareCheck,
+  radio: CircleDot,
+  dropdown: SquareChevronDown,
+  listbox: List,
+  signature: PenLine,
+  button: MousePointerClick,
 };
 
 export function FormsPanel() {
@@ -111,7 +134,11 @@ function FormList({ doc }: { readonly doc: VirtualDocument }) {
   for (const stop of stops) {
     if (
       !rows.some(
-        (r) => r.source === stop.source && r.name === stop.name && r.pageId === stop.pageId,
+        (r) =>
+          r.source === stop.source &&
+          r.fieldId === stop.fieldId &&
+          r.name === stop.name &&
+          r.pageId === stop.pageId,
       )
     ) {
       rows.push(stop);
@@ -123,7 +150,7 @@ function FormList({ doc }: { readonly doc: VirtualDocument }) {
 
   return (
     <>
-      <Toolbar sources={ids} fillable={rows.some((r) => isFillable(r.field))} />
+      <Toolbar fillable={rows.some((r) => isFillable(r.field))} hasPages={doc.pages.length > 0} />
       {xfaWithFields.length > 0 ? <XfaBadge /> : null}
       {xfaOnly.length > 0 ? (
         <p className={styles.warning} role="note">
@@ -146,19 +173,71 @@ function FormList({ doc }: { readonly doc: VirtualDocument }) {
   );
 }
 
+function AddFieldMenu({ disabled }: { readonly disabled: boolean }) {
+  const placing = useCreateStore((s) => s.placing);
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        className={styles.button}
+        disabled={disabled}
+        aria-pressed={placing !== null}
+        data-add-field=""
+      >
+        <Plus aria-hidden="true" />
+        {m.forms_add_field()}
+        <ChevronDown aria-hidden="true" />
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner side="bottom" align="start" sideOffset={4} collisionPadding={8}>
+          <Menu.Popup className={menuStyles.popup}>
+            {FIELD_KINDS.map((kind) => {
+              const Icon = CREATE_ICONS[kind];
+              return (
+                <Menu.Item
+                  key={kind}
+                  className={menuStyles.item}
+                  data-add-kind={kind}
+                  onClick={() => startPlacing(kind)}
+                >
+                  <Icon aria-hidden="true" width={14} height={14} />
+                  <span className={menuStyles.label}>{kindName(kind)}</span>
+                </Menu.Item>
+              );
+            })}
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
+}
+
 function Toolbar({
-  sources,
   fillable,
+  hasPages,
 }: {
-  readonly sources: readonly SourceId[];
   readonly fillable: boolean;
+  readonly hasPages: boolean;
 }) {
   const highlight = useFormStore((s) => s.highlight);
   const flatten = useFormStore((s) => s.flattenOnExport);
+  const design = useCreateStore((s) => s.design);
+  const placing = useCreateStore((s) => s.placing);
   const id = useId();
   return (
     <div className={styles.toolbar} data-annotation-keep="">
       <div className={styles.buttons}>
+        <AddFieldMenu disabled={!hasPages} />
+        <button
+          type="button"
+          className={styles.button}
+          aria-pressed={design}
+          disabled={!hasPages}
+          data-edit-fields=""
+          onClick={() => setDesign(!design)}
+        >
+          <SquareDashedMousePointer aria-hidden="true" />
+          {m.forms_design()}
+        </button>
         <button
           type="button"
           className={styles.button}
@@ -171,7 +250,7 @@ function Toolbar({
         <button
           type="button"
           className={styles.button}
-          disabled={!fillable || sources.length === 0}
+          disabled={!fillable}
           onClick={() => void clearActiveForm()}
         >
           <Eraser aria-hidden="true" />
@@ -187,6 +266,11 @@ function Toolbar({
         />
         {m.forms_flatten_on_export()}
       </label>
+      {placing !== null ? (
+        <p className={styles.hint} role="status">
+          {m.forms_create_placing({ kind: kindName(placing) })}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -219,7 +303,15 @@ function FieldRows({
     if (last?.pageId === row.pageId) last.rows.push(row);
     else pages.push({ position: row.position, pageId: row.pageId, rows: [row] });
   }
+  const design = useCreateStore((s) => s.design);
+  const selected = useCreateStore((s) => s.selected);
   const open = (row: FieldStop) => {
+    if (design && row.fieldId !== undefined) {
+      // Edit fields: a created field's row selects it on its page.
+      useCreateStore.getState().select({ fieldId: row.fieldId, widget: row.widget });
+      useViewStore.getState().scrollToPage(row.pageId);
+      return;
+    }
     if (isFillable(row.field)) {
       openField(row);
       return;
@@ -237,13 +329,23 @@ function FieldRows({
         >
           <h3 className={styles.pageTitle}>{m.comments_page({ page: page.position + 1 })}</h3>
           <ul className={styles.list}>
-            {page.rows.map((row) => {
+            {page.rows.map((row, index) => {
               const Icon = ICONS[row.field.kind];
               const value = valueText(row.field);
               const label = fieldLabel(row.field);
-              const current = activeName === row.name && activePage === row.pageId;
+              const current =
+                row.fieldId !== undefined && design
+                  ? selected?.fieldId === row.fieldId
+                  : activeName === row.name && activePage === row.pageId;
+              const createdOnPage = page.rows.filter((r) => r.fieldId !== undefined);
+              const createdIndex = createdOnPage.indexOf(row);
               return (
-                <li key={`${row.source}:${row.name}`}>
+                <li
+                  key={`${row.source ?? row.fieldId}:${row.name}`}
+                  className={styles.row}
+                  data-created-row={row.fieldId === undefined ? undefined : row.name}
+                  data-index={index}
+                >
                   <button
                     type="button"
                     className={styles.item}
@@ -267,12 +369,41 @@ function FieldRows({
                         {row.field.readOnly ? (
                           <span className={styles.tag}>{m.forms_read_only_tag()}</span>
                         ) : null}
+                        {row.fieldId !== undefined ? (
+                          <span className={styles.tag}>{m.forms_created_tag()}</span>
+                        ) : null}
                       </span>
                       <span className={styles.value} data-empty={value.empty || undefined}>
-                        {value.text}
+                        {row.fieldId !== undefined && row.field.kind === 'signature'
+                          ? m.forms_signature_placeholder()
+                          : value.text}
                       </span>
                     </span>
                   </button>
+                  {design && row.fieldId !== undefined ? (
+                    <span className={styles.order}>
+                      <button
+                        type="button"
+                        className={styles.orderButton}
+                        aria-label={m.forms_tab_earlier({ name: label })}
+                        title={m.forms_tab_earlier({ name: label })}
+                        disabled={createdIndex <= 0}
+                        onClick={() => row.fieldId && stepTabOrder(row.fieldId, -1)}
+                      >
+                        <ArrowUp aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.orderButton}
+                        aria-label={m.forms_tab_later({ name: label })}
+                        title={m.forms_tab_later({ name: label })}
+                        disabled={createdIndex < 0 || createdIndex >= createdOnPage.length - 1}
+                        onClick={() => row.fieldId && stepTabOrder(row.fieldId, 1)}
+                      >
+                        <ArrowDown aria-hidden="true" />
+                      </button>
+                    </span>
+                  ) : null}
                 </li>
               );
             })}

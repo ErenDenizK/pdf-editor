@@ -12,21 +12,26 @@
  * like annotation rects (`annotationRectToUser`), rotated pages included, so the layer
  * maps them through the page frame with no correction.
  */
-import type { PageId, SourceId, VirtualDocument } from '@pdf-editor/document-model';
+import type { FieldId, PageId, SourceId, VirtualDocument } from '@pdf-editor/document-model';
 import type { FormField, FormFieldWidget } from '@pdf-editor/engine';
 import { create } from 'zustand';
 
 import { engineContext, onPagesChanged } from '../annotations/edit-runner';
 import { getEngineService } from '../engine/engine-service';
+import { asFormField } from './create/field-model';
 
 interface SourceEntry {
   readonly fields: readonly FormField[];
   readonly loaded: boolean;
 }
 
-/** One widget of a field, placed in the active document. */
+/**
+ * One widget of a field, placed in the active document: a source field (`source`) or a
+ * field created in the app (`fieldId`, forms/create), which the model holds.
+ */
 export interface FieldStop {
-  readonly source: SourceId;
+  readonly source?: SourceId;
+  readonly fieldId?: FieldId;
   readonly name: string;
   /** Index into `field.widgets`. */
   readonly widget: number;
@@ -36,9 +41,10 @@ export interface FieldStop {
   readonly field: FormField;
 }
 
-/** The field widget whose editor (or focus) is active. */
+/** The field widget whose editor (or focus) is active (source or created field). */
 export interface ActiveField {
-  readonly source: SourceId;
+  readonly source?: SourceId;
+  readonly fieldId?: FieldId;
   readonly name: string;
   readonly widget: number;
   readonly pageId: PageId;
@@ -130,7 +136,8 @@ export function documentSources(doc: VirtualDocument): SourceId[] {
 /**
  * Every widget shown by the document, in document order: page by page, and within a page
  * top to bottom, then left to right (reading order of the form). Pages shown twice list
- * their widgets twice.
+ * their widgets twice. Fields created in the app follow a page's source fields, in their
+ * own tab order (`VirtualDocument.fields`).
  */
 export function fieldStops(
   doc: VirtualDocument,
@@ -138,7 +145,25 @@ export function fieldStops(
 ): FieldStop[] {
   const stops: FieldStop[] = [];
   doc.pages.forEach((page, position) => {
-    if (page.ref.kind !== 'source') return;
+    const created = () => {
+      for (const field of doc.fields ?? []) {
+        field.widgets.forEach((w, widget) => {
+          if (w.page !== page.id) return;
+          stops.push({
+            fieldId: field.id,
+            name: field.name,
+            widget,
+            pageId: page.id,
+            position,
+            field: asFormField(field, position),
+          });
+        });
+      }
+    };
+    if (page.ref.kind !== 'source') {
+      created();
+      return;
+    }
     const { source, index } = page.ref;
     const onPage: (FieldStop & { top: number; left: number })[] = [];
     for (const field of sources[source]?.fields ?? []) {
@@ -159,6 +184,7 @@ export function fieldStops(
     // Rows: widgets whose tops are within 4 pt read left to right.
     onPage.sort((a, b) => (Math.abs(a.top - b.top) > 4 ? b.top - a.top : a.left - b.left));
     for (const { top: _top, left: _left, ...stop } of onPage) stops.push(stop);
+    created();
   });
   return stops;
 }

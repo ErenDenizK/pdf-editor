@@ -1,0 +1,333 @@
+/*
+ * Created form fields (forms/create): a page overlay over the form layer. PDFium does not
+ * know these fields, so the layer draws them the way the export's appearance streams do:
+ * the page is never themed, so field colours are the document's (the model's small
+ * palette, inline), not design tokens. Chrome around them (selection, handles, the
+ * placement preview) uses the accent.
+ */
+.layer {
+  z-index: 2;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.layer[data-design],
+.layer[data-placing] {
+  pointer-events: auto;
+}
+
+.layer[data-placing] {
+  cursor: crosshair;
+}
+
+/* The drawn field, upright on the displayed page. */
+.look {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  color: #000000;
+  font-family: Helvetica, Arial, 'Liberation Sans', sans-serif;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.lookText {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: pre;
+}
+
+.lookText[data-multiline] {
+  align-items: flex-start;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comb {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-items: center;
+  text-align: center;
+}
+
+.lookList {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.lookOption {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* pdf-lib highlights selected list options in this blue; the export matches it. */
+.lookOption[data-selected] {
+  background: rgb(153 193 218);
+}
+
+.lookSvg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Design mode: a selectable, draggable target over each created widget. */
+.design {
+  position: absolute;
+  border-radius: 1px;
+  outline: 1px dashed rgb(124 140 255 / 0.7);
+  outline-offset: 0;
+  cursor: move;
+  pointer-events: auto;
+}
+
+.design[aria-pressed='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.design:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border: 1px solid var(--accent);
+  border-radius: 1px;
+  background: #ffffff;
+  pointer-events: auto;
+}
+
+.handle[data-handle='n'],
+.handle[data-handle='s'] {
+  cursor: ns-resize;
+}
+
+.handle[data-handle='e'],
+.handle[data-handle='w'] {
+  cursor: ew-resize;
+}
+
+.handle[data-handle='ne'],
+.handle[data-handle='sw'] {
+  cursor: nesw-resize;
+}
+
+.handle[data-handle='nw'],
+.handle[data-handle='se'] {
+  cursor: nwse-resize;
+}
+
+.propertiesButton {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-1);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  pointer-events: auto;
+}
+
+.propertiesButton svg {
+  width: 14px;
+  height: 14px;
+}
+
+.preview {
+  position: absolute;
+  border: 1px dashed var(--accent);
+  background: var(--accent-muted);
+  pointer-events: none;
+}
+
+/* Properties popover. */
+.popup {
+  display: grid;
+  gap: var(--space-3);
+  width: min(300px, calc(100vw - 16px));
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+.title {
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+.row {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.label {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-1);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.textarea {
+  min-height: 72px;
+  padding: var(--space-1) var(--space-2);
+  resize: vertical;
+}
+
+.input[aria-invalid='true'],
+.textarea[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.error {
+  color: var(--danger);
+  font-size: var(--text-xs);
+}
+
+.note {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 16px;
+}
+
+.warning {
+  color: var(--warning);
+  font-size: var(--text-xs);
+  line-height: 16px;
+}
+
+.checks {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.check input {
+  accent-color: var(--accent);
+}
+
+.inline {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.inline > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.segmented {
+  display: flex;
+  gap: 2px;
+}
+
+.segment {
+  flex: 1;
+  height: var(--control-height);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+}
+
+.segment[aria-checked='true'] {
+  border-color: rgb(124 140 255 / 0.45);
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.swatch {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-1);
+}
+
+.swatch[aria-checked='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* "None": a diagonal strike on the page white. */
+.swatch[data-none] {
+  background: linear-gradient(135deg, #ffffff 45%, var(--danger) 45% 55%, #ffffff 55%);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-hairline);
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+}
+
+.action svg {
+  width: 14px;
+  height: 14px;
+}
+
+.action[data-danger] {
+  color: var(--danger);
+}
+
+@media (hover: hover) {
+  .action:hover,
+  .segment:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}

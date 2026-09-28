@@ -11,3 +11,4 @@ export * from './serialize';
 export * from './invariants';
 export * from './metadata';
 export * from './resize';
+export * from './fields';

@@ -52,6 +52,7 @@ import { namedStampAppearance } from '../annotations/stamp-appearance';
 import {
   type Annotation,
   type AnnotationFinalizeRequest,
+  type CreatedFieldExpectation,
   EngineError,
   type EngineCallOptions,
   type EngineOutlineNode,
@@ -1419,6 +1420,10 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
           );
         }
       }
+      if (expectation.createdFields && expectation.createdFields.length > 0) {
+        const listed = await this.listFormFields(scratchId, options);
+        problems.push(...createdFieldProblems(listed, expectation.createdFields));
+      }
       if (expectation.annotationCounts) {
         for (const [key, expected] of Object.entries(expectation.annotationCounts)) {
           const pageIndex = Number(key);
@@ -1632,6 +1637,41 @@ function describeField(refs: readonly WidgetRef[]): FormField {
     ...(kind === 'combobox' && has(PDF_FORM_FIELD_FLAG.CHOICE_EDIT) ? { editable: true } : {}),
     widgets,
   };
+}
+
+/**
+ * Created form fields missing from `listed`: each expected field must be listed under its
+ * name, or a name the form merge policy derived from it (`name_2`, …), with its kind and a
+ * widget on every expected page.
+ */
+export function createdFieldProblems(
+  listed: readonly FormField[],
+  expected: readonly CreatedFieldExpectation[],
+): string[] {
+  const problems: string[] = [];
+  for (const want of expected) {
+    const prefix = `${want.name}_`;
+    const candidates = listed.filter(
+      (f) =>
+        f.name === want.name ||
+        (f.name.startsWith(prefix) && /^\d+$/.test(f.name.slice(prefix.length))),
+    );
+    const found = candidates.find(
+      (f) =>
+        f.kind === want.kind &&
+        want.pageIndices.every((page) =>
+          (f.widgets ?? [{ pageIndex: f.pageIndex }]).some((w) => w.pageIndex === page),
+        ),
+    );
+    if (found) continue;
+    const pages = want.pageIndices.map((p) => p + 1).join(', ');
+    problems.push(
+      candidates.length === 0
+        ? `Created form field "${want.name}" is missing`
+        : `Created form field "${want.name}" is not a ${want.kind} field with widgets on page ${pages}`,
+    );
+  }
+  return problems;
 }
 
 function flattenTitles(nodes: readonly EngineOutlineNode[], into: string[] = []): string[] {

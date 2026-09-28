@@ -24,13 +24,13 @@ import { type Box, type PageFrame, userRectToCss } from '../viewer/geometry';
 import { pageFrame } from '../viewer/page-frame';
 import { useToolStore } from '../viewer/tool-store';
 import { Tooltip } from '../ui/Tooltip';
-import { fieldLabel, fillField } from './actions';
+import { commitFieldValue, fieldLabel } from './actions';
 import { ChoiceEditor, TextEditor } from './FieldEditors';
 import { type ActiveField, useFormStore, useSourceFields, widgetsOf } from './form-store';
 import styles from './FormLayer.module.css';
 import { moveField } from './navigation';
 
-interface PlacedWidget {
+export interface PlacedWidget {
   readonly field: FormField;
   readonly widget: number;
   readonly box: Box;
@@ -78,7 +78,11 @@ export function FormLayer(props: PageOverlayProps) {
           pageId,
         };
         const isActive =
-          live && active !== null && active.name === p.field.name && active.widget === p.widget;
+          live &&
+          active !== null &&
+          active.fieldId === undefined &&
+          active.name === p.field.name &&
+          active.widget === p.widget;
         return (
           <FieldWidget
             key={`${p.field.name}#${p.widget}`}
@@ -96,18 +100,26 @@ export function FormLayer(props: PageOverlayProps) {
 
 FormLayer.displayName = 'FormLayer';
 
-function FieldWidget({
+/**
+ * The hit target (or, when active, the editor) of one widget. Shared with the created
+ * fields' layer (forms/create), which passes `here.fieldId` and `placeholder` for its
+ * unsigned signature fields.
+ */
+export function FieldWidget({
   placed,
   frame,
   here,
   active,
   live,
+  placeholder = false,
 }: {
   readonly placed: PlacedWidget;
   readonly frame: PageFrame;
   readonly here: ActiveField;
   readonly active: boolean;
   readonly live: boolean;
+  /** A signature placeholder created in the app: the notice says the app does not sign. */
+  readonly placeholder?: boolean;
 }) {
   const { field, box } = placed;
   const ref = useRef<HTMLButtonElement>(null);
@@ -170,7 +182,7 @@ function FieldWidget({
           aria-readonly={field.readOnly || undefined}
           aria-required={field.required || undefined}
           onClick={() => {
-            if (!field.readOnly) void fillField(here.source, field.name, !on);
+            if (!field.readOnly) void commitFieldValue(here, !on);
           }}
         />
       );
@@ -186,7 +198,7 @@ function FieldWidget({
           aria-disabled={field.readOnly || undefined}
           onClick={() => {
             if (!field.readOnly && !on && placed.exportValue !== undefined) {
-              void fillField(here.source, field.name, placed.exportValue);
+              void commitFieldValue(here, placed.exportValue);
             }
           }}
         />
@@ -212,7 +224,7 @@ function FieldWidget({
             aria-expanded={notice}
             onClick={() => setNotice((v) => !v)}
           />
-          {notice ? <SignatureNotice field={field} box={box} /> : null}
+          {notice ? <SignatureNotice field={field} box={box} placeholder={placeholder} /> : null}
         </>
       );
     default:
@@ -229,8 +241,16 @@ function FieldWidget({
   }
 }
 
-function SignatureNotice({ field, box }: { readonly field: FormField; readonly box: Box }) {
-  const signature = field.signature;
+function SignatureNotice({
+  field,
+  box,
+  placeholder,
+}: {
+  readonly field: FormField;
+  readonly box: Box;
+  readonly placeholder: boolean;
+}) {
+  const signature = placeholder ? undefined : field.signature;
   return (
     <div
       role="note"
@@ -251,7 +271,9 @@ function SignatureNotice({ field, box }: { readonly field: FormField; readonly b
           </span>
         </>
       ) : (
-        <div className={styles.noticeMeta}>{m.forms_signature_unsigned()}</div>
+        <div className={styles.noticeMeta}>
+          {placeholder ? m.forms_signature_placeholder_note() : m.forms_signature_unsigned()}
+        </div>
       )}
     </div>
   );
