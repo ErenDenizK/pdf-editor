@@ -153,6 +153,22 @@ hits within 2 pt) and pdf.js then glued most words: **keep one text object per w
 (Tesseract's own layout) and accept the line-end effect on skewed pages. PDFium's case-insensitive
 search folds `istanbul`/`ISTANBUL` to `İstanbul` but not `ışık` to `Işık` (a search-UI note).
 
+**Measured again for the M5 review (2026-09-28, `layer.test.ts` "hit rects within 2 pt of the
+manifest boxes").** The table above compares hits with Tesseract's boxes; against the manifest's
+ink boxes the row-band geometry (origin on the descender line, size = row height) put PDFium's
+search hit rects up to 3.73 pt (`scan-rotated`), 4.78 pt (`scan-turkish`) and 4.77 pt
+(`scan-foreign-ocr`) from the ink (medians 3.07, 0.91, 2.99 pt; 11 of 29, 15 of 23 and 11 of 57
+words within 2 pt): the hit covers the whole row band, so a word without ascenders or
+descenders is off by the band's extra height. The layer now writes each word as the rectangle along its line's angle whose
+bounds are its ink box (`geometry.ts` `inkGeometry`); the font's `/Ascent 1000 /Descent -1`
+and the glyph box 0…1 em make PDFium's boxes that rectangle. Hit rects vs manifest boxes, max
+(median): `scan-rotated` 1.10 (0.77) pt, `scan-turkish` 1.03 (0.63), `scan-foreign-ocr` 1.04
+(0.66), every word within 2 pt; no ink box sticks out of its hit by more than 0.21 pt (search
+rects are whole device pixels, which is most of the remaining difference). The skewed page of
+`scan-text.pdf`: median 0.73 pt, 38 of 40 within 2 pt (the two others are words whose
+Tesseract box took in a dust speck). Layer verification stays green on all four scans (every
+word found as a whole word within 2 pt of its written box, renders pixel-identical).
+
 ## 5. Licences (for `NOTICE`)
 
 Core submodules at tag v7.0.0 (`acffef2b`), licence files read at the pinned commits; presence

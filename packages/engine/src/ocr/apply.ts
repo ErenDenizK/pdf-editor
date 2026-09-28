@@ -3,7 +3,8 @@
  * pattern of ADR-0011 §3): the caller saves the source as it is; foreign invisible text is
  * removed through the raw API in a private scratch document when the plan asks for it; the
  * layer is added with pdf-lib; the result is verified on fresh scratch copies (every word
- * where it was written, the 150 dpi render pixel-identical to the input). Fails closed:
+ * where it was written, no invisible text left that was to be removed, the 150 dpi render of
+ * every planned page pixel-identical to the input). Fails closed:
  * `EngineError('internal')` with the problems, never unverified bytes.
  */
 import { runTask } from '../pdfium/task-bridge';
@@ -16,7 +17,7 @@ import {
 } from '../types';
 import { writeOcrLayer } from './layer';
 import { removeInvisibleText } from './raw';
-import { verifyOcrLayer } from './verify';
+import { type OcrRemovalOutcome, verifyOcrLayer } from './verify';
 
 /** The part of `HostedEngine` the pipeline uses (the redaction pipeline's). */
 export type OcrHost = RedactionHost;
@@ -53,7 +54,7 @@ export async function applyOcrLayerToBytes(
   const scratchOptions = signal ? { signal } : {};
   let bytes = new Uint8Array(input.slice(0));
   let invisibleTextObjects = 0;
-  const removalProblems: string[] = [];
+  const removal: OcrRemovalOutcome[] = [];
   if (plan.replace === 'all-invisible') {
     const scratch = await openScratch(host, bytes, scratchOptions);
     try {
@@ -65,11 +66,7 @@ export async function applyOcrLayerToBytes(
       );
       for (const { pageIndex, removed, remaining } of outcome) {
         invisibleTextObjects += removed;
-        if (remaining > 0) {
-          removalProblems.push(
-            `Page ${pageIndex + 1}: ${remaining} invisible character(s) could not be removed`,
-          );
-        }
+        removal.push({ pageIndex, remaining });
       }
       if (invisibleTextObjects > 0) {
         bytes = new Uint8Array(
@@ -90,18 +87,13 @@ export async function applyOcrLayerToBytes(
   try {
     const after = await openScratch(host, written.bytes, scratchOptions);
     try {
-      verification = await verifyOcrLayer(before, after, plan);
+      // Leftovers of the removal fail the check like a missing word (fails closed).
+      verification = await verifyOcrLayer(before, after, plan, { removal });
     } finally {
       await after.close();
     }
   } finally {
     await before.close();
-  }
-  if (removalProblems.length > 0) {
-    verification = {
-      ...verification,
-      problems: [...removalProblems, ...verification.problems],
-    };
   }
   if (!verification.ok) {
     throw new OcrLayerFailedError(

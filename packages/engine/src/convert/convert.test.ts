@@ -2,7 +2,7 @@
  * PDF → Markdown / text (spec §4): the golden of markdown-source.pdf (test/fixtures), reading
  * order on the two-column page, and one test per heuristic on synthetic runs.
  */
-import { unzipSync } from 'fflate';
+import { unzipSync, zipSync } from 'fflate';
 import type { Rect } from '@pdf-editor/document-model';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
@@ -12,7 +12,7 @@ import { createLocalAnalysisBackend } from '../analysis/backend';
 import { sid } from '../../test/helpers';
 import { createImageHarness, type ImageHarness } from '../image-objects/test-helpers';
 import type { ConvertPageInput, Glyph, TextRun } from '../types';
-import { convertPages } from './convert';
+import { convertPages, zipModifiedTime } from './convert';
 import { convertDocument, pdfiumConvertSource } from './pipeline';
 
 interface MarkdownExpect {
@@ -294,5 +294,99 @@ describe('heuristics', () => {
       },
     );
     expect(result.text).toBe('First line\n\nSecond line\n');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ZIP timestamps in every time zone (M5 review finding 4)
+// ---------------------------------------------------------------------------
+
+/** Local-field getters fflate reads to write an entry's MS-DOS date and time. */
+const LOCAL_GETTERS = ['FullYear', 'Month', 'Date', 'Hours', 'Minutes', 'Seconds'] as const;
+
+/**
+ * Runs `fn` as if the browser were in a zone `offset` minutes behind UTC (`getTimezoneOffset`
+ * sign). Vitest browser mode cannot set `TZ`, so the local getters are redirected for the
+ * duration: each reads the UTC field of the instant shifted by the offset, which is what the
+ * local field is in such a zone, and `getTimezoneOffset` returns the offset. Only these are
+ * replaced, and they are restored afterwards.
+ */
+async function inTimeZone<T>(offset: number, fn: () => T | Promise<T>): Promise<T> {
+  const proto = Date.prototype as unknown as Record<string, (this: Date) => number>;
+  const names = [...LOCAL_GETTERS.map((name) => `get${name}`), 'getTimezoneOffset'];
+  const saved = names.map((name) => [name, proto[name]!] as const);
+  for (const name of LOCAL_GETTERS) {
+    const utc = proto[`getUTC${name}`]!;
+    proto[`get${name}`] = function (this: Date) {
+      return utc.call(new Date(this.getTime() - offset * 60_000));
+    };
+  }
+  proto.getTimezoneOffset = () => offset;
+  try {
+    return await fn();
+  } finally {
+    for (const [name, getter] of saved) proto[name] = getter;
+  }
+}
+
+/** MS-DOS date and time of the first local file header (offsets 10 and 12). */
+function firstEntryStamp(zip: Uint8Array): { date: string; time: string } {
+  const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  expect(view.getUint32(0, true)).toBe(0x04034b50);
+  const time = view.getUint16(10, true);
+  const date = view.getUint16(12, true);
+  const two = (n: number) => String(n).padStart(2, '0');
+  return {
+    date: `${(date >> 9) + 1980}-${two((date >> 5) & 15)}-${two(date & 31)}`,
+    time: `${two(time >> 11)}:${two((time >> 5) & 63)}:${two((time & 31) * 2)}`,
+  };
+}
+
+describe('ZIP timestamps', () => {
+  // New York (+300), Hawaii (+600), Baker Island (+720), UTC, Tokyo (−540), Kiribati (−840).
+  const OFFSETS = [300, 600, 720, 0, -540, -840];
+
+  test('the fixed time is 1980-01-01 12:00 local in zones on both sides of UTC', () => {
+    for (const offset of OFFSETS) {
+      const local = new Date(zipModifiedTime(offset).getTime() - offset * 60_000);
+      expect(local.toISOString()).toBe('1980-01-01T12:00:00.000Z');
+    }
+    // The runner's own zone: the default offset gives the same wall-clock time.
+    const here = zipModifiedTime();
+    expect([here.getFullYear(), here.getMonth(), here.getDate(), here.getHours()]).toEqual([
+      1980, 0, 1, 12,
+    ]);
+  });
+
+  test('fflate writes the same entry stamp in every zone; the old UTC midnight threw behind UTC', async () => {
+    const entries = { 'a.txt': new TextEncoder().encode('a') };
+    for (const offset of OFFSETS) {
+      const stamp = await inTimeZone(offset, () =>
+        firstEntryStamp(zipSync(entries, { mtime: zipModifiedTime(offset) })),
+      );
+      expect(stamp).toEqual({ date: '1980-01-01', time: '12:00:00' });
+    }
+    // What the review found: 1980-01-01T00:00Z is 1979-12-31 in New York.
+    await expect(
+      inTimeZone(300, () => zipSync(entries, { mtime: new Date('1980-01-01T00:00:00Z') })),
+    ).rejects.toThrow(/date not in range/);
+  });
+
+  test('a Markdown export with an image zips in a zone behind UTC', async () => {
+    const rgba = { width: 2, height: 2, data: new Uint8Array(16).fill(200) };
+    const input = page([run('Text beside a picture.', 72, 700)], {
+      images: [{ rect: { x: 72, y: 500, width: 100, height: 100 }, rgba }],
+    });
+    for (const offset of [300, -540]) {
+      // `ConvertSession.finish` reads the zone's offset itself (the default of
+      // `zipModifiedTime`), inside the simulated zone.
+      const result = await inTimeZone(offset, () => convertPages([input]));
+      expect(result.zip).toBeDefined();
+      expect(firstEntryStamp(result.zip!)).toEqual({ date: '1980-01-01', time: '12:00:00' });
+      expect(Object.keys(unzipSync(result.zip!)).sort()).toEqual([
+        'document.md',
+        'images/p1-1.png',
+      ]);
+    }
   });
 });

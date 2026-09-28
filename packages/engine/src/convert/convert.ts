@@ -70,6 +70,23 @@ function encodeImage(image: ConvertImageInput): StoredImage['file'] {
 
 const pad3 = (n: number) => String(n).padStart(3, '0');
 
+/**
+ * The fixed modification time of every ZIP entry: the instant whose wall-clock time is
+ * 1980-01-01 12:00 in a zone `timezoneOffset` minutes behind UTC (`Date#getTimezoneOffset`'s
+ * sign: 300 in New York, −540 in Tokyo). fflate writes an entry's MS-DOS date from the
+ * *local* fields of `mtime` and throws below 1980, so a UTC instant (the earlier
+ * `1980-01-01T00:00:00Z`) is 1979-12-31 19:00 in New York and every export with images threw
+ * there. Noon on the first day of the range is inside it for every offset (−14 h … +12 h),
+ * and the stamp is the same bytes in every zone, so the ZIP stays reproducible. The offset is
+ * a parameter because a test cannot change the browser's time zone (Vitest browser mode has
+ * no `TZ`): the tests pass both signs and check the local fields fflate reads.
+ */
+export function zipModifiedTime(
+  timezoneOffset = new Date(1980, 0, 1, 12).getTimezoneOffset(),
+): Date {
+  return new Date(Date.UTC(1980, 0, 1, 12) + timezoneOffset * 60_000);
+}
+
 export class ConvertSession {
   private readonly pages = new Map<number, StoredPage>();
 
@@ -220,7 +237,7 @@ export class ConvertSession {
       const entries: Zippable = {};
       for (const f of files)
         entries[f.path] = [f.bytes, { level: f.mime.startsWith('text/') ? 6 : 0 }];
-      zip = zipSync(entries, { mtime: new Date('1980-01-01T00:00:00Z') });
+      zip = zipSync(entries, { mtime: zipModifiedTime() });
     }
     slicer.done('convert: files');
     const report: ConvertReport = {

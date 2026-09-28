@@ -1,9 +1,11 @@
 /**
- * Verification of a written layer (spec §1.2–§1.3) on private scratch documents: every
- * planned word must come back from PDFium's page text in its place (within 2 pt of the box
- * it was written to, on every edge), and a render at 150 dpi of every OCR'd page must be
- * pixel-identical to the same page before (the layer is invisible, content and images
- * untouched).
+ * Verification of a written layer (spec §1.2–§1.3) on private scratch documents. It fails
+ * closed: `ok` only when every planned word comes back from PDFium's page text as a whole
+ * word in its place (within 2 pt of the box it was written to, on every edge), no invisible
+ * text the plan asked to remove is left, and a render at 150 dpi of every page the run touched
+ * (every planned page, including one with no new words whose content `removeInvisibleText`
+ * regenerated or whose earlier layer was dropped) is pixel-identical to the same page before
+ * (the layer is invisible, content and images untouched).
  */
 import type { Rect } from '@pdf-editor/document-model';
 
@@ -55,30 +57,53 @@ function union(rects: readonly Rect[]): Rect | undefined {
   return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
 
+/** Letters, marks and digits: what a word may not continue into on either side. */
+const WORD_START = /^[\p{L}\p{M}\p{N}]/u;
+const WORD_END = /[\p{L}\p{M}\p{N}]$/u;
+
 /**
  * Finds `words` in order in a page's characters (a word PDFium placed elsewhere, e.g. at the
- * end of a skewed line, is looked for from the start of the page). Returns, per word, the
- * union of its characters' boxes, or undefined when the word is not there.
+ * end of a skewed line, is looked for from the start of the page). A match is a whole word:
+ * it starts and ends on character boundaries, and where the word begins (ends) with a letter,
+ * mark or digit, the page text before (after) it is not one, so "in" is not found inside
+ * "within" (the layer writes a space after every word but the page's last; PDFium replaces
+ * that space by a generated line break at a line end). Returns, per word, the union of its
+ * characters' boxes, or undefined when the word is not there.
  */
 export function locateWords(
   chars: readonly PageChar[],
   words: readonly string[],
 ): (Rect | undefined)[] {
-  const text = chars.map((c) => c.text).join('');
+  // A generated character PDFium gives no text (the line break it puts where a line's
+  // trailing space was) still separates words: it reads as a line break here, or the last
+  // word of a line would run into the first of the next.
+  const texts = chars.map((c) => (c.text === '' && !c.rect ? '\n' : c.text));
+  const text = texts.join('');
   // Offsets of each character in `text` (a character can be two UTF-16 units).
   const starts: number[] = [];
   let offset = 0;
-  for (const c of chars) {
+  for (const t of texts) {
     starts.push(offset);
-    offset += c.text.length;
+    offset += t.length;
   }
   const charAt = new Map(starts.map((s, i) => [s, i]));
+  const boundary = (at: number) => at === text.length || charAt.has(at);
   const used = new Set<number>();
   let cursor = 0;
   return words.map((word) => {
+    const wordStart = WORD_START.test(word);
+    const wordEnd = WORD_END.test(word);
+    // Two UTF-16 units on each side hold the neighbouring code point (the regexps are `u`).
+    const whole = (at: number): boolean => {
+      const end = at + word.length;
+      if (!charAt.has(at) || !boundary(end)) return false;
+      if (wordStart && WORD_END.test(text.slice(Math.max(0, at - 2), at))) return false;
+      if (wordEnd && WORD_START.test(text.slice(end, end + 2))) return false;
+      return true;
+    };
     const find = (from: number): number => {
-      let at = text.indexOf(word, from);
-      while (at !== -1 && (used.has(at) || !charAt.has(at))) at = text.indexOf(word, at + 1);
+      let at = word === '' ? -1 : text.indexOf(word, from);
+      while (at !== -1 && (used.has(at) || !whole(at))) at = text.indexOf(word, at + 1);
       return at;
     };
     let at = find(cursor);
@@ -124,22 +149,51 @@ async function pixelsDiffering(
   return differing;
 }
 
-/** Checks the layer written from `plan` (`after`) against the source it was written to. */
+/** What `removeInvisibleText` left on a page (`replace: 'all-invisible'`). */
+export interface OcrRemovalOutcome {
+  readonly pageIndex: number;
+  /** Invisible characters still on the page after the removal (must be 0). */
+  readonly remaining: number;
+}
+
+export interface VerifyOcrLayerOptions {
+  /** The removal outcome per page, when the plan asked for `all-invisible`. */
+  readonly removal?: readonly OcrRemovalOutcome[];
+}
+
+/**
+ * Checks the layer written from `plan` (`after`) against the source it was written to
+ * (`before`). Every planned page is rendered on both sides, with or without new words: a
+ * page whose words were all dropped may still have had its content regenerated
+ * (`all-invisible`) or its earlier layer removed (`ours`).
+ */
 export async function verifyOcrLayer(
   before: ScratchDocument,
   after: ScratchDocument,
   plan: OcrLayerPlan,
+  options: VerifyOcrLayerOptions = {},
 ): Promise<OcrLayerVerification> {
   const pages: OcrLayerPageCheck[] = [];
   const problems: string[] = [];
+  let removalLeft = false;
+  for (const { pageIndex, remaining } of options.removal ?? []) {
+    if (remaining > 0) {
+      removalLeft = true;
+      problems.push(
+        `Page ${pageIndex + 1}: ${remaining} invisible character(s) could not be removed`,
+      );
+    }
+  }
   for (const planned of plan.pages) {
     const { pageIndex } = planned;
     const words = planned.words.filter(writableWord);
-    if (words.length === 0) continue;
-    const located = locateWords(
-      await after.chars(pageIndex),
-      words.map((w) => w.text),
-    );
+    const located =
+      words.length === 0
+        ? []
+        : locateWords(
+            await after.chars(pageIndex),
+            words.map((w) => w.text),
+          );
     let found = 0;
     let within = 0;
     let worst = 0;
@@ -181,6 +235,8 @@ export async function verifyOcrLayer(
       problems.push(`Page ${pageIndex + 1}: the render changed (${differing} pixels at 150 dpi)`);
     }
   }
-  const ok = pages.every((p) => p.found === p.words && p.pixelsDiffering === 0);
+  const ok =
+    !removalLeft &&
+    pages.every((p) => p.found === p.words && p.within2pt === p.found && p.pixelsDiffering === 0);
   return { ok, pages, problems };
 }

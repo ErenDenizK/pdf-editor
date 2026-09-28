@@ -26,6 +26,7 @@ import {
   wordAccuracy,
 } from './test-helpers';
 import { encodePgm } from './pgm';
+import { layerWordRect } from './verify';
 import type { OcrPageResult, OcrRaster } from '../types';
 import type { PdfiumProxy } from '../worker/pdfium-proxy';
 
@@ -145,12 +146,20 @@ describe('recognition of the scan fixtures', () => {
         expect(percentile(deviations, 0.5)).toBeLessThan(1);
         expect(deviations.filter((d) => d <= 2).length / deviations.length).toBeGreaterThan(0.85);
       }
-      // Words carry their line and a consistent layer geometry.
+      // Words carry their line and a consistent layer geometry: the layer box of every word
+      // is its ink box (geometry.ts `inkGeometry`), turned by its line's angle; only a flat
+      // mark (a dash, below the 1 pt minimum size) gets a slightly taller box.
       for (const word of result.words) {
         expect(word.line).toBeGreaterThanOrEqual(0);
         expect(word.line).toBeLessThan(result.lines.length);
         expect(word.lowConfidence).toBe(word.confidence < 90);
-        expect(word.fontSize).toBeGreaterThan(8);
+        expect(word.angle).toBe(result.lines[word.line]!.angle);
+        expect(word.fontSize).toBeGreaterThanOrEqual(1);
+        const layer = layerWordRect(word);
+        expect(overhang(word.rect, layer), word.text).toBeLessThan(0.01);
+        expect(edgeDistance(layer, word.rect), word.text).toBeLessThan(
+          word.fontSize === 1 ? 1 : 0.01,
+        );
       }
     });
     numbers[`${file} @${dpi}`] = summary;

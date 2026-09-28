@@ -3,8 +3,11 @@
  * research 07 §4): page facts before and after, the layer written from real recognition of
  * `scan-text.pdf`, found by PDFium search and read back by pdf.js, the page render unchanged,
  * undo marked "replay required", replay byte-identical, and a re-run with `replace: 'ours'`
- * swapping the layer instead of stacking a second one. Also: the embedded glyphless font is
- * the pinned file.
+ * swapping the layer instead of stacking a second one. The same layer on `scan-rotated.pdf`
+ * (`/Rotate 90`) and `scan-turkish.pdf` (every Turkish letter found by PDFium search),
+ * `replace: 'all-invisible'` swapping `scan-foreign-ocr.pdf`'s foreign layer for ours, and
+ * spec §1.5's "hit rects within 2 pt of the manifest boxes". Also: the embedded glyphless
+ * font is the pinned file.
  */
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import pdfjsWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
@@ -13,13 +16,27 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import lock from '../../ocr/langs.lock.json';
 import { applyEngineEditWithResult } from '../edits/apply';
 import { isReplayRequired } from '../edits/text-edit';
-import type { OcrPageResult, SearchHit } from '../types';
+import type { OcrLayerPlan, OcrPageResult, SearchHit } from '../types';
 import type { PdfiumProxy } from '../worker/pdfium-proxy';
 import { ocrApplyEdit } from './edit';
 import { GLYPHLESS_FONT_SHA256, glyphlessFontBytes } from './glyphless-font';
 import { sha256Hex } from './packs';
 import { createOcrRecognizer } from './recognizer';
-import { createProxy, fixtureBytes, normalizeWord, OCR_BASE, sid, truth } from './test-helpers';
+import {
+  boxRect,
+  createProxy,
+  edgeDistance,
+  fixtureBytes,
+  normalizeWord,
+  OCR_BASE,
+  overhang,
+  percentile,
+  type ScanName,
+  sid,
+  truth,
+  wordAccuracy,
+} from './test-helpers';
+import { layerWordRect } from './verify';
 
 let engine: PdfiumProxy;
 const recognizer = createOcrRecognizer({ baseUrl: OCR_BASE, poolSize: 1 });
@@ -206,4 +223,184 @@ describe('the ocr.apply edit', () => {
     expect((await hitsOn(id, word, 0)).length).toBe(hitsBefore);
     await engine.close(sid(id));
   }, 120_000);
+});
+
+/** Recognitions of the other scans, once per file (300 dpi, the manifest's languages). */
+const recognised = new Map<ScanName, Promise<OcrPageResult[]>>();
+
+function recognise(file: ScanName): Promise<OcrPageResult[]> {
+  let pending = recognised.get(file);
+  if (!pending) {
+    pending = (async () => {
+      const id = sid(`layer-recognize-${file}`);
+      await engine.open(id, await fixtureBytes(file));
+      try {
+        const expected = truth(file);
+        const out: OcrPageResult[] = [];
+        for (const page of expected.pages) {
+          const raster = await engine.renderForOcr(id, page.page - 1, { dpi: 300 });
+          out.push(await recognizer.recognize(raster, page.page - 1, expected.languages));
+        }
+        return out;
+      } finally {
+        await engine.close(id);
+      }
+    })();
+    recognised.set(file, pending);
+  }
+  return pending;
+}
+
+/** Opens `file` as `id`, applies its recognition with `replace`, and checks the result. */
+async function applyScan(
+  file: ScanName,
+  id: string,
+  replace: OcrLayerPlan['replace'],
+): Promise<{
+  pages: OcrPageResult[];
+  removed: { ourLayers: number; invisibleTextObjects: number };
+}> {
+  const pages = file === 'scan-text.pdf' ? results : await recognise(file);
+  await engine.open(sid(id), await fixtureBytes(file));
+  const before = await Promise.all(pages.map((p) => pixels(id, p.pageIndex)));
+  const done = await applyEngineEditWithResult(
+    engine,
+    ocrApplyEdit(`ocr-${id}`, sid(id), { pages, replace }),
+  );
+  const ocr = done.ocr;
+  if (!ocr) throw new Error('ocr.apply returned no layer result');
+  expect(ocr.verification.ok).toBe(true);
+  expect(ocr.verification.problems).toEqual([]);
+  for (const check of ocr.verification.pages) {
+    expect(check.found).toBe(check.words);
+    expect(check.within2pt).toBe(check.found);
+    expect(check.pixelsDiffering).toBe(0);
+  }
+  // Independently of the layer's own check: the render is unchanged.
+  for (const [i, page] of pages.entries()) {
+    expect(differing(await pixels(id, page.pageIndex), before[i]!)).toBe(0);
+  }
+  return { pages, removed: ocr.removed };
+}
+
+describe('the layer on other scans', () => {
+  test('scan-rotated.pdf (/Rotate 90): verified, our layer, words found by search', async () => {
+    const id = 'layer-rotated';
+    const { pages } = await applyScan('scan-rotated.pdf', id, 'none');
+    const facts = await engine.ocrPageFacts(sid(id));
+    expect(facts[0]).toMatchObject({ visibleText: false, invisibleText: 'ours', ourLayer: true });
+    const words = searchableWords(pages[0]!);
+    let found = 0;
+    for (const word of words) if ((await hitsOn(id, word, 0)).length > 0) found++;
+    expect(found / words.length).toBeGreaterThanOrEqual(0.98);
+    await engine.close(sid(id));
+  }, 120_000);
+
+  test('scan-turkish.pdf: verified, and every Turkish letter is in some search hit', async () => {
+    const id = 'layer-turkish';
+    const { pages } = await applyScan('scan-turkish.pdf', id, 'none');
+    const words = searchableWords(pages[0]!);
+    const hitWords: string[] = [];
+    for (const word of words) if ((await hitsOn(id, word, 0)).length > 0) hitWords.push(word);
+    // Spec §1.5: search finds ≥ 95% of scan-turkish's words, every Turkish letter in some hit.
+    expect(hitWords.length / words.length).toBeGreaterThanOrEqual(0.95);
+    for (const letter of 'çğıöşüÇĞIİÖŞÜ') {
+      expect(
+        hitWords.some((w) => w.includes(letter)),
+        `a hit containing ${letter}`,
+      ).toBe(true);
+    }
+    // pdf.js reads the letters, too.
+    const doc = await engine.save(sid(id));
+    const extracted = (await pdfjsWords(doc)).flat().join(' ');
+    for (const letter of 'çğıöşüÇĞIİÖŞÜ') expect(extracted).toContain(letter);
+    await engine.close(sid(id));
+  }, 120_000);
+
+  test("scan-foreign-ocr.pdf with 'all-invisible': the foreign layer is replaced by ours", async () => {
+    const id = 'layer-foreign';
+    await engine.open(sid('layer-foreign-facts'), await fixtureBytes('scan-foreign-ocr.pdf'));
+    const before = await engine.ocrPageFacts(sid('layer-foreign-facts'));
+    expect(before[0]).toMatchObject({ invisibleText: 'foreign', ourLayer: false });
+    const foreignHits = (await hitsOn('layer-foreign-facts', 'Scanned', 0)).length;
+    expect(foreignHits).toBe(1);
+    await engine.close(sid('layer-foreign-facts'));
+
+    const { pages, removed } = await applyScan('scan-foreign-ocr.pdf', id, 'all-invisible');
+    expect(removed.invisibleTextObjects).toBeGreaterThan(0);
+    const facts = await engine.ocrPageFacts(sid(id));
+    expect(facts[0]).toMatchObject({ visibleText: false, invisibleText: 'ours', ourLayer: true });
+    // One hit per recognised occurrence: the foreign copy of each word is gone.
+    const word = 'Scanned';
+    const occurrences = pages[0]!.words.filter((w) => normalizeWord(w.text) === word).length;
+    expect(occurrences).toBe(1);
+    expect((await hitsOn(id, word, 0)).length).toBe(1);
+    await engine.close(sid(id));
+  }, 120_000);
+});
+
+describe('spec §1.5: hit rects within 2 pt of the manifest boxes', () => {
+  test.each([
+    'scan-rotated.pdf',
+    'scan-turkish.pdf',
+    'scan-foreign-ocr.pdf',
+    'scan-text.pdf',
+  ] as const)(
+    '%s',
+    async (file) => {
+      const id = `layer-hits-${file}`;
+      const { pages } = await applyScan(
+        file,
+        id,
+        file === 'scan-foreign-ocr.pdf' ? 'all-invisible' : 'none',
+      );
+      const expected = truth(file);
+      for (const [i, result] of pages.entries()) {
+        const page = expected.pages[i]!;
+        const { matches } = wordAccuracy(page, result.words);
+        const deviations: number[] = [];
+        const covered: number[] = [];
+        for (const [o, t] of matches) {
+          const word = result.words[o]!;
+          const box = boxRect(page.words[t]!.box);
+          const rects = (await hitsOn(id, word.text, result.pageIndex)).flatMap((h) => h.rects);
+          expect(rects.length, `hits for ${word.text}`).toBeGreaterThan(0);
+          // The hit on this word: the one nearest to its ink.
+          const nearest = rects.reduce((a, b) =>
+            edgeDistance(a, box) <= edgeDistance(b, box) ? a : b,
+          );
+          deviations.push(edgeDistance(nearest, box));
+          // Selection covers the ink (search rects are whole device pixels: ≤ 1 pt of rounding).
+          covered.push(overhang(box, nearest));
+          // Always within the layer's own tolerance of the box it was written to.
+          expect(edgeDistance(nearest, layerWordRect(word))).toBeLessThanOrEqual(2);
+        }
+        const summary = {
+          file,
+          page: page.page,
+          words: deviations.length,
+          median: percentile(deviations, 0.5),
+          max: percentile(deviations, 1),
+          overhang: percentile(covered, 1),
+        };
+        console.warn(`OCR hit rects: ${JSON.stringify(summary)}`);
+        expect(deviations.length).toBeGreaterThan(0.95 * page.words.length);
+        if (page.skewDegrees === 0) {
+          // Measured (M5 review): max 1.10 pt (rotated), 1.03 (Turkish), 1.04 (foreign); no
+          // manifest box sticks out of its hit by more than 0.21 pt.
+          expect(percentile(deviations, 1)).toBeLessThanOrEqual(2);
+          expect(percentile(covered, 1)).toBeLessThan(0.5);
+        } else {
+          // The skewed page's dust specks: tesseract merges a speck touching a word into its
+          // box (recognize.test.ts), so its hit is the grown box; the rest are within 2 pt.
+          expect(percentile(deviations, 0.5)).toBeLessThan(1);
+          expect(deviations.filter((d) => d <= 2).length / deviations.length).toBeGreaterThan(0.9);
+          // Its manifest boxes bound the rotated glyph boxes, a little larger than the ink.
+          expect(percentile(covered, 1)).toBeLessThan(1.5);
+        }
+      }
+      await engine.close(sid(id));
+    },
+    120_000,
+  );
 });

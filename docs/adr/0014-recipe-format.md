@@ -14,7 +14,7 @@ versions, and must never carry secrets.
    "description?", "steps": [...] }`, where every step is `{ "kind", "options" }` and the
    kinds are exactly the operations the app already exposes (rotate, page numbers,
    header/footer, watermark, compress preset, metadata strip or set, password and
-   permissions, page size, crop, OCR once W1 lands, export options). Unknown kinds fail
+   permissions, page size, crop, OCR, export options). Unknown kinds fail
    validation with the step index; unknown option keys are rejected, not ignored.
 2. **No secrets are ever serialized.** A password step stores only that a password is
    required; the value is asked for at run time and held in memory. A property test over

@@ -3,9 +3,10 @@
  *
  * - one Form XObject tagged `/PdfEditorOCR << /Engine /Lang /Version >>`, BBox = MediaBox,
  *   whose content is `/PdfEditorOCR BMC … EMC` around one text object per word: `3 Tr`
- *   (invisible), size = the line's row height, `Tm` on the (rotated) baseline in user space,
- *   `Tz` so the advance equals the word's width, the word as UTF-16BE codes plus a space
- *   (except the page's last word);
+ *   (invisible), `Tm` turned to the line's baseline angle with the word's ink box as the
+ *   text box (origin, size and advance from geometry.ts `inkGeometry`, so PDFium's boxes sit
+ *   on the ink), `Tz` so the advance equals the word's width, the word as UTF-16BE codes
+ *   plus a space (except the page's last word);
  * - the page's `/Contents` becomes `[q, …original streams…, Q q /PdfEditorOCRn Do Q]`: the
  *   original streams and every image are untouched, the added streams carry `/PdfEditorOCR`
  *   in their dictionaries, and the page gets its own copy of its (possibly inherited or

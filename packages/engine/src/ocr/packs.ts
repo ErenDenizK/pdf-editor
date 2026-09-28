@@ -156,6 +156,8 @@ export class OcrPackStore {
   private readonly cacheName: string;
   private readonly importDirectory: string;
   private readonly loaded = new Map<string, Promise<Uint8Array>>();
+  /** The one sweep of other versions' entries per store (`sweepOnce`). */
+  private swept?: Promise<void>;
 
   constructor(options: OcrPackStoreOptions) {
     const base = absoluteUrl(options.baseUrl);
@@ -248,8 +250,24 @@ export class OcrPackStore {
     return pending;
   }
 
+  /**
+   * Deletes other engine versions and packs no longer in the lock from the cache, once per
+   * store, before the first pack is loaded (ADR-0012 §4: the loader deletes old versions;
+   * `cleanupOutdatedCaches` never touches this runtime cache). Without it an upgrade would
+   * keep the previous core (≈ 3 MB) on the device until "Keep available offline" ran. Best
+   * effort: a failing sweep never stops recognition.
+   */
+  private sweepOnce(): Promise<void> {
+    this.swept ??= this.deleteOldVersions().then(
+      () => undefined,
+      () => undefined,
+    );
+    return this.swept;
+  }
+
   private async read(code: string, options: OcrPackLoadOptions): Promise<Uint8Array> {
     aborted(options.signal);
+    await this.sweepOnce();
     const imported = (await this.imported()).get(code);
     if (imported) {
       const dir = await opfsDir(this.importDirectory);

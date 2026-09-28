@@ -72,8 +72,10 @@ be precached) and `pdf-editor-wasm` keeps 4 entries (tesseract would evict PDFiu
 - **Font:** Type0 / CIDFontType2 from `pdf.ttf`, Identity-H, codes = UTF-16 units,
   `/CIDToGIDMap` → GID 1, `/DW 500`, `ToUnicode`, `/FontBBox`, `/Ascent`, `/Descent` set so
   PDFium's loose boxes cover the word (S1 checks). Any Unicode works, Turkish (ğ ı İ ş ç ö
-  ü) included. Per word: `BT 3 Tr`, size from the line height, `Tm` on the (rotated)
-  baseline, `Tz` so the advance equals the box width, a trailing space except at line end.
+  ü) included. Per word: `BT 3 Tr`, size and origin from the word's ink box along its
+  line's angle (the row height only as a fallback near 45° or for a degenerate box), `Tm`
+  on that rotated box, `Tz` so the advance equals the box width, a trailing space except at
+  line end; this keeps PDFium's search hits within 2 pt of the word boxes (research 07 §4).
   `/Lang` set from the OCR language when absent. Not tagged; no PDF/UA claim.
 
 ### 1.3 Quality, honesty, model
@@ -341,7 +343,7 @@ follow-up: unsigned `/Sig` placeholders reported as signed).
 - **Recipe** = ordered existing operations plus an output rule. Steps: rotate, delete
   pages, crop, resize, page numbers, header/footer, Bates (continuous across the batch),
   watermark (image ≤ 1 MB embedded as base64), metadata set / strip, flatten, compress
-  (preset), OCR (languages, scope), set password (permissions stored, passwords asked at
+  (preset), OCR (languages, quality or a fixed dpi, scope, what to do with existing invisible text; the batch renders at the recipe's dpi, Standard = 300), set password (permissions stored, passwords asked at
   run time, never stored), remove password (asked), convert (Markdown / text / images; last
   step). Page selectors: all, odd, even, ranges, first, last, landscape, portrait.
   Redaction is excluded on purpose (M4: nothing is applied automatically).
