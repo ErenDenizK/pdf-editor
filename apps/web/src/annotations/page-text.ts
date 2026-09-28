@@ -1,4 +1,7 @@
-/** Text runs of source pages for text markup, cached per page (the text never changes). */
+/**
+ * Text runs of source pages for text markup, cached per page and content revision (a text
+ * edit changes the page's text and bumps its revision).
+ */
 import type { SourceId } from '@pdf-editor/document-model';
 import type { TextRun } from '@pdf-editor/engine';
 
@@ -12,12 +15,13 @@ getEngineService().onSourceClosed((source) => {
 });
 
 export function pageText(source: SourceId, pageIndex: number): Promise<readonly TextRun[]> {
-  const key = `${source}:${pageIndex}`;
+  const service = getEngineService();
+  const page = `${source}:${pageIndex}:`;
+  const key = `${page}${service.pageRevision(source, pageIndex)}`;
   let runs = cache.get(key);
   if (!runs) {
-    runs = getEngineService()
-      .getPageText(source, pageIndex)
-      .then((result) => (result.ok ? result.value : []));
+    for (const old of [...cache.keys()]) if (old.startsWith(page)) cache.delete(old);
+    runs = service.getPageText(source, pageIndex).then((result) => (result.ok ? result.value : []));
     if (cache.size >= MAX_PAGES) {
       const oldest = cache.keys().next().value;
       if (oldest !== undefined) cache.delete(oldest);

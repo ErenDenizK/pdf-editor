@@ -143,7 +143,7 @@ test.describe('annotations', () => {
     await page.locator('body').press('p');
     await drag(page, 0, [0.3, 0.45], [0.6, 0.47]);
     await expect(layer(page).locator('[data-annotation-kind="ink"]')).toHaveCount(1);
-    await page.locator('body').press('e');
+    await page.locator('body').press('Shift+E');
     await drag(page, 0, [0.45, 0.4], [0.45, 0.52]);
     await expect(layer(page).locator('[data-annotation-kind="ink"]')).toHaveCount(0);
     await expect(historyRow(page, /Delete ink/)).toBeVisible();

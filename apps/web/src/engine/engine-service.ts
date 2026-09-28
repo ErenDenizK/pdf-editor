@@ -32,7 +32,9 @@ import type {
   EngineErrorCode,
   OpenedDocument,
   PdfEditor,
+  PdfRedactor,
   PdfRenderer,
+  PdfTextEditor,
   PdfVerifier,
   SaveOptions,
   SearchHit,
@@ -284,6 +286,15 @@ function isEditor(engine: RendererLike): engine is RendererLike & PdfEditor {
   return typeof (engine as Partial<PdfEditor>).createAnnotation === 'function';
 }
 
+function isTextEditor(engine: RendererLike): engine is RendererLike & PdfTextEditor {
+  const candidate = engine as Partial<PdfTextEditor>;
+  return (
+    typeof candidate.locateRuns === 'function' &&
+    typeof candidate.checkEditability === 'function' &&
+    typeof candidate.applyTextEdit === 'function'
+  );
+}
+
 export type RendererLike = Pick<PdfRenderer, 'open' | 'close' | 'renderPage' | 'getPageText'> &
   Partial<Pick<PdfRenderer, 'search'>> &
   Partial<Pick<PdfEditor, 'save'>> &
@@ -357,6 +368,35 @@ export class EngineService {
     const engine = await this.engine();
     if (!isEditor(engine)) throw new Error('The rendering engine has no content editor');
     return engine;
+  }
+
+  /**
+   * The text editor (M4, spec redaction-and-text-editing §2) behind the same adapter: the
+   * PDFium worker's `PdfTextEditor`, reached through the proxy. Text edits that change the
+   * document go through the edit runner (annotations/edit-runner.ts); this accessor is for
+   * locating runs and checking editability.
+   */
+  async textEditor(): Promise<PdfTextEditor> {
+    const engine = await this.engine();
+    if (!isTextEditor(engine)) throw new Error('The rendering engine has no text editor');
+    return engine;
+  }
+
+  /**
+   * Redaction in the PDFium worker (`PdfRedactor`, ADR-0011 §3). Applying goes through the
+   * edit runner (`redaction.apply` edits, redaction/apply.ts); the export uses this for its
+   * self-check on the final bytes (`verifyRedactedOutput`).
+   */
+  async redactor(): Promise<PdfRedactor> {
+    const engine = await this.engine();
+    const candidate = engine as Partial<PdfRedactor>;
+    if (
+      typeof candidate.applyRedactionPlan !== 'function' ||
+      typeof candidate.verifyRedactedOutput !== 'function'
+    ) {
+      throw new Error('The rendering engine cannot redact');
+    }
+    return engine as RendererLike & PdfRedactor;
   }
 
   /** The UI registers how to ask for a password; without one, locked files fail. */
@@ -452,6 +492,55 @@ export class EngineService {
     }
   }
 
+  /**
+   * Opens a source's original bytes again in the engine, under the same id, dropping every
+   * engine edit made to it (undo of edits without an inverse, such as text edits: spec
+   * redaction-and-text-editing §2.5). Cached bitmaps and text of the source are dropped,
+   * renders in flight are discarded and every page's revision bumps, so mounted views
+   * render again. Close listeners are not called: the source stays open. The caller replays
+   * the edits that should remain.
+   */
+  async reopenSource(sourceId: SourceId): Promise<EngineResult<void>> {
+    const blob = this.retained.get(sourceId);
+    if (blob === undefined) return fail('internal', `Source ${sourceId} is not open`);
+    let bytes: ArrayBuffer;
+    try {
+      bytes = await blob.arrayBuffer();
+    } catch (error) {
+      return fail('read-failed', `Could not read the kept copy: ${toFailure(error).message}`);
+    }
+    const password = this.passwords.get(sourceId);
+    const prefix = `${sourceId}:`;
+    try {
+      const engine = await this.engine();
+      await engine.close(sourceId);
+      await engine.open(sourceId, bytes, password === undefined ? {} : { password });
+    } catch (error) {
+      return { ok: false, error: toFailure(error) };
+    } finally {
+      for (const job of [...this.jobs.values()]) {
+        if (!job.key.startsWith(prefix)) continue;
+        if (!job.running) {
+          this.cancel(job, 'Source reopened');
+          continue;
+        }
+        job.stale = true;
+        if (this.jobs.get(job.key) === job) this.jobs.delete(job.key);
+      }
+      this.cache.removeSource(sourceId);
+      for (const key of [...this.texts.keys()]) {
+        if (key.startsWith(prefix)) this.texts.delete(key);
+      }
+      const pages = this.cropBoxes.get(sourceId)?.length ?? 0;
+      for (let index = 0; index < pages; index++) {
+        const key = `${sourceId}:${index}`;
+        this.revisions.set(key, (this.revisions.get(key) ?? 0) + 1);
+      }
+      for (const listener of this.revisionListeners) listener();
+    }
+    return ok(undefined);
+  }
+
   /** The password a source was opened with, if one was needed (kept in memory only). */
   sourcePassword(sourceId: SourceId): string | undefined {
     return this.passwords.get(sourceId);
@@ -498,7 +587,8 @@ export class EngineService {
   }
 
   /**
-   * Text runs of a page, memoized per source page (the text of a source never changes).
+   * Text runs of a page, memoized per source page (dropped by `invalidatePageText` after a
+   * text edit, and by `reopenSource`).
    * `signal` only abandons this caller's wait: the extraction still completes and is kept
    * for the next request. Failures are not cached.
    */
@@ -616,6 +706,14 @@ export class EngineService {
     const key = `${sourceId}:${index}`;
     this.revisions.set(key, (this.revisions.get(key) ?? 0) + 1);
     for (const listener of this.revisionListeners) listener();
+  }
+
+  /**
+   * Drops the memoized text of one source page after its text changed in the engine (a
+   * text edit). Call before `invalidatePage`, whose revision bump makes views read again.
+   */
+  invalidatePageText(sourceId: SourceId, index: number): void {
+    this.texts.delete(`${sourceId}:${index}`);
   }
 
   /** Content revision of a source page; changes whenever `invalidatePage` runs for it. */

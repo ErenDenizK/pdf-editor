@@ -1,0 +1,223 @@
+/*
+ * Edit text tool (redaction-and-text-editing spec §2.2). The layer takes the page while the
+ * tool is active (like a drawing tool, above the annotation layer's hit targets). Editable
+ * runs show a hairline on page hover and an accent fill under the pointer; runs that
+ * cannot be edited are hatched and dimmed. The inline editor matches the free-text editor
+ * (dashed accent frame on a white field over the page); its header is a raised panel like
+ * the note popup.
+ */
+.layer {
+  z-index: 2;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: default;
+}
+
+.run {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  cursor: text;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.run:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+@media (hover: hover) {
+  .layer:hover .run[data-editable] {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+}
+
+.run[data-editable]:hover,
+.run[data-editable]:focus-visible,
+.run[data-editable][data-editing] {
+  background: var(--accent-muted);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.run[data-blocked] {
+  cursor: not-allowed;
+}
+
+.layer:hover .run[data-blocked],
+.run[data-blocked]:focus-visible {
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--text-tertiary) 30%, transparent) 0 1.5px,
+    transparent 1.5px 5px
+  );
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-tertiary) 45%, transparent);
+}
+
+/* The inline editor: sized to the line box, turned with the line on rotated pages. */
+.input {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 2px;
+  border: 1px dashed var(--accent);
+  border-radius: 2px;
+  /* The page is never themed (DESIGN.md §3): the field is page white with page ink. */
+  background: color-mix(in srgb, var(--page-background) 94%, transparent);
+  color: #000000;
+  font-family: Helvetica, Arial, sans-serif;
+  line-height: 1;
+  white-space: pre;
+  transform-origin: top left;
+  pointer-events: auto;
+  field-sizing: content;
+}
+
+.input:focus-visible {
+  outline: none;
+  border-style: solid;
+}
+
+.input[readonly] {
+  opacity: 0.7;
+}
+
+/* The header: font, honesty badge, fit choice. Upright whatever the page rotation. */
+.panel {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  gap: var(--space-1);
+  width: max-content;
+  min-width: 200px;
+  max-width: 340px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-3);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  pointer-events: auto;
+  cursor: default;
+}
+
+.panel[data-side='above'] {
+  transform: translateY(-100%);
+}
+
+.font {
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: 500;
+}
+
+.badge svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.badge[data-tone='same'] {
+  color: var(--success);
+}
+
+.badge[data-tone='info'] {
+  color: var(--text-primary);
+}
+
+.badge[data-tone='warning'] {
+  color: var(--warning);
+}
+
+.badge[data-tone='blocked'] {
+  color: var(--danger);
+}
+
+.badge[data-tone='pending'] {
+  color: var(--text-tertiary);
+}
+
+.detail {
+  color: var(--text-secondary);
+}
+
+.fit {
+  display: grid;
+  gap: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--border-hairline);
+}
+
+.fit[data-attention] .fitText {
+  color: var(--warning);
+}
+
+.fitText {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.fitChoices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.choice {
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.choice:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.choice[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.choice:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.choice:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.hint {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run {
+    transition: none;
+  }
+}

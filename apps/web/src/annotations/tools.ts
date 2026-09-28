@@ -14,6 +14,7 @@ import {
   Stamp,
   StickyNote,
   Strikethrough,
+  TextCursorInput,
   Type,
   Underline,
   Waves,
@@ -29,12 +30,24 @@ export interface ToolDefinition {
   readonly tooltip?: () => string;
   readonly shortcut?: string;
   readonly Icon: LucideIcon;
+  /** Extra command palette keywords. */
+  readonly keywords?: readonly string[];
   /** Tool bar group; shapes share one button with a menu. */
   readonly group: 'select' | 'markup' | 'draw' | 'shape' | 'insert';
 }
 
 export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
   { mode: 'select', title: m.tool_select, shortcut: 'V', Icon: MousePointer2, group: 'select' },
+  // Edits the page's own text (redaction-and-text-editing spec §2.2), next to Select.
+  {
+    mode: 'edit-text',
+    title: m.tool_edit_text,
+    tooltip: m.tool_edit_text_tooltip,
+    shortcut: 'E',
+    Icon: TextCursorInput,
+    group: 'select',
+    keywords: ['edit', 'text', 'replace', 'change', 'typo', 'word', 'font'],
+  },
   { mode: 'highlight', title: m.tool_highlight, shortcut: 'H', Icon: Highlighter, group: 'markup' },
   { mode: 'underline', title: m.tool_underline, shortcut: 'U', Icon: Underline, group: 'markup' },
   {
@@ -54,7 +67,8 @@ export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
     group: 'markup',
   },
   { mode: 'ink', title: m.tool_ink, shortcut: 'P', Icon: PenLine, group: 'draw' },
-  { mode: 'eraser', title: m.tool_eraser, shortcut: 'E', Icon: Eraser, group: 'draw' },
+  // Shift+E: E is Edit text (spec §2.2).
+  { mode: 'eraser', title: m.tool_eraser, shortcut: 'Shift+E', Icon: Eraser, group: 'draw' },
   { mode: 'rectangle', title: m.tool_rectangle, shortcut: 'R', Icon: Square, group: 'shape' },
   { mode: 'ellipse', title: m.tool_ellipse, shortcut: 'O', Icon: Circle, group: 'shape' },
   { mode: 'line', title: m.tool_line, shortcut: 'L', Icon: Minus, group: 'shape' },

@@ -20,13 +20,21 @@
  * Every engine mutation runs in one serial queue, so a user action (read the current
  * annotation, change it, commit one history entry) never interleaves with a replay.
  *
+ * Text edits (`text.edit`, spec redaction-and-text-editing §2.5) share the queue, the log and
+ * the replay, but have no inverse the engine can apply: PDFium cannot restore a content
+ * stream, so their recorded inverse says "replay required" (`isReplayRequired`). Whenever
+ * such an edit must be undone (a history move, or reverting a dropped action), the source
+ * is reopened from its original bytes (`EngineService.reopenSource`) and the edits that
+ * remain are replayed in order; redo simply applies the forward edit again. Replay
+ * reproduces the same bytes (the applied payload records tier, face and size).
+ *
  * Ids: the edit log records annotation ids as first created (the /NM the user saw). The
  * PDFium adapter writes a requested /NM, so a redone create keeps its id. Should an engine
  * answer with another id, `annotationIds` maps original → current and edits are
  * translated on their way to the engine, so the log and the UI keep the original id.
  */
 import type { EngineEdit, SourceId, Workspace } from '@pdf-editor/document-model';
-import type { Annotation, PdfEditor } from '@pdf-editor/engine';
+import type { Annotation, PdfEditor, TextEditResult } from '@pdf-editor/engine';
 
 import { getEngineService } from '../engine/engine-service';
 import { announce } from '../shell/announcer';
@@ -236,6 +244,8 @@ async function hydrate(edit: EngineEdit): Promise<EngineEdit> {
 export interface ExecutedEdit {
   readonly recorded: EngineEdit;
   readonly annotation?: Annotation;
+  /** `text.edit`: the editor's result (tier, honesty, verification). */
+  readonly textEdit?: TextEditResult;
 }
 
 /** Edits executed by the running action (reverted if it fails or is dropped). */
@@ -264,6 +274,7 @@ export async function executeEdit(ctx: EngineContext, edit: EngineEdit): Promise
   return {
     recorded,
     ...(result.annotation ? { annotation: toUi(source, result.annotation, ctx.fix) } : {}),
+    ...(result.textEdit ? { textEdit: result.textEdit } : {}),
   };
 }
 
@@ -284,16 +295,22 @@ export function onPagesChanged(listener: PagesListener): () => void {
 
 function pagesChanged(edits: readonly EngineEdit[]): void {
   const seen = new Map<string, { source: SourceId; pageIndex: number }>();
+  const textChanged = new Set<string>();
   for (const edit of edits) {
-    seen.set(`${edit.source}:${edit.pageIndex}`, {
-      source: edit.source,
-      pageIndex: edit.pageIndex,
-    });
+    const key = `${edit.source}:${edit.pageIndex}`;
+    seen.set(key, { source: edit.source, pageIndex: edit.pageIndex });
+    if (edit.kind === 'text.edit') textChanged.add(key);
   }
   if (seen.size === 0) return;
   const pages = [...seen.values()];
   const service = getEngineService();
-  for (const page of pages) service.invalidatePage(page.source, page.pageIndex);
+  for (const page of pages) {
+    // Text edits change the page's text: drop the memoized runs before views re-read.
+    if (textChanged.has(`${page.source}:${page.pageIndex}`)) {
+      service.invalidatePageText(page.source, page.pageIndex);
+    }
+    service.invalidatePage(page.source, page.pageIndex);
+  }
   for (const listener of pageListeners) listener(pages);
 }
 
@@ -316,8 +333,17 @@ const applied = new Map<SourceId, readonly EngineEdit[]>();
 function annotationEdits(ws: Workspace): Map<SourceId, EngineEdit[]> {
   const bySource = new Map<SourceId, EngineEdit[]>();
   for (const edit of ws.engineEdits) {
-    // Form fills (forms/actions.ts) share the queue and the replay.
-    if (!edit.kind.startsWith('annotation.') && edit.kind !== 'form.set-value') continue;
+    // Form fills (forms/actions.ts) and text edits (text-edit/actions.ts) share the queue
+    // and the replay.
+    if (
+      !edit.kind.startsWith('annotation.') &&
+      edit.kind !== 'form.set-value' &&
+      edit.kind !== 'text.edit' &&
+      // Applied redactions (redaction/apply.ts): replay-required like text edits.
+      edit.kind !== 'redaction.apply'
+    ) {
+      continue;
+    }
     const list = bySource.get(edit.source);
     if (list) list.push(edit);
     else bySource.set(edit.source, [edit]);
@@ -335,6 +361,41 @@ async function tryEdit(ctx: EngineContext, edit: EngineEdit | undefined): Promis
     console.warn(`Replaying ${edit.kind} ${edit.id} failed`, error);
     return false;
   }
+}
+
+/** Whether undoing `edits` needs a reopen: one of them has a replay-required inverse. */
+async function needsReopen(edits: readonly EngineEdit[]): Promise<boolean> {
+  if (!edits.some((edit) => edit.kind === 'text.edit' || edit.kind === 'redaction.apply')) {
+    return false;
+  }
+  const { isReplayRequired } = await import('@pdf-editor/engine');
+  return edits.some((edit) => edit.inverse === undefined || isReplayRequired(edit.inverse));
+}
+
+/**
+ * Reopens `source` from its original bytes and replays `edits` in order (spec §2.5 undo).
+ * Resolves to the edits the engine now holds; `ok` is false when the reopen or a replayed
+ * edit failed (the engine then holds the prefix that did apply, or, when the reopen
+ * failed, an unknown state that the next reconcile treats as the original).
+ */
+async function rebuild(
+  ctx: EngineContext,
+  source: SourceId,
+  edits: readonly EngineEdit[],
+): Promise<{ readonly state: readonly EngineEdit[]; readonly ok: boolean }> {
+  const reopened = await getEngineService().reopenSource(source);
+  // The reopened document knows none of the ids the engine answered before.
+  annotationIds.forgetSource(source);
+  if (!reopened.ok) {
+    console.warn(`Reopening ${source} for undo failed`, reopened.error);
+    return { state: [], ok: false };
+  }
+  let state: readonly EngineEdit[] = [];
+  for (const edit of edits) {
+    if (!(await tryEdit(ctx, edit))) return { state, ok: false };
+    state = [...state, edit];
+  }
+  return { state, ok: true };
 }
 
 /** Keeps the store's `dirtySources` equal to the sources the engine holds edits for. */
@@ -372,6 +433,15 @@ async function reconcileNow(ctx: EngineContext): Promise<void> {
     }
     let state: readonly EngineEdit[] = current;
     let ok = true;
+    if (await needsReopen(current.slice(common))) {
+      // A text edit must go: reopen the original bytes and replay what remains.
+      touched.push(...current);
+      const rebuilt = await rebuild(ctx, source, wanted);
+      touched.push(...rebuilt.state);
+      applied.set(source, rebuilt.state);
+      if (!rebuilt.ok) failed = true;
+      continue;
+    }
     for (let i = current.length - 1; i >= common && ok; i--) {
       const edit = current[i] as EngineEdit;
       touched.push(edit);
@@ -439,10 +509,29 @@ function historyPosition(): string {
   return `${history.past.length}:${history.future.length}:${history.present.at}:${history.present.label}`;
 }
 
-/** Undoes executed edits (newest first) and reports the pages they touched. */
+/**
+ * Undoes executed edits (newest first) and reports the pages they touched. A source whose
+ * executed edits include a text edit is reopened and brought back to the edits the engine
+ * held before the action (`applied`).
+ */
 async function revert(ctx: EngineContext, edits: readonly EngineEdit[]): Promise<void> {
-  for (const edit of [...edits].reverse()) await tryEdit(ctx, edit.inverse);
-  pagesChanged(edits);
+  const reopen = new Set<SourceId>();
+  for (const source of new Set(edits.map((edit) => edit.source))) {
+    if (await needsReopen(edits.filter((edit) => edit.source === source))) reopen.add(source);
+  }
+  const touched: EngineEdit[] = [...edits];
+  for (const edit of [...edits].reverse()) {
+    if (!reopen.has(edit.source)) await tryEdit(ctx, edit.inverse);
+  }
+  for (const source of reopen) {
+    const before = applied.get(source) ?? [];
+    const rebuilt = await rebuild(ctx, source, before);
+    touched.push(...before);
+    applied.set(source, rebuilt.state);
+    if (!rebuilt.ok) announce(m.annot_replay_failed());
+  }
+  if (reopen.size > 0) syncDirtySources();
+  pagesChanged(touched);
 }
 
 /**

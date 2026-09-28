@@ -177,10 +177,13 @@ interface WorkspaceState {
     label: string | ((prelude: P) => string),
   ) => Promise<boolean>;
   /**
-   * Records content edits the engine has already executed (annotations) as one labelled
-   * history entry: appends them, each with its `inverse`, to `Workspace.engineEdits` and
-   * marks their sources dirty. Undo and redo move between snapshots; whoever executes
-   * engine edits (annotations/edit-runner.ts) replays the difference through the engine.
+   * Records content edits the engine has already executed (annotations, form values, text
+   * edits) as one labelled history entry: appends them, each with its `inverse`, to
+   * `Workspace.engineEdits` and marks their sources dirty. Undo and redo move between
+   * snapshots; whoever executes engine edits (annotations/edit-runner.ts) replays the
+   * difference through the engine. A text edit's inverse is "replay required": the runner
+   * then reopens the source's original bytes (kept by the engine service) and replays the
+   * snapshot's edits for that source, which is why every entry keeps the whole list.
    * With `coalesceKey`, a push that coalesces with the present entry (same key within the
    * 800 ms window) may replace the present entry's last edit by `merge(last, next)` (e.g.
    * one update from the first slider value to the last). Returns false when nothing was

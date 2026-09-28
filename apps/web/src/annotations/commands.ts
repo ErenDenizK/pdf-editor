@@ -4,6 +4,9 @@
  * in Read mode R is the rectangle tool and Delete removes the selected annotation; in
  * Arrange mode the tools are unavailable and the page commands keep those keys.
  */
+// Registers the Edit text page layer (the tool itself is in ANNOTATION_TOOLS).
+import '../text-edit';
+
 import { pickFiles } from '../files/open-files';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
@@ -73,7 +76,7 @@ export function registerAnnotationCommands(registry: CommandRegistry): () => voi
         title: m.cmd_tool({ tool: tool.title() }),
         group: m.group_tools(),
         ...(tool.shortcut === undefined ? {} : { shortcut: tool.shortcut }),
-        keywords: ['tool', 'annotate', 'annotation'],
+        keywords: ['tool', 'annotate', 'annotation', ...(tool.keywords ?? [])],
         when: readMode,
         run: () => activateTool(tool),
       }),

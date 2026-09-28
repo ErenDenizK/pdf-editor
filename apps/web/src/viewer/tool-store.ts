@@ -22,7 +22,9 @@ export type ToolMode =
   | 'stamp'
   | 'signature'
   /** Redaction marks (redaction spec §1.1): by text or by area. */
-  | 'redact';
+  | 'redact'
+  /** In-place text editing (redaction-and-text-editing spec §2.2): one line at a time. */
+  | 'edit-text';
 
 interface ToolState {
   readonly mode: ToolMode;

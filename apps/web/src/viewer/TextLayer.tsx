@@ -9,7 +9,14 @@
  * beyond. Selectable only while the Select tool is active.
  */
 import type { TextRun } from '@pdf-editor/engine';
-import { type CSSProperties, Fragment, useEffect, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 
 import { getEngineService } from '../engine/engine-service';
 import type { PageOverlayProps } from '../stage/page-overlays';
@@ -69,13 +76,23 @@ export function TextLayer(props: PageOverlayProps) {
   const distance = useViewStore((s) => distanceFromView(pageIndex, s.visibleRange));
   const selectable = useToolStore((s) => s.mode === 'select');
   const [built, setBuilt] = useState(false);
-  const [runs, setRuns] = useState<{ key: string; runs: readonly TextRun[] } | null>(null);
+  const [runs, setRuns] = useState<{
+    key: string;
+    page: string;
+    runs: readonly TextRun[];
+  } | null>(null);
 
   // Hysteresis: build near the viewport, keep until clearly away (spec §8).
   if (!built && distance <= BUILD_DISTANCE && sourceId !== undefined) setBuilt(true);
   if (built && distance > DROP_DISTANCE) setBuilt(false);
 
-  const key = `${sourceId ?? ''}:${sourceIndex}`;
+  // The page's content revision: a text edit changes its text (and bumps the revision).
+  const service = getEngineService();
+  const revision = useSyncExternalStore(service.subscribeRevisions, () =>
+    sourceId === undefined ? 0 : service.pageRevision(sourceId, sourceIndex),
+  );
+  const page = `${sourceId ?? ''}:${sourceIndex}`;
+  const key = `${page}:${revision}`;
   const layerRef = useRef<HTMLDivElement>(null);
 
   // While dragging a selection, the whole layer catches the pointer so the selection does
@@ -105,12 +122,13 @@ export function TextLayer(props: PageOverlayProps) {
     void getEngineService()
       .getPageText(sourceId, sourceIndex, controller.signal)
       .then((result) => {
-        if (result.ok) setRuns({ key, runs: result.value });
+        if (result.ok) setRuns({ key, page, runs: result.value });
       });
     return () => controller.abort();
-  }, [built, sourceId, sourceIndex, key]);
+  }, [built, sourceId, sourceIndex, key, page]);
 
-  if (!built || runs?.key !== key) return null;
+  // A new revision keeps showing the previous text until the new text arrives.
+  if (!built || runs?.page !== page) return null;
   const lines = layoutTextLines(runs.runs, pageFrame(props));
   if (lines.length === 0) return null;
 
