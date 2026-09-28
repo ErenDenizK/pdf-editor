@@ -62,13 +62,7 @@
 }
 
 .primary {
-  background: var(--accent);
-  color: var(--surface-0);
-}
-
-.primary:disabled {
-  background: var(--surface-3);
-  color: var(--text-disabled);
+  composes: primary-button from global;
 }
 
 .secondary {

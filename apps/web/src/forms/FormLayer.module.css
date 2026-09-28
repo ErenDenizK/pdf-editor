@@ -52,11 +52,12 @@
 
 .target:focus-visible,
 .target[data-active] {
-  outline: 2px solid var(--accent);
+  outline: var(--focus-ring);
   outline-offset: 1px;
 }
 
-/* Editors sit on the widget, white like the page, with the accent focus ring. */
+/* Editors sit on the widget, white like the page, framed by a 1px accent border and no halo
+   (design audit C7, D9): nothing glows. */
 .editor {
   position: absolute;
   z-index: 1;
@@ -71,7 +72,12 @@
   pointer-events: auto;
   transform-origin: center;
   outline: none;
-  box-shadow: 0 0 0 2px var(--accent-line);
+}
+
+/* Selected glyphs keep the page ink: the chrome's selection text colour is near-white. */
+.editor::selection {
+  background: var(--accent-highlight);
+  color: currentcolor;
 }
 
 textarea.editor {

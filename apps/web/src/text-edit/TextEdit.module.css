@@ -1,10 +1,11 @@
 /*
  * Edit text tool (redaction-and-text-editing spec §2.2). The layer takes the page while the
- * tool is active (like a drawing tool, above the annotation layer's hit targets). Editable
- * runs show a hairline on page hover and an accent fill under the pointer; runs that
- * cannot be edited are hatched and dimmed. The inline editor matches the free-text editor
- * (dashed accent frame on a white field over the page); its header is a glass popover like
- * the note popup.
+ * tool is active (like a drawing tool, above the annotation layer's hit targets). Only the
+ * line under the pointer (or with keyboard focus) is marked: an editable one gets an accent
+ * fill and ring, one that cannot be edited is hatched (design audit D6). The rest of the page
+ * stays unmarked. The inline editor matches the free-text editor (dashed accent frame on an
+ * opaque page-white field, so the original glyphs never show through); its header is a glass
+ * popover like the note popup.
  */
 .layer {
   z-index: 2;
@@ -42,12 +43,12 @@
 }
 
 @media (hover: hover) {
-  .layer:hover .run[data-editable] {
-    box-shadow: 0 0 0 1px var(--accent-line);
+  .run[data-editable]:hover {
+    background: var(--accent-muted);
+    box-shadow: 0 0 0 1px var(--accent);
   }
 }
 
-.run[data-editable]:hover,
 .run[data-editable]:focus-visible,
 .run[data-editable][data-editing] {
   background: var(--accent-muted);
@@ -58,7 +59,17 @@
   cursor: not-allowed;
 }
 
-.layer:hover .run[data-blocked],
+@media (hover: hover) {
+  .run[data-blocked]:hover {
+    background: repeating-linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--text-tertiary) 30%, transparent) 0 1.5px,
+      transparent 1.5px 5px
+    );
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-tertiary) 45%, transparent);
+  }
+}
+
 .run[data-blocked]:focus-visible {
   background: repeating-linear-gradient(
     135deg,
@@ -77,8 +88,9 @@
   padding: 0 2px;
   border: 1px dashed var(--accent);
   border-radius: var(--radius-page);
-  /* The page is never themed (DESIGN.md §3): the field is page white with page ink. */
-  background: color-mix(in srgb, var(--page-background) 94%, transparent);
+  /* The page is never themed (DESIGN.md §3): the field is page white with page ink, opaque
+     so the original glyphs never ghost through the edited text (design audit N6, D12). */
+  background: var(--page-background);
   color: #000000;
   font-family: Helvetica, Arial, sans-serif;
   line-height: 1;
@@ -91,6 +103,12 @@
 .input:focus-visible {
   outline: none;
   border-style: solid;
+}
+
+/* Selected glyphs keep the page ink: the chrome's selection text colour is near-white. */
+.input::selection {
+  background: var(--accent-highlight);
+  color: currentcolor;
 }
 
 .input[readonly] {
@@ -195,12 +213,14 @@
   font-size: var(--text-sm);
 }
 
-.choice:hover:not(:disabled) {
-  background: var(--surface-hover);
+@media (hover: hover) {
+  .choice:hover:not(:disabled) {
+    background: var(--surface-hover);
+  }
 }
 
+/* An option choice: accent-muted, no accent border (design audit D11). */
 .choice[aria-pressed='true'] {
-  border-color: var(--accent);
   background: var(--accent-muted);
 }
 

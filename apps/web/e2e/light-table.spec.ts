@@ -207,7 +207,7 @@ test.describe('light table', () => {
     await page.goto('./?lang=tr');
     await openFixtures(page, ['outline-named-dests.pdf', 'forms-a.pdf']);
     await page.getByRole('tab', { name: 'forms-a' }).click({ button: 'right' });
-    await page.getByRole('menuitem', { name: 'Düzenleme’de göster' }).click();
+    await page.getByRole('menuitem', { name: 'Sıralama’da göster' }).click();
     await expect(page.getByRole('grid')).toHaveCount(2);
     await rendered(page, 8);
     await page.getByRole('button', { name: 'outline-named-dests işlemleri' }).click();

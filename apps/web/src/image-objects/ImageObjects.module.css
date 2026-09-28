@@ -1,7 +1,7 @@
 /*
  * Image tool (M4 §3). The layer takes the page while the tool is active (like Edit text).
- * Images show a hairline on page hover and an accent fill under the pointer; the selected
- * one gets the annotation selection's dashed accent frame with eight white handles, and the
+ * Only the image under the pointer (or with keyboard focus) is marked, with a 1px accent ring
+ * and no fill: the page is never tinted (design audit D6, D7). The selected one gets the annotation selection's dashed accent frame with eight white handles, and the
  * contextual bar is the annotation bar's glass panel.
  */
 .layer {
@@ -23,9 +23,7 @@
   border-radius: var(--radius-page);
   background: transparent;
   cursor: move;
-  transition:
-    background-color var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out);
+  transition: box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .target:focus-visible {
@@ -34,19 +32,13 @@
 }
 
 @media (hover: hover) {
-  .layer:hover .target {
-    box-shadow: 0 0 0 1px var(--accent-line);
+  .target:hover {
+    box-shadow: 0 0 0 1px var(--accent);
   }
 }
 
-.target:hover,
 .target:focus-visible {
-  background: var(--accent-muted);
   box-shadow: 0 0 0 1px var(--accent);
-}
-
-.target[data-selected] {
-  background: transparent;
 }
 
 .selection {
@@ -66,7 +58,8 @@
 }
 
 .selection:focus-visible {
-  box-shadow: 0 0 0 3px var(--accent-muted);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 .selection[data-busy] {
@@ -165,8 +158,10 @@
   font-size: var(--text-sm);
 }
 
-.action:hover:not(:disabled) {
-  background: var(--surface-hover);
+@media (hover: hover) {
+  .action:hover:not(:disabled) {
+    background: var(--surface-hover);
+  }
 }
 
 .action:active:not(:disabled) {

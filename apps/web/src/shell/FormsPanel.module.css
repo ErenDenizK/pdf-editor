@@ -40,8 +40,8 @@
   height: 14px;
 }
 
+/* An option that is on: accent-muted, no accent border (design audit D11). */
 .button[aria-pressed='true'] {
-  border-color: var(--accent-line);
   background: var(--accent-muted);
   color: var(--text-primary);
 }
@@ -162,6 +162,8 @@
 
 .item[aria-current='true'] {
   background: var(--accent-muted);
+  /* Tertiary text is 4.3:1 on the accent-muted fill; it steps up to secondary (AA). */
+  --text-tertiary: var(--text-secondary);
 }
 
 .item:focus-visible {

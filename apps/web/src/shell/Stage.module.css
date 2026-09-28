@@ -196,7 +196,8 @@
   z-index: 4;
   display: grid;
   place-items: center;
-  border: 1px solid var(--accent);
+  /* Dashed, like the light table's drop outline: one look for "drop files here" (J6). */
+  border: 1px dashed var(--accent);
   border-radius: var(--radius-3);
   background: var(--scrim);
   pointer-events: none;

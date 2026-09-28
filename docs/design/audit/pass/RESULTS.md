@@ -1,14 +1,16 @@
-# Design refinement pass: steps 2 and 3 (results)
+# Design refinement pass: steps 2 to 5 (results)
 
 **Date:** 2026-09-28. **Base:** `f641f55` (the audit build plus the two bug fixes). Steps from
 [../README.md](../README.md#proposed-order): **2**, tokens and consolidation (no intended visual
-change); **3**, translucency ([../translucency.md](../translucency.md)). The owner decisions D1 to
+change); **3**, translucency ([../translucency.md](../translucency.md)); **4**, the tone-downs,
+removals and fixes; **5**, DESIGN.md and the design screenshots. The owner decisions D1 to
 D16 were taken as recommended.
 
 | Files | What they are |
 | --- | --- |
 | `step2-NN-*.png` | The audit's capture set after step 2 (tokens only). |
 | `step3-NN-*.png` | The same set after step 3 (glass). |
+| `step4-NN-*.png` | The frames that show step 4 best (the full diff table is in the step 4 section). |
 
 The step 2 "before" is the same capture of `f641f55` (not committed; it matches the audit's
 `NN-*.png` apart from the two fixed bugs). Full frames are 1440×900 at CSS scale, crops are at
@@ -215,3 +217,186 @@ active tool, slider thumbs, checked dot; never text on glass) is at least **3.48
 
 Browsers without `backdrop-filter` get the base `.glass` rule, which is the opaque
 `--glass-solid` with the normal text ladder (the remap lives inside the `@supports` block).
+
+## Step 4: tone-downs, removals and fixes
+
+Every remaining "tone down", "remove" and "fix" verdict in [../effects.md](../effects.md), with
+the owner decisions taken as recommended. CSS only, apart from one new global rule
+(`.primary-button` in `styles/global.css`) and two tokens (`--accent-hover`, `--accent-pressed`).
+No TSX changed: the text runs and image targets are real elements under the pointer, so
+"only the hovered one" (D6) needed no new state.
+
+### What changed, per decision
+
+- **D5** (C3): the 2px accent stripe is gone from the palette's selected row (it keeps
+  `--surface-active` and primary text) and from the current search hit (now `--accent-muted`,
+  G6). The merge/interleave chips lose their curved 3px tag stripe for a 6px tag dot (J3).
+- **D6** (C8, F13): with Edit text or Image armed, the page-wide `.layer:hover` rings are
+  gone. Only the run or image under the pointer (or with keyboard focus) is marked; a
+  blocked run is hatched only under the pointer or on focus. Hover is gated by
+  `(hover: hover)`.
+- **D7** (C9): an image under the pointer gets a 1px accent ring and no fill; text runs keep
+  the `--accent-muted` fill.
+- **D8** (I1, I13, E14): primary buttons in all eleven modules compose `.primary-button`:
+  `--accent-hover` #8f9dff on hover, `--accent-pressed` #6f7ff5 while pressed,
+  `--surface-3` + `--text-disabled` when disabled (no 50% opacity). The disabled
+  secondary button of the Compress and image-export dialogs uses `--text-disabled` instead
+  of opacity. The primary `background-color` transition now runs.
+- **D9** (C7): the 2px halo around the form field editor is gone; its 1px accent border stays.
+- **D10** (N3): crop handles are page white with a 1.5px accent stroke, like the annotation
+  and image handles. The preview sheet no longer clips them (they, and their focus ring, used
+  to be cut in half at the page edge). Created-field handles move from a 1px to the same
+  1.5px stroke (N2).
+- **D11** (G4, G5, G6, C4): option choices are `--accent-muted` with no accent border
+  (furniture segments, created-field segments, the Forms panel toggles, the Compress presets,
+  the text-edit fit choices, the search toggles, which also lose their ring). View switches
+  are `--surface-3` + inset hairline (the signature dialog tabs gain the hairline). Current
+  rows are `--accent-muted` everywhere (the History step and the current file join
+  Comments, Forms, Redactions and the search hit). Inside a current row or a checked preset,
+  `--text-tertiary` steps up to `--text-secondary`: tertiary on the muted fill is 4.3:1.
+- **D12** (N6): the inline text editor is opaque page white.
+- **D14** (J4): the dead-links notice in the Outline panel and the restricted-permissions
+  notice (Document tools) take the one notice recipe, a `--warning-line` hairline with no
+  fill. The merge chip stripe is J3 above.
+- **D15**: confirmed; Menu, Popover, Tooltip, the palette and every dialog enter from
+  `scale(var(--enter-scale))`.
+- **D16** (F2): the tab close button, the Arrange cell actions and the outline chevrons hover
+  with `--surface-hover`.
+
+### Other verdicts
+
+- **C10 / H6**: the focused image selection shows the standard focus ring instead of a 3px
+  `--accent-muted` halo.
+- **E11**: the tool dialogs' progress bar animates its width like the export dialog's.
+- **F4 / H4**: the Document tools inputs take the shared input look: `--border-strong`, no
+  hover, the focus ring at offset 0 (they had a hairline, a hover border and an accent border
+  instead of the ring).
+- **F5**: the image bar actions and the text-edit fit choices gate their hover by
+  `(hover: hover)`.
+- **F6**: the note popup's and the signature dialog's secondary buttons get the shared hover.
+- **H9**: the remaining `2px solid var(--accent)` outlines on radio wrappers and form targets
+  are written as `var(--focus-ring)` (same pixels).
+- **I9**: the corner chevrons on the Shapes and Stamp tools use `--text-tertiary` (which
+  resolves to `--glass-text-secondary` on the glass) instead of 0.7 opacity.
+- **J6**: the stage's file drag-over outline is dashed, like the light table's.
+- **N4**: the created-field placement preview uses `--accent-subtle`, the one preview fill.
+- Already done in step 2 and re-checked: B3, C1, C5, C6, E3, E10, F10, G10, I12, J1, J2, J5,
+  K1 to K7, L1.
+- Kept as they are (verdict "keep"): C12 (the lock badge ring stays a `box-shadow`; as a
+  border it would shrink the disc by 2px), E15 (per-module reduced-motion overrides) and N7
+  (the free-text editor keeps its 85% white field).
+
+**A defect found on the way.** The global `::selection` colour is chrome text (#e6e7ea), so
+selected glyphs inside the page-white editors (text edit, form field, free text) were
+near-white on white and disappeared. They now keep their ink (`color: currentcolor`) on an
+`--accent-highlight` fill ([step4-23](step4-23-text-edit-selection.png)).
+
+### Screenshots
+
+Same method as steps 2 and 3, on the step 3 capture as the "before". The base set was
+re-captured once more for 06 and 07: in the first run the page canvas of those two frames
+rendered at a different moment (1.7% of pixels on the page heading, not CSS), and a second
+capture matched step 3 there exactly. Rows 22 to 24 come from an extra script that captures
+states the base set does not (primary hover and pressed in the export dialog, a selection
+inside the inline editor, a blocked run under the pointer), on both builds.
+
+| Screenshot | any Δ % | Δ > 8 % | max Δ | Why |
+| --- | ---: | ---: | ---: | --- |
+| 02-read-toolbar-crop | 0.053 | 0.052 | 39 | I9: the Shapes and Stamp corner chevrons use the tertiary text step instead of 0.7 opacity |
+| 02-read-toolbar | 0.744 | 0.722 | 31 | G6: the current History row is accent-muted; I9 chevrons |
+| 03-read-annotation-bar | 0.568 | 0.553 | 38 | G6 current History row; I9 chevrons |
+| 04-menu-document | 2.073 | 0.328 | 31 | G6 current History row; F4 metadata inputs take the control border (0.10 → 0.16) |
+| 04-menu-shapes-over-page | 0.754 | 0.721 | 38 | G6 current History row; I9 chevrons |
+| 04-menu-zoom-crop | 17.373 | 0.315 | 13 | F4 metadata inputs and G6 current row, seen blurred through the menu glass (Δ ≤ 13) |
+| 04-menu-zoom | 1.577 | 0.594 | 31 | G6 current History row; F4 metadata inputs |
+| 05-palette-crop | 0.024 | 0.024 | 212 | D5: the accent stripe on the selected row is gone |
+| [05-palette-selected-row](step4-05-palette-selected-row.png) | 0.612 | 0.597 | 209 | D5: the accent stripe is gone; the row keeps surface-active and primary text |
+| 05-palette | 0.752 | 0.544 | 212 | D5 stripe; the current History row under the scrim |
+| 06-dialog-export | 0.743 | 0.536 | 14 | G6 current History row and F4 inputs under the dialog scrim |
+| 07-popover-privacy | 0.754 | 0.721 | 31 | G6 current History row; F4 metadata inputs |
+| [08-image-bar-crop](step4-08-image-bar-crop.png) | 2.685 | 2.680 | 131 | C10/H6: the focused image selection shows the standard 2px focus ring instead of a 3px accent-muted halo |
+| 08-image-bar | 1.221 | 1.199 | 131 | C10 focus ring; G6 current History row |
+| [08-image-hover-crop](step4-08-image-hover-crop.png) | 69.510 | 59.329 | 72 | D6/D7: no lavender wash over the picture; only the hovered image gets a 1px accent ring |
+| 08-image-hover | 12.751 | 10.974 | 72 | D6/D7 as the crop; G6 current row |
+| [09-right-inspector](step4-09-right-inspector.png) | 3.089 | 3.044 | 31 | G6: the current History row is accent-muted instead of surface-2 |
+| 10-arrange-context-menu | 0.741 | 0.721 | 31 | G6 current History row |
+| 10-arrange-selection | 0.741 | 0.721 | 31 | G6 current History row |
+| 11-redaction-marks-on-page | 0.007 | 0.007 | 37 | I9: a tool bar chevron at the edge of the crop |
+| 11-redactions-panel | 0.743 | 0.720 | 31 | G6 current History row |
+| [12-text-edit-hover-crop](step4-12-text-edit-hover-crop.png) | 1.465 | 1.458 | 72 | D6: only the line under the pointer is marked; the other lines lose their 0.45 ring |
+| 12-text-edit-hover | 1.403 | 1.368 | 72 | D6 as the crop; G6 current row |
+| [12-text-edit-open-crop](step4-12-text-edit-open-crop.png) | 10.566 | 1.456 | 234 | D12/N6: the editor is opaque page white (no ghost glyphs); the selected glyph keeps its ink (new fix, see below) |
+| 12-text-edit-open | 1.378 | 0.795 | 234 | D12 as the crop; G6 current row |
+| 13-tooltip-and-hover | 0.744 | 0.722 | 31 | G6 current History row; I9 chevrons |
+| 15-focus-ring-toolbar | 0.744 | 0.722 | 31 | G6 current History row; I9 chevrons |
+| [16-search-current-hit-crop](step4-16-search-current-hit-crop.png) | 37.858 | 37.065 | 196 | D5: the bent stripe is gone; the current hit is accent-muted like the other current rows (G6) |
+| 16-search-panel | 1.483 | 1.431 | 197 | D5/G6 as the crop; the current History row |
+| [17-form-editor-halo-crop](step4-17-form-editor-halo-crop.png) | 4.214 | 4.204 | 92 | D9/C7: the 2px halo around the field editor is gone |
+| 17-form-editor | 0.859 | 0.828 | 62 | D9 as the crop; G6 current row |
+| [18-crop-dialog-crop](step4-18-crop-dialog-crop.png) | 0.829 | 0.829 | 245 | D10/N3: white crop handles, no longer clipped by the preview; D8: the disabled Crop button is surface-3 with disabled text |
+| 18-crop-dialog | 0.994 | 0.786 | 245 | D10 and D8 as the crop; G6 current row under the scrim |
+| [19-compress-preset-focus-crop](step4-19-compress-preset-focus-crop.png) | 25.120 | 25.030 | 176 | D11/G5: the checked preset is accent-muted with its hairline (no accent border); its hint steps up to secondary |
+| 19-compress-preset-focus | 1.694 | 1.486 | 176 | D11/G5 as the crop; G6 current row under the scrim |
+| 20-statusbar-popup-open | 0.019 | 0.000 | 2 | noise (the popover edge; the same 0.019% as step 3, Δ ≤ 2) |
+| [22-primary-hover](step4-22-primary-hover.png) | 4.043 | 3.918 | 19 | D8: the primary button is one step lighter on hover (#8f9dff); before, hover did nothing |
+| [22-primary-pressed](step4-22-primary-pressed.png) | 4.043 | 3.863 | 13 | D8: one step darker while pressed (#6f7ff5) |
+| [23-text-edit-selection](step4-23-text-edit-selection.png) | 33.678 | 31.804 | 234 | Selected glyphs in the inline editor keep the page ink on an accent-highlight fill; before they were near-white on white (invisible) |
+| [24-text-edit-blocked-hover](step4-24-text-edit-blocked-hover.png) | 0.637 | 0.634 | 59 | D6: the blocked run is hatched only under the pointer; the other lines are no longer ringed |
+
+Unchanged (0 pixels): 01-empty-card, 01-empty, 03-annotation-bar-crop, 04-menu-shapes-crop,
+06-dialog-export-crop, 07-popover-privacy-crop, 10-arrange-cell-hover, 10-arrange-context-menu-
+crop, 10-arrange-contextbar-crop, 11-redactions-panel-crop, 11-redactions-row-hover, 13-tooltip-
+crop, 14-toolbar-hover-crop, 15-focus-ring-segmented-crop, 15-focus-ring-toolbar-crop,
+20-statusbar-before, 21-tab-hover.
+
+Almost every full frame shows the same 0.74% (Δ 31): the current History row in the right
+panel, now `--accent-muted` instead of `--surface-2`.
+
+### Contrast of the changed states
+
+Computed with the WCAG formula from the token values; the sampled column is the most common
+colour in that region of the step 4 capture.
+
+| State | Colours | Ratio | Sampled |
+| --- | --- | ---: | --- |
+| Current row / option choice, text | `--text-primary` on accent-muted over surface-1 (#21263a) | 12.1 | #21263b (History row, search hit, preset) |
+| same, secondary text | `--text-secondary` on #21263a / over surface-3 (#2b3047) | 5.57 / 4.83 | |
+| same, tertiary text (stepped up to secondary) | `--text-tertiary` on #21263a would be | 4.31 | #9a9ea6 in the checked preset's hint |
+| Search mark inside the current hit | primary on accent-muted twice (#30365a) | 9.43 | #30375a |
+| Text-edit fit choice pressed, on glass over a white page | primary on #494c61 | 6.82 | |
+| Primary button label (#0a0b0d): rest / hover / pressed | on #7c8cff / #8f9dff / #6f7ff5 | 6.61 / 7.91 / 5.65 | #8f9dff, #6f7ff5 |
+| Primary button fill vs dialog (surface-1): rest / hover / pressed | | 6.30 / 7.54 / 5.39 | |
+| Disabled primary | `--text-disabled` on surface-3 (exempt, WCAG 1.4.3); fill vs surface-1 | 1.98; 1.14 | #1c1f24 / #4a4e55 |
+| Image and text-run hover ring (1px accent) on a white page | #7c8cff on #ffffff | 2.98 | |
+| Text-run hover fill under black page ink | #000 on accent-muted over white (#eaedff) | 18.1 | |
+| Crop handle: white face vs the dark preview frame; accent stroke vs the white page | | 19.7; 2.98 | |
+| Selected glyphs in page editors | #000 on accent-highlight over white (#d8dcff) | 15.6 | #d7dcff / #000000 |
+| Merge chip tag dots on surface-2 | tag-0 … tag-5 | 6.39 to 7.85 | |
+| Notice border | `--warning-line` over surface-1 (#60502a), decorative | 2.39 | |
+| Input border (F4) | `--border-strong` over surface-2 | 1.63 | |
+| Tool bar corner chevron on glass over a white page | #b4b8bf on #3f4043 (was 0.7 × primary, 5.06) | 5.21 | |
+
+Every changed text state is AA. Two non-text notes: the 1px accent ring (hover on images and
+text runs, and the crop handle stroke on a white page) is 2.98:1, a hair under 3:1; it is the
+same ring and stroke the annotation and image handles already use, and hover is not the only
+way to reach a target (Tab and arrows focus it with the 2px focus ring). The input border
+(1.63:1) and the disabled button are unchanged in kind from step 2 and the audit (inputs are
+also identified by their surface-2 fill and label; disabled controls are exempt).
+
+## Step 5: DESIGN.md and the design screenshots
+
+DESIGN.md §2 now says which surfaces are glass (floating chrome, including menus and
+popovers) and which stay opaque; §3 carries the token scale as shipped (radii, border
+alphas, accent alphas and the two button steps, glass tokens and text colours, the warning
+line, motion and the enter scale) and the state rules; §5 lists the focus-offset overrides
+(effects H2); §7 is marked done with a pointer here.
+
+`docs/design/screenshots/` was re-captured with the app's own opt-in capture
+(`CAPTURE_SCREENSHOTS=1`) on the production build, in Chromium with the SwiftShader
+compositor so the glass is drawn correctly: the light-table, annotations, tools, redaction,
+text-edit and document-tools specs (17 files, 88 to 297 KB each). The two Turkish light-table
+frames (`m1-light-table-tr`, `m1-split-dialog-tr`) were written by a one-off copy of that step,
+because the spec still looks for the old Turkish label "Düzenleme’de göster" (the string is
+now "Sıralama’da göster"), so the spec's capture test cannot reach them. The M0, M2 search
+and two-up, and M3 forms, page-numbers and watermark frames have no spec that writes them any
+more and still show the pre-pass look.

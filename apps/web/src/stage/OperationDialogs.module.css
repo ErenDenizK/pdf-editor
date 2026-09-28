@@ -240,14 +240,24 @@
   align-items: center;
   gap: 1px;
   height: 24px;
-  padding: 0 var(--space-2) 0 6px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--border-hairline);
-  border-left: 3px solid var(--tag-color, var(--text-tertiary));
   border-radius: var(--radius-1);
   background: var(--surface-2);
   color: var(--text-primary);
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
+}
+
+/* The source tag is a 6px dot, like the file rows, not a side stripe (design audit J3, D14). */
+.chip::before {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-right: var(--space-1);
+  border-radius: var(--radius-round);
+  background: var(--tag-color, var(--text-tertiary));
+  content: '';
 }
 
 .chipLetter {

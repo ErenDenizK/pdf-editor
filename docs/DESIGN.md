@@ -41,70 +41,132 @@ containers; and the anti-pattern of CSS-invert dark mode).
 - **Left rail** collapses to icons; panels remember their state.
 - **Right panel** shows only what applies to the current selection (page, annotation,
   document). Empty selection shows document info and history.
-- **Floating tool bar** at bottom center over the document is the one translucent
-  surface. It shows the tools of the current mode; a second, contextual bar appears
-  above a selection (highlight/underline/comment for text; rotate/delete/extract for
-  pages; color/stroke/opacity for an annotation).
+- **Floating tool bar** at bottom center over the document. It shows the tools of the
+  current mode; a second, contextual bar appears above a selection (highlight/underline/
+  comment for text; rotate/delete/extract for pages; color/stroke/opacity for an
+  annotation).
+- **Floating chrome is frosted glass; everything docked is opaque.** Glass: the floating
+  tool bar, the contextual bars (annotation, image, Arrange), the crop banner, the command
+  palette, every menu, the privacy and link popovers, and the popovers anchored to the page
+  (text-edit header, note popup, form notice). Opaque: the tab bar, left rail, right panel and status bar,
+  dialogs (and their scrim), tooltips, the created-field properties popover and the update
+  toast. Details and fallbacks are in §3.
 - **Command palette** (Cmd/Ctrl+K) lists every action with its shortcut, accepts
   arguments ("rotate 3-5 90", "go 42"), shows recents.
 - **Status bar** carries the privacy indicator, zoom, and selection summary.
 - Hover states never shift layout; space is reserved.
 
-## 3. Tokens (draft)
+## 3. Tokens
 
 Dark is the default and the primary theme. A light theme follows the same ladder inverted
-and is a v1.x item, not a v1 blocker.
+and is a v1.x item, not a v1 blocker. The source of truth is
+`apps/web/src/styles/tokens.css`; this is its shape after the refinement pass (§7).
 
 ```css
 :root {
-  /* surface ladder: canvas → panel → raised → overlay */
+  /* surface ladder: canvas → panel → raised → overlay; hover and active are white washes */
   --surface-0: #0a0b0d;   /* app canvas */
   --surface-1: #101215;   /* panels */
   --surface-2: #16181c;   /* raised: cards, inputs */
-  --surface-3: #1c1f24;   /* popovers, menus */
-  --glass:     rgb(16 18 21 / 0.72);  /* floating chrome over the document, + blur 16px */
+  --surface-3: #1c1f24;   /* view-switch "on", disabled primary buttons */
+  --surface-hover:  rgb(255 255 255 / 0.045);
+  --surface-active: rgb(255 255 255 / 0.075);
+  --scrim: rgb(5 6 8 / 0.56);
 
-  --border-hairline: rgb(255 255 255 / 0.08);
-  --border-strong:   rgb(255 255 255 / 0.14);
+  /* glass: floating chrome over the document (the global .glass rule) */
+  --glass: rgb(24 26 31 / 0.5);
+  --glass-filter: blur(24px) saturate(1.8) brightness(0.4);
+  --glass-solid: #16181c;               /* opaque fallback */
+  --glass-text-secondary: #b4b8bf;      /* secondary and tertiary text on glass */
+  --glass-text-disabled: #6f737b;
+  --glass-danger: #ff8a8a;
+
+  /* borders: one alpha, one control step, one swatch ring */
+  --border-hairline: rgb(255 255 255 / 0.10);  /* dividers, surfaces, keycaps, page hairline */
+  --border-glass:    rgb(255 255 255 / 0.10);
+  --border-strong:   rgb(255 255 255 / 0.16);  /* inputs and control outlines (WCAG 1.4.11) */
+  --border-swatch:   rgb(255 255 255 / 0.28);  /* separates arbitrary colours from the bar */
 
   --text-primary:   #e6e7ea;
   --text-secondary: #9a9ea6;
-  --text-tertiary:  #6b7078;
+  --text-tertiary:  #858a92;  /* the draft's #6b7078 was 3.8:1; this is ≥ 4.76:1 on surface-0..3 */
   --text-disabled:  #4a4e55;
 
-  --accent:        #7c8cff;   /* one accent; used for focus, selection, primary action */
-  --accent-muted:  rgb(124 140 255 / 0.16);
-  --danger:        #ff6b6b;
-  --success:       #5fd39a;
-  --warning:       #f5c451;
+  /* one accent: focus, selection, primary action */
+  --accent:          #7c8cff;
+  --accent-hover:    #8f9dff;  /* primary button hover */
+  --accent-pressed:  #6f7ff5;  /* primary button pressed */
+  --accent-subtle:   rgb(124 140 255 / 0.08);  /* washes, hover fills, previews */
+  --accent-muted:    rgb(124 140 255 / 0.16);  /* selected and current fills */
+  --accent-line:     rgb(124 140 255 / 0.45);  /* 1px rings on non-focus states */
+  --accent-highlight:        rgb(124 140 255 / 0.30);  /* multiply highlights on the page */
+  --accent-highlight-strong: rgb(124 140 255 / 0.55);  /* the current search hit */
+  --danger:  #ff6b6b;
+  --success: #5fd39a;
+  --warning: #f5c451;
+  --warning-line: rgb(245 196 81 / 0.35);  /* the one honesty-notice border */
 
-  --page-shadow: 0 0 0 1px rgb(255 255 255 / 0.06);  /* pages get a hairline, not a drop shadow */
+  --page-shadow: 0 0 0 1px var(--border-hairline);  /* pages get a hairline, not a drop shadow */
+  --page-background: #ffffff;
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;   /* or Geist Sans */
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;      /* or Geist Mono */
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
   --tracking-ui: 0.01em;      /* slight positive tracking on dark backgrounds */
 
-  --radius-1: 4px; --radius-2: 6px; --radius-3: 10px;
+  /* radius: 2 on the page · 4 small controls · 6 buttons, rows, menus, popovers · 10 bars, dialogs */
+  --radius-page: 2px; --radius-1: 4px; --radius-2: 6px; --radius-3: 10px; --radius-round: 999px;
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px;
-  --duration-fast: 120ms; --duration-base: 180ms;
+
+  /* motion: one curve; instant is drag feedback only; one enter scale for popups and dialogs */
+  --duration-instant: 60ms; --duration-fast: 120ms; --duration-base: 180ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --enter-scale: 0.98;
+
+  --focus-ring: 2px solid var(--accent); --focus-offset: 2px;
 }
 ```
 
 Rules:
 
-- **No drop shadows** on working surfaces; elevation is a tonal step plus a hairline.
-- **Translucency only for floating chrome** over the document (tool bars, palette,
-  contextual bars). Every glass surface has a solid fallback and a 1px border and must pass
-  WCAG AA against both a white page and the dark canvas. Honor
-  `prefers-reduced-transparency` and `prefers-contrast`.
+- **No drop shadows** on working surfaces; elevation is a tonal step plus a hairline. No
+  halos and no side stripes either: the only `box-shadow`s are the page hairline, the inset
+  hairline of a view switch and 1px on-page rings.
+- **Translucency only for floating chrome** (§2): tool bars, contextual bars, the palette,
+  menus and popovers. Each surface composes one global `.glass` rule: a 50% tint over a
+  backdrop that is blurred, colour-boosted and darkened, so a white page shows through as
+  #3f4043 at worst. On glass, secondary and tertiary text use `--glass-text-secondary`,
+  danger uses `--glass-danger`, and accent is never text; every text colour stays AA over a
+  white page (primary 8.4:1, secondary 5.2:1, danger 4.6:1). The glass is opaque
+  (`--glass-solid`, normal text ladder) without `backdrop-filter`, under
+  `prefers-reduced-transparency` or `prefers-contrast: more`, and `Canvas` under forced
+  colours. Docked panels, dialogs and tooltips stay opaque.
 - **Color is for state**, never decoration: accent for focus/selection/primary action,
   danger for destructive, warning for honesty notices (repaired file, font substituted).
-  Source-document color tags on the light table use a small desaturated palette.
+  Source-document color tags on the light table use a small desaturated palette, shown as
+  6px dots next to a name.
+- **State patterns.** "On" has two looks: a view switch is `--surface-3` with an inset
+  hairline (Read | Arrange, page layout, signature tabs); an option choice is
+  `--accent-muted` with no accent border (presets, segments, fit choices, search toggles,
+  the active tool). Chrome toggles such as the panel buttons stay neutral
+  (`--surface-active`). A current
+  row (history step, current file, search hit, comment, field, redaction mark) is always
+  `--accent-muted`, and tertiary text inside it steps up to secondary. Hover is one step,
+  `--surface-hover`, including on small icon buttons.
+- **Buttons.** Primary buttons compose the global `.primary-button`: accent fill with a
+  `--surface-0` label, `--accent-hover` on hover, `--accent-pressed` while pressed, and
+  `--surface-3` with `--text-disabled` when disabled (never the accent at reduced opacity).
+  Secondary buttons are a hairline outline with the shared hover.
+- **Honesty notices**: one recipe, a `--warning-line` hairline around the text, no tinted
+  background and no side stripe.
+- **On the page**: tools mark only what is under the pointer or has keyboard focus (the
+  hovered line, image or field), with a 1px accent ring; images and the page are never
+  tinted. Handles are page white with a 1.5px accent stroke. In-place editors are opaque
+  page white with page ink, including the selected glyphs.
 - **Icons**: one consistent 1.5px stroke set (Lucide or Phosphor), 16px in chrome, 20px in
   the tool bar.
 - **Motion**: short, eased, disable-able. No bouncing, no springs in the chrome. Drag
-  ghosts are slightly scaled and translucent.
+  ghosts are slightly scaled and translucent. Popups, the palette and dialogs enter from
+  `scale(var(--enter-scale))`; side dialogs and the toast slide in from their edge.
 - **Typography**: 13px UI base, 12px secondary, 11px labels with tracking; numerals
   tabular in the status bar and page numbers.
 - **The document canvas is never themed.** Pages render as authored; we do not invert or
@@ -131,7 +193,10 @@ Rules:
 - Roving tabindex in tool bars and the grid; arrows move focus, Space selects, Enter opens,
   Delete removes, Alt+Arrows move pages, R / Shift+R rotate.
 - Live region announcements for moves, rotations, long operations, export completion.
-- Focus ring 2px accent on 2px offset, always visible on keyboard focus.
+- Focus ring 2px accent on 2px offset, always visible on keyboard focus. Deliberate offset
+  overrides: −2px for rows inside scrollers, 0 for inputs and menu items, 1px for segments,
+  presets, hotspots and swatches, 3px (outline) for thumbnails, 4px for grid cells, and
+  −2px for page layers.
 - Target sizes ≥ 24×24; reduced motion respected; nothing conveyed by color alone.
 
 ## 6. Naming and brand
@@ -141,6 +206,12 @@ open items (see `DISCUSSION.md`). Brand should be a single glyph at small size, 
 gradient, works in the tab bar at 16px.
 
 ## 7. Refinement pass (after M4)
+
+**Done (2026-09-28).** The audit, the owner decisions (D1 to D16) and the before/after
+screenshots are in [`docs/design/audit/`](design/audit/README.md); what each step changed,
+with pixel diffs and measured contrast, is in
+[`docs/design/audit/pass/RESULTS.md`](design/audit/pass/RESULTS.md). §2 and §3 describe the
+result. The original brief follows.
 
 Owner feedback after M3 (2026-09-27): the restraint is right, but the surfaces should read
 as more translucent, and a few effects look wrong rather than quiet. The pass is scheduled

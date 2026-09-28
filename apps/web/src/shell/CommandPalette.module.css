@@ -112,7 +112,6 @@
 .option[aria-selected='true'] {
   background: var(--surface-active);
   color: var(--text-primary);
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .option[aria-disabled='true'] {

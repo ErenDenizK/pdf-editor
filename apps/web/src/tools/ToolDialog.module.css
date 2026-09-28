@@ -63,9 +63,11 @@
   cursor: pointer;
 }
 
+/* An option choice: accent-muted, no accent border (design audit D11, G5). */
 .preset:has(input:checked) {
-  border-color: var(--accent);
-  background: var(--surface-2);
+  background: var(--accent-muted);
+  /* The hint is 4.3:1 in tertiary on the accent-muted fill; it steps up to secondary (AA). */
+  --text-tertiary: var(--text-secondary);
 }
 
 .preset:has(input:focus-visible) {
@@ -201,6 +203,7 @@
 
 .progress::-webkit-progress-value {
   background: var(--accent);
+  transition: width var(--duration-base) var(--ease-out);
 }
 
 .progress::-moz-progress-bar {
@@ -276,13 +279,12 @@
 }
 
 .primary {
-  background: var(--accent);
-  color: var(--surface-0);
+  composes: primary-button from global;
 }
 
-.primary:disabled,
 .secondary:disabled {
-  opacity: 0.5;
+  color: var(--text-disabled);
+  cursor: default;
 }
 
 .secondary {

@@ -132,6 +132,8 @@
 
 .row[aria-current='true'] {
   background: var(--accent-muted);
+  /* Tertiary text is 4.3:1 on the accent-muted fill; it steps up to secondary (AA). */
+  --text-tertiary: var(--text-secondary);
 }
 
 @media (hover: hover) {
@@ -267,16 +269,10 @@
 }
 
 .primary {
+  composes: primary-button from global;
   height: var(--control-height);
   padding: 0 var(--space-3);
   border-radius: var(--radius-2);
-  background: var(--accent);
-  color: var(--surface-0);
   font-size: var(--text-sm);
   font-weight: 500;
-}
-
-.primary:disabled {
-  opacity: 0.5;
-  cursor: default;
 }

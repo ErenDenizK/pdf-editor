@@ -63,7 +63,8 @@
 
 .previewSheet {
   position: relative;
-  overflow: hidden;
+  /* Not clipped: the edge handles (and their focus ring) straddle the page edge. */
+  overflow: visible;
   border-radius: var(--radius-page);
   background: var(--page-background);
   box-shadow: var(--page-shadow);
@@ -89,9 +90,11 @@
   height: 12px;
   margin: -6px 0 0 -6px;
   padding: 0;
-  border: 1px solid var(--accent);
+  border: 1.5px solid var(--accent);
   border-radius: var(--radius-page);
-  background: var(--surface-0);
+  /* Page white with the accent stroke, like the annotation and image handles (design audit
+     N3, D10): dark squares read as notches cut into the page. */
+  background: var(--page-background);
 }
 
 .handle:focus-visible {

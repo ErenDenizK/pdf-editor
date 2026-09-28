@@ -52,7 +52,6 @@
 .toggle[aria-pressed='true'] {
   background: var(--accent-muted);
   color: var(--text-primary);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
 .toggle:disabled {
@@ -132,10 +131,10 @@
   outline-offset: -2px;
 }
 
+/* The current hit is a current row: accent-muted, like Comments, Forms and Redactions. */
 .hit[aria-current='true'] {
-  background: var(--surface-2);
+  background: var(--accent-muted);
   color: var(--text-primary);
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .context {

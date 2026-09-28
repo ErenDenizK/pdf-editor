@@ -51,6 +51,10 @@
 
   /* One accent: focus, selection, primary action. Nothing else. */
   --accent: #7c8cff;
+  /* Primary buttons: one step lighter on hover, one darker while pressed. Their label
+     (--surface-0) stays AA on all three: 6.6:1, 7.9:1, 5.7:1. */
+  --accent-hover: #8f9dff;
+  --accent-pressed: #6f7ff5;
   /* Four accent alphas (plus the current search hit):
      subtle: washes, hover fills, previews · muted: selected and current fills ·
      line: 1px rings and borders on non-focus states · highlight: multiply highlights on the

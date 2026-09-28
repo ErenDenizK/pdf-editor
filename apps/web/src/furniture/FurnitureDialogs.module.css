@@ -124,15 +124,15 @@
   pointer-events: none;
 }
 
+/* An option choice: accent-muted, no accent border (design audit D11). */
 .segment:has(input:checked) {
-  border-color: var(--accent);
   background: var(--accent-muted);
   color: var(--text-primary);
 }
 
 .segment:has(input:focus-visible) {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 /* 3 × 3 anchor picker: nine radios laid out as the page. */
@@ -181,7 +181,7 @@
 }
 
 .anchor:has(input:focus-visible) {
-  outline: 2px solid var(--accent);
+  outline: var(--focus-ring);
 }
 
 .slots {

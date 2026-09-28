@@ -113,7 +113,8 @@
   width: 8px;
   height: 8px;
   margin: -4px 0 0 -4px;
-  border: 1px solid var(--accent);
+  /* One handle stroke on the page: 1.5px accent on page white (design audit N2). */
+  border: 1.5px solid var(--accent);
   border-radius: var(--radius-page);
   background: var(--page-background);
   pointer-events: auto;
@@ -158,10 +159,11 @@
   height: 14px;
 }
 
+/* Placement preview: the one preview fill, accent-subtle (design audit N4). */
 .preview {
   position: absolute;
   border: 1px dashed var(--accent);
-  background: var(--accent-muted);
+  background: var(--accent-subtle);
   pointer-events: none;
 }
 
@@ -277,8 +279,8 @@
   color: var(--text-secondary);
 }
 
+/* An option choice: accent-muted, no accent border (design audit D11). */
 .segment[aria-checked='true'] {
-  border-color: var(--accent-line);
   background: var(--accent-muted);
   color: var(--text-primary);
 }

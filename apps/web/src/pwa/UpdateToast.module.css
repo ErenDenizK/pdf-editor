@@ -67,8 +67,7 @@
 }
 
 .primary {
-  background: var(--accent);
-  color: var(--surface-0);
+  composes: primary-button from global;
 }
 
 .secondary {

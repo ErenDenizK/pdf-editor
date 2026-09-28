@@ -44,20 +44,17 @@
   min-width: 0;
   height: 26px;
   padding: 0 var(--space-2);
-  border: 1px solid var(--border-hairline);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-1);
   background: var(--surface-2);
   color: var(--text-primary);
   font-size: var(--text-sm);
 }
 
-.input:hover {
-  border-color: var(--border-strong);
-}
-
+/* The shared input look: the control border, no hover, the focus ring at offset 0 (design
+   audit F4, H4). */
 .input:focus-visible {
-  border-color: var(--accent);
-  outline: none;
+  outline-offset: 0;
 }
 
 .input[aria-invalid='true'] {
@@ -194,11 +191,11 @@
 }
 
 /* Honesty notice: badge + expandable explanation, inline (DESIGN.md §4.4). */
+/* Honesty notice: the one recipe, a warning hairline and no fill (design audit J4, D14). */
 .notice {
   padding: var(--space-2);
-  border: 1px solid var(--border-hairline);
+  border: 1px solid var(--warning-line);
   border-radius: var(--radius-2);
-  background: var(--surface-2);
   color: var(--text-secondary);
   font-size: var(--text-sm);
   line-height: var(--leading-base);
@@ -456,12 +453,7 @@
 }
 
 .primary {
-  background: var(--accent);
-  color: var(--surface-0);
-}
-
-.primary:disabled {
-  opacity: 0.5;
+  composes: primary-button from global;
 }
 
 .secondary {

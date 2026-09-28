@@ -218,6 +218,12 @@
   outline: none;
 }
 
+/* Selected glyphs keep the annotation's ink: the chrome's selection text colour is near-white. */
+.freeText::selection {
+  background: var(--accent-highlight);
+  color: currentcolor;
+}
+
 .notePopup {
   composes: glass from global;
   position: absolute;
@@ -265,14 +271,22 @@
   border-radius: var(--radius-2);
   font-size: var(--text-md);
   font-weight: 500;
+  transition: background-color var(--duration-fast) var(--ease-out);
 }
 
 .primary {
-  background: var(--accent);
-  color: var(--surface-0);
+  composes: primary-button from global;
 }
 
 .secondary {
   border: 1px solid var(--border-hairline);
   color: var(--text-secondary);
+}
+
+/* The shared secondary hover (design audit F6). */
+@media (hover: hover) {
+  .secondary:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
 }

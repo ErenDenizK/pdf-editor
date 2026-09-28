@@ -35,9 +35,11 @@
   font-size: var(--text-sm);
 }
 
+/* A view switch: surface-3 with a hairline, like the Read | Arrange switch (design audit D11). */
 .tab[aria-selected='true'] {
   background: var(--surface-3);
   color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-hairline);
 }
 
 .padWrap {
@@ -86,18 +88,22 @@
   border-radius: var(--radius-2);
   font-size: var(--text-md);
   font-weight: 500;
+  transition: background-color var(--duration-fast) var(--ease-out);
 }
 
 .primary {
-  background: var(--accent);
-  color: var(--surface-0);
-}
-
-.primary:disabled {
-  opacity: 0.5;
+  composes: primary-button from global;
 }
 
 .secondary {
   border: 1px solid var(--border-hairline);
   color: var(--text-secondary);
+}
+
+/* The shared secondary hover (design audit F6). */
+@media (hover: hover) {
+  .secondary:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
 }

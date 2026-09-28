@@ -162,9 +162,12 @@
   color: var(--text-disabled);
 }
 
+/* Current row: accent-muted everywhere (design audit D11, G6). */
 .fileRow[aria-current='true'] {
-  background: var(--surface-2);
+  background: var(--accent-muted);
   color: var(--text-primary);
+  /* Tertiary text is 4.3:1 on the accent-muted fill; it steps up to secondary (AA). */
+  --text-tertiary: var(--text-secondary);
 }
 
 .fileTag {

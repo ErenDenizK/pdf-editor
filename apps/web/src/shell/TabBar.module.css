@@ -138,7 +138,7 @@
 
 @media (hover: hover) {
   .close:hover {
-    background: var(--surface-active);
+    background: var(--surface-hover);
     color: var(--text-primary);
   }
 }
