@@ -121,18 +121,33 @@ Status: functionality complete and the independent correctness review of M3 reso
 findings fixed with regression tests). The M2 cross-viewer gate is now the automated
 matrix; v1.0 is tagged once it is green in CI and the owner merges `develop` into `main`.
 
-## M4 — Editing content  (→ v1.x)
+## M4 — Editing content  (→ v1.x) — **implemented 2026-09-28, exit pending review**
 
-- True redaction (PDFium redact in quads + annotation/metadata scrub + forensic
-  self-check + forced full rewrite).
-- Text editing, tier 1: "cover and remove" (glyphs actually removed, new text overlaid).
-- Text editing, tier 2: in-place edits when the embedded font has every needed glyph,
-  verified by read-back; visible "font substituted / reflow risk" state otherwise.
-- Image objects: move, resize, replace, extract.
-- Crop (as CropBox) with an explicit "crop and discard content" option; page resize with
-  annotation transforms.
-- Form field creation.
-- Outline editor.
+Engine hosting moved to our own PDFium worker with guarded raw access (ADR-0011); the
+viewer's PDFium worker chunk shrank from 1.7 MB to 1 MB.
+
+| Feature | Engine | Notes | Status |
+|---|---|---|---|
+| Redaction marks: by selection, word, area, search hits, sensitive-data finder (e-mail, phone, IBAN, TCKN, cards, dates) | P | standard `/Redact` annotations through the edit runner; Redactions panel with snippets, review (J/K), honesty text | done |
+| Apply redactions: engine pass + path/image removal + scrub + blank-region gate + fill + forensic self-check | P + L + raw | runs on private scratch documents; fails closed with reports; strings scrubbed document-wide (area-only option); attachments removed unless kept and then reported unverified; export re-checks the exact final bytes and blocks the download on any finding | done (no pre-apply tinting of graphics to be removed; overlay text drawn by pdf-lib; JBIG2/CCITT/JPX streams listed as not searched) |
+| Text editing, tier 2 (same font, verified) and tier 1 (bundled subset font) | raw | split text object, dry-run read-back, fallback with honesty state; fit: keep, shrink to 75%, overflow; undo = reopen + replay; export renames subset fonts, repairs MCIDs and drops orphaned streams | done (one run = one text object per line; forms are tier 1 with the text moved to page level; Type3, paths, invisible and vertical text refused) |
+| Image objects: move, resize, replace, extract | raw | handles, nudge, PNG/JPEG/WebP replace, JPEG pass-through on extract; transforms invertible, remove/replace replay-required | done (in-form images are moved to page level on transform/replace; replace drops the old object's clip and graphics state) |
+| Crop with "remove content outside the crop" | model + P | margins, presets, draggable preview, Draw crop area in Read mode; discard runs the redaction pipeline with white fill in the same history entry; shared source pages remove only content hidden everywhere | done (no trim-to-content; content outside the source's own CropBox stays) |
+| Page resize with annotation transforms | model + L | scale/fit/canvas, nine anchors, stretch; annotations, widgets, link and outline destinations transformed; verification checks annotations stay on the page | done (NoZoom icons keep their size; border widths and /DA font sizes not scaled) |
+| Form field creation | model + L | seven kinds, live widgets, properties popover, tab order, AcroForm materialisation with the existing name policies, flatten, verification | done (`/Tabs` not written; push buttons have no actions; duplicated pages get no fields) |
+| Outline editor | model + L | add at current view, rename, delete, move, indent/outdent, drag, open state, dead-link cleanup | done (no generate-from-headings; /XYZ navigation approximate) |
+
+Known behaviours and follow-ups from the workstreams:
+
+- The signature-field reader marks unsigned `/Sig` placeholders as signed after re-open
+  (`listFormFields` pairs every `/Sig` field with PDFium's signature list).
+- Edited lines become several runs; a later edit works on one run.
+- `checkEditability` runs outside the edit queue; a race with a reopen only shows an error.
+- Two agents observed a blank Read view after Arrange → Read or when opening a second
+  document; fix in progress at the time of writing.
+
+Exit: independent correctness review (engine and web) resolved with regression tests;
+docs current; changesets present → **v1.1.0**.
 
 ## M5 — Recognize and compare  (→ v1.x)
 

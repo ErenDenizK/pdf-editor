@@ -41,8 +41,12 @@ Roles:
   rendering engine and the content-level editor: page bitmaps and thumbnails, glyph
   geometry for selection and search, annotation CRUD with generated appearance streams,
   form field values and widget appearance regeneration, true redaction, flatten, save.
-  One instance per open document, in its own worker. ~2.2 MB gzip, loaded on first
-  document open and cached by the service worker.
+  Since M4 (ADR-0011) it runs in the app's own module worker
+  (`@pdf-editor/engine/pdfium.worker` behind `createPdfiumProxy`): one hosted engine
+  (`init` + `PdfiumNative` + `PdfEngine`) serves the adapter and, through a guarded raw
+  access with a per-source lock (`pdfium/host/`), the content editors (`text-edit/`,
+  `image-objects/`, `redaction/`). ~1 MB gzip worker chunk, loaded on first document
+  open and cached by the service worker.
 - **`@cantoo/pdf-lib` (MIT)** is the *assembler*: it turns a virtual document into bytes.
   It copies pages between documents, applies rotation, prepends/appends overlay content
   (page numbers, headers, watermarks), rebuilds `/Outlines`, `/PageLabels`, `/AcroForm`,
@@ -107,9 +111,14 @@ interface PageResize {             // unrotated user space, like cropBox
 - Structural operations (reorder, delete, rotate, duplicate, move across documents,
   split, merge) are array edits on `VirtualDocument.pages`. They are O(1) to O(n) on
   small arrays and instantly undoable.
-- Content operations (annotate, fill, redact, edit text) are applied to the source's
-  PDFium instance inside its worker and recorded in `EngineEditLog` as commands with
-  inverse operations, so they participate in the same undo stack.
+- Content operations (annotate, fill, redact, edit text, move or replace images) are
+  applied to the source's PDFium document inside the worker and recorded per source as
+  `EngineEdit`s. Annotation and form edits and image transforms carry exact inverses; text
+  edits, image removal or replacement and applied redactions are non-invertible and marked
+  "replay required": undo reopens the source's original bytes and replays the remaining
+  edit list (byte-identical by construction), redo re-applies the recorded edit. Applied
+  redactions and crop-with-discard replace the source's bytes with a verified result under
+  the same page ids.
 - **Undo/redo** is a pointer into a persistent history of workspace snapshots (Immer-style
   structural sharing) plus command replay for engine-side edits. Drag and color changes
   coalesce (pdf.js `CommandManager` model). History is persisted to IndexedDB/OPFS with
