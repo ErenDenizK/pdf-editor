@@ -34,6 +34,7 @@ The owner delegated all open items to the project lead. Resolutions, recorded in
 | 16. M4 | Approved as specified (`docs/specs/redaction-and-text-editing.md`); started 2026-09-27 with two engine spikes (raw PDFium access for text editing, EmbedPDF redaction coverage). |
 | 17. Design refinement pass | Owner direction: simplicity is right, but surfaces should be more translucent and a few effects look wrong. Scheduled as a dedicated pass after M4 (before M5), with a review of every effect against `docs/DESIGN.md`. |
 | 18. Product name | No hurry; decided last, before the v1.0 tag at the earliest. |
+| 19. M4 exit (2026-09-28) | Done after two independent reviews; 24 findings fixed with regression tests. Next: the design refinement pass (item 17), then M5. |
 
 ## Open
 

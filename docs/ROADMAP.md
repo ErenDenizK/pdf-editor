@@ -121,7 +121,7 @@ Status: functionality complete and the independent correctness review of M3 reso
 findings fixed with regression tests). The M2 cross-viewer gate is now the automated
 matrix; v1.0 is tagged once it is green in CI and the owner merges `develop` into `main`.
 
-## M4 — Editing content  (→ v1.x) — **implemented 2026-09-28, exit pending review**
+## M4 — Editing content  (→ v1.1) — **done 2026-09-28**
 
 Engine hosting moved to our own PDFium worker with guarded raw access (ADR-0011); the
 viewer's PDFium worker chunk shrank from 1.7 MB to 1 MB.
@@ -143,11 +143,16 @@ Known behaviours and follow-ups from the workstreams:
   (`listFormFields` pairs every `/Sig` field with PDFium's signature list).
 - Edited lines become several runs; a later edit works on one run.
 - `checkEditability` runs outside the edit queue; a race with a reopen only shows an error.
-- Two agents observed a blank Read view after Arrange → Read or when opening a second
-  document; fix in progress at the time of writing.
+- Text edits refuse, with a shown reason, text in a form drawn more than once, text whose
+  clip an edit would break, and encodings that cannot be read back; tier 2 refuses
+  characters with more than one code in the font.
+- The redaction content-text check does not decode custom font encodings inside streams
+  that are never drawn; page text is covered by the extraction checks.
 
-Exit: independent correctness review (engine and web) resolved with regression tests;
-docs current; changesets present → **v1.1.0**.
+Exit: the independent correctness review (engine: 1 blocker, 5 major, 5 minor; web: 5
+major, 8 minor) is resolved with regression tests (24 findings, 9 fix commits); the
+blank-Read-view bug found on the way is fixed; docs and changesets current → **v1.1.0**
+once the owner merges `develop` into `main` and tags.
 
 ## M5 — Recognize and compare  (→ v1.x)
 
