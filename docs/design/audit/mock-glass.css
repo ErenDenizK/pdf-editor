@@ -16,17 +16,17 @@
 
 /* Floating surfaces: tool bar, annotation / image / Arrange contextual bars, crop banner,
    command palette, menus, popovers, text-edit header, note popup, form notice. */
-[class*="_toolbar_jssel_"],
-[class*="_bar_106ew_"],
-[class*="_bar_1jrkk_"],
-[class*="_contextBar_1o8j2_"],
-[class*="_banner_i65ia_"],
-[class*="_popup_ewuyi_"],
-[class*="_popup_ejbcg_"],
-[class*="_popup_1thbq_"],
-[class*="_panel_qu0ng_"],
-[class*="_notePopup_106ew_"],
-[class*="_notice_1c50x_"] {
+[class*='_toolbar_jssel_'],
+[class*='_bar_106ew_'],
+[class*='_bar_1jrkk_'],
+[class*='_contextBar_1o8j2_'],
+[class*='_banner_i65ia_'],
+[class*='_popup_ewuyi_'],
+[class*='_popup_ejbcg_'],
+[class*='_popup_1thbq_'],
+[class*='_panel_qu0ng_'],
+[class*='_notePopup_106ew_'],
+[class*='_notice_1c50x_'] {
   /* Text on glass: two steps only, both AA over a white page (see the contrast table). */
   --text-secondary: var(--glass-text-secondary);
   --text-tertiary: var(--glass-text-secondary);
