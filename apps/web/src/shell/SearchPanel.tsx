@@ -10,6 +10,7 @@ import { CaseSensitive, ChevronDown, ChevronUp, WholeWord } from 'lucide-react';
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 
 import { formatNumber, m } from '../i18n';
+import { MarkMatchesButton } from '../redaction/MarkMatchesButton';
 import { useViewStore } from '../state/view-store';
 import { useActiveDocument, useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
@@ -162,6 +163,7 @@ function SearchView({ doc }: { readonly doc: VirtualDocument }) {
             onClick={() => searchStep(1)}
           />
         </div>
+        <MarkMatchesButton />
       </div>
       {hits.length > 0 ? <ResultList doc={doc} hits={hits} current={current} /> : null}
     </div>

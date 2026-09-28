@@ -5,7 +5,7 @@
  */
 
 import type { PDFArray, PDFDict, PDFNumber, PDFString } from '@cantoo/pdf-lib';
-import { PDFDocument, PDFName } from '@cantoo/pdf-lib';
+import { decodePDFRawStream, PDFDocument, PDFName, PDFRawStream } from '@cantoo/pdf-lib';
 import type { Rect } from '@pdf-editor/document-model';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
@@ -456,5 +456,135 @@ describe('flatten and verification', () => {
     });
     expect(wrong.problems.join(' ')).toContain('expected 3');
     await adapter.close(id);
+  });
+});
+
+describe('redaction marks (/Redact)', () => {
+  function redactDict(pdf: PDFDocument): PDFDict {
+    const annots = pdf.getPage(0).node.Annots()?.asArray() ?? [];
+    const dict = annots
+      .map((ref) => pdf.context.lookup(ref) as PDFDict)
+      .find((d) => String(d.get(PDFName.of('Subtype'))) === '/Redact');
+    if (!dict) throw new Error('no /Redact annotation');
+    return dict;
+  }
+
+  function colorOf(dict: PDFDict, key: string): number[] | undefined {
+    const value = dict.lookup(PDFName.of(key)) as PDFArray | undefined;
+    return value?.asArray().map((n) => Math.round((n as PDFNumber).asNumber() * 255));
+  }
+
+  test('/IC defaults to black; outline, fill, overlay text and colour round-trip', async () => {
+    const id = await openBlank();
+    const area: Rect = { x: 100, y: 600, width: 120, height: 20 };
+    const plain = await adapter.createAnnotation(id, {
+      kind: 'redact',
+      pageIndex: 0,
+      rect: area,
+      quads: [area],
+    });
+    expect(plain).toMatchObject({ kind: 'redact', interiorColor: '#000000' });
+    expect((plain as MarkupAnnotation).overlayText).toBeUndefined();
+
+    const second: Rect = { x: 100, y: 500, width: 80, height: 14 };
+    const styled = await adapter.createAnnotation(id, {
+      kind: 'redact',
+      pageIndex: 0,
+      rect: second,
+      quads: [second],
+      color: '#E53935',
+      interiorColor: '#1E88E5',
+      overlayText: 'REDACTED',
+      overlayColor: '#FFFFFF',
+    });
+    expect(styled).toMatchObject({
+      color: '#E53935',
+      interiorColor: '#1E88E5',
+      overlayText: 'REDACTED',
+      overlayColor: '#FFFFFF',
+    });
+
+    // An update carries the full state: dropping the overlay text clears it.
+    const {
+      overlayText: _text,
+      overlayColor: _color,
+      ...withoutOverlay
+    } = styled as MarkupAnnotation;
+    const cleared = await adapter.updateAnnotation(id, withoutOverlay);
+    expect((cleared as MarkupAnnotation).overlayText).toBeUndefined();
+    expect((cleared as MarkupAnnotation).overlayColor).toBeUndefined();
+    const restored = await adapter.updateAnnotation(id, styled);
+    expect(restored).toMatchObject({ overlayText: 'REDACTED', interiorColor: '#1E88E5' });
+
+    const saved = await adapter.save(id);
+    const report = await checkAnnotationConformance(saved.slice(0));
+    expect(report.problems).toEqual([]);
+    const pdf = await PDFDocument.load(saved.slice(0), { updateMetadata: false });
+    const first = redactDict(pdf);
+    expect(colorOf(first, 'IC')).toEqual([0, 0, 0]);
+
+    const reopened = sid(`reopened-redact-${counter}`);
+    await adapter.open(reopened, saved);
+    const again = await adapter.listAnnotations(reopened, 0);
+    const marks = again.filter((a) => a.kind === 'redact') as MarkupAnnotation[];
+    expect(marks).toHaveLength(2);
+    expectRect(marks[0]?.quads[0], area);
+    expect(marks[0]).toMatchObject({ interiorColor: '#000000', color: '#E53935' });
+    expect(marks[1]).toMatchObject({
+      interiorColor: '#1E88E5',
+      overlayText: 'REDACTED',
+      overlayColor: '#FFFFFF',
+    });
+    await adapter.close(reopened);
+    await adapter.close(id);
+  });
+});
+
+describe('links', () => {
+  test('a saved link has /C equal to its underline appearance colour', async () => {
+    const id = await openBlank();
+    const rect: Rect = { x: 72, y: 600, width: 150, height: 18 };
+    await adapter.createAnnotation(id, {
+      kind: 'link',
+      pageIndex: 0,
+      rect,
+      uri: 'https://example.org/',
+    });
+    await adapter.createAnnotation(id, {
+      kind: 'link',
+      pageIndex: 0,
+      rect: { ...rect, y: 560 },
+      uri: 'https://example.org/red',
+      color: '#FF0000',
+    });
+    const saved = await adapter.save(id);
+    await adapter.close(id);
+    const pdf = await PDFDocument.load(saved, { updateMetadata: false });
+    const links = (pdf.getPage(0).node.Annots()?.asArray() ?? [])
+      .map((ref) => pdf.context.lookup(ref) as PDFDict)
+      .filter((d) => String(d.get(PDFName.of('Subtype'))) === '/Link');
+    expect(links).toHaveLength(2);
+    const expected = [
+      [0, 0, 1],
+      [1, 0, 0],
+    ];
+    links.forEach((dict, i) => {
+      const c = (dict.lookup(PDFName.of('C')) as PDFArray | undefined)
+        ?.asArray()
+        .map((n) => (n as PDFNumber).asNumber());
+      expect(c).toEqual(expected[i]);
+      // The generated underline strokes in the same colour.
+      const ap = dict.lookup(PDFName.of('AP')) as PDFDict | undefined;
+      const normal = ap?.lookup(PDFName.of('N'));
+      expect(normal).toBeInstanceOf(PDFRawStream);
+      const ops = new TextDecoder('latin1').decode(
+        decodePDFRawStream(normal as PDFRawStream).decode(),
+      );
+      const strokes = [...ops.matchAll(/([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+RG/g)].map((m) =>
+        [m[1], m[2], m[3]].map(Number),
+      );
+      expect(strokes.length).toBeGreaterThan(0);
+      for (const rgb of strokes) expect(rgb).toEqual(expected[i]);
+    });
   });
 });

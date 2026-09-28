@@ -15,12 +15,16 @@
  * - Opacity of stamps: EmbedPDF writes no /CA for stamps; the pass sets /CA and wraps the
  *   appearance in a form that applies a matching ExtGState (`/CA` alone is not honoured by
  *   all viewers).
+ * - Link colour: a touched link without /C gets the stroke colour of its appearance (the
+ *   generated underline; blue when none is found). pdf.js reads a missing /C as black and
+ *   draws a second, black underline from /BS.
  *
  * Pure function of the bytes and the request; runs in the assembly worker when the
  * adapter's inspector offers `finalizeAnnotations`, else in the adapter's thread.
  */
 
 import {
+  decodePDFRawStream,
   PDFArray,
   PDFBool,
   PDFDict,
@@ -41,6 +45,7 @@ const N = {
   Annots: PDFName.of('Annots'),
   AP: PDFName.of('AP'),
   BBox: PDFName.of('BBox'),
+  C: PDFName.of('C'),
   CA: PDFName.of('CA'),
   Contents: PDFName.of('Contents'),
   ExtGState: PDFName.of('ExtGState'),
@@ -206,6 +211,29 @@ function applyOpacity(doc: PDFDocument, annot: PDFDict, alpha: number): void {
   ap.set(N.N, context.register(wrapper));
 }
 
+/** Default link colour (the underline EmbedPDF generates without /C). */
+const LINK_RGB = [0, 0, 1] as const;
+
+/** The last `r g b RG` stroke colour in an annotation's normal appearance, if any. */
+function appearanceStrokeRgb(doc: PDFDocument, annot: PDFDict): number[] | undefined {
+  const { context } = doc;
+  const ap = context.lookupMaybe(annot.get(N.AP), PDFDict);
+  const normal = ap ? context.lookup(ap.get(N.N)) : undefined;
+  if (!(normal instanceof PDFRawStream)) return undefined;
+  let content: string;
+  try {
+    content = new TextDecoder('latin1').decode(decodePDFRawStream(normal).decode());
+  } catch {
+    return undefined;
+  }
+  const number = String.raw`(-?(?:\d+\.?\d*|\.\d+))`;
+  const ops = [
+    ...content.matchAll(new RegExp(`${number}\\s+${number}\\s+${number}\\s+RG\\b`, 'g')),
+  ];
+  const last = ops[ops.length - 1];
+  return last ? [Number(last[1]), Number(last[2]), Number(last[3])] : undefined;
+}
+
 /**
  * Applies the post-pass to `bytes` and returns the new bytes. Never changes page content
  * or widgets.
@@ -255,6 +283,10 @@ export async function finalizeAnnotations(
       const flags = context.lookup(dict.get(N.F));
       const f = flags instanceof PDFNumber ? flags.asNumber() : 0;
       dict.set(N.F, PDFNumber.of(f | ANNOT_FLAG.Print));
+
+      if (subtype === 'Link' && !dict.has(N.C)) {
+        dict.set(N.C, context.obj(appearanceStrokeRgb(doc, dict) ?? [...LINK_RGB]));
+      }
 
       const alpha = request.opacity[nm];
       if (alpha !== undefined && alpha < 1) applyOpacity(doc, dict, alpha);

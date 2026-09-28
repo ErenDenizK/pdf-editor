@@ -11,7 +11,14 @@ import { create } from 'zustand';
 import { readJson, writeJson } from './safe-storage';
 
 export type ViewMode = 'read' | 'arrange';
-export type LeftPanelView = 'pages' | 'outline' | 'search' | 'comments' | 'forms' | 'files';
+export type LeftPanelView =
+  | 'pages'
+  | 'outline'
+  | 'search'
+  | 'comments'
+  | 'redactions'
+  | 'forms'
+  | 'files';
 /** Placeholder tool ids; the tool state machine (ARCHITECTURE.md §6) will own these. */
 export type ToolId = 'select' | 'highlight' | 'ink' | 'text' | 'shapes' | 'note';
 
@@ -75,6 +82,7 @@ export function parseLayout(value: unknown): PersistedLayout {
     'outline',
     'search',
     'comments',
+    'redactions',
     'forms',
     'files',
   ];

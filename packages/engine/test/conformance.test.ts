@@ -2,7 +2,7 @@
  * `checkAnnotationConformance` on hand-built annotations: every rule has a failing case.
  */
 
-import type { PDFDict } from '@cantoo/pdf-lib';
+import type { PDFArray, PDFDict, PDFNumber } from '@cantoo/pdf-lib';
 import { PDFDocument, PDFName, type PDFRef, PDFString } from '@cantoo/pdf-lib';
 import { describe, expect, test } from 'vitest';
 
@@ -198,5 +198,45 @@ describe('checkAnnotationConformance', () => {
     expect(annots?.size()).toBe(3);
     const stamp = doc.context.lookup(annots?.get(2)) as PDFDict;
     expect(String(stamp.get(PDFName.of('CA')))).toBe('0.4');
+  });
+  test('finalizeAnnotations gives a touched link without /C its appearance colour', async () => {
+    const { bytes } = await build(({ doc, annot }) => {
+      const underline = (rgb: string) =>
+        doc.context.register(
+          doc.context.stream(`q ${rgb} RG 2 w 0 1 m 120 1 l S Q`, {
+            Type: 'XObject',
+            Subtype: 'Form',
+            BBox: [0, 0, 120, 20],
+          }),
+        );
+      const link = (nm: string, ap: PDFRef | undefined, extra: Record<string, unknown> = {}) =>
+        annot({
+          Subtype: 'Link',
+          Rect: [10, 10, 130, 30],
+          NM: PDFString.of(nm),
+          BS: { S: 'U', W: 2 },
+          ...(ap ? { AP: { N: ap } } : {}),
+          ...extra,
+        });
+      link('blue', underline('0 0 1'));
+      link('red', underline('1 0 0'));
+      link('none', undefined);
+      link('kept', underline('0 0 1'), { C: [0, 0.5, 0] });
+      link('untouched', underline('0 0 1'));
+    });
+    const fixed = await finalizeAnnotations(bytes, {
+      touched: ['blue', 'red', 'none', 'kept'],
+      noteOpen: {},
+      opacity: {},
+      includeComments: true,
+      now: '2026-09-27T12:00:00Z',
+    });
+    const doc = await PDFDocument.load(fixed);
+    const colors = (doc.getPage(0).node.Annots()?.asArray() ?? []).map((ref) => {
+      const dict = doc.context.lookup(ref) as PDFDict;
+      const c = dict.lookup(PDFName.of('C')) as PDFArray | undefined;
+      return c?.asArray().map((n) => (n as PDFNumber).asNumber());
+    });
+    expect(colors).toEqual([[0, 0, 1], [1, 0, 0], [0, 0, 1], [0, 0.5, 0], undefined]);
   });
 });

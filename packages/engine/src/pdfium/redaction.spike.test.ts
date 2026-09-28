@@ -1574,7 +1574,9 @@ describe('redaction spike: fill, overlay, black boxes, timing', () => {
     expect(box('red').mean).toEqual([255, 0, 0]); // /IC honoured
     expect(box('noIC').white).toBe(1); // no /IC: content removed, nothing painted
     expect(box('overlay').white).toBe(0); // /OverlayText is not drawn
-    expect(box('adapter').white).toBe(1); // adapter mapping writes /C and /OC, never /IC
+    // Found here: the adapter mapping wrote /C and /OC but never /IC, so nothing was painted.
+    // Fixed in M4 (annotation-mapping.ts: /IC defaults to black).
+    expect(box('adapter').dark).toBe(1);
     expect(box('rectsDrawBlackBoxesTrue').white).toBe(1); // option ignored by the wrapper
     expect((variantsOut.nativeDrawBlackBoxes as Fill).render.box.dark).toBe(1);
   });

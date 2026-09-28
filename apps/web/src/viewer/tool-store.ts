@@ -20,7 +20,9 @@ export type ToolMode =
   | 'text-box'
   | 'note'
   | 'stamp'
-  | 'signature';
+  | 'signature'
+  /** Redaction marks (redaction spec §1.1): by text or by area. */
+  | 'redact';
 
 interface ToolState {
   readonly mode: ToolMode;

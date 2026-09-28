@@ -8,6 +8,8 @@ import { pickFiles } from '../files/open-files';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import type { CommandRegistry } from '../commands/registry';
+import { registerRedactionCommands } from '../redaction/commands';
+import { markSelection } from '../redaction/marks';
 import { useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useToolStore } from '../viewer/tool-store';
@@ -43,6 +45,8 @@ export async function activateTool(tool: ToolDefinition): Promise<void> {
   const tools = useToolStore.getState();
   const store = useAnnotationStore.getState();
   if (isMarkupMode(tool.mode) && (await markupFromSelection(tool.mode))) return;
+  // Redact: selected text becomes a mark (redaction spec §1.1); else the tool arms.
+  if (tool.mode === 'redact' && (await markSelection())) return;
   if (tool.mode === 'stamp') {
     const pending = store.pendingStamp;
     if (!pending || pending.kind === 'signature') {
@@ -115,6 +119,7 @@ export function registerAnnotationCommands(registry: CommandRegistry): () => voi
       keywords: ['panel', 'sidebar', 'annotations', 'notes'],
       run: () => useUiStore.setState({ leftPanelOpen: true, leftPanelView: 'comments' }),
     }),
+    registerRedactionCommands(registry),
   ];
   return () => {
     for (const dispose of disposers) dispose();

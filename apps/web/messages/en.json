@@ -1059,7 +1059,7 @@
   "annot_kind_stamp": "stamp",
   "annot_kind_signature": "signature",
   "annot_kind_link": "link",
-  "annot_kind_redact": "redaction",
+  "annot_kind_redact": "redaction mark",
   "history_annot_create": "{kind} on page {page}",
   "history_annot_move": "Move {kind}",
   "history_annot_resize": "Resize {kind}",
@@ -1405,5 +1405,171 @@
   "repair_saved": "Saved a repaired copy of {name}",
   "repair_failed": "Could not repair {name}: {reason}",
   "repair_not_needed": "{name} needed no repair",
-  "compress_result_structure_only": "All of it from the file structure: −{lossless}. No image could be made smaller."
+  "compress_result_structure_only": "All of it from the file structure: −{lossless}. No image could be made smaller.",
+  "tool_redact": "Redact",
+  "tool_redact_tooltip": "Redact: mark text or drag an area (Alt drags an area over text)",
+  "view_redactions": "Redactions",
+  "cmd_show_redactions": "Show redactions",
+  "cmd_redaction_next": "Next redaction mark",
+  "cmd_redaction_previous": "Previous redaction mark",
+  "cmd_redaction_find": "Find sensitive data",
+  "cmd_redaction_mark_matches": "Mark all search matches for redaction",
+  "history_redaction_marks": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Mark {count} area for redaction",
+        "countPlural=*": "Mark {count} areas for redaction"
+      }
+    }
+  ],
+  "history_redaction_finds": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Mark {count} sensitive match for redaction",
+        "countPlural=*": "Mark {count} sensitive matches for redaction"
+      }
+    }
+  ],
+  "history_redaction_matches": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Mark {count} search match for redaction",
+        "countPlural=*": "Mark {count} search matches for redaction"
+      }
+    }
+  ],
+  "redaction_none": "No redaction marks",
+  "redaction_reviewing": "Redaction mark {index} of {total}, page {page}",
+  "redaction_find_done": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Found {count} possible match of sensitive data",
+        "countPlural=*": "Found {count} possible matches of sensitive data"
+      }
+    }
+  ],
+  "redaction_pattern_email": "E-mail addresses",
+  "redaction_pattern_phone": "Phone numbers",
+  "redaction_pattern_iban": "IBANs",
+  "redaction_pattern_tckn": "Turkish ID numbers (TCKN)",
+  "redaction_pattern_card": "Card numbers",
+  "redaction_pattern_date": "Dates",
+  "redaction_honesty": "Marks are only marks: the text under them stays in the file, and anyone can remove a mark, until redactions are applied. Applying cannot be undone once the file is exported.",
+  "redaction_summary": [
+    {
+      "declarations": [
+        "input count",
+        "input countText",
+        "input selectedText",
+        "local countPlural = count: plural"
+      ],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{countText} mark · {selectedText} selected",
+        "countPlural=*": "{countText} marks · {selectedText} selected"
+      }
+    }
+  ],
+  "redaction_no_document_body": "Open a PDF to mark content for redaction.",
+  "redaction_loading": "Reading marks…",
+  "redaction_empty_title": "No redaction marks",
+  "redaction_empty_body": "Select text and press X, drag an area with the Redact tool, mark search matches, or find sensitive data.",
+  "redaction_find": "Find sensitive data",
+  "redaction_apply": "Apply redactions",
+  "redaction_apply_unavailable": "Available in the next update",
+  "redaction_page": "Page {page}",
+  "redaction_page_short": "p. {page}",
+  "redaction_area": "Area without text",
+  "redaction_include": "Include the mark on page {page} when applying",
+  "redaction_delete": "Delete mark",
+  "redaction_find_title": "Sensitive data",
+  "redaction_find_close": "Close results",
+  "redaction_find_progress": "Searching page {done} of {total}…",
+  "redaction_find_failed": "Could not read the text of this document.",
+  "redaction_find_none": "Nothing found. The helpers look for e-mail addresses, phone numbers, IBANs, Turkish ID numbers, card numbers and dates in the document’s text; scanned pages without text are not searched.",
+  "redaction_find_include": "Mark “{text}” on page {page}",
+  "redaction_mark_selected": [
+    {
+      "declarations": ["input count", "input countText", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Mark {countText} selected",
+        "countPlural=*": "Mark {countText} selected"
+      }
+    }
+  ],
+  "redaction_mark_matches": [
+    {
+      "declarations": ["input count", "input countText", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Mark {countText} match for redaction",
+        "countPlural=*": "Mark all {countText} matches for redaction"
+      }
+    }
+  ],
+  "cmd_resize_pages": "Resize pages…",
+  "cmd_resize_document_pages": "Resize the document’s pages…",
+  "action_resize_pages": "Resize pages…",
+  "section_resize": "Resize pages…",
+  "resize_title": "Resize pages",
+  "resize_size_label": "New size",
+  "resize_preset_label": "Paper",
+  "resize_preset_letter": "Letter",
+  "resize_preset_legal": "Legal",
+  "resize_preset_tabloid": "Tabloid",
+  "resize_preset_custom": "Custom",
+  "resize_preset_original": "Original size",
+  "resize_width": "Width",
+  "resize_height": "Height",
+  "resize_unit_label": "Unit",
+  "resize_unit_mm": "mm",
+  "resize_unit_in": "in",
+  "resize_unit_pt": "pt",
+  "resize_error_size": "Enter a width and height between {min} and {max} {unit}.",
+  "resize_orientation_label": "Orientation",
+  "resize_portrait": "Portrait",
+  "resize_landscape": "Landscape",
+  "resize_match_orientation": "Keep each page’s orientation",
+  "resize_match_orientation_hint": "Landscape pages get the size turned sideways.",
+  "resize_mode_label": "Content",
+  "resize_mode_scale": "Scale",
+  "resize_mode_scale_hint": "Fills the page at the same proportions; what does not fit is cut off on the side away from the anchor.",
+  "resize_stretch": "Stretch to fill exactly (distorts the content)",
+  "resize_mode_fit": "Fit",
+  "resize_mode_fit_hint": "Scales the content to fit inside the page, with margins.",
+  "resize_mode_canvas": "Canvas",
+  "resize_mode_canvas_hint": "Keeps the content at 100% and only makes the page larger or smaller around it.",
+  "resize_anchor_label": "Anchor",
+  "resize_anchor_top_left": "Top left",
+  "resize_anchor_top": "Top",
+  "resize_anchor_top_right": "Top right",
+  "resize_anchor_left": "Left",
+  "resize_anchor_center": "Center",
+  "resize_anchor_right": "Right",
+  "resize_anchor_bottom_left": "Bottom left",
+  "resize_anchor_bottom": "Bottom",
+  "resize_anchor_bottom_right": "Bottom right",
+  "resize_scope_label": "Apply to",
+  "resize_scope_selection": "Selected pages ({count})",
+  "resize_scope_document": "All pages of {title} ({count})",
+  "resize_scope_same_size": "Every page sized {size} ({count})",
+  "resize_nothing": "No pages to resize.",
+  "resize_preview": "{pages} will become {size}",
+  "resize_preview_original": "{pages} go back to their original size",
+  "resize_preview_label": "Preview of the first page",
+  "resize_size_dims": "{width} × {height} {unit}",
+  "resize_size_named": "{name} ({size})",
+  "resize_confirm": "Resize",
+  "history_resize": "Resize {pages}",
+  "announce_resized": "Resized {pages} to {size}",
+  "announce_resize_cleared": "{pages} back to their original size"
 }

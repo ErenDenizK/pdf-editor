@@ -1,10 +1,11 @@
 /**
- * Left rail: an icon tab list (Pages / Outline / Search / Comments / Forms / Files) and a
- * collapsible, resizable panel.
+ * Left rail: an icon tab list (Pages / Outline / Search / Comments / Redactions / Forms /
+ * Files) and a collapsible, resizable panel.
  * Selecting the open view again collapses the panel (as in VS Code). State persists via
  * the UI store. Keyboard: Up/Down move between rail tabs, Enter/Space toggle.
  */
 import {
+  EyeOff,
   FileStack,
   Files,
   Keyboard,
@@ -30,6 +31,7 @@ import { FormsPanel } from './FormsPanel';
 import styles from './LeftRail.module.css';
 import { OutlinePanel } from './OutlinePanel';
 import { PagesPanel } from './PagesPanel';
+import { RedactionsPanel } from './panels/RedactionsPanel';
 import { SearchPanel } from './SearchPanel';
 import { useCommandShortcut } from './use-command-shortcut';
 
@@ -38,6 +40,7 @@ const VIEWS: readonly { id: LeftPanelView; label: () => string; Icon: typeof Fil
   { id: 'outline', label: m.view_outline, Icon: ListTree },
   { id: 'search', label: m.view_search, Icon: Search },
   { id: 'comments', label: m.view_comments, Icon: MessageSquareText },
+  { id: 'redactions', label: m.view_redactions, Icon: EyeOff },
   { id: 'forms', label: m.view_forms, Icon: TextCursorInput },
   { id: 'files', label: m.view_files, Icon: Files },
 ];
@@ -127,6 +130,7 @@ export function LeftRail() {
             {view === 'outline' ? <OutlinePanel /> : null}
             {view === 'search' ? <SearchPanel /> : null}
             {view === 'comments' ? <CommentsPanel /> : null}
+            {view === 'redactions' ? <RedactionsPanel /> : null}
             {view === 'forms' ? <FormsPanel /> : null}
             {view === 'files' ? <FilesView /> : null}
           </div>

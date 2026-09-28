@@ -190,13 +190,21 @@ export function fromEmbedPdf(a: PdfAnnotationObject, g: PageGeometry): Annotatio
   }
   switch (a.type) {
     case PdfAnnotationSubtype.REDACT: {
+      // /C is the outline (`color`), /IC the fill once applied (`interiorColor`), /OC the
+      // overlay text colour (docs/research/06-redaction-spike.md §1).
       const r = a;
       const base = baseFrom(a, g, 'redact');
-      withColors(base, r.strokeColor ?? r.color, r.overlayColor, r.opacity);
+      withColors(base, r.strokeColor, r.color, r.opacity);
+      const overlayColor =
+        r.overlayColor && r.overlayColor !== 'transparent'
+          ? normalizeColor(r.overlayColor)
+          : undefined;
       return {
         ...base,
         kind: 'redact',
         quads: (r.segmentRects ?? []).map((q) => deviceToUserRect(g, q)),
+        ...(r.overlayText ? { overlayText: r.overlayText } : {}),
+        ...(overlayColor ? { overlayColor } : {}),
       };
     }
     case PdfAnnotationSubtype.INK: {
@@ -424,6 +432,9 @@ function iconFromName(name: string | undefined): PdfAnnotationName | undefined {
   return (PdfAnnotationName as unknown as Record<string, PdfAnnotationName | undefined>)[name];
 }
 
+/** Colour of the links we write (their underline appearance and /C). */
+export const LINK_COLOR = '#0000FF';
+
 /**
  * Builds the EmbedPDF object for a create/update. `id` may be empty for a create; EmbedPDF
  * then generates one (and writes it to /NM).
@@ -470,9 +481,15 @@ export function toEmbedPdf(a: NewAnnotation, id: string, g: PageGeometry): PdfAn
         ...base,
         type: PdfAnnotationSubtype.REDACT,
         segmentRects: a.quads.map((q) => userToDeviceRect(g, q)),
+        // EmbedPDF writes `color` as /IC (the fill applying paints), `strokeColor` as /C
+        // and `overlayColor` as /OC. Without /IC applying removes content but paints
+        // nothing (spike 06 §1), so it defaults to black.
+        color: a.interiorColor ?? '#000000',
         strokeColor: a.color ?? '#E53935',
-        overlayColor: a.interiorColor ?? '#000000',
         opacity,
+        // Always written: an update carries the full state, so absent clears them.
+        overlayText: a.overlayText ?? '',
+        overlayColor: a.overlayColor ?? 'transparent',
       };
       return redact;
     }
@@ -585,6 +602,9 @@ export function toEmbedPdf(a: NewAnnotation, id: string, g: PageGeometry): PdfAn
       const link: PdfLinkAnnoObject = {
         ...base,
         type: PdfAnnotationSubtype.LINK,
+        // The generated appearance is an underline (/BS /S /U) in this colour; without /C,
+        // pdf.js draws a second, black underline from /BS (it reads a missing /C as black).
+        strokeColor: a.color ?? LINK_COLOR,
         target:
           a.uri !== undefined
             ? { type: 'action', action: { type: PdfActionType.URI, uri: a.uri } }
