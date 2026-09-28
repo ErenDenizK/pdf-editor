@@ -8,6 +8,7 @@ import { getEngineService } from './engine/engine-service';
 import { ExportDialog } from './export/ExportDialog';
 import { useLocale } from './i18n';
 import { LocaleBoundary } from './i18n/LocaleBoundary';
+import { registerOutlineCommands } from './outline/outline-commands';
 import { UpdateToast } from './pwa/UpdateToast';
 import { AppShell } from './shell/AppShell';
 import { registerArrangeCommands } from './stage/arrange-commands';
@@ -25,6 +26,7 @@ export function App() {
   useLayoutEffect(() => registerAppCommands(), [locale]);
   useLayoutEffect(() => registerArrangeCommands(), [locale]);
   useLayoutEffect(() => registerDocumentCommands(commandRegistry), [locale]);
+  useLayoutEffect(() => registerOutlineCommands(commandRegistry), [locale]);
   useLayoutEffect(() => {
     const engine = getEngineService();
     engine.setPasswordPrompt(requestPassword);

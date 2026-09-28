@@ -1,0 +1,113 @@
+/* Outline editing: toolbar, dead-link notice, in-place rename. Tokens only (DESIGN.md §3). */
+
+.toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2) var(--space-2);
+}
+
+.toolButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.toolButton svg {
+  width: 14px;
+  height: 14px;
+}
+
+.toolButton:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .toolButton:not(:disabled):hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+/* Honesty notice (DESIGN.md §4.4): inline, with the fix next to it. */
+.dead {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 var(--space-2) var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 18px;
+}
+
+.dead svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--warning);
+}
+
+.deadText {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.renameWrap {
+  position: relative;
+  display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.renameInput {
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-1);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-md);
+}
+
+.renameInput:focus-visible {
+  outline: none;
+}
+
+.renameInput[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.renameError {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  max-width: 240px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-1);
+  background: var(--surface-3);
+  color: var(--danger);
+  font-size: var(--text-sm);
+  white-space: normal;
+}

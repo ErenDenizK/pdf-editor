@@ -31,6 +31,7 @@ export default mergeConfig(
         '@pdf-editor/engine > comlink',
         'zustand',
         '@tanstack/react-virtual',
+        '@atlaskit/pragmatic-drag-and-drop-hitbox/list-item',
       ],
     },
     test: {

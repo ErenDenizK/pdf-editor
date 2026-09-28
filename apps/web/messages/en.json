@@ -4,8 +4,13 @@
   "common_cancel": "Cancel",
   "pages_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} page",
         "countPlural=*": "{count} pages"
@@ -14,8 +19,13 @@
   ],
   "files_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} file",
         "countPlural=*": "{count} files"
@@ -24,8 +34,13 @@
   ],
   "documents_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} document",
         "countPlural=*": "{count} documents"
@@ -81,10 +96,67 @@
   "outline_link_open": "Open link",
   "outline_link_unsupported": "This link type cannot be opened: {uri}",
   "outline_page_label": "Page {label}",
+  "outline_toolbar_label": "Bookmark actions",
+  "outline_add": "Add bookmark",
+  "outline_add_tooltip": "Add a bookmark at the current page and position",
+  "outline_add_child": "Add child bookmark",
+  "outline_add_sibling": "Add bookmark after",
+  "outline_rename": "Rename",
+  "outline_delete": "Delete",
+  "outline_set_destination": "Set destination to current view",
+  "outline_move_up": "Move up",
+  "outline_move_down": "Move down",
+  "outline_indent": "Indent",
+  "outline_outdent": "Outdent",
+  "outline_start_expanded": "Expanded when the file opens",
+  "outline_menu_label": "Bookmark actions for {title}",
+  "outline_new_title": "Page {label}",
+  "outline_rename_label": "Bookmark title",
+  "outline_title_empty": "Enter a title",
+  "outline_untitled": "Untitled",
+  "outline_dead_links": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} bookmark points at a removed page.",
+        "countPlural=*": "{count} bookmarks point at removed pages."
+      }
+    }
+  ],
+  "outline_remove_dead": "Remove dead links",
+  "outline_drag_label": "Drag to move",
+  "history_outline_add": "Add bookmark “{title}”",
+  "history_outline_rename": "Rename bookmark to “{title}”",
+  "history_outline_delete": "Delete bookmark “{title}”",
+  "history_outline_move": "Move bookmark “{title}”",
+  "history_outline_destination": "Set destination of “{title}”",
+  "history_outline_expanded": "Change expansion of “{title}”",
+  "history_outline_remove_dead": "Remove dead bookmarks",
+  "announce_outline_added": "Added bookmark “{title}”",
+  "announce_outline_deleted": "Deleted bookmark “{title}”. Undo with {shortcut}",
+  "announce_outline_moved": "“{title}” moved to level {level}, position {position}",
+  "announce_outline_move_blocked": "“{title}” cannot move further",
+  "announce_outline_destination": "“{title}” now points at page {label}",
+  "announce_outline_dead_removed": "Removed dead bookmarks",
+  "cmd_outline_add": "Add bookmark at current view",
+  "cmd_outline_remove_dead": "Remove dead bookmarks",
+  "shortcuts_outline_move": "Move a bookmark up, down, in or out",
+  "shortcuts_outline_rename": "Rename a bookmark",
   "status_opening": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Opening {count} file…",
         "countPlural=*": "Opening {count} files…"
@@ -97,8 +169,14 @@
   "privacy_local_only": "Local only",
   "privacy_external_requests": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["count", "countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "count",
+        "countPlural"
+      ],
       "match": {
         "count=0, countPlural=*": "No external requests",
         "count=*, countPlural=one": "{count} external request",
@@ -268,8 +346,13 @@
   "security_outcome_none": "Not encrypted.",
   "security_outcome_removed": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Not encrypted: the password protection of {count} file is removed.",
         "countPlural=*": "Not encrypted: the password protection of {count} files is removed."
@@ -351,8 +434,13 @@
   "summary_encrypted_owner": "Encrypted with AES-256; opens without a password; restricted: {restricted}.",
   "summary_security_removed_requested": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Password protection from {count} file was removed, as you asked.",
         "countPlural=*": "Password protection from {count} files was removed, as you asked."
@@ -404,8 +492,13 @@
   "history_close": "Close {name}",
   "history_move": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Move {count} page",
         "countPlural=*": "Move {count} pages"
@@ -414,8 +507,13 @@
   ],
   "history_rotate": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Rotate {count} page",
         "countPlural=*": "Rotate {count} pages"
@@ -424,8 +522,13 @@
   ],
   "history_delete": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Delete {count} page",
         "countPlural=*": "Delete {count} pages"
@@ -434,8 +537,13 @@
   ],
   "history_duplicate": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Duplicate {count} page",
         "countPlural=*": "Duplicate {count} pages"
@@ -448,8 +556,13 @@
   "announce_closed": "Closed {name}",
   "announce_rotated_right": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Rotated {count} page right",
         "countPlural=*": "Rotated {count} pages right"
@@ -458,8 +571,13 @@
   ],
   "announce_rotated_left": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Rotated {count} page left",
         "countPlural=*": "Rotated {count} pages left"
@@ -468,8 +586,14 @@
   ],
   "announce_deleted": [
     {
-      "declarations": ["input count", "input shortcut", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input shortcut",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Deleted {count} page. Undo with {shortcut}",
         "countPlural=*": "Deleted {count} pages. Undo with {shortcut}"
@@ -484,7 +608,9 @@
         "input title",
         "local countPlural = count: plural"
       ],
-      "selectors": ["countPlural"],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Moved {count} page to position {position} in {title}",
         "countPlural=*": "Moved {count} pages to position {position} in {title}"
@@ -493,8 +619,13 @@
   ],
   "announce_selected": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Selected {count} page",
         "countPlural=*": "Selected {count} pages"
@@ -503,8 +634,13 @@
   ],
   "announce_duplicated": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Duplicated {count} page",
         "countPlural=*": "Duplicated {count} pages"
@@ -622,8 +758,13 @@
   "announce_showing_in_arrange": "Showing {title} in Arrange",
   "announce_showing_all": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Showing {count} document in Arrange",
         "countPlural=*": "Showing {count} documents in Arrange"
@@ -656,8 +797,14 @@
   "announce_moved_to": "Moved {pages} to position {position} in {title}",
   "history_insert_pages": [
     {
-      "declarations": ["input count", "input from", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input from",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Insert {count} page from {from}",
         "countPlural=*": "Insert {count} pages from {from}"
@@ -669,8 +816,13 @@
   "announce_images_failed": "Could not read as images: {names}",
   "bookmarks_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} bookmark",
         "countPlural=*": "{count} bookmarks"
@@ -719,8 +871,13 @@
   "split_mode_outline": "At top-level bookmarks",
   "split_outline_hint": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} bookmark starts a document; parts are named after it.",
         "countPlural=*": "{count} bookmarks start documents; parts are named after them."
@@ -732,8 +889,13 @@
   "split_mode_selection": "Before each selected page",
   "split_selection_hint": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} selected page starts a new document.",
         "countPlural=*": "{count} selected pages start new documents."
@@ -743,8 +905,14 @@
   "split_selection_none": "Select the pages that should start a new document (not the first page).",
   "split_preview": [
     {
-      "declarations": ["input count", "input sizes", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input sizes",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Creates {count} document: {sizes} pages",
         "countPlural=*": "Creates {count} documents: {sizes} pages"
@@ -760,8 +928,14 @@
   "history_split": "Split {title} into {count}",
   "announce_split": [
     {
-      "declarations": ["input count", "input title", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input title",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Split {title} into {count} document",
         "countPlural=*": "Split {title} into {count} documents"
@@ -787,8 +961,14 @@
   "merge_all_name_label": "Title of the merged document",
   "merge_all_preview": [
     {
-      "declarations": ["input count", "input pages", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input pages",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Creates one document from {count} document with {pages}.",
         "countPlural=*": "Creates one document from {count} documents with {pages}."
@@ -799,8 +979,13 @@
   "merge_move_down": "Move {title} down",
   "history_merge_all": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Merge {count} document",
         "countPlural=*": "Merge {count} documents"
@@ -809,8 +994,14 @@
   ],
   "announce_merged_all": [
     {
-      "declarations": ["input count", "input title", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input title",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Merged {count} document into {title}",
         "countPlural=*": "Merged {count} documents into {title}"
@@ -839,8 +1030,13 @@
   "announce_renamed": "Renamed to {title}",
   "image_size_title": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Insert {count} image",
         "countPlural=*": "Insert {count} images"
@@ -890,8 +1086,13 @@
   "summary_bookmarks_dropped": "Bookmarks: {kept} kept, {dropped} dropped because their pages are not in this document.",
   "summary_bookmarks_kept": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Bookmarks: all {count} bookmark kept.",
         "countPlural=*": "Bookmarks: all {count} bookmarks kept."
@@ -900,8 +1101,13 @@
   ],
   "summary_links": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Links: {count} link to pages rewritten.",
         "countPlural=*": "Links: {count} links to pages rewritten."
@@ -910,8 +1116,14 @@
   ],
   "summary_links_dropped": [
     {
-      "declarations": ["input count", "input dropped", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input dropped",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Links: {count} link to pages rewritten, {dropped} removed because their target page is not in this document.",
         "countPlural=*": "Links: {count} links to pages rewritten, {dropped} removed because their target page is not in this document."
@@ -920,8 +1132,13 @@
   ],
   "summary_fields_renamed": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Form fields: {count} field renamed so fields from different files stay separate.",
         "countPlural=*": "Form fields: {count} fields renamed so fields from different files stay separate."
@@ -930,8 +1147,13 @@
   ],
   "summary_fields_unified": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Form fields: {count} field with the same name joined; they share the first file’s value.",
         "countPlural=*": "Form fields: {count} fields with the same name joined; they share the first file’s value."
@@ -942,8 +1164,13 @@
   "summary_xfa_removed": "XFA form data removed; the regular form fields are kept.",
   "summary_security_removed": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Password protection from {count} file was removed; set a new password in Export options.",
         "countPlural=*": "Password protection from {count} files was removed; set a new password in Export options."
@@ -952,8 +1179,13 @@
   ],
   "summary_repaired": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} damaged file was repaired when opened; the output is built from the repaired copy.",
         "countPlural=*": "{count} damaged files were repaired when opened; the output is built from the repaired copy."
@@ -962,8 +1194,13 @@
   ],
   "status_documents_shown": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} document shown",
         "countPlural=*": "{count} documents shown"
@@ -1073,8 +1310,13 @@
   "history_annot_delete_one": "Delete {kind}",
   "history_annot_delete": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Delete {count} annotation",
         "countPlural=*": "Delete {count} annotations"
@@ -1083,8 +1325,13 @@
   ],
   "annot_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} annotation",
         "countPlural=*": "{count} annotations"
@@ -1155,8 +1402,13 @@
   "forms_clear_all_label": "Clear all fields",
   "forms_cleared": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} field cleared",
         "countPlural=*": "{count} fields cleared"
@@ -1281,8 +1533,13 @@
   "cmd_tools_save_repaired": "Save repaired copy",
   "tools_images_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} image",
         "countPlural=*": "{count} images"
@@ -1291,8 +1548,13 @@
   ],
   "tools_fonts_count": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} font",
         "countPlural=*": "{count} fonts"
@@ -1342,8 +1604,13 @@
   "compress_page_number": "Page {page}",
   "compress_skipped_label": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{count} image skipped",
         "countPlural=*": "{count} images skipped"
@@ -1416,8 +1683,13 @@
   "cmd_redaction_mark_matches": "Mark all search matches for redaction",
   "history_redaction_marks": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Mark {count} area for redaction",
         "countPlural=*": "Mark {count} areas for redaction"
@@ -1426,8 +1698,13 @@
   ],
   "history_redaction_finds": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Mark {count} sensitive match for redaction",
         "countPlural=*": "Mark {count} sensitive matches for redaction"
@@ -1436,8 +1713,13 @@
   ],
   "history_redaction_matches": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Mark {count} search match for redaction",
         "countPlural=*": "Mark {count} search matches for redaction"
@@ -1448,8 +1730,13 @@
   "redaction_reviewing": "Redaction mark {index} of {total}, page {page}",
   "redaction_find_done": [
     {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Found {count} possible match of sensitive data",
         "countPlural=*": "Found {count} possible matches of sensitive data"
@@ -1471,7 +1758,9 @@
         "input selectedText",
         "local countPlural = count: plural"
       ],
-      "selectors": ["countPlural"],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "{countText} mark · {selectedText} selected",
         "countPlural=*": "{countText} marks · {selectedText} selected"
@@ -1498,8 +1787,14 @@
   "redaction_find_include": "Mark “{text}” on page {page}",
   "redaction_mark_selected": [
     {
-      "declarations": ["input count", "input countText", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input countText",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Mark {countText} selected",
         "countPlural=*": "Mark {countText} selected"
@@ -1508,8 +1803,14 @@
   ],
   "redaction_mark_matches": [
     {
-      "declarations": ["input count", "input countText", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
+      "declarations": [
+        "input count",
+        "input countText",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
       "match": {
         "countPlural=one": "Mark {countText} match for redaction",
         "countPlural=*": "Mark all {countText} matches for redaction"

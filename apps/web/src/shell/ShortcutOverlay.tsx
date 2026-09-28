@@ -29,6 +29,16 @@ const WIDGET_KEYS: readonly { title: () => string; keys: readonly ParsedShortcut
   { title: m.shortcuts_move_row, keys: [parseShortcut('Alt+Up'), parseShortcut('Alt+Down')] },
   { title: m.shortcuts_open_in_read, keys: [parseShortcut('Enter')] },
   { title: m.shortcuts_outline_expand, keys: [parseShortcut('Left'), parseShortcut('Right')] },
+  { title: m.shortcuts_outline_rename, keys: [parseShortcut('F2')] },
+  {
+    title: m.shortcuts_outline_move,
+    keys: [
+      parseShortcut('Alt+Up'),
+      parseShortcut('Alt+Down'),
+      parseShortcut('Alt+Left'),
+      parseShortcut('Alt+Right'),
+    ],
+  },
 ];
 
 export function ShortcutOverlay() {
