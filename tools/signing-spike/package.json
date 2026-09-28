@@ -1,0 +1,21 @@
+{
+  "name": "@pdf-editor/signing-spike",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Spike S2 (M5): Cantoo incremental writer on the corpus, PAdES-B placeholder and CMS signing with pkijs + WebCrypto, PKCS#12 parsing, validator prototype. Evidence for docs/research/08-signing-spike.md; not shipped.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "spike": "pnpm run spike:node && pnpm run spike:browser",
+    "spike:node": "vitest run --config vitest.node.config.ts",
+    "spike:browser": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@cantoo/pdf-lib": "2.11.1",
+    "@embedpdf/pdfium": "2.15.1",
+    "asn1js": "3.0.10",
+    "pdfjs-dist": "6.3.289",
+    "pkijs": "3.4.1"
+  }
+}
