@@ -28,6 +28,17 @@ export { diagnoseSource } from './pdflib/metadata-diagnostics';
 export { checkXrefStructure, type XrefCheckResult } from './structure/xref-check';
 
 export { type ExportPlan, type ExportPlanOptions, planExport } from './export-plan';
+// Redaction (M4): pdf-lib post-pass after the engine pass, and the forensic self-check.
+export {
+  forensicCheck,
+  type ForensicOptions,
+  normalizeForMatch,
+  RedactedStringMatcher,
+  type ScrubOptions,
+  type ScrubResult,
+  type ScrubStep,
+  scrubRedactedDocument,
+} from './redaction';
 
 export {
   checkAnnotationConformance,

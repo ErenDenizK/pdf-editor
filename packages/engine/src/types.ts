@@ -207,9 +207,18 @@ export interface AnnotationBase {
   };
 }
 
+/**
+ * Text markup, and /Redact marks (pending redactions, spec redaction §1.1). For `redact`:
+ * `color` is the outline (/C), `interiorColor` the fill painted once applied (/IC, black
+ * when absent), and `overlayText` / `overlayColor` are /OverlayText and its colour (/OC).
+ */
 export interface MarkupAnnotation extends AnnotationBase {
   readonly kind: 'highlight' | 'underline' | 'strikeout' | 'squiggly' | 'redact';
   readonly quads: readonly Rect[];
+  /** /Redact only: text to show over the area once applied (/OverlayText). */
+  readonly overlayText?: string;
+  /** /Redact only: colour of the overlay text (/OC). */
+  readonly overlayColor?: string;
 }
 
 export interface InkAnnotation extends AnnotationBase {
@@ -848,4 +857,393 @@ export interface SourceDiagnostics {
   readonly warnings: readonly string[];
   /** Some facts could not be read (e.g. encrypted without the password). */
   readonly partial: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Text editing: PdfTextEditor (spec redaction-and-text-editing §2, research 05 §6, ADR-0011)
+// ---------------------------------------------------------------------------
+
+/** An affine matrix `[a, b, c, d, e, f]` (PDF row-vector convention). */
+export type TextMatrix = readonly [number, number, number, number, number, number];
+
+/**
+ * What identifies a run for an edit, and what replay re-checks. Indices describe the page
+ * *as it is when the edit runs*: after any edit on a page, locate its runs again.
+ */
+export interface TextRunRef {
+  readonly source: SourceId;
+  readonly pageIndex: number;
+  /**
+   * Index of the text object among the page's objects (`FPDFPage_GetObject`), then, for text
+   * inside Form XObjects, its index inside each enclosing form (`FPDFFormObj_GetObject`).
+   */
+  readonly objectPath: readonly number[];
+  /** Text-page index (`FPDFText_*`) of the run's first character. */
+  readonly charStart: number;
+  /** Number of text-page characters (glyphs) in the run. */
+  readonly charCount: number;
+  /** The run's text as located; an edit fails with `stale-run` when the page differs. */
+  readonly text: string;
+}
+
+/** A glyph of a located run. */
+export interface LocatedGlyph extends Glyph {
+  /** Text-page index of the character. */
+  readonly charIndex: number;
+  /** Glyph origin on the baseline, unrotated user space. */
+  readonly origin: { readonly x: number; readonly y: number };
+}
+
+/**
+ * How the run's font is stored: a standard-14 font by name (not embedded), an embedded
+ * font program, a Type3 font (glyphs are content streams: not editable), or another font
+ * that is not embedded (the viewer substitutes it).
+ */
+export type TextFontKind = 'standard14' | 'embedded' | 'type3' | 'not-embedded';
+
+export interface TextRunFont {
+  /** /BaseFont as PDFium reports it, subset tag included (`ABCDEF+Inter-Regular`). */
+  readonly baseName: string;
+  readonly embedded: boolean;
+  readonly kind: TextFontKind;
+  /** Font descriptor /Flags. */
+  readonly flags: number;
+  /** Name/flag heuristics used to pick the tier-1 substitute. */
+  readonly bold: boolean;
+  readonly italic: boolean;
+  readonly monospace: boolean;
+  readonly serif: boolean;
+}
+
+/** One editable unit: a text object's glyphs on one line (spec §2.2: single lines). */
+export interface LocatedRun extends TextRunRef {
+  /** Union of the glyph boxes, unrotated user space (like `Glyph.rect`). */
+  readonly lineBox: Rect;
+  readonly glyphs: readonly LocatedGlyph[];
+  /** Font size (Tf); the text's scale on the page is in `matrix`. */
+  readonly fontSize: number;
+  /** The object's matrix in page space (forms applied): linear part and origin. */
+  readonly matrix: TextMatrix;
+  /** Unit vector of the writing direction on the page (unrotated user space). */
+  readonly direction: { readonly x: number; readonly y: number };
+  readonly font: TextRunFont;
+  /** Text render mode (Tr); 3 is invisible (OCR layers). */
+  readonly renderMode: number;
+  /** Marked-content id of the object, when it is tagged content. */
+  readonly mcid?: number;
+  /** The text is drawn by a Form XObject (`objectPath.length > 1`). */
+  readonly inForm: boolean;
+  /** Glyphs advance along the text space's y axis (vertical writing): not editable. */
+  readonly vertical: boolean;
+}
+
+/**
+ * What the user is told about an edit (spec §2.2 badge, history label, export summary):
+ * - `same-font`: tier 2, re-encoded in the original embedded font and verified;
+ * - `same-font-not-embedded`: tier 2 in a standard-14 font that is not embedded;
+ * - `font-substituted`: tier 1, the new text uses a bundled face (`substitute`);
+ * - `moved-out-of-form`: tier 1 on text inside a Form XObject; the line now lives in the
+ *   page content (the form's clip, transparency group and reuse no longer apply to it);
+ * - `not-editable`: Type3, text drawn as paths, invisible (render mode 3), vertical, or
+ *   nested forms.
+ */
+export type TextEditHonesty =
+  | 'same-font'
+  | 'same-font-not-embedded'
+  | 'font-substituted'
+  | 'moved-out-of-form'
+  | 'not-editable';
+
+/** Why a run is not editable at all. */
+export type TextEditBlocker = 'type3' | 'invisible' | 'paths' | 'vertical' | 'nested-form';
+
+/** Why tier 2 (the original font) cannot take the replacement. */
+export type TextTier2Refusal =
+  | 'blocked'
+  | 'in-form'
+  | 'not-embedded'
+  | 'outside-winansi'
+  | 'missing-glyphs'
+  | 'readback';
+
+/** Shrink-to-fit floor (spec §2.5): the replacement may shrink to 75% of the run's size. */
+export const TEXT_EDIT_SHRINK_FLOOR = 0.75;
+
+/** Width of the replacement in one tier's font against the free space. */
+export interface TextFitOption {
+  /** Advance width of the replacement at the run's size, points along the baseline. */
+  readonly width: number;
+  /** Size factor that makes it fit (1 when it fits as is). */
+  readonly shrink: number;
+  readonly fits: boolean;
+  /** `shrink` is at least `TEXT_EDIT_SHRINK_FLOOR`. */
+  readonly canShrink: boolean;
+}
+
+export interface TextFitReport {
+  /**
+   * Free space, points along the baseline, from the start of the selection to the origin of
+   * the next glyph on the line (any text object), or to the page edge when there is none.
+   */
+  readonly available: number;
+  /** Whether `available` ends at a glyph (false: at the page box edge). */
+  readonly boundedByGlyph: boolean;
+  /** Width of the selected glyphs (what the replacement replaces). */
+  readonly replaced: number;
+  /** Tier 2 (original font); absent when tier 2 cannot encode the replacement. */
+  readonly tier2?: TextFitOption;
+  /** Tier 1 (bundled substitute); absent when tier 1 is not possible. */
+  readonly tier1?: TextFitOption;
+}
+
+export interface TextEditability {
+  readonly tier2:
+    | { readonly ok: true }
+    | {
+        readonly ok: false;
+        readonly reason: TextTier2Refusal;
+        /** Characters the original font cannot show (pre-check or read-back). */
+        readonly missing: readonly string[];
+      };
+  readonly tier1:
+    | {
+        readonly ok: true;
+        /** Bundled face key, e.g. `Inter-Regular`. */
+        readonly substitute: string;
+        /** Display name of the substitute family, e.g. `Inter`. */
+        readonly family: string;
+      }
+    | {
+        readonly ok: false;
+        readonly reason: TextEditBlocker | 'unsupported-chars';
+        readonly missing?: readonly string[];
+      };
+  /** The tier `tier: 'auto'` uses; absent when not editable. */
+  readonly tier?: 1 | 2;
+  /** Honesty state of the `auto` edit (`not-editable` when neither tier works). */
+  readonly honesty: TextEditHonesty;
+  readonly fit: TextFitReport;
+}
+
+/** A replacement of `run.text.slice(start, end)` (UTF-16 offsets on glyph boundaries). */
+export interface TextEditQuery {
+  readonly run: TextRunRef;
+  /** Default 0. */
+  readonly start?: number;
+  /** Default `run.text.length`. */
+  readonly end?: number;
+  readonly replacement: string;
+}
+
+export interface TextEditRequest extends TextEditQuery {
+  /** `auto` tries tier 2 and falls back to tier 1 (the result says so). */
+  readonly tier: 'auto' | 1 | 2;
+  /**
+   * `keep`: the run's size, must fit the free space; `shrink`: down to the shrink floor;
+   * `overflow`: the run's size, may run past the next glyph. Ignored with `fontSize`.
+   */
+  readonly fit: 'keep' | 'shrink' | 'overflow';
+  /** Tier-1 face key to use (replay: the face recorded by the first run). */
+  readonly face?: string;
+  /** Exact font size of the replacement (replay: the size recorded by the first run). */
+  readonly fontSize?: number;
+}
+
+export interface TextEditVerification {
+  /** The edited run's text read back from a fresh text page. */
+  readonly readback: string;
+  /** Largest movement of a kept glyph, points. */
+  readonly maxDrift: number;
+  /** The new glyph boxes lie within the line box extended by the free space. */
+  readonly insideLineBox: boolean;
+}
+
+export interface TextEditResult {
+  readonly tier: 1 | 2;
+  readonly honesty: Exclude<TextEditHonesty, 'not-editable'>;
+  /** Tier 1: the bundled face key used. */
+  readonly substitute?: string;
+  /** Font size of the replacement. */
+  readonly fontSize: number;
+  /** `auto` tried tier 2 first and fell back (the history label says so). */
+  readonly fellBack: boolean;
+  /** Why tier 2 was not used, when `tier` is 1. */
+  readonly tier2Refusal?: TextTier2Refusal;
+  readonly verification: TextEditVerification;
+}
+
+/**
+ * In-place text editing on an open source (spec §2.5). Implemented in the PDFium host
+ * (`text-edit/`), exposed across the worker by `PdfiumProxy`.
+ */
+export interface PdfTextEditor {
+  /** Editable runs of a page (per text object and line), in reading order. */
+  locateRuns(
+    source: SourceId,
+    pageIndex: number,
+    options?: EngineCallOptions,
+  ): Promise<readonly LocatedRun[]>;
+  /** Tier 2 / tier 1 availability, honesty and fit for a replacement (no change made). */
+  checkEditability(query: TextEditQuery, options?: EngineCallOptions): Promise<TextEditability>;
+  /** Applies the edit, verified by read-back, and regenerates the page content. */
+  applyTextEdit(request: TextEditRequest, options?: EngineCallOptions): Promise<TextEditResult>;
+}
+
+// ---------------------------------------------------------------------------
+// Redaction: pdf-lib post-pass and forensic self-check (spec redaction §1.2, research 06)
+// ---------------------------------------------------------------------------
+
+/** One applied redaction area. */
+export interface RedactionArea {
+  readonly pageIndex: number;
+  /**
+   * Unrotated page user space (points, origin bottom-left, absolute: the same space as
+   * `Glyph.rect` and annotation rects), whatever the page's /Rotate.
+   */
+  readonly rect: Rect;
+  /** Overlay text for this area; overrides `RedactionPlan.overlayText`. */
+  readonly overlayText?: string;
+}
+
+/** What was redacted and how the areas are painted; input of the scrub and the check. */
+export interface RedactionPlan {
+  readonly areas: readonly RedactionArea[];
+  /**
+   * The redacted strings (glyph text under the marks, search terms). They are scrubbed from
+   * every document-level string and must be absent from the whole output, so a caller
+   * redacting only some occurrences of a string (area-only mode) leaves it out. Matching
+   * ignores case and whitespace.
+   */
+  readonly strings: readonly string[];
+  /** Fill colour of the areas, `#rrggbb` or `#rgb`; default black. */
+  readonly fillColor?: string;
+  /** Text drawn centred in every area (standard font, auto-sized), e.g. "REDACTED". */
+  readonly overlayText?: string;
+  /** Overlay text colour; default white on dark fills, black on light ones. */
+  readonly overlayColor?: string;
+  /**
+   * Keep embedded files and file attachment annotations (default false: all removed). Kept
+   * attachments cannot be searched reliably and are reported as unverified.
+   */
+  readonly keepAttachments?: boolean;
+  /** Replacement for redacted strings in document-level strings; default "[redacted]". */
+  readonly placeholder?: string;
+}
+
+/** What the tagged-PDF repair did: nothing to do, tree kept, tree pruned, or removed. */
+export type RedactionStructureOutcome = 'not-tagged' | 'intact' | 'pruned' | 'untagged';
+
+/** Result counts of `scrubRedactedDocument` (export summary data). */
+export interface RedactionReport {
+  /** Areas per page index. */
+  readonly areasByPage: Readonly<Record<number, number>>;
+  /** Annotations removed (in an area, carrying a redacted string, popups and replies). */
+  readonly annotationsRemoved: number;
+  /** Of `annotationsRemoved`: link annotations. */
+  readonly linksRemoved: number;
+  /** Pending /Redact marks that were still in the file (removed). */
+  readonly pendingMarksRemoved: number;
+  /** Form fields whose value (/V, /DV) was cleared because a widget lay in an area. */
+  readonly fieldsCleared: number;
+  /** Widgets removed from pages and fields. */
+  readonly widgetsRemoved: number;
+  /** Fields dropped from the form because no widget was left. */
+  readonly fieldsRemoved: number;
+  readonly xfaRemoved: boolean;
+  /** String objects rewritten with the placeholder (outline, Info, struct tree, …). */
+  readonly stringsReplaced: number;
+  /** Named destinations (and other name-tree keys) renamed; referrers follow. */
+  readonly namesRenamed: number;
+  readonly metadata: {
+    /** XMP regenerated from the scrubbed Info. */
+    readonly xmpRegenerated: boolean;
+    /** Per-object /Metadata streams removed (pages, images, forms). */
+    readonly objectMetadata: number;
+    readonly pieceInfo: number;
+    readonly thumbnails: number;
+    /** Script actions, /AA entries and the /Names /JavaScript tree entries removed. */
+    readonly javascript: number;
+  };
+  readonly structure: RedactionStructureOutcome;
+  /** Structure elements removed or stripped of /ActualText and /Alt. */
+  readonly structElementsPruned: number;
+  readonly attachments: {
+    /** Embedded files, file attachment annotations and /AF entries removed. */
+    readonly removed: number;
+    /** With `keepAttachments`: names of the kept files, not verified by the check. */
+    readonly unverified: readonly string[];
+  };
+  /** Indirect objects dropped by garbage collection before the full rewrite. */
+  readonly unreachableObjectsRemoved: number;
+  /** Problems that did not stop the scrub (e.g. overlay text that did not fit). */
+  readonly warnings: readonly string[];
+}
+
+/** Identifiers of the self-check's checks (research 06 §4, in order). */
+export type ForensicCheckId =
+  | 'parse'
+  | 'single-revision'
+  | 'no-unreachable-objects'
+  | 'no-text-in-areas'
+  | 'no-search-hits'
+  | 'object-strings'
+  | 'byte-grep'
+  | 'no-annotations-in-areas'
+  | 'fill-pixels';
+
+/** One hit of a failing check: where the leak or problem is. */
+export interface ForensicFinding {
+  /** Human-readable location, e.g. "object 12, /Title" or "page 1, area 0". */
+  readonly where: string;
+  readonly objectNumber?: number;
+  readonly pageIndex?: number;
+  readonly areaIndex?: number;
+  /** Encoding or channel, e.g. "ascii", "utf16be-hex", "inflated stream", "search". */
+  readonly channel?: string;
+  readonly detail?: string;
+}
+
+export interface ForensicCheckResult {
+  readonly id: ForensicCheckId;
+  readonly passed: boolean;
+  /** Empty when passed; capped at 50 (see `truncated`). */
+  readonly findings: readonly ForensicFinding[];
+  /** More findings existed than listed. */
+  readonly truncated?: boolean;
+  /** What was checked, and anything that could not be (e.g. streams not decodable). */
+  readonly note?: string;
+}
+
+export interface ForensicReport {
+  /** Every check passed. */
+  readonly ok: boolean;
+  /** One entry per `ForensicCheckId`, in that order. */
+  readonly checks: readonly ForensicCheckResult[];
+  /** Streams whose filters could not be decoded, so their content was not searched. */
+  readonly notSearched: readonly string[];
+  /** Embedded files present in the output (kept attachments); binary, not verifiable. */
+  readonly unverifiedAttachments: readonly string[];
+}
+
+/** RGBA pixels, rows top-down, as a render of `ForensicDeps.renderArea`. */
+export interface ForensicPixels {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Uint8ClampedArray | Uint8Array;
+}
+
+/**
+ * Engine access for `forensicCheck`, bound to the checked bytes (opened by the caller, e.g.
+ * through `PdfRenderer`), so the check itself stays DOM-free.
+ */
+export interface ForensicDeps {
+  /** Text runs of a page, glyph boxes in unrotated user space (`PdfRenderer.getPageText`). */
+  getPageText(pageIndex: number): Promise<readonly TextRun[]>;
+  /** Case-insensitive whole-document search (`PdfRenderer.search`). */
+  search(query: string): Promise<readonly SearchHit[]>;
+  /**
+   * Renders exactly `rect` (user space) of a page at `scale`, with annotations and forms
+   * (`PdfRenderer.renderPage` with `clip`).
+   */
+  renderArea(pageIndex: number, rect: Rect, scale: number): Promise<ForensicPixels>;
 }
