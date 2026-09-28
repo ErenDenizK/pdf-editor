@@ -151,3 +151,11 @@ export function byteGrepFindings(file: RawFile, targets: readonly GrepTarget[]):
   }
   return findings;
 }
+
+/** "num gen" of every /Encrypt reference in a trailer or cross-reference stream dictionary. */
+export function encryptRefs(file: RawFile): Set<string> {
+  const keys = new Set<string>();
+  for (const m of file.skeleton.matchAll(/\/Encrypt\s+(\d+)\s+(\d+)\s+R/g))
+    keys.add(`${m[1]} ${m[2]}`);
+  return keys;
+}

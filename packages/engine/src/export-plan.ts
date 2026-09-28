@@ -38,6 +38,11 @@ import {
 } from '@pdf-editor/document-model';
 
 import type { VerificationExpectation } from './types';
+import { type RedactionExportPlan, redactionExportPlan } from './redaction/export-hooks';
+
+/** The export's redaction check on the exact final bytes (see redaction/verify-output.ts). */
+export { verifyRedactedOutput } from './redaction/verify-output';
+export type { RedactionExportPlan } from './redaction/export-hooks';
 
 export interface ExportPlan {
   /** The document to hand to `PdfAssembler.assemble`. */
@@ -53,6 +58,13 @@ export interface ExportPlan {
    * policy); its user password is in `expectation.password` so verification can open it.
    */
   readonly security?: SecurityPolicy;
+  /**
+   * Present when a source of the document has applied redactions: those sources must be
+   * read as their redacted bytes, the export is a full rewrite (never incremental or
+   * byte-preserving), and `verifyRedactedOutput(finalBytes, redaction.plans, …)` must pass
+   * on the exact bytes offered for download.
+   */
+  readonly redaction?: RedactionExportPlan;
 }
 
 export interface ExportPlanOptions {
@@ -90,6 +102,11 @@ function insideExpectation(
 ): { annotationsInsidePages?: readonly number[] } {
   const indices = pages.flatMap((page, i) => (contentFitsPage(ws, page) ? [i] : []));
   return indices.length > 0 ? { annotationsInsidePages: indices } : {};
+}
+
+function redactionOf(ws: Workspace, doc: VirtualDocument): { redaction?: RedactionExportPlan } {
+  const redaction = redactionExportPlan(ws, doc);
+  return redaction === undefined ? {} : { redaction };
 }
 
 export function planExport(
@@ -130,6 +147,7 @@ export function planExport(
     sources,
     sourceNames,
     ...(security === undefined ? {} : { security }),
+    ...redactionOf(ws, doc),
     expectation: {
       pageCount: doc.pages.length,
       pageSizes: doc.pages.map((page) => pageUnrotatedSize(ws, page)),

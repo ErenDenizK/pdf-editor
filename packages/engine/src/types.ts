@@ -1254,3 +1254,95 @@ export interface ForensicDeps {
    */
   renderArea(pageIndex: number, rect: Rect, scale: number): Promise<ForensicPixels>;
 }
+// ---------------------------------------------------------------------------
+// Redaction: engine pass, blank-region gate and the whole apply (research 06 §3)
+// ---------------------------------------------------------------------------
+
+/** What the engine pass (PDFium, private scratch document) did. */
+export interface RedactionEnginePassReport {
+  /** Pages with areas (one `applyAllRedactions` each). */
+  readonly pages: number;
+  readonly areas: number;
+  /** Path objects removed because their bounds touch an area (pages and Form XObjects). */
+  readonly pathsRemoved: number;
+  /** Image objects removed because they lay entirely inside an area. */
+  readonly imagesRemoved: number;
+  /**
+   * /Redact annotations already in the bytes on pages with areas, deleted unapplied (the
+   * plan is what gets applied; marks elsewhere are removed by the scrub).
+   */
+  readonly pendingMarksDropped: number;
+  /** The source was encrypted; the output of the pass is not. */
+  readonly decrypted: boolean;
+  readonly durationMs: number;
+}
+
+/** Kinds of what the gate found in an area that is not blank. */
+export type RedactionLeftoverKind =
+  | 'text'
+  | 'path'
+  | 'image'
+  | 'shading'
+  | 'form'
+  | 'annotation'
+  | 'unknown';
+
+/** One area of the blank-region gate. */
+export interface RedactionGateArea {
+  readonly areaIndex: number;
+  readonly pageIndex: number;
+  /** Share of sampled pixels that are page background (white), 0–1. */
+  readonly backgroundShare: number;
+  readonly blank: boolean;
+  /** For an area that is not blank: page objects and annotations still touching it. */
+  readonly remaining: readonly RedactionLeftoverKind[];
+}
+
+/**
+ * The blank-region gate (research 06 §3 step 3): after removal and before the fill, every
+ * area rendered with annotations and forms must be page background only.
+ */
+export interface RedactionGateReport {
+  readonly ok: boolean;
+  readonly areas: readonly RedactionGateArea[];
+}
+
+/** Redacted strings captured before applying (glyph text under the areas). */
+export interface RedactionCapture {
+  /** Added to the plan's strings: scrubbed and checked document-wide. */
+  readonly strings: readonly string[];
+  /** Too short to search document-wide (fewer than 4 characters); areas only. */
+  readonly skipped: readonly string[];
+}
+
+export interface ApplyRedactionsOptions extends EngineCallOptions {
+  /** Password of an encrypted source (the output is not encrypted). */
+  readonly password?: string;
+  /**
+   * Add the glyph text under each area to the plan's strings (default true). Turn off for
+   * "area only" redaction, where the same text elsewhere in the document must stay.
+   */
+  readonly captureStrings?: boolean;
+  /** Remove image objects lying entirely inside an area (default true). */
+  readonly removeCoveredImages?: boolean;
+}
+
+/** A verified redaction: the bytes may be offered, every report is for the export summary. */
+export interface ApplyRedactionsResult {
+  readonly bytes: ArrayBuffer;
+  /** The plan as applied (the caller's plus the captured strings): keep it for the export. */
+  readonly plan: RedactionPlan;
+  readonly captured: RedactionCapture;
+  readonly engine: RedactionEnginePassReport;
+  readonly gate: RedactionGateReport;
+  readonly redaction: RedactionReport;
+  readonly forensic: ForensicReport;
+}
+
+/**
+ * Payload of a `redaction.apply` engine edit (the contract between the app and the export
+ * plan): the plan as applied, in the source's page indices.
+ */
+export interface RedactionApplyPayload {
+  readonly plan: RedactionPlan;
+}

@@ -41,6 +41,7 @@ import type {
 import { byteVariants } from './byte-grep';
 import {
   byteGrepFindings,
+  encryptRefs,
   type GrepTarget,
   readRawFile,
   singleRevisionFindings,
@@ -198,7 +199,7 @@ export async function forensicCheck(
   checks.push(
     await guarded('no-unreachable-objects', () =>
       doc
-        ? result('no-unreachable-objects', unreachableFindings(doc))
+        ? result('no-unreachable-objects', unreachableFindings(doc, encryptRefs(file)))
         : notParsed('no-unreachable-objects'),
     ),
   );

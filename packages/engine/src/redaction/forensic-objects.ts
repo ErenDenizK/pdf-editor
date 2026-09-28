@@ -48,12 +48,22 @@ function describe(doc: PDFDocument, object: PDFObject): string {
   return parts.length > 0 ? parts.join(' ') : object instanceof PDFStream ? 'stream' : 'dictionary';
 }
 
-/** Check 2: indirect objects not reachable from the trailer (file structure excluded). */
-export function unreachableFindings(doc: PDFDocument): ForensicFinding[] {
+/**
+ * Check 2: indirect objects not reachable from the trailer (file structure excluded).
+ * `trailerRoots` are "num gen" keys named by the raw trailers (pdf-lib drops /Encrypt from
+ * its trailer once it decrypted a file, so the encryption dictionary is passed this way).
+ */
+export function unreachableFindings(
+  doc: PDFDocument,
+  trailerRoots: ReadonlySet<string> = new Set(),
+): ForensicFinding[] {
   const reachable = reachableRefs(doc.context);
   const findings: ForensicFinding[] = [];
   for (const [ref, object] of sortedObjects(doc.context)) {
-    if (reachable.has(refKey(ref)) || isStructuralStream(doc.context, object)) continue;
+    const key = refKey(ref);
+    if (reachable.has(key) || trailerRoots.has(key) || isStructuralStream(doc.context, object)) {
+      continue;
+    }
     findings.push({
       where: `object ${ref.objectNumber} ${ref.generationNumber}`,
       objectNumber: ref.objectNumber,

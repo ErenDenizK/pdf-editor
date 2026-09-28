@@ -57,6 +57,11 @@ export type ScrubStep =
   | 'gc';
 
 export interface ScrubOptions {
+  /**
+   * Draw the fill (default true). `applyRedactions` passes false so the blank-region gate
+   * sees the areas unpainted, then draws them with `fillRedactionAreas`.
+   */
+  readonly fill?: boolean;
   /** Testing only: steps to leave out (a deliberately broken redaction). */
   readonly skip?: readonly ScrubStep[];
 }
@@ -158,7 +163,7 @@ export async function scrubRedactedDocument(
     warnings.push(`Fill colour "${plan.fillColor}" is not #rrggbb; black was used`);
   }
   const overlayColor = parseColor(plan.overlayColor) ?? contrastingColor(fill);
-  if (!skip.has('fill')) {
+  if (!skip.has('fill') && options.fill !== false) {
     await drawFills(doc, areasByPage, {
       fill,
       overlayColor,
@@ -217,4 +222,44 @@ export async function scrubRedactedDocument(
     warnings,
   };
   return { bytes: out.slice().buffer, report };
+}
+
+/**
+ * Scrub step 6 on its own, for bytes scrubbed with `fill: false`: draws the fill and overlay
+ * text of `plan` and writes a fresh file (no new /ID: the scrub made one). Returns the
+ * warnings of the fill (overlay text that did not fit, invalid colours).
+ */
+export async function fillRedactionAreas(
+  bytes: ArrayBuffer | Uint8Array,
+  plan: RedactionPlan,
+): Promise<{ bytes: ArrayBuffer; warnings: string[] }> {
+  const doc = await PDFDocument.load(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), {
+    updateMetadata: false,
+  });
+  const warnings: string[] = [];
+  const pageCount = doc.getPageCount();
+  const areasByPage = new Map<number, IndexedArea[]>();
+  plan.areas.forEach((area, index) => {
+    if (!validArea(area) || area.pageIndex >= pageCount) return; // warned by the scrub
+    areasByPage.set(area.pageIndex, [
+      ...(areasByPage.get(area.pageIndex) ?? []),
+      { ...area, index },
+    ]);
+  });
+  const fill = parseColor(plan.fillColor) ?? BLACK;
+  await drawFills(doc, areasByPage, {
+    fill,
+    overlayColor: parseColor(plan.overlayColor) ?? contrastingColor(fill),
+    ...(plan.overlayText === undefined ? {} : { overlayText: plan.overlayText }),
+    matcher: new RedactedStringMatcher(plan.strings),
+    warnings,
+  });
+  await doc.flush();
+  dropUnreachable(doc);
+  const out = await doc.save({
+    useObjectStreams: true,
+    updateFieldAppearances: false,
+    addDefaultPage: false,
+  });
+  return { bytes: out.slice().buffer, warnings };
 }

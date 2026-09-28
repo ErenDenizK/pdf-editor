@@ -38,6 +38,21 @@ export {
   type ScrubResult,
   type ScrubStep,
   scrubRedactedDocument,
+  // Part b: the whole apply on the hosted engine, and the export hooks.
+  applyRedactions,
+  engineRedact,
+  type EnginePassOptions,
+  fillRedactionAreas,
+  mergeForensicReports,
+  MIN_CAPTURED_LENGTH,
+  RedactionFailedError,
+  type RedactionFailure,
+  type RedactionExportPlan,
+  redactionExportPlan,
+  type RedactionHost,
+  redactionPlanOf,
+  verifyRedactedOutput,
+  withForensicDeps,
 } from './redaction';
 
 export {
