@@ -21,6 +21,7 @@ import { startRename } from '../stage/section-operations';
 import { TabArrangeMenu } from '../stage/TabArrangeMenu';
 import { useUiStore } from '../state/ui-store';
 import { useTabItems, useWorkspaceStore } from '../state/workspace-store';
+import { SignatureTabGlyph } from '../signatures/SignatureBadge';
 import { DocumentMenu } from '../tools/DocumentMenu';
 import { IconButton } from '../ui/IconButton';
 import { Keycaps } from '../ui/Keycaps';
@@ -156,6 +157,7 @@ export function TabBar() {
                     >
                       <span className={styles.tag} data-tag={doc.colorIndex} aria-hidden="true" />
                       <span className={styles.name}>{doc.title}</span>
+                      <SignatureTabGlyph documentId={doc.id} />
                     </button>
                     <span
                       aria-hidden="true"

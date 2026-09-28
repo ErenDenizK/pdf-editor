@@ -18,6 +18,7 @@ import { AnnotationProperties } from '../annotations/AnnotationProperties';
 import { DiagnosticsDetails } from '../document/Diagnostics';
 import { MetadataEditor } from '../document/MetadataEditor';
 import { SecurityInfo } from '../document/SecurityInfo';
+import { SignaturesSection, useHasSignatureSection } from '../signatures/SignaturesSection';
 import { useAnnotationStore } from '../annotations/annotation-store';
 import { formatBytes } from '../files/file-filters';
 import { getLocale, m } from '../i18n';
@@ -70,7 +71,7 @@ export const SOURCE_BADGES: readonly {
   badge('repaired', m.badge_repaired, m.badge_repaired_explanation),
   badge('hasAcroForm', m.badge_form, m.badge_form_explanation),
   badge('hasXfa', m.badge_xfa, m.badge_xfa_explanation),
-  badge('hasSignatures', m.badge_signed, m.badge_signed_explanation),
+  badge('hasSignatures', m.badge_signed, m.signature_badge_explanation),
   badge('tagged', m.badge_tagged, m.badge_tagged_explanation),
 ];
 
@@ -79,6 +80,7 @@ export function RightPanel() {
   const width = useUiStore((s) => s.rightPanelWidth);
   const setWidth = useUiStore((s) => s.setRightPanelWidth);
   const hasDocuments = useHasDocuments();
+  const hasSignatures = useHasSignatureSection();
   // With nothing open there is nothing to inspect; the empty state gets the whole stage.
   if (!open || !hasDocuments) return null;
 
@@ -112,6 +114,11 @@ export function RightPanel() {
             }
           />
         </Section>
+        {hasSignatures ? (
+          <Section id="signatures" title={m.inspector_signatures()}>
+            <SignaturesSection />
+          </Section>
+        ) : null}
         <Section id="history" title={m.inspector_history()}>
           <HistorySection />
         </Section>

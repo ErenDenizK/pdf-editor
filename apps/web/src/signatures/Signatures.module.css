@@ -1,0 +1,421 @@
+/* Signatures: Inspector section, status badge, Sign dialog (DESIGN.md §2–§4). Docked and
+   dialog surfaces are opaque; colour marks state only, always with a word beside it. */
+
+.section {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.source {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.source + .source {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-hairline);
+}
+
+.sourceName {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-2);
+  background: var(--surface-2);
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: 500;
+  line-height: var(--leading-base);
+}
+
+.status svg,
+.badge svg,
+.tabGlyph svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+}
+
+.status[data-tone='ok'] svg,
+.badge[data-tone='ok'] svg,
+.tabGlyph[data-tone='ok'] {
+  color: var(--success);
+}
+
+.status[data-tone='note'] svg,
+.badge[data-tone='note'] svg,
+.tabGlyph[data-tone='note'] {
+  color: var(--warning);
+}
+
+.status[data-tone='problem'] svg,
+.badge[data-tone='problem'] svg,
+.tabGlyph[data-tone='problem'] {
+  color: var(--danger);
+}
+
+.explanation {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+/* Honesty notice: the one recipe, a warning hairline and no fill (DESIGN.md §3). */
+.honesty {
+  padding: var(--space-2);
+  border: 1px solid var(--warning-line);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.weak {
+  color: var(--warning);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 6px var(--space-3);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 18px;
+}
+
+.facts dt {
+  color: var(--text-tertiary);
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.subheading {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.lines {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 18px;
+}
+
+.lines li {
+  overflow-wrap: anywhere;
+}
+
+.detail {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.details {
+  font-size: var(--text-sm);
+}
+
+.details > summary {
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 24px;
+}
+
+.details[open] > summary {
+  margin-bottom: var(--space-2);
+}
+
+.detailsBody {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.small {
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.small:disabled {
+  color: var(--text-disabled);
+}
+
+@media (hover: hover) {
+  .small:not(:disabled):hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.note {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.error {
+  color: var(--danger);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+/* ---- Status bar badge and tab glyph ---- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .badge:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.badgeMuted {
+  color: var(--text-tertiary);
+}
+
+.tabGlyph {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  color: var(--text-tertiary);
+}
+
+.tabGlyph svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* ---- Sign dialog (layered on ShortcutOverlay.module.css's popup) ---- */
+
+.popup {
+  width: min(480px, calc(100vw - 32px));
+}
+
+.dialogBody {
+  display: grid;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-6) var(--space-6);
+}
+
+.description {
+  color: var(--text-secondary);
+  line-height: var(--leading-base);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.label {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.input,
+.select {
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+}
+
+.file {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.file::file-selector-button {
+  height: 28px;
+  margin-right: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.input:focus-visible,
+.select:focus-visible,
+.file:focus-visible {
+  outline-offset: 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--space-2);
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  line-height: var(--leading-base);
+}
+
+.check input {
+  flex: none;
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.hint {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-base);
+}
+
+.preview {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-2);
+  background: var(--surface-2);
+}
+
+.command {
+  display: block;
+  padding: var(--space-2);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-1);
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+}
+
+/* ---- Export dialog Signature section ---- */
+
+.exportIdentity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.exportIdentity > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.primary,
+.secondary {
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-2);
+  font-size: var(--text-md);
+  font-weight: 500;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.primary {
+  composes: primary-button from global;
+}
+
+.secondary {
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+}
+
+@media (hover: hover) {
+  .secondary:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}

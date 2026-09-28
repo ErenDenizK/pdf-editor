@@ -22,6 +22,7 @@
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
 // Vite's `?worker` constructor: the worker script is fetched only when one is constructed.
 import PdfiumWorker from '@pdf-editor/engine/pdfium.worker?worker';
+import SignatureWorker from '@pdf-editor/engine/signature.worker?worker';
 import {
   createRandomIdGenerator,
   type Rect,
@@ -39,6 +40,7 @@ import type {
   PdfVerifier,
   SaveOptions,
   SearchHit,
+  SignatureProxy,
   TextRun,
   VerificationExpectation,
   VerificationResult,
@@ -1002,4 +1004,96 @@ export function getEngineService(): EngineService {
     },
   });
   return instance;
+}
+
+// ---------------------------------------------------------------------------
+// Signature worker (M5 spec recognize-and-compare §3, ADR-0013)
+// ---------------------------------------------------------------------------
+
+/** The shared signature worker ends after this long without a call (spec §3.2). */
+export const SIGNATURE_IDLE_MS = 5 * 60_000;
+
+/** A new signature worker (`@pdf-editor/engine/signature.worker`) behind its proxy. */
+export async function createSignatureWorker(): Promise<SignatureProxy> {
+  // Constructed first so the worker script loads while the engine chunk does.
+  const worker = new SignatureWorker({ name: 'pdf-editor signature' });
+  try {
+    const { createSignatureProxy } = await import('@pdf-editor/engine');
+    return createSignatureProxy(worker);
+  } catch (error) {
+    worker.terminate();
+    throw error;
+  }
+}
+
+/**
+ * The signature worker's lifecycle. Validation on open and "View signed version" share one
+ * long-lived worker (`run`), terminated `idleMs` after its last call ends; signing takes a
+ * worker of its own (`dedicated`), which the caller terminates right after signing so the
+ * imported key goes with it (ADR-0013 §2).
+ */
+export class SignatureWorkerHost {
+  private shared: Promise<SignatureProxy> | undefined;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private busy = 0;
+
+  constructor(
+    private readonly create: () => Promise<SignatureProxy> = createSignatureWorker,
+    private readonly idleMs: number = SIGNATURE_IDLE_MS,
+  ) {}
+
+  /** True while the shared worker exists (started and not yet terminated). */
+  get alive(): boolean {
+    return this.shared !== undefined;
+  }
+
+  /** Runs `task` on the shared worker, starting it when needed. */
+  async run<T>(task: (proxy: SignatureProxy) => Promise<T>): Promise<T> {
+    this.busy += 1;
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    try {
+      if (this.shared === undefined) {
+        const created = this.create();
+        created.catch(() => {
+          if (this.shared === created) this.shared = undefined;
+        });
+        this.shared = created;
+      }
+      return await task(await this.shared);
+    } finally {
+      this.busy -= 1;
+      if (this.busy === 0) {
+        this.timer = setTimeout(() => {
+          this.timer = undefined;
+          this.terminate();
+        }, this.idleMs);
+      }
+    }
+  }
+
+  /** A worker for one signing; the caller must `terminate()` it when done. */
+  dedicated(): Promise<SignatureProxy> {
+    return this.create();
+  }
+
+  /** Ends the shared worker now (idle timeout, tests). A later `run` starts a new one. */
+  terminate(): void {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    const current = this.shared;
+    this.shared = undefined;
+    void current?.then(
+      (proxy) => proxy.terminate(),
+      () => undefined,
+    );
+  }
+}
+
+let signatureHost: SignatureWorkerHost | undefined;
+
+/** The app-wide signature worker host (the worker itself starts on first use). */
+export function getSignatureWorkers(): SignatureWorkerHost {
+  signatureHost ??= new SignatureWorkerHost();
+  return signatureHost;
 }

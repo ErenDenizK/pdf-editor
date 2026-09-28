@@ -11,6 +11,7 @@ import { STRIP_ITEMS } from '../document/strip-items';
 import { formatNumber, m } from '../i18n';
 import { pagesPhrase } from '../state/workspace-store';
 import { checkName } from '../redaction/report-text';
+import type { SignatureExportSummary } from '../signatures/signing';
 import { familyOfFace } from '../text-edit/model';
 import type {
   ExportOutcome,
@@ -44,6 +45,39 @@ const NO_NOTES: SourceNotes = { securityRemoved: [], repaired: [] };
 export interface ContentSummary {
   readonly redaction?: RedactionExportSummary;
   readonly textEdits?: TextEditExportSummary;
+  /** The signature the export added (spec recognize-and-compare §3.2). */
+  readonly signature?: SignatureExportSummary;
+  /** Existing signatures the rewrite removed. */
+  readonly signaturesRemoved?: { readonly files: readonly string[]; readonly count: number };
+}
+
+/** "Signed by …": signer, algorithm, field, and what the signature does not prove. */
+function signatureItems(content: ContentSummary): SummaryItem[] {
+  const items: SummaryItem[] = [];
+  const { signature, signaturesRemoved } = content;
+  if (signature) {
+    items.push({
+      id: 'signature',
+      tone: 'changed',
+      text: m.summary_signature({
+        signer: signature.signer,
+        algorithm: signature.algorithm,
+        field: signature.fieldName,
+      }),
+    });
+  }
+  if (signaturesRemoved && signaturesRemoved.count > 0) {
+    items.push({
+      id: 'signatures-removed',
+      tone: 'changed',
+      text: m.summary_signatures_removed({
+        count: signaturesRemoved.count,
+        countText: formatNumber(signaturesRemoved.count),
+      }),
+      details: signaturesRemoved.files,
+    });
+  }
+  return items;
 }
 
 /** "Redaction: N areas on M pages, self-check passed (9 checks)", per page and per check. */
@@ -253,6 +287,7 @@ export function summarizeReport(
   // Output: what the content edits became, first.
   if (content.redaction) items.push(...redactionItems(content.redaction));
   if (content.textEdits) items.push(...textEditItems(content.textEdits));
+  items.push(...signatureItems(content));
   if (outcome?.security) {
     const restricted = restrictionList(outcome.security.permissions);
     items.push({

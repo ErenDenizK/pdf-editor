@@ -9,6 +9,21 @@ import viteConfig from './vite.config.ts';
 export default mergeConfig(
   viteConfig,
   defineConfig({
+    server: {
+      fs: {
+        // Vite 8 denies *.{crt,pem,key,p12,pfx,cer,der} by default; the signature tests read
+        // the test-only .p12 files in test/fixtures/pki, so only .p12 is re-allowed (as in
+        // packages/engine/vitest.config.ts).
+        deny: [
+          '.env',
+          '.env.*',
+          '*.{crt,pem,key,pfx,cer,der}',
+          '.npmrc',
+          '.yarnrc.yml',
+          '**/.git/**',
+        ],
+      },
+    },
     // Pre-bundle every dependency the tests reach lazily (engine wasm loader, fontkit,
     // fflate, the UI primitives). Discovering one mid-run makes Vite reload the browser,
     // which times out whichever test iframe is starting at that moment (seen in CI).

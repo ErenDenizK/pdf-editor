@@ -7,6 +7,7 @@ import { BookOpen, LayoutGrid, Minus, Plus, Search } from 'lucide-react';
 
 import { formatNumber, formatPercent, m } from '../i18n';
 import { PrivacyIndicator } from '../privacy/PrivacyIndicator';
+import { SignatureStatusBadge } from '../signatures/SignatureBadge';
 import { useShownSections } from '../stage/arrange-data';
 import { useSelectionStore } from '../state/selection-store';
 import { MAX_ZOOM, MIN_ZOOM, useUiStore } from '../state/ui-store';
@@ -122,6 +123,7 @@ export function StatusBar() {
             <span className={styles.item}>{m.status_opening({ count: opening })}</span>
           </>
         ) : null}
+        {doc ? <SignatureStatusBadge separator={styles.dot} /> : null}
         <span className={styles.dot} aria-hidden="true">
           ·
         </span>

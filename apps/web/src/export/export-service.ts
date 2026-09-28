@@ -37,9 +37,17 @@
  *    password) against every plan mapped to output pages; a failing check fails
  *    verification with the check's findings. Only verified bytes are offered.
  *
+ * 5. Signatures (spec recognize-and-compare §3.2, ADR-0013): the assembler writes a new
+ *    file, so a signed source's signatures could not survive; `stripSignatures` removes their
+ *    values before assembly (reported in `signaturesRemoved`). With `sign`, the last step
+ *    signs a copy of the verified bytes in a dedicated signature worker (PAdES-B approval
+ *    signature, one incremental section; refused for encrypted outputs), re-opens the signed
+ *    bytes in PDFium (and re-runs the redaction self-check when there is one), and the worker
+ *    is terminated; only then are the signed bytes offered, with the signature in the summary.
+ *
  * Order for an edited, redacted source: engine save (annotation and form post-passes) →
- * `finalizeTextEdits` → assembly (and encryption) → compression → PDFium verification →
- * redaction self-check.
+ * `finalizeTextEdits` → signature values removed → assembly (and encryption) → compression →
+ * PDFium verification → redaction self-check → signing → PDFium re-open (and self-check).
  *
  * Never rejects: failures resolve to `{ ok: false }` with a message fit for the UI.
  */
@@ -60,9 +68,13 @@ import type {
   PdfEditor,
   PdfRedactor,
   ReconciliationReport,
+  SignOptions,
+  SignRequest,
+  SignResult,
   VerificationExpectation,
   VerificationResult,
 } from '@pdf-editor/engine';
+import type { Rect } from '@pdf-editor/document-model';
 
 import { appliedEdits, runExclusive } from '../annotations/edit-runner';
 import { getAssembler } from '../engine/assembler-client';
@@ -74,11 +86,20 @@ import {
 } from '../engine/engine-service';
 import { m } from '../i18n';
 import { failingCheckLines } from '../redaction/report-text';
+import type { SignatureCorner, StripResult } from '../signatures/pdf-pass';
+import {
+  type SignatureExportSummary,
+  type SignDraft,
+  signatureSummaryOf,
+  signExportBytes,
+  signingFailureText,
+  signRequestOf,
+} from '../signatures/signing';
 import { blobsOfDocument, useWorkspaceStore } from '../state/workspace-store';
 import { compressExport, type ExportCompressor } from '../tools/export-compression';
 import { exportCompressionFor } from '../tools/tools-store';
 
-export type ExportPhase = 'reading' | 'assembling' | 'verifying' | 'redaction';
+export type ExportPhase = 'reading' | 'assembling' | 'verifying' | 'redaction' | 'signing';
 
 export interface ExportProgress {
   readonly phase: ExportPhase;
@@ -174,6 +195,10 @@ export interface PreparedExport {
     readonly before: number;
     readonly after: number;
   };
+  /** The signature the export added (the bytes are signed), when it signed. */
+  readonly signature?: SignatureExportSummary;
+  /** Signed sources whose signature values the rewrite removed (file names, count). */
+  readonly signaturesRemoved?: { readonly files: readonly string[]; readonly count: number };
 }
 
 export interface ExportOptions {
@@ -200,8 +225,27 @@ export interface ExportOptions {
    * with "Apply to export" (tools store), if any; null: none.
    */
   readonly compression?: CompressionSettings | null;
+  /**
+   * Sign the output with this certificate (spec recognize-and-compare §3.2) as the last step.
+   * Refused when the output is encrypted.
+   */
+  readonly sign?: SignDraft;
   readonly signal?: AbortSignal;
   readonly onProgress?: (progress: ExportProgress) => void;
+}
+
+/** The signature steps of an export (defaults: `signatures/pdf-pass.ts`, `signatures/signing.ts`). */
+export interface ExportSignatureSteps {
+  /** Removes signature values from a signed source's bytes before assembly. */
+  readonly strip: (bytes: ArrayBuffer) => Promise<StripResult>;
+  /** A visible signature's rectangle on an output page. */
+  readonly rect: (bytes: ArrayBuffer, pageIndex: number, corner: SignatureCorner) => Promise<Rect>;
+  /** Signs a copy of `bytes` in a dedicated worker and terminates it. */
+  readonly sign: (
+    bytes: ArrayBuffer,
+    request: SignRequest,
+    options: SignOptions,
+  ) => Promise<SignResult>;
 }
 
 export interface ExportDependencies {
@@ -239,7 +283,19 @@ export interface ExportDependencies {
    * Without it an export with applied redactions fails: it cannot be verified.
    */
   readonly redactor?: () => Promise<Pick<PdfRedactor, 'verifyRedactedOutput'>>;
+  /**
+   * Removing existing signatures and signing. Without it signed sources keep their (then
+   * broken) signature values and an export with `sign` fails.
+   */
+  readonly signatures?: ExportSignatureSteps;
 }
+
+const defaultSignatureSteps: ExportSignatureSteps = {
+  strip: async (bytes) => (await import('../signatures/pdf-pass')).stripSignatures(bytes),
+  rect: async (bytes, pageIndex, corner) =>
+    (await import('../signatures/pdf-pass')).visibleSignatureRect(bytes, pageIndex, corner),
+  sign: (bytes, request, options) => signExportBytes(bytes, request, options),
+};
 
 const defaultDependencies = (): ExportDependencies => ({
   engine: getEngineService(),
@@ -255,6 +311,7 @@ const defaultDependencies = (): ExportDependencies => ({
   compress: compressExport,
   compressionFor: exportCompressionFor,
   redactor: () => getEngineService().redactor(),
+  signatures: defaultSignatureSteps,
 });
 
 const failed = (message: string, code: 'internal' | 'aborted' = 'internal') =>
@@ -459,6 +516,10 @@ async function prepareExportNow(
       ...(options.flattenForms ? { flattenForms: true } : {}),
     });
 
+    // Signing an encrypted output is refused (spec §3.2): say so before any work.
+    if (options.sign && plan.security) return failed(m.sign_refused_encrypted());
+    if (options.sign && !deps.signatures) return failed(m.sign_failed({ reason: 'unavailable' }));
+
     const redaction = plan.redaction;
     const redactor = redaction ? await deps.redactor?.() : undefined;
     // A redacted export that cannot be checked is never offered.
@@ -514,6 +575,8 @@ async function prepareExportNow(
     const sources = new Map<SourceId, ArrayBuffer>();
     const securityRemoved: string[] = [];
     const repaired: string[] = [];
+    const signaturesRemovedFrom: string[] = [];
+    let signaturesRemoved = 0;
     for (const [index, sourceId] of plan.sources.entries()) {
       if (signal?.aborted) return failed(m.export_error_cancelled(), 'aborted');
       onProgress?.({ phase: 'reading', done: index, total: plan.sources.length });
@@ -558,6 +621,16 @@ async function prepareExportNow(
         // Image edits rewrote page content: drop the orphaned streams (the old content, a
         // removed or replaced image) so nothing removed survives in the file.
         bytes = (await finalizeContentEdits(bytes)).bytes;
+      }
+      if (source?.flags.hasSignatures === true && deps.signatures) {
+        // A rewritten file cannot keep a signature: remove the values rather than ship
+        // signatures that would only verify as broken (spec §3.2).
+        const stripped = await deps.signatures.strip(bytes);
+        bytes = stripped.bytes;
+        if (stripped.removed > 0) {
+          signaturesRemoved += stripped.removed;
+          signaturesRemovedFrom.push(name);
+        }
       }
       sources.set(sourceId, bytes);
       // With a new password on the output, the old protection is replaced, not dropped.
@@ -663,6 +736,60 @@ async function prepareExportNow(
       }
       onProgress?.({ phase: 'redaction', done: 1, total: 1 });
     }
+    let signature: SignatureExportSummary | undefined;
+    if (options.sign && deps.signatures && verification.ok) {
+      if (signal?.aborted) return failed(m.export_error_cancelled(), 'aborted');
+      const steps = deps.signatures;
+      const draft = options.sign;
+      onProgress?.({ phase: 'signing', done: 0, total: 1 });
+      let signed: SignResult;
+      try {
+        const rect = draft.visible
+          ? await steps.rect(bytes, draft.visible.pageIndex, draft.visible.corner)
+          : undefined;
+        // On a copy of the verified bytes (the worker takes what it is given).
+        signed = await steps.sign(bytes.slice(0), signRequestOf(draft, rect), {
+          ...(signal ? { signal } : {}),
+        });
+      } catch (error) {
+        if (toFailure(error).code === 'aborted') {
+          return failed(m.export_error_cancelled(), 'aborted');
+        }
+        return failed(signingFailureText(error));
+      }
+      // The signed file must open in PDFium like the unsigned one (the new signature field
+      // and widget are the only additions, so form and annotation counts are not compared).
+      const {
+        annotationCounts: _counts,
+        checkAnnotations: _check,
+        annotationIds: _ids,
+        formFieldNames: _names,
+        createdFields: _created,
+        annotationsInsidePages: _inside,
+        ...reopenExpectation
+      } = expectation;
+      const reopened = await deps.engine.verify(signed.bytes.slice(0), reopenExpectation, signal);
+      if (!reopened.ok) {
+        return failed(
+          m.export_error_check({ reason: reopened.error.message }),
+          codeOf(reopened.error.code),
+        );
+      }
+      verification = reopened.value;
+      if (verification.ok && redaction && redactor && redactionSummary) {
+        // The self-check again, on the exact signed bytes offered.
+        const check = await redactor.verifyRedactedOutput(signed.bytes.slice(0), redaction.plans, {
+          ...(signal ? { signal } : {}),
+        });
+        redactionSummary = { ...redactionSummary, report: check };
+        if (!check.ok) {
+          verification = { ok: false, problems: failingCheckLines(check) };
+        }
+      }
+      bytes = signed.bytes;
+      signature = signatureSummaryOf(signed);
+      onProgress?.({ phase: 'signing', done: 1, total: 1 });
+    }
     const textEditSummary: TextEditExportSummary | undefined =
       textEditSources.length > 0
         ? {
@@ -686,6 +813,10 @@ async function prepareExportNow(
         ...(compression ? { compression } : {}),
         ...(redactionSummary ? { redaction: redactionSummary } : {}),
         ...(textEditSummary ? { textEdits: textEditSummary } : {}),
+        ...(signature ? { signature } : {}),
+        ...(signaturesRemoved > 0
+          ? { signaturesRemoved: { files: signaturesRemovedFrom, count: signaturesRemoved } }
+          : {}),
         outcome: {
           ...(plan.security ? { security: plan.security } : {}),
           passwordRemoved: doc.passwordRemoved === true,

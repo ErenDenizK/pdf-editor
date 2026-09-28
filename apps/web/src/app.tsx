@@ -13,6 +13,9 @@ import { UpdateToast } from './pwa/UpdateToast';
 import { AppShell } from './shell/AppShell';
 import { registerArrangeCommands } from './stage/arrange-commands';
 import { OperationDialogs } from './stage/OperationDialogs';
+import { registerSignatureCommands } from './signatures/signature-commands';
+import { startSignatureValidation } from './signatures/signature-store';
+import { SignDialog } from './signatures/SignDialog';
 import { requestPassword } from './state/password-store';
 
 /**
@@ -27,6 +30,9 @@ export function App() {
   useLayoutEffect(() => registerArrangeCommands(), [locale]);
   useLayoutEffect(() => registerDocumentCommands(commandRegistry), [locale]);
   useLayoutEffect(() => registerOutlineCommands(commandRegistry), [locale]);
+  useLayoutEffect(() => registerSignatureCommands(commandRegistry), [locale]);
+  // Signature validation on open (spec recognize-and-compare §3.1).
+  useLayoutEffect(() => startSignatureValidation(), []);
   useLayoutEffect(() => {
     const engine = getEngineService();
     engine.setPasswordPrompt(requestPassword);
@@ -37,6 +43,7 @@ export function App() {
       <AppShell />
       <ExportDialog />
       <DocumentDialogs />
+      <SignDialog />
       <OperationDialogs />
       <UpdateToast />
     </LocaleBoundary>

@@ -2,8 +2,9 @@
  * Export dialog (ARCHITECTURE.md §4): the options in sections (document-tools spec §8):
  * Output (file name, compatibility mode), Security (effective password outcome, override),
  * Annotations (flatten, comments as popups; spec viewer-annotations.md §6), Forms
- * (flatten), Compression and Metadata (policy), then assembly and
- * verification with progress, then the reconciliation summary — what was kept, rewritten,
+ * (flatten), Compression, Metadata (policy) and Signature (existing signatures, "Sign the
+ * exported file"; spec recognize-and-compare §3.2), then assembly, verification and signing
+ * with progress, then the reconciliation summary — what was kept, rewritten,
  * renamed or removed — and only then the Save/Download button (a fresh click, which the
  * save picker needs as user activation). Styled as the password dialog.
  */
@@ -31,6 +32,9 @@ import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { CompressionExportRow } from '../tools/CompressionExportRow';
 import overlay from '../shell/ShortcutOverlay.module.css';
+import { ExportSignatureSection } from '../signatures/ExportSignatureSection';
+import { activeSignDraft, openSignDialog, useSignStore } from '../signatures/sign-store';
+import { SignDialog } from '../signatures/SignDialog';
 import { pagesPhrase, useWorkspaceStore } from '../state/workspace-store';
 import { useRetained } from '../ui/use-retained';
 import { deliverPdf, supportsSavePicker } from './deliver';
@@ -71,6 +75,7 @@ export function ExportDialog() {
 function progressText(progress: ExportProgress | null, pageCount: number): string {
   if (progress === null || progress.phase === 'reading') return m.export_progress_reading();
   if (progress.phase === 'redaction') return m.export_progress_redaction();
+  if (progress.phase === 'signing') return m.export_progress_signing();
   if (progress.phase === 'assembling') {
     return m.export_progress_assembling({
       done: Math.min(progress.done, progress.total),
@@ -86,7 +91,7 @@ function progressValue(progress: ExportProgress | null): number {
   // Reading 0–10 %, assembling 10–85 %, verifying 85–100 %.
   if (progress.phase === 'reading') return 10 * share;
   if (progress.phase === 'assembling') return 10 + 75 * share;
-  if (progress.phase === 'redaction') return 95 + 5 * share;
+  if (progress.phase === 'redaction' || progress.phase === 'signing') return 95 + 5 * share;
   return 85 + 10 * share;
 }
 
@@ -109,6 +114,8 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
         (p) => p.ref.kind === 'source' && s.workspace.sources[p.ref.source]?.flags.hasAcroForm,
       ),
   );
+  const signOn = useSignStore((s) => s.signOnExport[documentId] === true);
+  const encryptedOutput = securityChoice !== 'none' && doc?.security !== undefined;
   const [step, setStep] = useState<Step>({ kind: 'form' });
   const controller = useRef<AbortController | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -124,6 +131,12 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
   const start = async (event: SyntheticEvent) => {
     event.preventDefault();
     setFileName((name) => exportFileName(name));
+    const sign = activeSignDraft(documentId);
+    if (signOn && !sign) {
+      // "Sign the exported file" without a certificate yet: choose one first.
+      openSignDialog(documentId, 'export');
+      return;
+    }
     const abort = new AbortController();
     controller.current = abort;
     setStep({ kind: 'working', progress: null });
@@ -133,6 +146,7 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
       flattenForms: hasForms && flattenForms,
       includeComments,
       ...(securityChoice === 'none' ? { security: null } : {}),
+      ...(sign ? { sign } : {}),
       signal: abort.signal,
       onProgress: (progress) => {
         if (!abort.signal.aborted) setStep({ kind: 'working', progress });
@@ -291,6 +305,16 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
               <ExportMetadataSection doc={doc} />
             </ExportSection>
           ) : null}
+          {doc ? (
+            <ExportSection title={m.export_section_signature()}>
+              <ExportSignatureSection
+                doc={doc}
+                encryptedOutput={encryptedOutput}
+                checkClassName={styles.check}
+                hintClassName={styles.hint}
+              />
+            </ExportSection>
+          ) : null}
           <div className={styles.actions}>
             <Dialog.Close className={styles.secondary}>{m.common_cancel()}</Dialog.Close>
             <button type="submit" className={styles.primary} disabled={pageCount === 0}>
@@ -356,6 +380,7 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
       ) : null}
       {/* Set password / Strip metadata opened from the sections nest in this dialog. */}
       <DocumentDialogs origin="export" />
+      <SignDialog origin="export" />
     </Dialog.Popup>
   );
 }
@@ -396,6 +421,8 @@ function ReviewStep({
   const items = summarizeReport(prepared.report, prepared.sourceNotes, prepared.outcome, {
     ...(prepared.redaction ? { redaction: prepared.redaction } : {}),
     ...(prepared.textEdits ? { textEdits: prepared.textEdits } : {}),
+    ...(prepared.signature ? { signature: prepared.signature } : {}),
+    ...(prepared.signaturesRemoved ? { signaturesRemoved: prepared.signaturesRemoved } : {}),
   });
   const seconds = (prepared.durationMs / 1000).toFixed(1);
   return (
