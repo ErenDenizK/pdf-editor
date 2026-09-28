@@ -23,7 +23,7 @@ import {
   pageTotalRotation,
   type Workspace,
 } from '@pdf-editor/document-model';
-import { type RefObject, useEffect, useLayoutEffect, useRef } from 'react';
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { RENDER_PRIORITY, sheetSize } from '../engine/engine-service';
 import { m } from '../i18n';
@@ -209,6 +209,17 @@ export function ReadView({ doc }: { readonly doc: VirtualDocument }) {
   const readLayout = useViewStore((s) => s.layout);
   const currentPage = useViewStore((s) => s.currentPage);
   const viewportRef = useRef<HTMLDivElement>(null);
+  // The viewport is the page column's scroll element, and the column mounts only once it
+  // exists. A child's layout effects run before React attaches its parent's ref, so a
+  // column mounted with the viewport would give its virtualizer a null scroll element on
+  // mount; the virtualizer then observes nothing and lays out no rows until something else
+  // re-renders the column (Read mode stayed blank until a window resize). Setting state
+  // from the ref callback re-renders synchronously during the same commit, before paint.
+  const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
+  const attachViewport = useCallback((el: HTMLDivElement | null) => {
+    viewportRef.current = el;
+    setViewport(el);
+  }, []);
   const layout = computeLayout(ws, doc, readLayout, currentPage);
   const cssScale = zoom * CSS_PX_PER_PT;
 
@@ -252,21 +263,24 @@ export function ReadView({ doc }: { readonly doc: VirtualDocument }) {
 
   return (
     <div
-      ref={viewportRef}
+      ref={attachViewport}
       className={styles.viewport}
       data-read-viewport
       data-layout={readLayout}
       tabIndex={-1}
     >
-      <PageColumn
-        doc={doc}
-        ws={ws}
-        layout={layout}
-        readLayout={readLayout}
-        cssScale={cssScale}
-        viewportRef={viewportRef}
-        fingerprint={fingerprint}
-      />
+      {viewport ? (
+        <PageColumn
+          doc={doc}
+          ws={ws}
+          layout={layout}
+          readLayout={readLayout}
+          cssScale={cssScale}
+          scrollElement={viewport}
+          viewportRef={viewportRef}
+          fingerprint={fingerprint}
+        />
+      ) : null}
       <GoToPageDialog doc={doc} />
     </div>
   );
@@ -291,6 +305,7 @@ function PageColumn({
   layout,
   readLayout,
   cssScale,
+  scrollElement,
   viewportRef,
   fingerprint,
 }: {
@@ -299,6 +314,12 @@ function PageColumn({
   readonly layout: Layout;
   readonly readLayout: ReadLayout;
   readonly cssScale: number;
+  /**
+   * The Read viewport, already attached: the virtualizer observes its size and scroll from
+   * its first layout effect. (A hidden viewport has no size; the virtualizer's
+   * ResizeObserver lays the rows out once it is shown.)
+   */
+  readonly scrollElement: HTMLDivElement;
   readonly viewportRef: RefObject<HTMLDivElement | null>;
   readonly fingerprint: string | undefined;
 }) {
@@ -319,7 +340,7 @@ function PageColumn({
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: rows.length,
-    getScrollElement: () => viewportRef.current,
+    getScrollElement: () => scrollElement,
     estimateSize: (r) => heightOf(r) + GAP,
     getItemKey: (r) => {
       const first = rows[r]?.pages[0];

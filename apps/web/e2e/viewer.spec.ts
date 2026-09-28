@@ -155,3 +155,36 @@ test('two-up layout shows pages side by side', async ({ page }) => {
   await page.getByRole('radio', { name: 'Continuous' }).click();
   await expect(page.getByTestId('status-pages')).toHaveText('Page 3 of 6');
 });
+
+/** The first Read page canvas that holds a rendered bitmap. */
+const readBitmap = (page: Page) =>
+  page.locator('[data-read-viewport] canvas[data-state="rendered"]').first();
+
+// Regression: the virtualized page column found no scroll element on its first commit and
+// stayed blank until something (a window resize) re-rendered it.
+test('Read mode renders pages after Arrange without a resize', async ({ page }) => {
+  await expect(readBitmap(page)).toBeVisible();
+  await page.keyboard.press('2');
+  await expect(page.locator('[data-read-viewport]')).toHaveCount(0);
+  await page.keyboard.press('1');
+  await expect(page.locator('[data-read-viewport] [data-page-index="0"]')).toBeVisible();
+  await expect(readBitmap(page)).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByTestId('status-pages')).toHaveText('Page 1 of 6');
+});
+
+test('a document opened in Read mode renders its pages, and so does the tab left', async ({
+  page,
+}) => {
+  await expect(readBitmap(page)).toBeVisible();
+  await openFixtures(page, ['simple-text.pdf']);
+  const second = page.getByRole('tab', { name: 'simple-text' });
+  await second.click();
+  await expect(second).toHaveAttribute('aria-selected', 'true');
+  const viewport = page.locator('[data-read-viewport]');
+  await expect(viewport.locator('[data-page-index="0"]')).toBeVisible();
+  await expect(readBitmap(page)).toBeVisible({ timeout: 5_000 });
+
+  await page.getByRole('tab', { name: 'outline-named-dests' }).click();
+  await expect(page.getByTestId('status-pages')).toHaveText('Page 1 of 6');
+  await expect(readBitmap(page)).toBeVisible({ timeout: 5_000 });
+});
