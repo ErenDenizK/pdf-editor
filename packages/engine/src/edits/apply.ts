@@ -14,7 +14,14 @@
 
 import type { EngineEdit } from '@pdf-editor/document-model';
 
-import { type Annotation, type EngineCallOptions, EngineError, type PdfEditor } from '../types';
+import {
+  type Annotation,
+  type EngineCallOptions,
+  EngineError,
+  type PdfEditor,
+  type PdfTextEditor,
+  type TextEditResult,
+} from '../types';
 import {
   type AnnotationCreatePayload,
   type AnnotationDeletePayload,
@@ -29,8 +36,12 @@ import {
   type SerializedAnnotation,
   serializeAnnotation,
 } from './payloads';
+import { applyTextEditEdit, type TextEditReplayPayload } from './text-edit';
 
-/** The parts of `PdfEditor` edits use (`getAnnotationAppearance` for stamps). */
+/**
+ * The parts of `PdfEditor` edits use (`getAnnotationAppearance` for stamps), and
+ * `PdfTextEditor.applyTextEdit` for `text.edit` (`PdfiumProxy` has both).
+ */
 export type EditTarget = Pick<
   PdfEditor,
   | 'listAnnotations'
@@ -40,7 +51,8 @@ export type EditTarget = Pick<
   | 'listFormFields'
   | 'setFormFieldValue'
   | 'getAnnotationAppearance'
->;
+> &
+  Partial<Pick<PdfTextEditor, 'applyTextEdit'>>;
 
 export interface AppliedEdit {
   /** The edit as applied: a create's payload carries the annotation id actually used. */
@@ -49,6 +61,8 @@ export interface AppliedEdit {
   readonly inverse: EngineEdit;
   /** The annotation after the edit (creates and updates). */
   readonly annotation?: Annotation;
+  /** `text.edit`: the editor's result (tier, honesty, verification). */
+  readonly textEdit?: TextEditResult;
 }
 
 const UNDO_SUFFIX = ':undo';
@@ -169,6 +183,13 @@ export async function applyEngineEditWithResult(
       await editor.setFormFieldValue(edit.source, name, formValueFromJson(value), options);
       const inverse: FormSetValuePayload = { name, value: formValueToJson(field.value) };
       return { applied: edit, inverse: inverseOf(edit, 'form.set-value', inverse) };
+    }
+    case 'text.edit': {
+      // Non-invertible (research 05 §4): the inverse tells history to reopen and replay.
+      const { payload, result } = await applyTextEditEdit(editor, edit, options);
+      const applied: EngineEdit = { ...edit, payload };
+      const inverse: TextEditReplayPayload = { replayRequired: true, of: edit.id };
+      return { applied, inverse: inverseOf(applied, 'text.edit', inverse), textEdit: result };
     }
     case 'redaction.mark':
     case 'redaction.apply':

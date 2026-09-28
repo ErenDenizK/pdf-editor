@@ -402,7 +402,10 @@ export interface EngineEdit {
     | 'annotation.delete'
     | 'form.set-value'
     | 'redaction.mark'
-    | 'redaction.apply';
+    | 'redaction.apply'
+    // In-place text edit (spec redaction-and-text-editing §2.5). Not invertible: its
+    // inverse is a `text.edit` marked "replay required" (undo = reopen + replay).
+    | 'text.edit';
   readonly payload: unknown;
   readonly inverse?: EngineEdit;
 }

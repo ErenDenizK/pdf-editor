@@ -1,7 +1,7 @@
 /**
  * Wraps the PDFium worker (constructed by the app, keeping bundler-specific code out of this
  * package) as the viewer's `PdfRenderer` + `PdfEditor` + `PdfVerifier`: a drop-in for a
- * `PdfiumAdapter` on the caller's thread (ADR-0011 §1).
+ * `PdfiumAdapter` on the caller's thread (ADR-0011 §1), plus the worker's `PdfTextEditor`.
  *
  * - `open` *transfers* its ArrayBuffer (detached in the caller), as `PdfRenderer` documents;
  *   `verify` copies. Render bitmaps and saved bytes are transferred back.
@@ -21,6 +21,7 @@ import {
   EngineError,
   type PdfEditor,
   type PdfRenderer,
+  type PdfTextEditor,
   type PdfVerifier,
   type RenderResult,
   type SourceInspector,
@@ -48,7 +49,7 @@ export interface PdfiumProxyOptions {
   readonly inspector?: SourceInspector;
 }
 
-export interface PdfiumProxy extends PdfRenderer, PdfEditor, PdfVerifier {
+export interface PdfiumProxy extends PdfRenderer, PdfEditor, PdfVerifier, PdfTextEditor {
   getAnnotationAppearance(
     id: SourceId,
     pageIndex: number,
@@ -323,6 +324,24 @@ export function createPdfiumProxy(worker: Worker, options: PdfiumProxyOptions): 
       const { signal, wire } = split(callOptions);
       return invoke('verify', signal, (port) =>
         remote.verify(bytes, expectation, wire, withPort(port, port)),
+      );
+    },
+    locateRuns(id, pageIndex, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke('locateRuns', signal, (port) =>
+        remote.locateRuns(id, pageIndex, wire, withPort(port, port)),
+      );
+    },
+    checkEditability(query, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke('checkEditability', signal, (port) =>
+        remote.checkEditability(query, wire, withPort(port, port)),
+      );
+    },
+    applyTextEdit(request, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke('applyTextEdit', signal, (port) =>
+        remote.applyTextEdit(request, wire, withPort(port, port)),
       );
     },
     destroy() {

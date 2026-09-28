@@ -15,6 +15,7 @@ import type {
   EngineCallOptions,
   EngineErrorCode,
   FormField,
+  LocatedRun,
   NewAnnotation,
   OpenedDocument,
   OpenOptions,
@@ -24,6 +25,10 @@ import type {
   SearchHit,
   SearchOptions,
   SourceInspection,
+  TextEditability,
+  TextEditQuery,
+  TextEditRequest,
+  TextEditResult,
   TextRun,
   VerificationExpectation,
   VerificationResult,
@@ -164,6 +169,23 @@ export interface PdfiumWorkerApi {
     options: WireCallOptions,
     abortPort?: MessagePort,
   ): Promise<Wire<VerificationResult>>;
+  // PdfTextEditor (text-edit/): raw access, exclusive per source.
+  locateRuns(
+    id: SourceId,
+    pageIndex: number,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<readonly LocatedRun[]>>;
+  checkEditability(
+    query: TextEditQuery,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<TextEditability>>;
+  applyTextEdit(
+    request: TextEditRequest,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<TextEditResult>>;
   /** Closes every document and releases the engine; the worker stays usable. */
   destroy(): Promise<void>;
 }

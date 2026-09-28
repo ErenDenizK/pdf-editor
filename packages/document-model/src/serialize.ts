@@ -522,6 +522,7 @@ const EDIT_KINDS: readonly EngineEdit['kind'][] = [
   'form.set-value',
   'redaction.mark',
   'redaction.apply',
+  'text.edit',
 ];
 
 function readEdit(value: unknown, path: string, depth = 0): EngineEdit {

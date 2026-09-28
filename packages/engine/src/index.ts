@@ -60,6 +60,21 @@ export {
   type PdfiumProxyOptions,
 } from './worker/pdfium-proxy';
 export type { PdfiumWorkerConfig } from './worker/pdfium-protocol';
+// Text editing (M4, spec redaction-and-text-editing §2): the `PdfTextEditor` on a hosted
+// engine (in the app it runs in the PDFium worker, reached through `PdfiumProxy`) and the
+// export post-pass for edited sources.
+export {
+  createTextEditor,
+  finalizeTextEdits,
+  type FinalizeTextEditsOptions,
+  type FinalizeTextEditsResult,
+  HostedTextEditor,
+  type TextEditFailure,
+  type TextEditorHost,
+  type TextEditorOptions,
+  textEditError,
+  textEditFailureReason,
+} from './text-edit';
 export {
   createHostedEngine,
   type HostedEngine,

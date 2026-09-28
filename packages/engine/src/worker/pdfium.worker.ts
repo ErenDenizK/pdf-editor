@@ -1,13 +1,13 @@
 /**
  * PDFium worker entry (ADR-0011 §1): the viewer's engine in our own module worker. It hosts
- * `init` + `PdfiumNative` + `PdfEngine` (pdfium/host) and a `PdfiumAdapter` built on that
- * engine; later the M4 editors (`PdfTextEditor`, `PdfRedactor`) that need raw access. WASM is
+ * `init` + `PdfiumNative` + `PdfEngine` (pdfium/host), a `PdfiumAdapter` built on that
+ * engine, and the M4 editors that need raw access (`PdfTextEditor`, text-edit/). WASM is
  * single-threaded and fetched from the app's own origin (no COOP/COEP, no CDN; ADR-0004).
  *
  * The app constructs it (bundler-specific), e.g. with Vite:
  * `new Worker(new URL('…/pdfium.worker.ts', import.meta.url), { type: 'module' })` or
  * `import PdfiumWorker from '@pdf-editor/engine/pdfium.worker?worker'`, and wraps it with
- * `createPdfiumProxy`. The engine starts on the first call that needs it.
+ * `createPdfiumProxy`. The engine (wasm fetch + init) starts as soon as the proxy configures it.
  *
  * Every adapter call on a source runs under that source's shared lock, so raw edits
  * (`HostedEngine.withRawAccess`, exclusive) never land between the tasks of one call.
@@ -18,6 +18,7 @@ import type { SourceId } from '@pdf-editor/document-model';
 import { createHostedEngine, type HostedEngine } from '../pdfium/host/hosted-engine';
 import { SourceLocks } from '../pdfium/host/source-lock';
 import { PdfiumAdapter } from '../pdfium/pdfium-adapter';
+import { createTextEditor, type HostedTextEditor } from '../text-edit/editor';
 import { throwIfAborted } from '../pdfium/task-bridge';
 import { EngineError, type SearchHit, type SourceInspector } from '../types';
 import {
@@ -33,6 +34,7 @@ let config: PdfiumWorkerConfig | undefined;
 let inspector: SourceInspector | undefined;
 let hostPromise: Promise<HostedEngine> | undefined;
 let adapter: PdfiumAdapter | undefined;
+let textEditor: Promise<HostedTextEditor> | undefined;
 /** Created before the engine so calls can queue on a source while the WASM loads. */
 const locks = new SourceLocks();
 
@@ -69,6 +71,21 @@ function getAdapter(): PdfiumAdapter {
     });
   }
   return adapter;
+}
+
+/**
+ * The text editor on the hosted engine. Its calls take the source's lock exclusively
+ * (`withRawAccess`), so they are not wrapped in `onSource` (the lock is not re-entrant).
+ */
+function getTextEditor(): Promise<HostedTextEditor> {
+  if (!textEditor) {
+    const created = host().then((hosted) => createTextEditor(hosted));
+    created.catch(() => {
+      if (textEditor === created) textEditor = undefined;
+    });
+    textEditor = created;
+  }
+  return textEditor;
 }
 
 function failure(error: unknown): Wire<never> {
@@ -169,6 +186,9 @@ const api: PdfiumWorkerApi = {
   configure(next, bridge, capabilities) {
     if (adapter) throw new EngineError('internal', 'PDFium worker is already running');
     config = next;
+    // The proxy is created on first document open: start fetching and compiling the wasm now,
+    // while the caller still reads the file. A failure resurfaces on the first call.
+    host().catch(() => undefined);
     inspector = bridge
       ? bridgedInspector(
           bridge as Remote<InspectorBridge>,
@@ -288,10 +308,26 @@ const api: PdfiumWorkerApi = {
       getAdapter().verify(bytes, expectation, withSignal(options, signal)),
     );
   },
+  locateRuns(id, pageIndex, options, abortPort) {
+    return call(abortPort, async (signal) =>
+      (await getTextEditor()).locateRuns(id, pageIndex, withSignal(options, signal)),
+    );
+  },
+  checkEditability(query, options, abortPort) {
+    return call(abortPort, async (signal) =>
+      (await getTextEditor()).checkEditability(query, withSignal(options, signal)),
+    );
+  },
+  applyTextEdit(request, options, abortPort) {
+    return call(abortPort, async (signal) =>
+      (await getTextEditor()).applyTextEdit(request, withSignal(options, signal)),
+    );
+  },
   async destroy() {
     const current = adapter;
     adapter = undefined;
     hostPromise = undefined;
+    textEditor = undefined;
     await current?.destroy();
   },
 };

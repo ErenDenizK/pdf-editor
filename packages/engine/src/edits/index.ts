@@ -20,3 +20,13 @@ export {
   type SerializedNewAnnotation,
   serializeAnnotation,
 } from './payloads';
+export {
+  appliedTextEditPayload,
+  isReplayRequired,
+  readTextEditPayload,
+  type TextEditPayload,
+  textEditPayloadOf,
+  type TextEditReplayPayload,
+  textEditRequestOf,
+  type TextEditRunJson,
+} from './text-edit';
