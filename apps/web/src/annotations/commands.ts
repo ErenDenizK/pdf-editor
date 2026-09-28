@@ -6,8 +6,11 @@
  */
 // Registers the Edit text page layer (the tool itself is in ANNOTATION_TOOLS).
 import '../text-edit';
+// Registers the Image tool's page layer (the tool itself is in ANNOTATION_TOOLS).
+import '../image-objects';
 
 import { pickFiles } from '../files/open-files';
+import { deleteImage, useImageStore } from '../image-objects';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import type { CommandRegistry } from '../commands/registry';
@@ -113,6 +116,18 @@ export function registerAnnotationCommands(registry: CommandRegistry): () => voi
       run: async () => {
         const selection = useAnnotationStore.getState().selection;
         if (selection) await deleteAnnotations(selection, selection.ids);
+      },
+    }),
+    registry.register({
+      id: 'image.delete',
+      title: m.cmd_delete_image(),
+      group: m.group_edit(),
+      shortcut: ['Delete', 'Backspace'],
+      keywords: ['remove', 'image', 'picture'],
+      when: () => readMode() && useImageStore.getState().selection !== null,
+      run: async () => {
+        const selection = useImageStore.getState().selection;
+        if (selection) await deleteImage(selection.target, selection.image);
       },
     }),
     registry.register({

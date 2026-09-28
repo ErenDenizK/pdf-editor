@@ -589,6 +589,9 @@ const EDIT_KINDS: readonly EngineEdit['kind'][] = [
   'redaction.mark',
   'redaction.apply',
   'text.edit',
+  'image.transform',
+  'image.remove',
+  'image.replace',
 ];
 
 function readEdit(value: unknown, path: string, depth = 0): EngineEdit {

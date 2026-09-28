@@ -24,7 +24,9 @@ export type ToolMode =
   /** Redaction marks (redaction spec §1.1): by text or by area. */
   | 'redact'
   /** In-place text editing (redaction-and-text-editing spec §2.2): one line at a time. */
-  | 'edit-text';
+  | 'edit-text'
+  /** Image objects (M4 §3): select, move, resize, replace, extract, delete. */
+  | 'image';
 
 interface ToolState {
   readonly mode: ToolMode;

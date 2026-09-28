@@ -21,6 +21,23 @@ export {
   serializeAnnotation,
 } from './payloads';
 export {
+  applyImageEdit,
+  type AppliedImageEdit,
+  type ImageRefJson,
+  imageRefJson,
+  type ImageRemovePayload,
+  type ImageReplacementJson,
+  imageReplacementJson,
+  imageReplacementOf,
+  type ImageReplacePayload,
+  type ImageReplayPayload,
+  type ImageTransformPayload,
+  isImageReplayRequired,
+  readImageRemovePayload,
+  readImageReplacePayload,
+  readImageTransformPayload,
+} from './image-edit';
+export {
   applyRedactionEdit,
   type RedactionApplyEditPayload,
   type RedactionReplayPayload,

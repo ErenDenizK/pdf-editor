@@ -1,7 +1,8 @@
 /**
  * PDFium worker entry (ADR-0011 §1): the viewer's engine in our own module worker. It hosts
  * `init` + `PdfiumNative` + `PdfEngine` (pdfium/host), a `PdfiumAdapter` built on that
- * engine, and the M4 editors that need raw access (`PdfTextEditor`, text-edit/). WASM is
+ * engine, and the M4 editors that need raw access (`PdfTextEditor`, text-edit/;
+ * `PdfImageEditor`, image-objects/). WASM is
  * single-threaded and fetched from the app's own origin (no COOP/COEP, no CDN; ADR-0004).
  *
  * The app constructs it (bundler-specific), e.g. with Vite:
@@ -27,6 +28,7 @@ import { PdfiumAdapter } from '../pdfium/pdfium-adapter';
 import { applyRedactions, RedactionFailedError } from '../redaction/apply';
 import { withForensicDeps } from '../redaction/engine-session';
 import { verifyRedactedOutput } from '../redaction/verify-output';
+import { createImageEditor, type HostedImageEditor } from '../image-objects/editor';
 import { createTextEditor, type HostedTextEditor } from '../text-edit/editor';
 import { throwIfAborted } from '../pdfium/task-bridge';
 import { EngineError, type SearchHit, type SourceInspector } from '../types';
@@ -44,6 +46,7 @@ let inspector: SourceInspector | undefined;
 let hostPromise: Promise<HostedEngine> | undefined;
 let adapter: PdfiumAdapter | undefined;
 let textEditor: Promise<HostedTextEditor> | undefined;
+let imageEditor: Promise<HostedImageEditor> | undefined;
 /** Created before the engine so calls can queue on a source while the WASM loads. */
 const locks = new SourceLocks();
 
@@ -95,6 +98,18 @@ function getTextEditor(): Promise<HostedTextEditor> {
     textEditor = created;
   }
   return textEditor;
+}
+
+/** The image editor on the hosted engine; like the text editor, not wrapped in `onSource`. */
+function getImageEditor(): Promise<HostedImageEditor> {
+  if (!imageEditor) {
+    const created = host().then((hosted) => createImageEditor(hosted));
+    created.catch(() => {
+      if (imageEditor === created) imageEditor = undefined;
+    });
+    imageEditor = created;
+  }
+  return imageEditor;
 }
 
 function failure(error: unknown): Wire<never> {
@@ -340,6 +355,36 @@ const api: PdfiumWorkerApi = {
       (await getTextEditor()).applyTextEdit(request, withSignal(options, signal)),
     );
   },
+  locateImages(id, pageIndex, options, abortPort) {
+    return call(abortPort, async (signal) =>
+      (await getImageEditor()).locateImages(id, pageIndex, withSignal(options, signal)),
+    );
+  },
+  extractImage(ref, options, abortPort) {
+    return call(
+      abortPort,
+      async (signal) => (await getImageEditor()).extractImage(ref, withSignal(options, signal)),
+      (image) => [
+        image.rgba.buffer as ArrayBuffer,
+        ...(image.original ? [image.original.bytes.buffer as ArrayBuffer] : []),
+      ],
+    );
+  },
+  transformImage(ref, target, options, abortPort) {
+    return call(abortPort, async (signal) =>
+      (await getImageEditor()).transformImage(ref, target, withSignal(options, signal)),
+    );
+  },
+  removeImage(ref, options, abortPort) {
+    return call(abortPort, async (signal) =>
+      (await getImageEditor()).removeImage(ref, withSignal(options, signal)),
+    );
+  },
+  replaceImage(ref, replacement, options, abortPort) {
+    return call(abortPort, async (signal) =>
+      (await getImageEditor()).replaceImage(ref, replacement, withSignal(options, signal)),
+    );
+  },
   applyRedactionPlan(id, plan, options, abortPort) {
     return call(
       abortPort,
@@ -387,6 +432,7 @@ const api: PdfiumWorkerApi = {
     adapter = undefined;
     hostPromise = undefined;
     textEditor = undefined;
+    imageEditor = undefined;
     await current?.destroy();
   },
 };

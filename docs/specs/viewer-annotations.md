@@ -32,8 +32,12 @@ the workspace history; export runs them through `PdfEditor.save()` before assemb
 ## 2. Tools (floating bar, bottom center)
 
 Select (V) · Highlight (H) · Underline (U) · Strikeout (S) · Ink (P) · Shapes (R: rectangle,
-O: ellipse, L: line, A: arrow) · Text box (T) · Note (N) · Stamp/Image (I) · Signature (G).
+O: ellipse, L: line, A: arrow) · Text box (T) · Note (N) · Stamp/Image (Shift+I) · Signature (G).
 Esc returns to Select. Tools are sticky until Esc; Shift while drawing constrains.
+
+Shortcut changes in M4: E is Edit text (the eraser moved to Shift+E) and I is the Image tool
+for the page's own images (move, resize, replace, extract; M4 §3), so the stamp / image
+annotation tool moved from I to Shift+I.
 
 A **contextual bar above the selection** replaces property dialogs: color swatches (a
 fixed palette of 8 plus custom), opacity, stroke width, font size (text box), delete,

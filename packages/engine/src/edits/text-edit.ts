@@ -59,12 +59,16 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Whether `edit` is the inverse of a text edit or of an applied redaction
- * (edits/redaction-apply.ts): undo needs reopen + replay.
+ * Whether `edit` is the inverse of a text edit, of an applied redaction
+ * (edits/redaction-apply.ts) or of an image removal or replacement (edits/image-edit.ts):
+ * undo needs reopen + replay.
  */
 export function isReplayRequired(edit: EngineEdit): boolean {
   return (
-    (edit.kind === 'text.edit' || edit.kind === 'redaction.apply') &&
+    (edit.kind === 'text.edit' ||
+      edit.kind === 'redaction.apply' ||
+      edit.kind === 'image.remove' ||
+      edit.kind === 'image.replace') &&
     isObject(edit.payload) &&
     edit.payload.replayRequired === true
   );

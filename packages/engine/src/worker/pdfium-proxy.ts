@@ -1,7 +1,8 @@
 /**
  * Wraps the PDFium worker (constructed by the app, keeping bundler-specific code out of this
  * package) as the viewer's `PdfRenderer` + `PdfEditor` + `PdfVerifier`: a drop-in for a
- * `PdfiumAdapter` on the caller's thread (ADR-0011 §1), plus the worker's `PdfTextEditor`.
+ * `PdfiumAdapter` on the caller's thread (ADR-0011 §1), plus the worker's `PdfTextEditor`
+ * and `PdfImageEditor`.
  *
  * - `open` *transfers* its ArrayBuffer (detached in the caller), as `PdfRenderer` documents;
  *   `verify` copies. Render bitmaps and saved bytes are transferred back.
@@ -26,6 +27,7 @@ import {
   type PdfEditor,
   type PdfRedactor,
   type PdfRenderer,
+  type PdfImageEditor,
   type PdfTextEditor,
   type PdfVerifier,
   type RenderResult,
@@ -59,6 +61,7 @@ export interface PdfiumProxy
     PdfEditor,
     PdfVerifier,
     PdfTextEditor,
+    PdfImageEditor,
     PdfRedactor {
   getAnnotationAppearance(
     id: SourceId,
@@ -357,6 +360,37 @@ export function createPdfiumProxy(worker: Worker, options: PdfiumProxyOptions): 
       const { signal, wire } = split(callOptions);
       return invoke('applyTextEdit', signal, (port) =>
         remote.applyTextEdit(request, wire, withPort(port, port)),
+      );
+    },
+    locateImages(id, pageIndex, callOptions) {
+      const { signal, ...wire } = callOptions ?? {};
+      return invoke('locateImages', signal, (port) =>
+        remote.locateImages(id, pageIndex, wire, withPort(port, port)),
+      );
+    },
+    extractImage(ref, callOptions) {
+      const { signal, ...wire } = callOptions ?? {};
+      return invoke('extractImage', signal, (port) =>
+        remote.extractImage(ref, wire, withPort(port, port)),
+      );
+    },
+    transformImage(ref, target, callOptions) {
+      const { signal, ...wire } = callOptions ?? {};
+      return invoke('transformImage', signal, (port) =>
+        remote.transformImage(ref, target, wire, withPort(port, port)),
+      );
+    },
+    removeImage(ref, callOptions) {
+      const { signal, ...wire } = callOptions ?? {};
+      return invoke('removeImage', signal, (port) =>
+        remote.removeImage(ref, wire, withPort(port, port)),
+      );
+    },
+    replaceImage(ref, replacement, callOptions) {
+      const { signal, ...wire } = callOptions ?? {};
+      // Copied to the worker (structured clone); the caller keeps its bytes.
+      return invoke('replaceImage', signal, (port) =>
+        remote.replaceImage(ref, replacement, wire, withPort(port, port)),
       );
     },
     applyRedactionPlan(id, plan, callOptions) {

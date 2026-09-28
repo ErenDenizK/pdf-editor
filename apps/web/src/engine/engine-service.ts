@@ -32,6 +32,7 @@ import type {
   EngineErrorCode,
   OpenedDocument,
   PdfEditor,
+  PdfImageEditor,
   PdfRedactor,
   PdfRenderer,
   PdfTextEditor,
@@ -295,6 +296,17 @@ function isTextEditor(engine: RendererLike): engine is RendererLike & PdfTextEdi
   );
 }
 
+function isImageEditor(engine: RendererLike): engine is RendererLike & PdfImageEditor {
+  const candidate = engine as Partial<PdfImageEditor>;
+  return (
+    typeof candidate.locateImages === 'function' &&
+    typeof candidate.extractImage === 'function' &&
+    typeof candidate.transformImage === 'function' &&
+    typeof candidate.removeImage === 'function' &&
+    typeof candidate.replaceImage === 'function'
+  );
+}
+
 export type RendererLike = Pick<PdfRenderer, 'open' | 'close' | 'renderPage' | 'getPageText'> &
   Partial<Pick<PdfRenderer, 'search'>> &
   Partial<Pick<PdfEditor, 'save'>> &
@@ -379,6 +391,18 @@ export class EngineService {
   async textEditor(): Promise<PdfTextEditor> {
     const engine = await this.engine();
     if (!isTextEditor(engine)) throw new Error('The rendering engine has no text editor');
+    return engine;
+  }
+
+  /**
+   * The image-object editor (M4 §3) behind the same adapter: the PDFium worker's
+   * `PdfImageEditor`, reached through the proxy. Image edits that change the document go
+   * through the edit runner (`image.*` edits, image-objects/actions.ts); this accessor is for
+   * locating and extracting images.
+   */
+  async imageEditor(): Promise<PdfImageEditor> {
+    const engine = await this.engine();
+    if (!isImageEditor(engine)) throw new Error('The rendering engine has no image editor');
     return engine;
   }
 

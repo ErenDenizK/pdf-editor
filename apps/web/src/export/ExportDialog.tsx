@@ -101,10 +101,13 @@ function ExportFlow({ documentId }: { readonly documentId: DocumentId }) {
   const [securityChoice, setSecurityChoice] = useState<SecurityChoice>('document');
   // "Flatten on export" is shared with the Forms panel (forms/form-store.ts).
   const flattenForms = useFormStore((s) => s.flattenOnExport);
-  const hasForms = useWorkspaceStore((s) =>
-    (doc?.pages ?? []).some(
-      (p) => p.ref.kind === 'source' && s.workspace.sources[p.ref.source]?.flags.hasAcroForm,
-    ),
+  // Source AcroForms, or fields created in the app (their Flatten option is the same).
+  const hasForms = useWorkspaceStore(
+    (s) =>
+      (doc?.fields?.length ?? 0) > 0 ||
+      (doc?.pages ?? []).some(
+        (p) => p.ref.kind === 'source' && s.workspace.sources[p.ref.source]?.flags.hasAcroForm,
+      ),
   );
   const [step, setStep] = useState<Step>({ kind: 'form' });
   const controller = useRef<AbortController | null>(null);

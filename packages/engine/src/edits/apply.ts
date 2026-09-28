@@ -19,7 +19,9 @@ import {
   type ApplyRedactionsResult,
   type EngineCallOptions,
   EngineError,
+  type ImageEditResult,
   type PdfEditor,
+  type PdfImageEditor,
   type PdfRedactor,
   type PdfTextEditor,
   type TextEditResult,
@@ -38,13 +40,14 @@ import {
   type SerializedAnnotation,
   serializeAnnotation,
 } from './payloads';
+import { applyImageEdit, type ImageReplayPayload } from './image-edit';
 import { applyRedactionEdit, type RedactionReplayPayload } from './redaction-apply';
 import { applyTextEditEdit, type TextEditReplayPayload } from './text-edit';
 
 /**
  * The parts of `PdfEditor` edits use (`getAnnotationAppearance` for stamps),
- * `PdfTextEditor.applyTextEdit` for `text.edit` and `PdfRedactor.applyRedactionPlan` for
- * `redaction.apply` (`PdfiumProxy` has all of them).
+ * `PdfTextEditor.applyTextEdit` for `text.edit`, `PdfRedactor.applyRedactionPlan` for
+ * `redaction.apply` and `PdfImageEditor` for `image.*` (`PdfiumProxy` has all of them).
  */
 export type EditTarget = Pick<
   PdfEditor,
@@ -57,7 +60,8 @@ export type EditTarget = Pick<
   | 'getAnnotationAppearance'
 > &
   Partial<Pick<PdfTextEditor, 'applyTextEdit'>> &
-  Partial<Pick<PdfRedactor, 'applyRedactionPlan'>>;
+  Partial<Pick<PdfRedactor, 'applyRedactionPlan'>> &
+  Partial<Pick<PdfImageEditor, 'transformImage' | 'removeImage' | 'replaceImage'>>;
 
 export interface AppliedEdit {
   /** The edit as applied: a create's payload carries the annotation id actually used. */
@@ -70,6 +74,8 @@ export interface AppliedEdit {
   readonly textEdit?: TextEditResult;
   /** `redaction.apply`: every report of the apply (and the redacted bytes). */
   readonly redaction?: ApplyRedactionsResult;
+  /** `image.*`: the image editor's result (the image as located after the edit). */
+  readonly image?: ImageEditResult;
 }
 
 const UNDO_SUFFIX = ':undo';
@@ -207,6 +213,21 @@ export async function applyEngineEditWithResult(
         applied,
         inverse: inverseOf(applied, 'redaction.apply', inverse),
         redaction: result,
+      };
+    }
+    case 'image.transform':
+    case 'image.remove':
+    case 'image.replace': {
+      // A transform inverts to the previous matrix; removal and replacement need a replay.
+      const done = await applyImageEdit(editor, edit, options);
+      const applied: EngineEdit = { ...edit, payload: done.payload };
+      const inverse: ImageReplayPayload = { replayRequired: true, of: edit.id };
+      return {
+        applied,
+        inverse: done.inversePayload
+          ? inverseOf(applied, 'image.transform', done.inversePayload)
+          : inverseOf(applied, edit.kind, inverse),
+        image: done.result,
       };
     }
     case 'redaction.mark':

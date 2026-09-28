@@ -17,8 +17,14 @@ import type {
   ApplyRedactionsResult,
   EngineCallOptions,
   EngineErrorCode,
+  ExtractedImage,
   ForensicReport,
   FormField,
+  ImageEditResult,
+  ImageObjectRef,
+  ImageReplacement,
+  ImageTransformTarget,
+  LocatedImage,
   LocatedRun,
   NewAnnotation,
   OpenedDocument,
@@ -203,6 +209,37 @@ export interface PdfiumWorkerApi {
     options: WireCallOptions,
     abortPort?: MessagePort,
   ): Promise<Wire<TextEditResult>>;
+  // PdfImageEditor (image-objects/): raw access, exclusive per source.
+  locateImages(
+    id: SourceId,
+    pageIndex: number,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<readonly LocatedImage[]>>;
+  /** The pixels (and original bytes) are transferred to the caller. */
+  extractImage(
+    ref: ImageObjectRef,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<ExtractedImage>>;
+  transformImage(
+    ref: ImageObjectRef,
+    target: ImageTransformTarget,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<ImageEditResult>>;
+  removeImage(
+    ref: ImageObjectRef,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<ImageEditResult>>;
+  /** The replacement's bytes are transferred to the worker. */
+  replaceImage(
+    ref: ImageObjectRef,
+    replacement: ImageReplacement,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<ImageEditResult>>;
   // PdfRedactor (redaction/): the whole apply on the hosted engine, and the export check.
   /**
    * Saves the source, applies `plan` in scratch documents and replaces the open document

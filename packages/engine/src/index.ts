@@ -90,6 +90,25 @@ export {
   textEditError,
   textEditFailureReason,
 } from './text-edit';
+// Image objects (M4 §3): the `PdfImageEditor` on a hosted engine (in the app it runs in the
+// PDFium worker, reached through `PdfiumProxy`) and the matrix helpers the UI shares.
+export {
+  applyMatrix,
+  createImageEditor,
+  effectiveDpi,
+  finalizeContentEdits,
+  type FinalizeContentEditsResult,
+  HostedImageEditor,
+  IMAGE_TRANSFORM_TOLERANCE,
+  imageBounds,
+  type ImageEditFailure,
+  type ImageEditorHost,
+  imageEditError,
+  imageEditFailureReason,
+  invertMatrix,
+  matrixForRect,
+  multiplyMatrix,
+} from './image-objects';
 export {
   createHostedEngine,
   type HostedEngine,

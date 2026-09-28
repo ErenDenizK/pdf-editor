@@ -1407,3 +1407,147 @@ export interface PdfRedactor {
     options?: VerifyRedactedOutputOptions,
   ): Promise<ForensicReport>;
 }
+
+// ---------------------------------------------------------------------------
+// Image objects: PdfImageEditor (M4 §3: move, resize, replace, extract; ADR-0011)
+// ---------------------------------------------------------------------------
+
+/**
+ * The filters of an image stream, as a kind: `DCT` (JPEG), `JPX` (JPEG 2000), `Flate`,
+ * `CCITT` (fax), `JBIG2`, `LZW`, `RunLength`, the ASCII encodings, or `other`.
+ */
+export type ImageFilterKind =
+  | 'DCT'
+  | 'JPX'
+  | 'Flate'
+  | 'CCITT'
+  | 'JBIG2'
+  | 'LZW'
+  | 'RunLength'
+  | 'ASCIIHex'
+  | 'ASCII85'
+  | 'other';
+
+/**
+ * What identifies an image object for an edit, and what replay re-checks. Like
+ * `TextRunRef`, the path describes the page *as it is when the edit runs*: after any edit on
+ * a page, locate its images again.
+ */
+export interface ImageObjectRef {
+  readonly source: SourceId;
+  readonly pageIndex: number;
+  /**
+   * Index of the object among the page's objects (`FPDFPage_GetObject`), then, for images
+   * inside Form XObjects, its index inside each enclosing form (`FPDFFormObj_GetObject`).
+   */
+  readonly objectPath: readonly number[];
+  /** Pixel size of the image as located; an edit fails with `stale-image` when it differs. */
+  readonly pixelWidth: number;
+  readonly pixelHeight: number;
+  /**
+   * Bounds as located (unrotated user space); an edit fails with `stale-image` when the
+   * object's bounds differ by more than `IMAGE_BOUNDS_TOLERANCE`.
+   */
+  readonly bounds: Rect;
+}
+
+/** Tolerance of the bounds re-check (points): matrices are single precision in PDFium. */
+export const IMAGE_BOUNDS_TOLERANCE = 0.05;
+
+/** One image object of a page (`PdfImageEditor.locateImages`). */
+export interface LocatedImage extends ImageObjectRef {
+  /**
+   * The object's matrix in page space (enclosing forms applied): it maps the unit square
+   * (the image, bottom-up) onto the page. `bounds` is the unit square's bounding box under it.
+   */
+  readonly matrix: TextMatrix;
+  /** Filters of the image stream, in order (e.g. `['DCT']`); empty when unfiltered. */
+  readonly filters: readonly ImageFilterKind[];
+  /**
+   * The image has transparency: a soft mask (/SMask), a colour-key or stencil /Mask, or it
+   * is itself a stencil mask. Saving the original JPEG (`ExtractedImage.original`) drops it.
+   */
+  readonly hasSMask: boolean;
+  /**
+   * The image is drawn by a Form XObject (`objectPath.length > 1`). A form may be drawn more
+   * than once (other pages, or several places on this one), and changing an image inside it
+   * changes every place the form is drawn; PDFium does not tell which forms are shared, so
+   * the UI warns for every image in a form.
+   */
+  readonly inForm: boolean;
+  /** Bits per pixel and colour space (`FPDFImageObj_GetImageMetadata`), when known. */
+  readonly bitsPerPixel: number;
+  readonly colorSpace: string;
+  /** Effective resolution on the page: pixels per inch along the image's own axes. */
+  readonly dpi: { readonly x: number; readonly y: number };
+}
+
+/**
+ * Where an image goes: a page-space matrix (as `LocatedImage.matrix`), or a user-space rect
+ * the image's bounds must fill (the matrix is scaled and moved; rotation and skew kept).
+ */
+export type ImageTransformTarget = { readonly matrix: TextMatrix } | { readonly rect: Rect };
+
+/**
+ * New pixels for an image object: RGBA (straight alpha, row-major, top row first; alpha
+ * becomes a soft mask), or encoded JPEG bytes (embedded as they are, DCTDecode) or PNG bytes
+ * (decoded by PDFium and stored with Flate).
+ */
+export type ImageReplacement =
+  | {
+      readonly rgba: Uint8Array | Uint8ClampedArray;
+      readonly width: number;
+      readonly height: number;
+    }
+  | { readonly jpeg: Uint8Array }
+  | { readonly png: Uint8Array };
+
+/** An image object's pixels (`PdfImageEditor.extractImage`). */
+export interface ExtractedImage {
+  /** Pixel size (the image's own, independent of its size on the page). */
+  readonly width: number;
+  readonly height: number;
+  /** RGBA, straight alpha, top row first: decode, colour conversion and masks applied. */
+  readonly rgba: Uint8ClampedArray;
+  /** The stream's own bytes, when they are a file as is (a DCT-only image is a JPEG). */
+  readonly original?: { readonly bytes: Uint8Array; readonly mime: 'image/jpeg' };
+}
+
+export interface ImageEditResult {
+  /** The image after the edit (re-located at the same path); absent after a removal. */
+  readonly image?: LocatedImage;
+  /** The page-space matrix before the edit (the inverse of a transform sets it again). */
+  readonly previousMatrix: TextMatrix;
+  /** Largest difference between the expected and the re-located bounds, points. */
+  readonly drift: number;
+}
+
+/**
+ * Image objects of an open source (M4 §3). Implemented in the PDFium host (`image-objects/`),
+ * exposed across the worker by `PdfiumProxy`. Every mutation regenerates the page content
+ * (`FPDFPage_GenerateContent`) and is verified by locating the page's images again.
+ */
+export interface PdfImageEditor {
+  /** Image objects of a page (forms walked up to three levels deep), in paint order. */
+  locateImages(
+    source: SourceId,
+    pageIndex: number,
+    options?: EngineCallOptions,
+  ): Promise<readonly LocatedImage[]>;
+  /** The image's pixels, and its original JPEG bytes when it is a DCT-only image. */
+  extractImage(ref: ImageObjectRef, options?: EngineCallOptions): Promise<ExtractedImage>;
+  /** Moves / resizes the image (sets its matrix). */
+  transformImage(
+    ref: ImageObjectRef,
+    target: ImageTransformTarget,
+    options?: EngineCallOptions,
+  ): Promise<ImageEditResult>;
+  /** Removes the image object from the page (or from its form). */
+  removeImage(ref: ImageObjectRef, options?: EngineCallOptions): Promise<ImageEditResult>;
+  /** Replaces the image's pixels, keeping its place (matrix) on the page. */
+  replaceImage(
+    ref: ImageObjectRef,
+    replacement: ImageReplacement,
+    options?: EngineCallOptions,
+  ): Promise<ImageEditResult>;
+}

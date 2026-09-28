@@ -527,7 +527,12 @@ export interface EngineEdit {
     | 'redaction.apply'
     // In-place text edit (spec redaction-and-text-editing §2.5). Not invertible: its
     // inverse is a `text.edit` marked "replay required" (undo = reopen + replay).
-    | 'text.edit';
+    | 'text.edit'
+    // Image objects (M4 §3): a transform's inverse restores the previous matrix; remove
+    // and replace are not invertible (their inverse is marked "replay required").
+    | 'image.transform'
+    | 'image.remove'
+    | 'image.replace';
   readonly payload: unknown;
   readonly inverse?: EngineEdit;
 }

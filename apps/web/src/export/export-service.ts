@@ -16,7 +16,8 @@
  *    Sources with text edits (`text.edit`) are always saved by PDFium and then finalized
  *    (`finalizeTextEdits`: `/Untitled` subset fonts renamed, repeated MCIDs repaired,
  *    unreachable objects dropped; ADR-0011 §5) right where their edited bytes are produced,
- *    so the assembler only ever sees finalized bytes. Sources with applied redactions
+ *    so the assembler only ever sees finalized bytes. Sources with image edits (`image.*`)
+ *    get the garbage collection alone (`finalizeContentEdits`). Sources with applied redactions
  *    (`plan.redaction`) are always saved by PDFium too: the engine holds their redacted
  *    document, never the original bytes kept at open.
  * 3. Assemble in the assembly worker, with progress. Image pages take their bytes from the
@@ -300,6 +301,14 @@ async function expectedAnnotationCounts(
   return any ? counts : undefined;
 }
 
+/**
+ * Sources with image edits (`image.transform`, `image.remove`, `image.replace`): their page
+ * content was rewritten, so their saved bytes are garbage-collected (ADR-0011 §5).
+ */
+function imageEditedSources(ws: Workspace): Set<SourceId> {
+  return new Set(ws.engineEdits.filter((e) => e.kind.startsWith('image.')).map((e) => e.source));
+}
+
 /** `text.edit` edits per source. */
 function textEditCounts(ws: Workspace): Map<SourceId, number> {
   const counts = new Map<SourceId, number>();
@@ -352,11 +361,11 @@ async function prepareExportNow(
   if (doc.pages.length === 0) return failed(m.export_error_no_pages());
   try {
     const { annotationIdsOfEdits, planExport } = await import('@pdf-editor/engine');
-    const plan = planExport(
-      ws,
-      documentId,
-      options.security === undefined ? {} : { security: options.security },
-    );
+    const plan = planExport(ws, documentId, {
+      ...(options.security === undefined ? {} : { security: options.security }),
+      // Flattened created fields are not expected in the output.
+      ...(options.flattenForms ? { flattenForms: true } : {}),
+    });
 
     const redaction = plan.redaction;
     const redactor = redaction ? await deps.redactor?.() : undefined;
@@ -364,7 +373,8 @@ async function prepareExportNow(
     if (redaction && !redactor) return failed(m.export_failed_redaction());
     const redacted = new Set<SourceId>(redaction?.sources ?? []);
     const textEdits = textEditCounts(ws);
-    const { finalizeTextEdits } = await import('@pdf-editor/engine');
+    const imageEdited = imageEditedSources(ws);
+    const { finalizeContentEdits, finalizeTextEdits } = await import('@pdf-editor/engine');
     const textEditSources: {
       name: string;
       edits: number;
@@ -445,6 +455,10 @@ async function prepareExportNow(
           mcidsReassigned: finalized.mcidsReassigned,
           unreachableRemoved: finalized.unreachableRemoved,
         });
+      } else if (imageEdited.has(sourceId)) {
+        // Image edits rewrote page content: drop the orphaned streams (the old content, a
+        // removed or replaced image) so nothing removed survives in the file.
+        bytes = (await finalizeContentEdits(bytes)).bytes;
       }
       sources.set(sourceId, bytes);
       // With a new password on the output, the old protection is replaced, not dropped.
@@ -474,6 +488,8 @@ async function prepareExportNow(
       {
         ...(options.compatibility ? { compatibility: true } : {}),
         ...(plan.security ? { security: plan.security } : {}),
+        // Fields created in the app are flattened by the assembler (source fields by save).
+        ...(options.flattenForms ? { flattenForms: true } : {}),
         ...(signal ? { signal } : {}),
         onProgress: (done, total) => onProgress?.({ phase: 'assembling', done, total }),
       },

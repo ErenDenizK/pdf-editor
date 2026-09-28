@@ -340,7 +340,9 @@ function annotationEdits(ws: Workspace): Map<SourceId, EngineEdit[]> {
       edit.kind !== 'form.set-value' &&
       edit.kind !== 'text.edit' &&
       // Applied redactions (redaction/apply.ts): replay-required like text edits.
-      edit.kind !== 'redaction.apply'
+      edit.kind !== 'redaction.apply' &&
+      // Image objects (image-objects/actions.ts): removal and replacement are replay-required.
+      !edit.kind.startsWith('image.')
     ) {
       continue;
     }
@@ -365,7 +367,8 @@ async function tryEdit(ctx: EngineContext, edit: EngineEdit | undefined): Promis
 
 /** Whether undoing `edits` needs a reopen: one of them has a replay-required inverse. */
 async function needsReopen(edits: readonly EngineEdit[]): Promise<boolean> {
-  if (!edits.some((edit) => edit.kind === 'text.edit' || edit.kind === 'redaction.apply')) {
+  const replayKinds = ['text.edit', 'redaction.apply', 'image.remove', 'image.replace'];
+  if (!edits.some((edit) => replayKinds.includes(edit.kind))) {
     return false;
   }
   const { isReplayRequired } = await import('@pdf-editor/engine');

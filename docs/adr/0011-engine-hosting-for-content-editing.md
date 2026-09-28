@@ -34,8 +34,8 @@ two spikes (`docs/research/05-text-editing-spike.md`, `06-redaction-spike.md`) e
 2. **Raw access is confined to `packages/engine/src/pdfium/host/`**: module init, the
    guarded `docContext()` (throws with a clear message if the private layout changes; a
    test pins it), memory and string helpers, and a per-document lock that serialises raw
-   edits with orchestrator tasks. Nothing outside `host/`, `text-edit/` and `redaction/`
-   touches the raw module.
+   edits with orchestrator tasks. Nothing outside `host/`, `text-edit/`, `image-objects/`
+   and `redaction/` touches the raw module.
 3. **Redaction applies in a private PDFium instance** (the `compress/pdfium-decoder.ts`
    pattern) at apply time, never in the user's open document, followed by the pdf-lib
    post-pass and the forensic self-check (spec §1.2, §1.4).

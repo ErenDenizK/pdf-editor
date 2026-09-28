@@ -5,6 +5,7 @@ import {
   Eraser,
   EyeOff,
   Highlighter,
+  Image,
   type LucideIcon,
   Minus,
   MousePointer2,
@@ -48,6 +49,16 @@ export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
     group: 'select',
     keywords: ['edit', 'text', 'replace', 'change', 'typo', 'word', 'font'],
   },
+  // The page's own images (M4 §3), next to Edit text.
+  {
+    mode: 'image',
+    title: m.tool_image,
+    tooltip: m.tool_image_tooltip,
+    shortcut: 'I',
+    Icon: Image,
+    group: 'select',
+    keywords: ['image', 'picture', 'photo', 'move', 'resize', 'replace', 'extract', 'logo'],
+  },
   { mode: 'highlight', title: m.tool_highlight, shortcut: 'H', Icon: Highlighter, group: 'markup' },
   { mode: 'underline', title: m.tool_underline, shortcut: 'U', Icon: Underline, group: 'markup' },
   {
@@ -75,7 +86,8 @@ export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
   { mode: 'arrow', title: m.tool_arrow, shortcut: 'A', Icon: ArrowUpRight, group: 'shape' },
   { mode: 'text-box', title: m.tool_text_box, shortcut: 'T', Icon: Type, group: 'insert' },
   { mode: 'note', title: m.tool_note, shortcut: 'N', Icon: StickyNote, group: 'insert' },
-  { mode: 'stamp', title: m.tool_stamp, shortcut: 'I', Icon: Stamp, group: 'insert' },
+  // Shift+I: I is the Image tool (M4 §3).
+  { mode: 'stamp', title: m.tool_stamp, shortcut: 'Shift+I', Icon: Stamp, group: 'insert' },
   {
     mode: 'signature',
     title: m.tool_signature,
