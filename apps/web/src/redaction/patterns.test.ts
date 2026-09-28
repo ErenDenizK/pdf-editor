@@ -78,6 +78,38 @@ describe('phone numbers', () => {
     }
     expect(found('Invoice 2024-000123, total 1.234.567', 'phone')).toEqual([]);
   });
+
+  it('accepts a slash after the area code, a bracketed trunk 0 and no-break spaces', () => {
+    const nbsp = '+90\u00A0532\u00A0123\u00A045\u00A067';
+    for (const phone of [
+      '0532/123 45 67',
+      '0212/555 12 34',
+      '+90 (0532) 123 45 67',
+      '+44 (0)20 7946 0958',
+      nbsp,
+      '0532\u00A0123\u00A045\u00A067',
+    ]) {
+      expect(isPhoneNumber(phone), phone).toBe(true);
+      expect(found(`Tel: ${phone}.`, 'phone'), phone).toEqual([phone]);
+    }
+    expect(found('0532 123 45 67 / 0533 765 43 21', 'phone')).toEqual([
+      '0532 123 45 67',
+      '0533 765 43 21',
+    ]);
+  });
+
+  it('keeps dates, amounts and references written with slashes or no-break spaces out', () => {
+    for (const text of [
+      '12/31/2025',
+      '01/02/2024',
+      'Invoice 2024/000123',
+      '1\u00A0234\u00A0567 TL',
+      '+90 (0132) 123 45 67', // bracketed trunk, then an invalid Turkish number
+      '0132/123 45 67',
+    ]) {
+      expect(found(text, 'phone'), text).toEqual([]);
+    }
+  });
 });
 
 describe('IBAN', () => {
@@ -103,6 +135,28 @@ describe('IBAN', () => {
     expect(isIban('XX89 3704 0044 0532 0130 00')).toBe(false); // unknown country
     expect(found('TR34 0006 1005 1978 6457 8413 26', 'iban')).toEqual([]);
   });
+
+  const TR = 'TR33 0006 1005 1978 6457 8413 26';
+  const DE = 'DE89 3704 0044 0532 0130 00';
+
+  it('finds every IBAN on a line', () => {
+    expect(found(`${DE} or ${TR}`, 'iban')).toEqual([DE, TR]);
+    expect(found(`${TR} ${DE}`, 'iban')).toEqual([TR, DE]); // adjacent table columns
+    expect(found(`${DE}, ${TR}`, 'iban')).toEqual([DE, TR]);
+    expect(found(`IBAN: ${TR} Ziraat`, 'iban')).toEqual([TR]);
+    // An invalid candidate does not hide the valid IBAN after it.
+    expect(found(`TR34 0006 1005 1978 6457 8413 26 ${DE}`, 'iban')).toEqual([DE]);
+  });
+
+  it('accepts groups separated by no-break or doubled spaces', () => {
+    const nbsp = TR.replace(/ /g, '\u00A0');
+    const doubled = TR.replace(/ /g, '  ');
+    expect(isIban(nbsp)).toBe(true);
+    expect(found(`IBAN: ${nbsp}.`, 'iban')).toEqual([nbsp]);
+    expect(found(`IBAN: ${doubled} Ziraat`, 'iban')).toEqual([doubled]);
+    // A line break ends the candidate: an IBAN is not stitched across lines.
+    expect(found('TR33 0006 1005\n1978 6457 8413 26', 'iban')).toEqual([]);
+  });
 });
 
 describe('Turkish national id (TCKN)', () => {
@@ -121,6 +175,22 @@ describe('Turkish national id (TCKN)', () => {
     expect(isTckn('01234567890')).toBe(false);
     expect(isTckn('1000000014')).toBe(false);
     expect(found('Order 100000001460', 'tckn')).toEqual([]); // part of a longer number
+  });
+
+  it('accepts the 3-3-3-2 grouping used on forms', () => {
+    expect(found('TC: 100 000 001 46', 'tckn')).toEqual(['100 000 001 46']);
+    expect(found('TC: 100\u00A0000\u00A0001\u00A046.', 'tckn')).toEqual([
+      '100\u00A0000\u00A0001\u00A046',
+    ]);
+    // A compact id still counts after a row number in a table.
+    expect(found('1 10000000146', 'tckn')).toEqual(['10000000146']);
+  });
+
+  it('rejects groups with a wrong check or that belong to a longer number', () => {
+    expect(found('TC: 100 000 001 47', 'tckn')).toEqual([]);
+    expect(found('1 100 000 001 46', 'tckn')).toEqual([]);
+    expect(found('100 000 001 46 7', 'tckn')).toEqual([]);
+    expect(found('100 000 001 467', 'tckn')).toEqual([]);
   });
 });
 

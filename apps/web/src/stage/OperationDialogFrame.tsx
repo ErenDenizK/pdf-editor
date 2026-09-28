@@ -17,12 +17,15 @@ export function Frame({
   testId,
   initialFocus,
   wide = false,
+  busy = false,
   children,
 }: {
   readonly title: string;
   readonly testId: string;
   readonly initialFocus?: RefObject<HTMLElement | null>;
   readonly wide?: boolean;
+  /** Work is running that must not be interrupted: the close button is disabled. */
+  readonly busy?: boolean;
   readonly children: ReactNode;
 }) {
   return (
@@ -33,7 +36,7 @@ export function Frame({
     >
       <div className={overlay.header}>
         <Dialog.Title className={overlay.title}>{title}</Dialog.Title>
-        <Dialog.Close className={overlay.close} aria-label={m.common_close()}>
+        <Dialog.Close className={overlay.close} aria-label={m.common_close()} disabled={busy}>
           <X aria-hidden="true" />
         </Dialog.Close>
       </div>

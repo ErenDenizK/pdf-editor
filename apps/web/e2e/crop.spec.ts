@@ -59,6 +59,8 @@ test('crop every page with discard, export, re-open: cropped size, header gone, 
   await expect(page.locator('[data-page-index="0"]').first()).toBeVisible({ timeout: 20_000 });
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByRole('combobox', { name: 'Search commands' }).fill('crop pages');
+  // The list filters on a deferred value: wait for the row before Enter runs the active one.
+  await expect(page.getByRole('option', { name: /Crop pages/, selected: true })).toBeVisible();
   await page.keyboard.press('Enter');
   const dialog = page.getByTestId('crop-dialog');
   await expect(dialog).toBeVisible();

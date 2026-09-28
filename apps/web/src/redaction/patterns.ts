@@ -122,22 +122,27 @@ export function isIban(value: string): boolean {
  * - Turkish national: trunk 0 and 10 more digits whose first is 2, 3, 4, 5 or 8
  *   (landlines, mobiles, 850 / 800 numbers);
  * - a Turkish mobile without the trunk (5xx xxx xx xx), only when written in groups.
+ *
+ * Groups may be separated by a space (also a no-break space), `.`, `-` or `/`.
  */
 export function isPhoneNumber(value: string): boolean {
   const text = value.trim();
   const opens = (text.match(/\(/g) ?? []).length;
   const closes = (text.match(/\)/g) ?? []).length;
   if (opens !== closes || opens > 1) return false;
-  const digits = digitsOf(text);
   const turkish = (national: string) => /^[2-58]\d{9}$/.test(national);
   if (text.startsWith('+') || text.startsWith('00')) {
+    // A trunk 0 in brackets after the country code ("+44 (0)20 …", "+90 (0532) …") is
+    // not dialled from abroad.
+    const digits = digitsOf(text.replace(/\(0/, '('));
     const rest = text.startsWith('+') ? digits : digits.slice(2);
     if (rest.length < 8 || rest.length > 15 || rest.startsWith('0')) return false;
     if (rest.startsWith('90')) return turkish(rest.slice(2));
     return true;
   }
+  const digits = digitsOf(text);
   if (digits.startsWith('0')) return digits.length === 11 && turkish(digits.slice(1));
-  return /[\s.()-]/.test(text) && /^5\d{9}$/.test(digits);
+  return /[\s./()-]/.test(text) && /^5\d{9}$/.test(digits);
 }
 
 function daysInMonth(year: number, month: number): number {
@@ -211,14 +216,25 @@ function monthNumber(name: string): number | undefined {
 // ---------------------------------------------------------------------------
 
 // Candidates; boundaries keep them from starting or ending inside a longer token.
+/** A blank inside a grouped number: a space, a no-break space (U+00A0, U+202F) or a tab. */
+const GAP = String.raw`[ \t\u00A0\u202F]`;
 const EMAIL =
   /(?<![\p{L}\p{N}._%+-])[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}(?![\p{L}\p{N}-]|\.[\p{L}\p{N}])/gu;
-const IBAN = /(?<![\p{L}\p{N}])[A-Z]{2}\d{2}(?: ?[A-Z0-9]){11,32}/giu;
+// Groups may be separated by up to three blanks (justified text); the finder cuts the
+// candidate at its country's length.
+const IBAN = new RegExp(
+  String.raw`(?<![\p{L}\p{N}])[A-Z]{2}\d{2}(?:${GAP}{0,3}[A-Z0-9]){11,32}`,
+  'giu',
+);
 const CARD = /(?<![\p{N}])\d(?:[ -]?\d){11,18}(?![\p{N}])/gu;
-const TCKN = /(?<![\p{N}])[1-9]\d{10}(?![\p{N}])/gu;
+// Eleven digits, compact or in the 3-3-3-2 groups used on forms ("100 000 001 46").
+const TCKN = new RegExp(
+  String.raw`(?<!\p{N})[1-9]\d{10}(?!\p{N})|(?<!\p{N}${GAP}?)[1-9]\d{2}(?:${GAP}\d{3}){2}${GAP}\d{2}(?!${GAP}?\p{N})`,
+  'gu',
+);
 const PHONE_GROUP = String.raw`(?:\(\d{1,4}\)|\d{1,4})`;
 const PHONE = new RegExp(
-  String.raw`(?<![\p{L}\p{N}+])(?:\+|00)?[ ]?${PHONE_GROUP}(?:[ .-]?${PHONE_GROUP}){1,7}(?![\p{L}\p{N}])`,
+  String.raw`(?<![\p{L}\p{N}+])(?:\+|00)?${GAP}?${PHONE_GROUP}(?:(?:${GAP}|[.\/-])?${PHONE_GROUP}){1,7}(?![\p{L}\p{N}])`,
   'gu',
 );
 const NUMERIC_DATE =
@@ -246,7 +262,7 @@ function ibanPrefix(candidate: string): number | undefined {
   if (length === undefined) return undefined;
   let count = 0;
   for (let i = 0; i < candidate.length; i++) {
-    if (candidate[i] !== ' ') count += 1;
+    if (!/\s/.test(candidate[i] ?? ' ')) count += 1;
     if (count === length) return isIban(candidate.slice(0, i + 1)) ? i + 1 : undefined;
   }
   return undefined;
@@ -261,6 +277,9 @@ function findIbans(text: string): PatternMatch[] {
   for (const m of matches(IBAN, text)) {
     const length = ibanPrefix(m[0]);
     if (length !== undefined) out.push(match('iban', text, m.index, m.index + length));
+    // The candidate is greedy and may run into the next IBAN on the line: resume right
+    // after the IBAN found, or after the country code of a candidate that is not one.
+    IBAN.lastIndex = m.index + (length ?? 1);
   }
   return out;
 }
@@ -276,7 +295,7 @@ function findCards(text: string): PatternMatch[] {
 function findTckns(text: string): PatternMatch[] {
   const out: PatternMatch[] = [];
   for (const m of matches(TCKN, text)) {
-    if (isTckn(m[0])) out.push(match('tckn', text, m.index, m.index + m[0].length));
+    if (isTckn(digitsOf(m[0]))) out.push(match('tckn', text, m.index, m.index + m[0].length));
   }
   return out;
 }

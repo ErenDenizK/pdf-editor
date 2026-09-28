@@ -26,13 +26,23 @@ import {
 } from '@pdf-editor/document-model';
 
 import { m } from '../i18n';
-import { type ApplyOutcome, applyRedactionPlans, type PlannedRedaction } from '../redaction/apply';
+import {
+  type ApplyOutcome,
+  applyRedactionPlans,
+  markInAreas,
+  type PlannedRedaction,
+} from '../redaction/apply';
+import { collectMarks } from '../redaction/redaction-store';
 import { announce } from '../shell/announcer';
-import { closeOperationDialog, openOperationDialog } from '../stage/operation-dialogs-store';
+import {
+  closeOperationDialog,
+  openOperationDialog,
+  useOperationDialogStore,
+} from '../stage/operation-dialogs-store';
 import { useUiStore } from '../state/ui-store';
 import { pagesPhrase, useWorkspaceStore } from '../state/workspace-store';
 import { goToPageIndex } from '../viewer/navigation';
-import { type CropDraft, type CropScope, useCropStore } from './crop-store';
+import { type CropDraft, type CropScope, isCropWorking, useCropStore } from './crop-store';
 import { pageBoxOf } from './display';
 import {
   clampRect,
@@ -190,6 +200,24 @@ export function planDiscard(ws: Workspace, crops: readonly PageCrop[]): DiscardP
   return { plans, shared };
 }
 
+/**
+ * Redaction marks (listed ones, from the loaded pages) that reach into the areas `plans`
+ * remove: the discard deletes them instead of creating them again (redaction/apply.ts),
+ * so the dialog warns first. A source page shown twice counts its marks once.
+ */
+export function marksOutsideCrop(
+  ws: Workspace,
+  pages: Parameters<typeof collectMarks>[1],
+  plans: readonly PlannedRedaction[],
+): number {
+  const found = new Set<string>();
+  for (const entry of collectMarks(ws, pages).entries) {
+    const plan = plans.find((p) => p.source === entry.source);
+    if (plan !== undefined && markInAreas(entry.mark, plan.plan.areas)) found.add(entry.markKey);
+  }
+  return found.size;
+}
+
 function sameRect(a: Rect, b: Rect): boolean {
   const near = (x: number, y: number) => Math.abs(x - y) < 0.01;
   return near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height);
@@ -243,6 +271,36 @@ export async function cropPages(
     announce(clear ? m.announce_crop_reset({ pages }) : m.announce_cropped({ pages }));
   }
   return { kind: 'cropped', committed };
+}
+
+/**
+ * "Crop and remove" from the dialog: runs `cropPages` with the discard and keeps the
+ * progress and the outcome in the crop store (crop-store.ts), so the dialog cannot close
+ * while it works and shows the result sheet even when opened again. When there is no sheet
+ * to show (a plain crop after all), the dialog closes. Never rejects.
+ */
+export async function cropAndDiscard(
+  documentId: DocumentId,
+  pageIds: readonly PageId[],
+  margins: Margins,
+): Promise<void> {
+  if (isCropWorking()) return;
+  useCropStore.setState({ run: { kind: 'working', documentId } });
+  let result: CropOutcome;
+  try {
+    result = await cropPages(pageIds, margins, { discard: true });
+  } catch (error) {
+    // cropPages never rejects; this keeps the dialog out of "working" forever.
+    const message = error instanceof Error ? error.message : String(error);
+    result = { kind: 'discarded', outcome: { kind: 'error', message }, committed: false };
+  }
+  if (result.kind === 'discarded' && result.outcome.kind !== 'nothing') {
+    useCropStore.setState({ run: { kind: 'done', documentId, outcome: result.outcome } });
+    return;
+  }
+  useCropStore.setState({ run: { kind: 'idle' } });
+  const open = useOperationDialogStore.getState().dialog;
+  if (open?.kind === 'crop' && open.documentId === documentId) closeOperationDialog();
 }
 
 // ---------------------------------------------------------------------------

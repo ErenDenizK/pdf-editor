@@ -52,6 +52,7 @@ import {
   titleProblemMessage,
 } from './section-operations';
 import { CropDialog, CropDrawBanner } from '../crop';
+import { dismissCropOutcome, isCropWorking } from '../crop/crop-store';
 import { ResizeDialog } from './ResizeDialog';
 
 export function OperationDialogs() {
@@ -62,10 +63,14 @@ export function OperationDialogs() {
     <Dialog.Root
       open={dialog !== null}
       onOpenChange={(open) => {
-        if (!open) closeOperationDialog();
+        // Esc and the backdrop do nothing while a crop removes content (crop-store.ts).
+        if (!open && !isCropWorking()) closeOperationDialog();
       }}
       onOpenChangeComplete={(open) => {
-        if (!open) release();
+        if (open) return;
+        // A crop's result sheet was seen: the next crop dialog starts from the form.
+        if (shown?.kind === 'crop') dismissCropOutcome(shown.documentId);
+        release();
       }}
     >
       <Dialog.Portal>

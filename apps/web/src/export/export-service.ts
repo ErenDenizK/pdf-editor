@@ -645,9 +645,12 @@ async function prepareExportNow(
         areaOnlyStrings: areaOnlyStringsOf(redaction.sources.flatMap(heldOf)),
       };
       if (!check.ok) {
-        // Marks left unapplied are flagged by the check (any /Redact in a redacted file).
+        // Marks left unapplied are flagged by the check (any /Redact in a redacted file,
+        // reported as "intersects an area" when it lies on removed content).
         const pendingMarks = check.checks.some((c) =>
-          c.findings.some((f) => f.detail === 'pending /Redact mark'),
+          c.findings.some(
+            (f) => f.detail === 'pending /Redact mark' || f.detail === 'Redact intersects an area',
+          ),
         );
         verification = {
           ok: false,

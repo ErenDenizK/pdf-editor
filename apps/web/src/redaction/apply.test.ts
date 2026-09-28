@@ -4,7 +4,10 @@
  * `redaction.apply` edit and one history entry, the page text loses the token, unticked
  * marks stay marks, undo reopens and replays (the mark and the text come back), redo applies
  * again; a self-check failure leaves the document and the history as they were; the export
- * reads the redacted source and passes the self-check on its final bytes.
+ * reads the redacted source and passes the self-check on its final bytes; an unticked mark
+ * overlapping an applied area is deleted (reported), not kept; short text under a mark
+ * ("fox") is reported as searched only inside the areas unless the user adds it; blocked
+ * applies are announced.
  */
 import {
   getActiveDocument,
@@ -12,6 +15,8 @@ import {
   type PageId,
   type SourceId,
 } from '@pdf-editor/document-model';
+import { render, within } from '@testing-library/react';
+import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import metadataUrl from '../../../../test/fixtures/redact-metadata.pdf?url';
@@ -28,14 +33,18 @@ import {
 import { pageText } from '../annotations/page-text';
 import { getEngineService } from '../engine/engine-service';
 import { prepareExport } from '../export/export-service';
+import { useAnnouncer } from '../shell/announcer';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import {
   type ApplyOutcome,
   applyTickedRedactions,
   DEFAULT_CHOICES,
   markAreas,
+  markInAreas,
   resetRedactionApply,
+  shortTextUnderMarks,
 } from './apply';
+import { notSearchedGroups, Outcome } from './ApplyRedactionsDialog';
 import { createMarks, isRedactMark } from './marks';
 import { markKeyOf, resetRedactionStore, useRedactionStore } from './redaction-store';
 import { indexPageText, quadsForTextRange } from './text-index';
@@ -99,6 +108,40 @@ describe('markAreas', () => {
     const b = { x: 150, y: 600.5, width: 30, height: 12 };
     const next = { x: 72, y: 580, width: 50, height: 12 };
     expect(markAreas([a, b, next])).toEqual([{ x: 100, y: 600, width: 80, height: 12.5 }, next]);
+  });
+});
+
+describe('markInAreas', () => {
+  const mark = {
+    pageIndex: 0,
+    rect: { x: 100, y: 600, width: 50, height: 12 },
+    quads: [{ x: 100, y: 600, width: 50, height: 12 }],
+  };
+  it('meets an area on its page with a positive overlap', () => {
+    expect(
+      markInAreas(mark, [{ pageIndex: 0, rect: { x: 140, y: 590, width: 20, height: 20 } }]),
+    ).toBe(true);
+    // Touching edges, another page, or apart: no.
+    expect(
+      markInAreas(mark, [{ pageIndex: 0, rect: { x: 150, y: 600, width: 20, height: 12 } }]),
+    ).toBe(false);
+    expect(
+      markInAreas(mark, [{ pageIndex: 1, rect: { x: 100, y: 600, width: 50, height: 12 } }]),
+    ).toBe(false);
+    expect(markInAreas(mark, [])).toBe(false);
+  });
+});
+
+describe('notSearchedGroups', () => {
+  it('groups the streams the self-check could not decode by filter', () => {
+    expect(
+      notSearchedGroups([
+        'object 12 (DCTDecode)',
+        'object 13 (DCTDecode)',
+        'object 7 (JBIG2Decode, FlateDecode)',
+        'object 9 (unreadable)',
+      ]),
+    ).toBe('DCTDecode (2), JBIG2Decode, FlateDecode (1), unreadable (1)');
   });
 });
 
@@ -226,6 +269,102 @@ describe('applying redactions', () => {
     expect(prepared.value.redaction?.report.checks).toHaveLength(9);
     const bytes = new Uint8Array(prepared.value.bytes);
     expect(new TextDecoder('latin1').decode(bytes)).not.toContain(TOKEN);
+  });
+
+  it('an unticked mark overlapping an applied one is deleted, reported, and the export passes', async () => {
+    const { source, target } = await open();
+    const [line1] = await tokenQuads(source);
+    const q = line1?.[0];
+    if (!q) throw new Error('no token');
+    const bigger = [{ x: q.x - 4, y: q.y - 2, width: q.width + 8, height: q.height + 4 }];
+    await createMarks([{ target, marks: [line1 ?? [], bigger] }]);
+    const all = await marks(source);
+    expect(all).toHaveLength(2);
+    const spare = all.find((a) => a.quads[0]?.x === q.x - 4);
+    useRedactionStore.getState().setIncluded([markKeyOf(source, spare?.id ?? '')], false);
+
+    const outcome = applied(await applyTickedRedactions({ ...DEFAULT_CHOICES, areaOnly: true }));
+    const [result] = outcome.sources;
+    expect(result?.keptMarks).toBe(0);
+    expect(result?.removedMarks).toBe(1);
+    expect(await marks(source)).toEqual([]);
+    const sheet = render(createElement(Outcome, { outcome }));
+    expect(sheet.getByTestId('redaction-removed-marks')).toHaveTextContent(
+      '1 mark that was not applied reached into a removed area, so it was deleted',
+    );
+    sheet.unmount();
+
+    const doc = getActiveDocument(model().workspace);
+    if (!doc) throw new Error('no document');
+    const prepared = await prepareExport(doc.id, { compression: null });
+    if (!prepared.ok) throw new Error(prepared.error.message);
+    expect(prepared.value.verification).toEqual({ ok: true, problems: [] });
+
+    // Undo brings both marks back.
+    model().undo();
+    await whenIdle();
+    expect((await marks(source)).map((a) => a.id).sort()).toEqual(all.map((a) => a.id).sort());
+  });
+
+  it('a new mark drawn on an applied area gets the pending-marks hint at export', async () => {
+    const { source, target } = await open();
+    const [first] = await tokenQuads(source);
+    await createMarks([{ target, marks: [first ?? []] }]);
+    applied(await applyTickedRedactions({ ...DEFAULT_CHOICES, areaOnly: true }));
+    // Marked again over the removed area: the check reports "Redact intersects an area".
+    await createMarks([{ target, marks: [first ?? []] }]);
+    const doc = getActiveDocument(model().workspace);
+    if (!doc) throw new Error('no document');
+    const prepared = await prepareExport(doc.id, { compression: null });
+    if (!prepared.ok) throw new Error(prepared.error.message);
+    const findings = prepared.value.redaction?.report.checks.flatMap((c) => c.findings) ?? [];
+    expect(findings.map((f) => f.detail)).toContain('Redact intersects an area');
+    expect(prepared.value.verification.problems[0]).toMatch(/marks that were not applied/);
+  });
+
+  it('short text under a mark is reported as removed in the area only, unless added', async () => {
+    const { source, target } = await open();
+    const runs = await pageText(source, 0);
+    const index = indexPageText(runs);
+    const at = index.text.indexOf('fox');
+    await createMarks([{ target, marks: [quadsForTextRange(runs, index, at, at + 3)] }]);
+    const [mark] = await marks(source);
+    if (!mark) throw new Error('no mark');
+    // The dialog lists it before applying.
+    expect(await shortTextUnderMarks([{ source, mark }])).toEqual([{ source, text: 'fox' }]);
+
+    const outcome = applied(await applyTickedRedactions(DEFAULT_CHOICES));
+    const [result] = outcome.sources;
+    expect(result?.result.captured.skipped).toEqual(['fox']);
+    expect(result?.result.plan.strings).toEqual([]);
+    const sheet = render(createElement(Outcome, { outcome }));
+    expect(sheet.getByTestId('redaction-skipped')).toHaveTextContent(
+      'Removed inside the areas only, too short to search the whole document for: “fox”.',
+    );
+    sheet.unmount();
+
+    // Added by the user: searched and scrubbed document-wide, no longer listed as skipped.
+    model().undo();
+    await whenIdle();
+    const again = applied(
+      await applyTickedRedactions({ ...DEFAULT_CHOICES, alsoSearch: [{ source, text: 'fox' }] }),
+    );
+    expect(again.sources[0]?.result.plan.strings).toEqual(['fox']);
+    const second = render(createElement(Outcome, { outcome: again }));
+    expect(second.queryByTestId('redaction-skipped')).toBeNull();
+    expect(within(second.container).getByTestId('redaction-checks-summary')).toHaveTextContent('9');
+    second.unmount();
+  });
+
+  it('a blocked apply is announced in the live region', async () => {
+    const { source, target } = await open();
+    const [first] = await tokenQuads(source);
+    await createMarks([{ target, marks: [first ?? []] }]);
+    const outcome = await applyTickedRedactions(DEFAULT_CHOICES);
+    expect(outcome.kind).toBe('blocked');
+    expect(useAnnouncer.getState().message).toBe(
+      'The self-check found redacted content in the result, so nothing was applied. The document is unchanged.',
+    );
   });
 
   it('the model copies (metadata, bookmark titles) are scrubbed in the same history entry', async () => {

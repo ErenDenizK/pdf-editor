@@ -7,6 +7,13 @@
  * first, whether to also remove the content outside the crop through the redaction
  * pipeline. A plain crop commits at once; with the removal the dialog shows the
  * redaction's progress and then its result sheet (redaction/ApplyRedactionsDialog.tsx).
+ * The run and its outcome live in crop-store.ts: the dialog cannot close while it works.
+ * Before the removal it warns about redaction marks reaching outside the crop (deleted,
+ * not applied).
+ *
+ * On resized pages the margins are measured on the original page (the crop is taken of the
+ * source content, which the resize then fits to the new page size again): the summary
+ * says so and names both sizes.
  *
  * "Trim to content" is left out: the engine reports text and annotation bounds, but not
  * the bounds of images and vector drawings, so a trim computed from text would cut them.
@@ -21,12 +28,12 @@ import {
 } from '@pdf-editor/document-model';
 import { type KeyboardEvent, type SyntheticEvent, useEffect, useId, useRef, useState } from 'react';
 
+import { useAnnotationStore } from '../annotations/annotation-store';
 import { RENDER_PRIORITY } from '../engine/engine-service';
 import styles from '../export/ExportDialog.module.css';
 import { formatNumber, m } from '../i18n';
 import { PageCanvas } from '../pages/PageCanvas';
 import { fitInBox } from '../pages/page-geometry';
-import type { ApplyOutcome } from '../redaction/apply';
 import { Outcome } from '../redaction/ApplyRedactionsDialog';
 import { Actions, Frame } from '../stage/OperationDialogFrame';
 import local from '../stage/OperationDialogs.module.css';
@@ -34,15 +41,23 @@ import { closeOperationDialog } from '../stage/operation-dialogs-store';
 import { fromUnit, type ResizeUnit, sizeLabel, toUnit } from '../stage/ResizeDialog';
 import { pagesPhrase, useWorkspaceStore } from '../state/workspace-store';
 import {
+  cropAndDiscard,
   cropPages,
   displayedSizeOf,
+  marksOutsideCrop,
   planCrops,
   planDiscard,
   scopePages,
   startCropDrawing,
 } from './actions';
 import own from './Crop.module.css';
-import { type CropScope, clearResume, peekResume } from './crop-store';
+import {
+  type CropScope,
+  clearResume,
+  dismissCropOutcome,
+  peekResume,
+  useCropStore,
+} from './crop-store';
 import { pageBoxOf } from './display';
 import {
   dragMargins,
@@ -67,11 +82,6 @@ const EDGE_SIDE: Readonly<Partial<Record<Handle, Side>>> = {
   s: 'bottom',
   w: 'left',
 };
-
-type Step =
-  | { readonly kind: 'form' }
-  | { readonly kind: 'working' }
-  | { readonly kind: 'done'; readonly outcome: ApplyOutcome };
 
 function findPage(ws: Workspace, id: PageId | undefined): VirtualPage | undefined {
   if (id === undefined) return undefined;
@@ -151,15 +161,27 @@ export function CropDialog({
     resume?.scope ?? (selection.length > 0 ? 'selection' : 'document'),
   );
   const [discard, setDiscard] = useState(resume?.discard ?? false);
-  const [step, setStep] = useState<Step>({ kind: 'form' });
+  const run = useCropStore((s) => s.run);
+  const annotationPages = useAnnotationStore((s) => s.pages);
+  const ensurePage = useAnnotationStore((s) => s.ensurePage);
   const firstInput = useRef<HTMLInputElement>(null);
   const errorId = useId();
   const unitId = useId();
   const baseId = useId();
 
+  const targets = doc === undefined ? [] : scopePages(ws, documentId, scope, selection, reference);
+  // Read the annotations of the pages to crop: marks there are deleted by the removal.
+  const targetKey = targets.join(',');
+  useEffect(() => {
+    const current = useWorkspaceStore.getState().workspace;
+    for (const id of targetKey === '' ? [] : targetKey.split(',')) {
+      const page = findPage(current, id as PageId);
+      if (page?.ref.kind === 'source') ensurePage(page.ref.source, page.ref.index);
+    }
+  }, [targetKey, ensurePage]);
+
   if (doc === undefined) return null;
 
-  const targets = scopePages(ws, documentId, scope, selection, reference);
   const previewPage = findPage(ws, targets[0] ?? firstId);
   const previewSize = shownBox(ws, previewPage);
   const problem = previewSize === undefined ? undefined : marginsProblem(margins, previewSize);
@@ -168,7 +190,13 @@ export function CropDialog({
   const hasCrop = targets.some((id) => findPage(ws, id)?.cropBox !== undefined);
   const ready = problem === undefined && plan.crops.length > 0 && (!clear || hasCrop);
   const removing = discard && !clear;
-  const shared = removing && ready ? planDiscard(ws, plan.crops).shared : 0;
+  const discardPlan = removing && ready ? planDiscard(ws, plan.crops) : undefined;
+  const shared = discardPlan?.shared ?? 0;
+  const marksOutside =
+    discardPlan === undefined ? 0 : marksOutsideCrop(ws, annotationPages, discardPlan.plans);
+  const resized = targets.some((id) => findPage(ws, id)?.resize !== undefined);
+  const previewPageSize =
+    previewPage?.resize === undefined ? undefined : displayedSizeOf(ws, previewPage.id);
   const croppedSize =
     previewSize === undefined || problem !== undefined
       ? undefined
@@ -184,29 +212,26 @@ export function CropDialog({
     setMargins((current) => ({ ...current, [side]: fromUnit(value, unit) }));
   };
 
+  // A run for this document (the removal): its progress, then its result sheet.
+  const mine = run.kind !== 'idle' && run.documentId === documentId ? run : undefined;
+
   const submit = async (event: SyntheticEvent) => {
     event.preventDefault();
-    if (!ready || step.kind !== 'form') return;
+    if (!ready || mine !== undefined) return;
     if (!removing) {
       await cropPages(targets, margins, { discard: false });
       closeOperationDialog();
       return;
     }
-    setStep({ kind: 'working' });
-    const result = await cropPages(targets, margins, { discard: true });
-    if (result.kind === 'discarded' && result.outcome.kind !== 'nothing') {
-      setStep({ kind: 'done', outcome: result.outcome });
-    } else {
-      closeOperationDialog();
-    }
+    await cropAndDiscard(documentId, targets, margins);
   };
 
   const draw = () =>
     startCropDrawing({ documentId, pageIds: selection, margins, unit, scope, discard }, targets[0]);
 
-  if (step.kind === 'working') {
+  if (mine?.kind === 'working') {
     return (
-      <Frame title={m.crop_title()} testId="crop-dialog" wide>
+      <Frame title={m.crop_title()} testId="crop-dialog" wide busy>
         <div className={styles.body}>
           <p className={styles.description} role="status">
             {m.crop_removing()}
@@ -217,17 +242,17 @@ export function CropDialog({
     );
   }
 
-  if (step.kind === 'done') {
+  if (mine?.kind === 'done') {
     return (
       <Frame title={m.crop_title()} testId="crop-dialog" wide>
         <div className={styles.body} data-testid="crop-result">
-          <Outcome outcome={step.outcome} />
+          <Outcome outcome={mine.outcome} />
           <div className={styles.actions}>
-            {step.outcome.kind === 'applied' ? null : (
+            {mine.outcome.kind === 'applied' ? null : (
               <button
                 type="button"
                 className={styles.secondary}
-                onClick={() => setStep({ kind: 'form' })}
+                onClick={() => dismissCropOutcome(documentId)}
               >
                 {m.common_back()}
               </button>
@@ -252,15 +277,26 @@ export function CropDialog({
             ? hasCrop
               ? m.crop_preview_reset({ pages: pagesPhrase(plan.crops.length) })
               : m.crop_preview_none()
-            : m.crop_preview({
-                pages: pagesPhrase(plan.crops.length),
-                size: croppedSize === undefined ? '' : sizeLabel(croppedSize, unit),
-              });
+            : previewPageSize !== undefined
+              ? m.crop_preview_resized({
+                  pages: pagesPhrase(plan.crops.length),
+                  size: croppedSize === undefined ? '' : sizeLabel(croppedSize, unit),
+                  pageSize: sizeLabel(previewPageSize, unit),
+                })
+              : m.crop_preview({
+                  pages: pagesPhrase(plan.crops.length),
+                  size: croppedSize === undefined ? '' : sizeLabel(croppedSize, unit),
+                });
 
   return (
     <Frame title={m.crop_title()} testId="crop-dialog" initialFocus={firstInput} wide>
       <form className={styles.body} onSubmit={(event) => void submit(event)}>
         <p className={own.notice}>{m.crop_notice()}</p>
+        {resized ? (
+          <p className={own.notice} data-testid="crop-resized-notice">
+            {m.crop_resized_notice()}
+          </p>
+        ) : null}
         <fieldset className={local.options}>
           <legend className={local.legend}>{m.crop_margins_label()}</legend>
           <div className={own.marginRow}>
@@ -423,6 +459,11 @@ export function CropDialog({
           ) : null}
           {shared > 0 ? (
             <p className={own.notice}>{m.crop_discard_shared({ count: shared })}</p>
+          ) : null}
+          {marksOutside > 0 ? (
+            <p className={own.warning} role="note" data-testid="crop-discard-marks">
+              {m.crop_discard_marks({ count: marksOutside })}
+            </p>
           ) : null}
         </fieldset>
 

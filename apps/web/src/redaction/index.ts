@@ -14,6 +14,7 @@ export {
   clearFinder,
   deleteMark,
   findSensitiveData,
+  isStaleMatch,
   markCheckedFinds,
   markSearchHits,
   revealMark,

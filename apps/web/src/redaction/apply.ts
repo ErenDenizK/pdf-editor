@@ -14,7 +14,10 @@
  *    stay as they are. The recorded payload is `{ plan: result.plan }` in the source's page
  *    indices (`RedactionApplyPayload`), which `planExport` reads;
  * 3. the marks that were not ticked (or sit on pages no document shows) are created again
- *    with their ids: they stay marks.
+ *    with their ids: they stay marks. A mark that reaches into an area the source now has
+ *    redacted (this apply's or an earlier one) is not created again: it would stand on
+ *    removed content, and the export's self-check refuses any annotation in a redacted
+ *    area. The result sheet reports how many were deleted that way (`removedMarks`).
  *
  * The model carries copies of source strings the assembler writes again at export: the
  * document's metadata (Info and XMP) and its bookmark titles. For every document showing a
@@ -51,6 +54,7 @@ import type {
 } from '@pdf-editor/engine';
 
 import { useAnnotationStore } from '../annotations/annotation-store';
+import { pageText } from '../annotations/page-text';
 import {
   type EngineContext,
   executeEdit,
@@ -65,6 +69,7 @@ import { useWorkspaceStore } from '../state/workspace-store';
 import { clearLinksForSource } from '../viewer/LinkLayer';
 import { isRedactMark, type RedactMark } from './marks';
 import { markKeyOf, useRedactionStore } from './redaction-store';
+import { textUnderQuads } from './text-index';
 
 /** Fill choices of the confirmation dialog (spec §1.2 step 4). */
 export type FillChoice = 'black' | 'white' | 'custom';
@@ -82,6 +87,18 @@ export interface ApplyChoices {
    * text elsewhere in the document stays and is not searched for (`captureStrings: false`).
    */
   readonly areaOnly: boolean;
+  /**
+   * Text under the marks too short for the engine to search document-wide on its own
+   * (`shortTextUnderMarks`) that the user asked to search and scrub anyway: added to the
+   * plan's strings of its source (ignored with `areaOnly`).
+   */
+  readonly alsoSearch: readonly ShortText[];
+}
+
+/** A string under ticked marks of `source` shorter than the engine searches by itself. */
+export interface ShortText {
+  readonly source: SourceId;
+  readonly text: string;
 }
 
 export const DEFAULT_CHOICES: ApplyChoices = {
@@ -90,7 +107,48 @@ export const DEFAULT_CHOICES: ApplyChoices = {
   overlayText: '',
   keepAttachments: false,
   areaOnly: false,
+  alsoSearch: [],
 };
+
+/**
+ * Captured strings shorter than this (normalised) are not searched document-wide by the
+ * engine (`MIN_CAPTURED_LENGTH` of packages/engine/src/redaction/apply.ts).
+ */
+const MIN_SEARCHED_LENGTH = 4;
+
+/** Length of `text` as the engine matches it: NFKC, no whitespace or invisible characters. */
+function matchLength(text: string): number {
+  return text.normalize('NFKC').replace(/[\s\u00ad\u180e\u200b-\u200d\u2060\ufeff]/gu, '').length;
+}
+
+/**
+ * The text under `marks` (one string per line of a mark, as the engine captures it) that is
+ * too short to be searched document-wide, e.g. "NDA": applying removes it inside the marks
+ * only, unless the user adds it to the searched strings (`ApplyChoices.alsoSearch`).
+ * Distinct per source, in mark order.
+ */
+export async function shortTextUnderMarks(
+  marks: readonly {
+    readonly source: SourceId;
+    readonly mark: Pick<RedactMark, 'pageIndex' | 'quads'>;
+  }[],
+): Promise<ShortText[]> {
+  const out: ShortText[] = [];
+  const seen = new Set<string>();
+  for (const { source, mark } of marks) {
+    const runs = await pageText(source, mark.pageIndex);
+    for (const line of markAreas(mark.quads)) {
+      const text = textUnderQuads(runs, [line]);
+      const length = matchLength(text);
+      if (length === 0 || length >= MIN_SEARCHED_LENGTH) continue;
+      const key = `${source}\u0000${text.normalize('NFKC').toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ source, text });
+    }
+  }
+  return out;
+}
 
 const HEX = /^#[0-9a-f]{6}$/i;
 
@@ -153,6 +211,8 @@ export interface SourceRedaction {
   readonly marks: number;
   /** Marks left as marks. */
   readonly keptMarks: number;
+  /** Marks not applied that reached into a redacted area: deleted, not kept (step 3). */
+  readonly removedMarks: number;
   readonly byteLength: number;
   readonly result: Omit<ApplyRedactionsResult, 'bytes'>;
 }
@@ -334,6 +394,30 @@ function isRedactionFailure(
   );
 }
 
+/** Positive-area overlap of two rectangles (as the engine's self-check tests it). */
+function overlaps(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+/** Whether a mark's /Rect or one of its quads meets one of `areas` on its page. */
+export function markInAreas(
+  mark: Pick<RedactMark, 'pageIndex' | 'rect' | 'quads'>,
+  areas: readonly { readonly pageIndex: number; readonly rect: Rect }[],
+): boolean {
+  const rects = [mark.rect, ...mark.quads];
+  return areas.some(
+    (area) => area.pageIndex === mark.pageIndex && rects.some((r) => overlaps(r, area.rect)),
+  );
+}
+
+/** Areas of the `redaction.apply` edits the model already holds for `source`. */
+function recordedAreas(source: SourceId): RedactionPlan['areas'] {
+  return useWorkspaceStore
+    .getState()
+    .workspace.engineEdits.filter((e) => e.source === source && e.kind === 'redaction.apply')
+    .flatMap((e) => (e.payload as { plan?: RedactionPlan } | undefined)?.plan?.areas ?? []);
+}
+
 let applying = false;
 
 /** Whether an apply is running. */
@@ -352,14 +436,16 @@ type Blocked = Extract<ApplyOutcome, { kind: 'blocked' }>;
 /**
  * Redacts one source inside the runner's action (steps 1–3 of the module comment): deletes
  * every /Redact mark of the source, runs `redaction.apply` with the job's plan and creates
- * the marks that were not ticked again. The recorded edits are appended to `edits`.
+ * the marks that were not ticked again, unless they reach into a redacted area. The
+ * recorded edits are appended to `edits`.
  */
 async function redactSource(
   ctx: EngineContext,
   job: RedactionJob,
   edits: EngineEdit[],
 ): Promise<SourceRedaction | Blocked> {
-  const recreate: EngineEdit[] = [];
+  const earlier = recordedAreas(job.source);
+  const recreate: { readonly mark: RedactMark; readonly edit: EngineEdit }[] = [];
   for (const mark of job.all) {
     const deleted = await executeEdit(ctx, {
       id: globalThis.crypto.randomUUID(),
@@ -373,11 +459,14 @@ async function redactSource(
     // The delete's inverse is the create that restores the mark exactly.
     if (!ticked && deleted.recorded.inverse) {
       recreate.push({
-        id: globalThis.crypto.randomUUID(),
-        source: job.source,
-        pageIndex: mark.pageIndex,
-        kind: 'annotation.create',
-        payload: deleted.recorded.inverse.payload,
+        mark,
+        edit: {
+          id: globalThis.crypto.randomUUID(),
+          source: job.source,
+          pageIndex: mark.pageIndex,
+          kind: 'annotation.create',
+          payload: deleted.recorded.inverse.payload,
+        },
       });
     }
   }
@@ -404,15 +493,22 @@ async function redactSource(
     };
   }
   edits.push(applied.recorded);
-  for (const edit of recreate) edits.push((await executeEdit(ctx, edit)).recorded);
   const result = capture.result();
   if (!result) throw new Error('The engine returned no redaction result');
+  const redacted = [...earlier, ...result.plan.areas];
+  let kept = 0;
+  for (const { mark, edit } of recreate) {
+    if (markInAreas(mark, redacted)) continue;
+    edits.push((await executeEdit(ctx, edit)).recorded);
+    kept += 1;
+  }
   const { bytes, ...reports } = result;
   return {
     source: job.source,
     name: job.name,
     marks: job.ticked.length,
-    keptMarks: recreate.length,
+    keptMarks: kept,
+    removedMarks: recreate.length - kept,
     byteLength: bytes.byteLength,
     result: reports,
   };
@@ -421,7 +517,8 @@ async function redactSource(
 /**
  * Runs the jobs `plan` returns as one action and one history entry labelled `label(done)`
  * (with `coalesceKey`, so a caller can join a model change to the entry), then scrubs the
- * redacted strings from the model and announces the label. Never rejects.
+ * redacted strings from the model and announces the label (or, when the gate or the
+ * self-check stopped it or it failed, that nothing was applied). Never rejects.
  */
 async function runRedactions(
   plan: (ctx: EngineContext) => Promise<readonly RedactionJob[]>,
@@ -452,11 +549,19 @@ async function runRedactions(
       }
       return { edits, label: label(done), coalesceKey, value: done };
     });
-    if (status.blocked) return status.blocked;
+    if (status.blocked) {
+      // The dialog may be closed (or read by a screen reader elsewhere): say it here too.
+      announce(
+        status.blocked.stage === 'gate'
+          ? m.redaction_blocked_gate()
+          : m.redaction_blocked_forensic(),
+      );
+      return status.blocked;
+    }
     if (!sources) {
-      return status.nothing
-        ? { kind: 'nothing' }
-        : { kind: 'error', message: m.redaction_apply_failed() };
+      if (status.nothing) return { kind: 'nothing' };
+      announce(m.redaction_apply_failed());
+      return { kind: 'error', message: m.redaction_apply_failed() };
     }
     const text = label(sources);
     const strings = sources.flatMap((s) => s.result.plan.strings);
@@ -475,6 +580,7 @@ async function runRedactions(
     return { kind: 'applied', label: text, sources };
   } catch (error) {
     console.warn('Applying redactions failed', error);
+    announce(m.redaction_apply_failed());
     return {
       kind: 'error',
       message: error instanceof Error ? error.message : String(error),
@@ -490,11 +596,17 @@ async function runRedactions(
 export async function applyTickedRedactions(choices: ApplyChoices): Promise<ApplyOutcome> {
   return runRedactions(
     async (ctx) =>
-      (await jobsOf(ctx)).map((job) => ({
-        ...job,
-        plan: planForMarks(job.ticked, choices),
-        captureStrings: !choices.areaOnly,
-      })),
+      (await jobsOf(ctx)).map((job) => {
+        const plan = planForMarks(job.ticked, choices);
+        const strings = choices.areaOnly
+          ? []
+          : choices.alsoSearch.filter((s) => s.source === job.source).map((s) => s.text);
+        return {
+          ...job,
+          plan: strings.length > 0 ? { ...plan, strings } : plan,
+          captureStrings: !choices.areaOnly,
+        };
+      }),
     (done) => m.history_redactions_applied({ count: appliedAreas(done) }),
     // Joins the model scrub to the engine edits' history entry.
     `redaction.apply:${globalThis.crypto.randomUUID()}`,
@@ -510,8 +622,10 @@ export interface PlannedRedaction {
 /**
  * Applies plans built elsewhere (crop and discard, crop/actions.ts) through the same
  * pipeline as ticked marks: per source every /Redact mark is set aside and created again
- * afterwards (none of them is applied), the plan runs with its gate and self-check, and
- * the edits commit as one history entry labelled `options.label` under
+ * afterwards unless it reaches into a redacted area (none of them is applied; a crop
+ * deletes the marks reaching outside it, `marksOutsideCrop` in crop/actions.ts), the plan
+ * runs with its gate and self-check, and the edits commit as one history entry labelled
+ * `options.label` under
  * `options.coalesceKey`, so the caller can join its model change to the same entry
  * (`applyOperation` with that key, right after). Plans without areas are skipped; the
  * outcome is 'nothing' when none has any. Never rejects.

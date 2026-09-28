@@ -4,6 +4,14 @@
  * exported, attachments removed unless kept, fill and overlay text, "area only"), then the
  * apply with its self-check, then a result sheet with every report, or, when the gate or
  * the self-check stopped it, the stage and the findings with the document unchanged.
+ *
+ * Short text under the ticked marks (fewer than 4 characters, e.g. "NDA") is removed inside
+ * the marks only; the form lists it with a tick per string to search and scrub it
+ * document-wide as well. The sheet says which short strings were left to the areas, and
+ * which streams the self-check could not decode and so did not search.
+ *
+ * The run and its outcome live in apply-store.ts: the dialog cannot be closed while it
+ * works (Esc and the backdrop are ignored), and it shows the outcome until closed.
  */
 import { Dialog } from '@base-ui/react/dialog';
 import type { ForensicReport, RedactionGateReport } from '@pdf-editor/engine';
@@ -19,14 +27,15 @@ import { useRetained } from '../ui/use-retained';
 import {
   type ApplyChoices,
   type ApplyOutcome,
-  applyTickedRedactions,
   DEFAULT_CHOICES,
   type FillChoice,
+  type ShortText,
   type SourceRedaction,
+  shortTextUnderMarks,
 } from './apply';
 import styles from './ApplyRedactions.module.css';
-import { useApplyDialogStore } from './apply-store';
-import { collectMarks, useRedactionStore } from './redaction-store';
+import { dismissApplyOutcome, runApply, useApplyDialogStore } from './apply-store';
+import { collectMarks, type MarkEntry, useRedactionStore } from './redaction-store';
 import { checkName, failingCheckLines, leftoverName } from './report-text';
 
 type Step =
@@ -44,7 +53,10 @@ export function ApplyRedactionsDialog() {
       open={open}
       onOpenChange={setOpen}
       onOpenChangeComplete={(isOpen) => {
-        if (!isOpen) release();
+        if (isOpen) return;
+        release();
+        // The sheet was seen; the next opening starts from the form.
+        dismissApplyOutcome();
       }}
     >
       <Dialog.Portal>
@@ -55,14 +67,52 @@ export function ApplyRedactionsDialog() {
   );
 }
 
-function useTickCounts(): { readonly ticked: number; readonly unticked: number } {
+interface TickCounts {
+  readonly ticked: number;
+  readonly unticked: number;
+  /** One entry per ticked mark (a page shown twice lists its marks once). */
+  readonly marks: readonly MarkEntry[];
+}
+
+function useTickCounts(): TickCounts {
   const workspace = useWorkspaceStore((s) => s.workspace);
   const pages = useAnnotationStore((s) => s.pages);
   const excluded = useRedactionStore((s) => s.excluded);
-  const keys = new Set(collectMarks(workspace, pages).entries.map((e) => e.markKey));
-  const ticked = [...keys].filter((key) => !excluded.has(key)).length;
-  return { ticked, unticked: keys.size - ticked };
+  const byKey = new Map<string, MarkEntry>();
+  for (const entry of collectMarks(workspace, pages).entries) {
+    if (!byKey.has(entry.markKey)) byKey.set(entry.markKey, entry);
+  }
+  const marks = [...byKey.values()].filter((e) => !excluded.has(e.markKey));
+  return { ticked: marks.length, unticked: byKey.size - marks.length, marks };
 }
+
+/** Short text under the ticked marks (see `shortTextUnderMarks`); empty while reading. */
+function useShortTexts(marks: readonly MarkEntry[]): readonly ShortText[] {
+  // `marks` is rebuilt every render; the key holds what the search reads, and changes only
+  // when that does.
+  const key = JSON.stringify(
+    marks.map((e) => ({
+      source: e.source,
+      mark: { pageIndex: e.mark.pageIndex, quads: e.mark.quads },
+    })),
+  );
+  const [found, setFound] = useState<{ key: string; texts: readonly ShortText[] }>();
+  useEffect(() => {
+    let live = true;
+    void shortTextUnderMarks(JSON.parse(key) as Parameters<typeof shortTextUnderMarks>[0]).then(
+      (texts) => {
+        if (live) setFound({ key, texts });
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [key]);
+  return found?.key === key ? found.texts : [];
+}
+
+const shortKey = (s: ShortText) => `${s.source}\u0000${s.text}`;
 
 const FILLS: readonly { readonly id: FillChoice; readonly swatch?: string }[] = [
   { id: 'black', swatch: '#000000' },
@@ -77,9 +127,17 @@ function fillLabel(id: FillChoice): string {
 }
 
 function ApplyFlow({ onClose }: { readonly onClose: () => void }) {
-  const [step, setStep] = useState<Step>({ kind: 'form' });
+  const run = useApplyDialogStore((s) => s.run);
+  const step: Step =
+    run.kind === 'working'
+      ? { kind: 'working' }
+      : run.kind === 'done'
+        ? { kind: 'done', outcome: run.outcome }
+        : { kind: 'form' };
   const [choices, setChoices] = useState<ApplyChoices>(DEFAULT_CHOICES);
-  const { ticked, unticked } = useTickCounts();
+  const { ticked, unticked, marks } = useTickCounts();
+  const shortTexts = useShortTexts(step.kind === 'form' ? marks : []);
+  const [searched, setSearched] = useState<ReadonlySet<string>>(new Set());
   const primaryRef = useRef<HTMLButtonElement>(null);
   const set = (patch: Partial<ApplyChoices>) => setChoices((c) => ({ ...c, ...patch }));
 
@@ -89,9 +147,8 @@ function ApplyFlow({ onClose }: { readonly onClose: () => void }) {
 
   const apply = async (event: SyntheticEvent) => {
     event.preventDefault();
-    setStep({ kind: 'working' });
-    const outcome = await applyTickedRedactions(choices);
-    setStep({ kind: 'done', outcome });
+    const alsoSearch = shortTexts.filter((s) => searched.has(shortKey(s)));
+    await runApply({ ...choices, alsoSearch });
   };
 
   return (
@@ -196,6 +253,30 @@ function ApplyFlow({ onClose }: { readonly onClose: () => void }) {
               </span>
             </label>
           </fieldset>
+          {shortTexts.length > 0 && !choices.areaOnly ? (
+            <fieldset className={exportStyles.section} data-testid="redaction-short-texts">
+              <legend className={exportStyles.sectionTitle}>{m.redaction_short_title()}</legend>
+              <p className={styles.note}>{m.redaction_short_hint()}</p>
+              {shortTexts.map((short) => {
+                const key = shortKey(short);
+                return (
+                  <label key={key} className={exportStyles.check}>
+                    <input
+                      type="checkbox"
+                      checked={searched.has(key)}
+                      onChange={(event) => {
+                        const next = new Set(searched);
+                        if (event.target.checked) next.add(key);
+                        else next.delete(key);
+                        setSearched(next);
+                      }}
+                    />
+                    <span>{m.redaction_short_search({ text: short.text })}</span>
+                  </label>
+                );
+              })}
+            </fieldset>
+          ) : null}
           <div className={exportStyles.actions}>
             <Dialog.Close className={exportStyles.secondary}>{m.common_cancel()}</Dialog.Close>
             <button
@@ -227,7 +308,7 @@ function ApplyFlow({ onClose }: { readonly onClose: () => void }) {
               <button
                 type="button"
                 className={exportStyles.secondary}
-                onClick={() => setStep({ kind: 'form' })}
+                onClick={dismissApplyOutcome}
               >
                 {m.common_back()}
               </button>
@@ -342,6 +423,11 @@ function SourceResult({
     [m.redaction_result_attachments(), report.attachments.removed],
     [m.redaction_result_kept_marks(), source.keptMarks],
   ];
+  // Short text left to the areas: captured but not in the searched strings.
+  const searched = new Set(result.plan.strings.map((s) => s.normalize('NFKC').toLowerCase()));
+  const skipped = result.captured.skipped.filter(
+    (s) => !searched.has(s.normalize('NFKC').toLowerCase()),
+  );
   return (
     <section className={styles.stack} data-redaction-source="">
       <h3 className={styles.sourceTitle} data-testid="redaction-result-areas">
@@ -355,6 +441,19 @@ function SourceResult({
           </div>
         ))}
       </dl>
+      {source.removedMarks > 0 ? (
+        <p className={styles.note} data-testid="redaction-removed-marks">
+          {m.redaction_result_removed_marks({
+            count: source.removedMarks,
+            countText: formatNumber(source.removedMarks),
+          })}
+        </p>
+      ) : null}
+      {skipped.length > 0 ? (
+        <p className={styles.note} data-testid="redaction-skipped">
+          {m.redaction_result_skipped({ strings: skipped.map((s) => `“${s}”`).join(', ') })}
+        </p>
+      ) : null}
       {report.attachments.unverified.length > 0 ? (
         <p className={styles.note}>
           {m.redaction_result_unverified({ names: report.attachments.unverified.join(', ') })}
@@ -371,10 +470,36 @@ function SourceResult({
   );
 }
 
+/**
+ * Streams the self-check could not decode, grouped by filter: entries read
+ * "object 12 (DCTDecode)" or "object 7 (JBIG2Decode, FlateDecode)" (engine forensic-objects.ts).
+ */
+export function notSearchedGroups(entries: readonly string[]): string {
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    const named = /\(([^)]*)\)\s*$/.exec(entry)?.[1]?.trim() ?? '';
+    const filter = named === '' ? m.redaction_not_searched_unknown() : named;
+    counts.set(filter, (counts.get(filter) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([filter, count]) =>
+      m.redaction_not_searched_group({ filter, count: formatNumber(count) }),
+    )
+    .join(', ');
+}
+
 function CheckList({ report }: { readonly report: ForensicReport }) {
   const passed = report.checks.filter((c) => c.passed).length;
   return (
     <>
+      {report.notSearched.length > 0 ? (
+        <p className={styles.note} data-testid="redaction-not-searched">
+          {m.redaction_result_not_searched({
+            count: report.notSearched.length,
+            groups: notSearchedGroups(report.notSearched),
+          })}
+        </p>
+      ) : null}
       <p className={styles.note} data-testid="redaction-checks-summary">
         {m.redaction_result_checks({
           passed: formatNumber(passed),

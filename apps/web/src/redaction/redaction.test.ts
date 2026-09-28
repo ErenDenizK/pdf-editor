@@ -33,7 +33,13 @@ import {
   stepKey,
   useRedactionStore,
 } from './redaction-store';
-import { findSensitiveData, markCheckedFinds, markSearchHits, stepMark } from './review';
+import {
+  findSensitiveData,
+  isStaleMatch,
+  markCheckedFinds,
+  markSearchHits,
+  stepMark,
+} from './review';
 import { indexPageText, quadsForTextRange, textUnderQuads } from './text-index';
 
 const TOKEN = 'SECRET-7731';
@@ -243,5 +249,20 @@ describe('redaction marks through the engine', () => {
       'IBAN: TR33 0006 1005 1978 6457 8413 26'.slice(6),
       'ali.veli@example.com',
     ]);
+
+    // Results are tied to the page's text: marks keep them current, a text edit on the
+    // page (or an applied redaction in the source) makes them stale; other pages do not.
+    const [date] = useRedactionStore.getState().finder.matches;
+    if (!date) throw new Error('no match');
+    const ws = model().workspace;
+    expect(ws.engineEdits.some((e) => e.kind === 'annotation.create')).toBe(true);
+    expect(isStaleMatch(ws, date)).toBe(false);
+    const withEdit = (kind: 'text.edit' | 'redaction.apply', pageIndex: number) => ({
+      ...ws,
+      engineEdits: [...ws.engineEdits, { id: `x-${kind}`, source, pageIndex, kind, payload: {} }],
+    });
+    expect(isStaleMatch(withEdit('text.edit', 0), date)).toBe(true);
+    expect(isStaleMatch(withEdit('text.edit', 1), date)).toBe(false);
+    expect(isStaleMatch(withEdit('redaction.apply', 1), date)).toBe(true);
   });
 });

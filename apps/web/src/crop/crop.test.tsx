@@ -9,7 +9,11 @@
  * - crop and discard (`cropPages` with discard): one history entry holding the redaction
  *   and the crop, the text outside the crop is gone from the page while the text inside
  *   stays, undo brings both back, and the export passes its self-check;
- * - a page another page still shows in full keeps its content (nothing is discarded).
+ * - a page another page still shows in full keeps its content (nothing is discarded);
+ * - pending redaction marks: the dialog warns about marks reaching outside the crop, the
+ *   removal deletes them (not recreated on removed content) and keeps the ones inside, and
+ *   the export then passes; Esc does not close the dialog while it removes;
+ * - a resized page: the summary names the original-page crop and the new page size.
  */
 import '../styles/tokens.css';
 import '../styles/reset.css';
@@ -20,7 +24,9 @@ import {
   type DocumentId,
   duplicatePages,
   historyEntries,
+  PAPER_SIZES,
   pageDisplaySize,
+  resizePages,
   type SourceId,
   type Workspace,
 } from '@pdf-editor/document-model';
@@ -31,14 +37,17 @@ import { page, userEvent } from 'vitest/browser';
 import rotatedUrl from '../../../../test/fixtures/rotated-pages.pdf?url';
 import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
 import { fixtureFile } from '../../test/store-harness';
+import { deleteAnnotations } from '../annotations/actions';
 import { resetAnnotationStore } from '../annotations/annotation-store';
-import { resetEditRunner, whenIdle } from '../annotations/edit-runner';
+import { readAnnotations, resetEditRunner, whenIdle } from '../annotations/edit-runner';
 import { pageText } from '../annotations/page-text';
 import { App } from '../app';
 import { openDocuments } from '../commands/app-commands';
 import { commandRegistry } from '../commands/registry';
 import { prepareExport } from '../export/export-service';
 import { resetRedactionApply } from '../redaction/apply';
+import { createMarks, isRedactMark } from '../redaction/marks';
+import { indexPageText, quadsForTextRange } from '../redaction/text-index';
 import { closeOperationDialog } from '../stage/operation-dialogs-store';
 import { runSectionCommand } from '../stage/section-menu';
 import { useSelectionStore } from '../state/selection-store';
@@ -84,6 +93,30 @@ async function typeMargin(dialog: HTMLElement, side: keyof Margins, value: strin
 
 async function sourceText(source: SourceId, index: number): Promise<string> {
   return (await pageText(source, index)).map((run) => run.text).join('\n');
+}
+
+/** Quads of the first occurrence of `needle` on a source page. */
+async function quadsOf(source: SourceId, index: number, needle: string) {
+  const runs = await pageText(source, index);
+  const text = indexPageText(runs);
+  const at = text.text.indexOf(needle);
+  if (at < 0) throw new Error(`no ${needle}`);
+  return quadsForTextRange(runs, text, at, at + needle.length);
+}
+
+/** Page 1 of `id` with a mark on its header (outside MARGINS) and one on the body text. */
+async function markHeaderAndBody(id: DocumentId) {
+  const first = pageAt(id, 0);
+  if (first.ref.kind !== 'source') throw new Error('not a source page');
+  const source = first.ref.source;
+  const target = { source, pageIndex: 0, pageId: first.id, position: 1 };
+  await createMarks([
+    { target, marks: [await quadsOf(source, 0, 'PAGE 1'), await quadsOf(source, 0, 'quick')] },
+  ]);
+  const marks = (await readAnnotations(source, 0)).filter(isRedactMark);
+  expect(marks).toHaveLength(2);
+  const [header, body] = [...marks].sort((a, b) => (b.quads[0]?.y ?? 0) - (a.quads[0]?.y ?? 0));
+  return { source, target, header, body };
 }
 
 function reset() {
@@ -266,6 +299,93 @@ describe('crop pages dialog', () => {
   }, 60_000);
 });
 
+describe('crop pages dialog: removal and resized pages', () => {
+  beforeEach(async () => {
+    await page.viewport(1440, 900);
+    reset();
+  });
+  afterEach(async () => {
+    await whenIdle();
+    reset();
+  });
+
+  it('warns about marks outside the crop, ignores Esc while removing, then shows the sheet', async () => {
+    const id = await openInApp(simpleUrl, 'simple-text.pdf');
+    const { source, body } = await markHeaderAndBody(id);
+    select(pageAt(id, 0).id);
+    await commandRegistry.execute('pages.crop');
+    const dialog = await screen.findByTestId('crop-dialog');
+    await waitFor(() => expect(within(dialog).getByTestId('crop-unit')).toBeVisible());
+    await userEvent.selectOptions(within(dialog).getByTestId('crop-unit'), 'pt');
+    await typeMargin(dialog, 'top', '108');
+    await typeMargin(dialog, 'right', '72');
+    await typeMargin(dialog, 'bottom', '72');
+    await typeMargin(dialog, 'left', '72');
+    expect(within(dialog).queryByTestId('crop-discard-marks')).toBeNull();
+    await userEvent.click(within(dialog).getByTestId('crop-discard'));
+    // The header mark reaches into the removed band: deleted, not applied. Said first.
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('crop-discard-marks')).toHaveTextContent(
+        '1 redaction mark reaches outside the crop',
+      );
+    });
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Crop and remove' }));
+    await waitFor(() => expect(dialog).toHaveTextContent('Removing the content outside the crop'));
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeDisabled();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.getByTestId('crop-dialog')).toBeVisible();
+
+    const sheet = await screen.findByTestId('crop-result', {}, { timeout: 30_000 });
+    expect(within(sheet).getByTestId('redaction-removed-marks')).toHaveTextContent(
+      '1 mark that was not applied reached into a removed area',
+    );
+    const left = (await readAnnotations(source, 0)).filter(isRedactMark);
+    expect(left.map((a) => a.id)).toEqual([body?.id]);
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByTestId('crop-dialog')).toBeNull());
+
+    // Opened again: the form, not the old sheet.
+    await commandRegistry.execute('pages.crop');
+    const again = await screen.findByTestId('crop-dialog');
+    await waitFor(() => expect(within(again).getByTestId('crop-summary')).toBeVisible());
+    expect(within(again).queryByTestId('crop-result')).toBeNull();
+  }, 90_000);
+
+  it('on a resized page, names the crop of the original page and the new page size', async () => {
+    const id = await openInApp(simpleUrl, 'simple-text.pdf');
+    const first = pageAt(id, 0);
+    // Letter resized to A5 (fit): shown and exported as 419.53 × 595.28 pt.
+    model().applyOperation(
+      (w) => resizePages(w, [first.id], { ...PAPER_SIZES.a5, mode: 'fit', anchor: 'center' }),
+      'Resize',
+    );
+    const size = pageDisplaySize(ws(), pageAt(id, 0));
+    expect(size.width).toBeCloseTo(419.53, 1);
+    select(first.id);
+    await commandRegistry.execute('pages.crop');
+    const dialog = await screen.findByTestId('crop-dialog');
+    await waitFor(() => expect(within(dialog).getByTestId('crop-unit')).toBeVisible());
+    expect(within(dialog).getByTestId('crop-resized-notice')).toHaveTextContent(
+      'the margins are measured on the original page',
+    );
+    await userEvent.selectOptions(within(dialog).getByTestId('crop-unit'), 'pt');
+    for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+      await typeMargin(dialog, side, '72');
+    }
+    const summary = within(dialog).getByTestId('crop-summary');
+    expect(summary).toHaveTextContent('468 × 648 pt of its original page');
+    expect(summary).toHaveTextContent('419');
+    await userEvent.click(within(dialog).getByRole('button', { name: /^Crop$/ }));
+    await whenIdle();
+    // The export writes the resized page size; the crop is of the original content.
+    expect(pageAt(id, 0).cropBox).toEqual({ x: 72, y: 72, width: 468, height: 648 });
+    const shown = pageDisplaySize(ws(), pageAt(id, 0));
+    expect(shown.width).toBeCloseTo(419.53, 1);
+    expect(shown.height).toBeCloseTo(595.28, 1);
+  }, 60_000);
+});
+
 describe('crop and discard', () => {
   beforeEach(reset);
   afterEach(async () => {
@@ -329,6 +449,38 @@ describe('crop and discard', () => {
     const out = await PDFDocument.load(result.value.bytes, { updateMetadata: false });
     const crop = out.getPage(0).getCropBox();
     expect([crop.x, crop.y, crop.width, crop.height]).toEqual([72, 72, 468, 612]);
+  }, 90_000);
+
+  it('deletes pending marks reaching outside the crop, keeps the others; the export passes', async () => {
+    const { id } = await open();
+    const { source, target, header, body } = await markHeaderAndBody(id);
+    const outcome = await cropPages([pageAt(id, 0).id], MARGINS, { discard: true });
+    if (outcome.kind !== 'discarded' || outcome.outcome.kind !== 'applied') {
+      throw new Error(`not applied: ${JSON.stringify(outcome).slice(0, 400)}`);
+    }
+    const [report] = outcome.outcome.sources;
+    expect(report?.removedMarks).toBe(1);
+    expect(report?.keptMarks).toBe(1);
+    await whenIdle();
+    const left = (await readAnnotations(source, 0)).filter(isRedactMark);
+    expect(left.map((a) => a.id)).toEqual([body?.id]);
+    expect(left.map((a) => a.id)).not.toContain(header?.id);
+
+    // The kept mark is still pending (the export says so); once deleted, the export passes.
+    const pending = await prepareExport(id, { compression: null });
+    if (!pending.ok) throw new Error(pending.error.message);
+    expect(pending.value.verification.problems[0]).toMatch(/marks that were not applied/);
+    await deleteAnnotations(target, [body?.id ?? '']);
+    const prepared = await prepareExport(id, { compression: null });
+    if (!prepared.ok) throw new Error(prepared.error.message);
+    expect(prepared.value.verification).toEqual({ ok: true, problems: [] });
+
+    // Undo brings back both marks with the content.
+    model().undo();
+    model().undo();
+    await whenIdle();
+    const back = (await readAnnotations(source, 0)).filter(isRedactMark).map((a) => a.id);
+    expect(back.sort()).toEqual([header?.id, body?.id].sort());
   }, 90_000);
 
   it('keeps what another page still shows', async () => {

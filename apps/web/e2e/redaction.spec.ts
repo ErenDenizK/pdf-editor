@@ -11,6 +11,9 @@
  * the check on the final file, and the export re-opened in the app has no trace of the
  * token. Keeping attachments on `redact-metadata.pdf` is stopped by the self-check (the
  * attachment still holds the token), and nothing changes until attachments are removed.
+ * While applying, Esc and a click on the backdrop do not close the dialog: the blocked
+ * outcome is shown there and announced in the live region; the mark checkboxes have
+ * unique accessible names.
  */
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -186,6 +189,15 @@ test('mark every search match, then review the marks with J and K', async ({ pag
   await page.getByRole('tab', { name: 'Redactions' }).click();
   const panel = page.locator('[data-redactions-panel]');
   await expect(panel.getByTestId('redaction-snippet')).toHaveText([TOKEN, TOKEN, TOKEN]);
+  // Three marks with the same text: each checkbox still has its own name.
+  for (const n of [1, 2, 3]) {
+    await expect(
+      panel.getByRole('checkbox', {
+        name: `Include mark ${n} on page 1 (“${TOKEN}”) when applying`,
+        exact: true,
+      }),
+    ).toHaveCount(1);
+  }
   await page.locator('[data-read-viewport]').focus();
   await page.keyboard.press('j');
   await expect(panel.locator('li[aria-current="true"]')).toHaveCount(1);
@@ -376,4 +388,51 @@ test('keeping attachments: the self-check sees the token in the attachment and n
   const pdf = await PDFDocument.load(bytes, { updateMetadata: false });
   expect(pdf.catalog.lookup(PDFName.of('Names'))).toBeUndefined();
   expect(bytes.toString('latin1')).not.toContain(TOKEN);
+});
+
+test('Esc and the backdrop while applying: the dialog stays and the blocked outcome is shown and announced', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await useFileInputPicker(page);
+  await page.goto('./?lang=en');
+  await openFixtures(page, ['redact-metadata.pdf']);
+  await selectText(page, TOKEN);
+  await page.keyboard.press('x');
+  await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await page.getByRole('tab', { name: 'Redactions' }).click();
+  const panel = page.locator('[data-redactions-panel]');
+  // The mark's checkbox names the mark (its number on the page and the text under it).
+  await expect(panel.getByRole('checkbox', { name: /Include mark 1 on page 1/ })).toBeVisible();
+  await expect(panel.getByRole('checkbox', { name: new RegExp(TOKEN) })).toBeVisible();
+
+  await panel.getByTestId('redaction-apply').click();
+  const dialog = page.getByTestId('redaction-apply-dialog');
+  await dialog.getByRole('checkbox', { name: /Keep attachments/ }).check();
+  await dialog.getByTestId('redaction-apply-confirm').click();
+  await expect(dialog.getByRole('status')).toContainText(/Removing content/);
+  await expect(dialog.getByRole('button', { name: 'Close' })).toBeDisabled();
+  // Neither Esc nor a click outside the dialog closes it while it works.
+  await page.keyboard.press('Escape');
+  await page.mouse.click(10, 450);
+  await expect(dialog).toBeVisible();
+
+  // Blocked (the kept attachment holds the token): shown in the dialog and announced.
+  const blocked = dialog.getByTestId('redaction-blocked');
+  await expect(blocked).toBeVisible({ timeout: 30_000 });
+  await expect(blocked.getByRole('alert')).toHaveAttribute('data-stage', 'forensic');
+  const announced =
+    'The self-check found redacted content in the result, so nothing was applied. The document is unchanged.';
+  await expect(
+    page.locator('[role="status"][aria-live="polite"]').filter({ hasText: announced }),
+  ).toHaveCount(1);
+  await expect(historyRow(page, /Redactions applied/)).toHaveCount(0);
+
+  // Once finished, Esc closes it; opened again, the form starts afresh.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await panel.getByTestId('redaction-apply').click();
+  await expect(dialog.getByTestId('redaction-apply-confirm')).toBeVisible();
+  await expect(dialog.getByTestId('redaction-blocked')).toHaveCount(0);
 });

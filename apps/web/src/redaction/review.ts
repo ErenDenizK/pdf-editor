@@ -3,7 +3,13 @@
  * sensitive data with the pattern helpers, mark the ticked finds, and mark every search
  * hit. Everything creates or removes marks only; nothing is applied.
  */
-import type { PageId, Rect, SourceId, VirtualDocument } from '@pdf-editor/document-model';
+import type {
+  PageId,
+  Rect,
+  SourceId,
+  VirtualDocument,
+  Workspace,
+} from '@pdf-editor/document-model';
 
 import { deleteAnnotations } from '../annotations/actions';
 import { type PageTarget, useAnnotationStore } from '../annotations/annotation-store';
@@ -89,6 +95,28 @@ export function deleteMark(entry: MarkEntry): Promise<number | undefined> {
 let finderRun = 0;
 
 /**
+ * Which version of a source page's text the model holds: the ids of the engine edits that
+ * change it (text edits on the page, applied redactions anywhere in the source). Unlike
+ * the page's render revision it does not move when a mark is added, so finder results
+ * survive "Mark selected" and come back when a text edit is undone.
+ */
+export function pageTextKey(ws: Workspace, source: SourceId, pageIndex: number): string {
+  return ws.engineEdits
+    .filter(
+      (e) =>
+        e.source === source &&
+        (e.kind === 'redaction.apply' || (e.kind === 'text.edit' && e.pageIndex === pageIndex)),
+    )
+    .map((e) => e.id)
+    .join(',');
+}
+
+/** Whether the text of a finder match's page changed since it was found. */
+export function isStaleMatch(ws: Workspace, match: FinderMatch): boolean {
+  return pageTextKey(ws, match.source, match.sourceIndex) !== match.textKey;
+}
+
+/**
  * Runs the pattern helpers over every page of `doc` (each source page once) and lists the
  * matches for review. A new run cancels the previous one.
  */
@@ -125,6 +153,11 @@ export async function findSensitiveData(
     for (const [n, page] of pages.entries()) {
       const runs = await pageText(page.source, page.sourceIndex);
       if (run !== finderRun) return;
+      const textKey = pageTextKey(
+        useWorkspaceStore.getState().workspace,
+        page.source,
+        page.sourceIndex,
+      );
       const index = indexPageText(runs);
       for (const found of findPatterns(index.text, patterns)) {
         const quads = quadsForTextRange(runs, index, found.start, found.end);
@@ -135,6 +168,7 @@ export async function findSensitiveData(
           pattern: found.pattern,
           text: found.text.replace(/\s+/g, ' '),
           quads,
+          textKey,
           ...page,
         });
         if (!UNTICKED_BY_DEFAULT.has(found.pattern)) checked.add(id);
@@ -175,7 +209,10 @@ function groupByPage<T extends { source: SourceId; sourceIndex: number }>(
 /** Creates marks for the ticked finds (one history entry); they leave the review list. */
 export async function markCheckedFinds(): Promise<number> {
   const { finder } = useRedactionStore.getState();
-  const chosen = finder.matches.filter((match) => finder.checked.has(match.id));
+  const ws = useWorkspaceStore.getState().workspace;
+  const chosen = finder.matches.filter(
+    (match) => finder.checked.has(match.id) && !isStaleMatch(ws, match),
+  );
   if (chosen.length === 0) return 0;
   const done = await createMarks(
     groupByPage(chosen, targetOf, (match) => match.quads),

@@ -1795,6 +1795,44 @@
   "redaction_result_attachments": "Attachments removed",
   "redaction_result_unverified": "Attachments kept, not verified: {names}",
   "redaction_result_kept_marks": "Unticked marks kept as marks",
+  "redaction_include_text": "Include mark {index} on page {page} (“{text}”) when applying",
+  "redaction_include_index": "Include mark {index} on page {page} when applying",
+  "redaction_short_title": "Short text under the marks",
+  "redaction_short_hint": "Text shorter than 4 characters is removed inside the marks only: the same text elsewhere in the document stays, and nothing checks for it. Tick it to search and scrub it in the whole document too; the apply then stops if it is still visible elsewhere.",
+  "redaction_short_search": "Also search and scrub “{text}” document-wide",
+  "redaction_result_removed_marks": [
+    {
+      "declarations": ["input count", "input countText", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{countText} mark that was not applied reached into a removed area, so it was deleted with the content.",
+        "countPlural=*": "{countText} marks that were not applied reached into removed areas, so they were deleted with the content."
+      }
+    }
+  ],
+  "redaction_result_skipped": "Removed inside the areas only, too short to search the whole document for: {strings}.",
+  "redaction_result_not_searched": [
+    {
+      "declarations": ["input count", "input groups", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "The self-check could not decode {count} stream, so it was not searched for redacted content: {groups}.",
+        "countPlural=*": "The self-check could not decode {count} streams, so they were not searched for redacted content: {groups}."
+      }
+    }
+  ],
+  "redaction_not_searched_group": "{filter} ({count})",
+  "redaction_not_searched_unknown": "unreadable",
+  "redaction_find_stale": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "The text of {count} page changed since the search, so its results are hidden. Search again to update them.",
+        "countPlural=*": "The text of {count} pages changed since the search, so their results are hidden. Search again to update them."
+      }
+    }
+  ],
   "redaction_result_tags_pruned": "Accessibility tags pruned to match the removed content.",
   "redaction_result_tags_removed": "Accessibility tags removed: they could not stay intact, so the file is no longer tagged.",
   "redaction_result_gate": "Blank check passed: every area was empty before the fill.",
@@ -2032,6 +2070,18 @@
       }
     }
   ],
+  "crop_discard_marks": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} redaction mark reaches outside the crop. It will be deleted, not applied: the text under it is removed only where it lies outside the crop. Apply it first to remove all of it.",
+        "countPlural=*": "{count} redaction marks reach outside the crop. They will be deleted, not applied: the text under them is removed only where it lies outside the crop. Apply them first to remove all of it."
+      }
+    }
+  ],
+  "crop_preview_resized": "{pages} will be cropped, the first to {size} of its original page, which is then resized to {pageSize} again",
+  "crop_resized_notice": "Resized pages: the margins are measured on the original page, before the resize. The cropped content is then fitted to the new page size again.",
   "crop_confirm": "Crop",
   "crop_confirm_reset": "Remove crop",
   "crop_confirm_discard": "Crop and remove",

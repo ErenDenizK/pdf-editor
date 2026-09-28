@@ -106,6 +106,8 @@ export interface FinderMatch {
   readonly source: SourceId;
   readonly sourceIndex: number;
   readonly quads: readonly Rect[];
+  /** The page's text version when found (`pageTextKey`): a later text edit makes it stale. */
+  readonly textKey: string;
 }
 
 export type FinderStatus = 'idle' | 'running' | 'done' | 'error';

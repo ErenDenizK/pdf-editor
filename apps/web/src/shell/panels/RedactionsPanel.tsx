@@ -9,15 +9,17 @@
  */
 import type { Rect, SourceId } from '@pdf-editor/document-model';
 import { ScanSearch, ShieldAlert, Trash2, X } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 
 import { useAnnotationStore } from '../../annotations/annotation-store';
 import { pageText } from '../../annotations/page-text';
+import { getEngineService } from '../../engine/engine-service';
 import { formatNumber, m } from '../../i18n';
 import {
   clearFinder,
   deleteMark,
   findSensitiveData,
+  isStaleMatch,
   markCheckedFinds,
   revealMark,
 } from '../../redaction';
@@ -208,8 +210,8 @@ function MarkList({
           ) : null}
           <h4 className={styles.pageTitle}>{m.redaction_page({ page: group.position })}</h4>
           <ul className={styles.list}>
-            {group.entries.map((entry) => (
-              <MarkRow key={entry.key} entry={entry} />
+            {group.entries.map((entry, index) => (
+              <MarkRow key={entry.key} entry={entry} index={index + 1} />
             ))}
           </ul>
         </section>
@@ -218,15 +220,28 @@ function MarkList({
   );
 }
 
-/** Snippets per source page and quads; the text of a page never changes. */
+/**
+ * Snippets per source page, content revision and quads: a text edit (or an applied
+ * redaction) changes the text under a mark and bumps the page's revision (`pageText` is
+ * keyed the same way).
+ */
 const snippets = new Map<string, string>();
 
-function snippetKey(source: SourceId, pageIndex: number, quads: readonly Rect[]): string {
-  return `${source}:${pageIndex}:${JSON.stringify(quads)}`;
+function snippetKey(
+  source: SourceId,
+  pageIndex: number,
+  revision: number,
+  quads: readonly Rect[],
+): string {
+  return `${source}:${pageIndex}:${revision}:${JSON.stringify(quads)}`;
 }
 
 function useSnippet(entry: MarkEntry): string | undefined {
-  const key = snippetKey(entry.source, entry.sourceIndex, entry.mark.quads);
+  const service = getEngineService();
+  const revision = useSyncExternalStore(service.subscribeRevisions, () =>
+    service.pageRevision(entry.source, entry.sourceIndex),
+  );
+  const key = snippetKey(entry.source, entry.sourceIndex, revision, entry.mark.quads);
   const [loaded, setLoaded] = useState<{ key: string; text: string } | undefined>();
   useEffect(() => {
     if (snippets.has(key)) return;
@@ -244,7 +259,10 @@ function useSnippet(entry: MarkEntry): string | undefined {
   return loaded?.key === key ? loaded.text : snippets.get(key);
 }
 
-function MarkRow({ entry }: { readonly entry: MarkEntry }) {
+/** Longest snippet quoted in a checkbox's accessible name. */
+const LABEL_SNIPPET = 40;
+
+function MarkRow({ entry, index }: { readonly entry: MarkEntry; readonly index: number }) {
   const snippet = useSnippet(entry);
   const checked = useRedactionStore((s) => !s.excluded.has(entry.markKey));
   const current = useRedactionStore((s) => s.current === entry.key);
@@ -259,13 +277,24 @@ function MarkRow({ entry }: { readonly entry: MarkEntry }) {
   }, [current]);
 
   const label = snippet === undefined ? '' : snippet === '' ? m.redaction_area() : snippet;
+  // Unique per row: the mark's number on its page, and the text under it when there is some.
+  const quoted =
+    snippet === undefined || snippet === ''
+      ? undefined
+      : snippet.length > LABEL_SNIPPET
+        ? `${snippet.slice(0, LABEL_SNIPPET - 1)}…`
+        : snippet;
+  const checkLabel =
+    quoted === undefined
+      ? m.redaction_include_index({ index, page: entry.position })
+      : m.redaction_include_text({ index, page: entry.position, text: quoted });
   return (
     <li ref={rowRef} className={styles.row} aria-current={current || selected ? 'true' : undefined}>
       <input
         type="checkbox"
         className={styles.check}
         checked={checked}
-        aria-label={m.redaction_include({ page: entry.position })}
+        aria-label={checkLabel}
         onChange={(e) => setIncluded([entry.markKey], e.target.checked)}
       />
       <button
@@ -306,19 +335,28 @@ function revealMatch(match: FinderMatch): void {
 function Finder() {
   const finder = useRedactionStore((s) => s.finder);
   const setChecked = useRedactionStore((s) => s.setMatchesChecked);
-  const activeDocument = useWorkspaceStore((s) => s.workspace.activeDocument);
+  const workspace = useWorkspaceStore((s) => s.workspace);
+  const activeDocument = workspace.activeDocument;
   const [busy, setBusy] = useState(false);
   if (finder.status === 'idle') return null;
   // Results belong to the document they were found in.
   if (finder.documentId !== activeDocument) return null;
 
+  // Matches on pages whose text changed since the search (a text edit, an applied
+  // redaction) no longer say where the text is: hidden until the next search.
+  const current = finder.matches.filter((match) => !isStaleMatch(workspace, match));
+  const stalePages = new Set(
+    finder.matches
+      .filter((match) => isStaleMatch(workspace, match))
+      .map((match) => `${match.source}:${match.sourceIndex}`),
+  ).size;
   const byPattern = new Map<PatternId, FinderMatch[]>();
-  for (const match of finder.matches) {
+  for (const match of current) {
     const list = byPattern.get(match.pattern) ?? [];
     list.push(match);
     byPattern.set(match.pattern, list);
   }
-  const chosen = finder.matches.filter((match) => finder.checked.has(match.id)).length;
+  const chosen = current.filter((match) => finder.checked.has(match.id)).length;
   let status = '';
   if (finder.status === 'running') {
     status = m.redaction_find_progress({
@@ -326,7 +364,7 @@ function Finder() {
       total: formatNumber(finder.progress.total),
     });
   } else if (finder.status === 'error') status = m.redaction_find_failed();
-  else if (finder.matches.length === 0) status = m.redaction_find_none();
+  else if (current.length === 0 && stalePages === 0) status = m.redaction_find_none();
 
   return (
     <section className={styles.finder} aria-label={m.redaction_find_title()}>
@@ -342,6 +380,11 @@ function Finder() {
       {status !== '' ? (
         <p className={styles.finderStatus} role="status" data-testid="redaction-find-status">
           {status}
+        </p>
+      ) : null}
+      {stalePages > 0 ? (
+        <p className={styles.finderStatus} data-testid="redaction-find-stale">
+          {m.redaction_find_stale({ count: stalePages })}
         </p>
       ) : null}
       {GROUP_ORDER.filter((id) => PATTERN_IDS.includes(id) && byPattern.has(id)).map((id) => {
@@ -399,7 +442,7 @@ function Finder() {
           </fieldset>
         );
       })}
-      {finder.matches.length > 0 ? (
+      {current.length > 0 ? (
         <div className={styles.finderActions}>
           <button
             type="button"
