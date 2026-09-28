@@ -18,5 +18,6 @@ only after discussion with the project owner; the discussion summary is appended
 | 0009 | Headless accessibility primitives: Base UI | accepted |
 | 0010 | i18n with Paraglide JS and offline PWA with vite-plugin-pwa | accepted |
 | 0011 | Engine hosting for content editing: own PDFium worker, raw access | accepted |
+| 0012 | OCR engine hosting and language packs | accepted |
 | 0013 | Signature validation semantics and PAdES-B signing | accepted |
 | 0014 | Batch recipe file format | accepted |

@@ -1,0 +1,24 @@
+{
+  "name": "@pdf-editor/ocr-spike",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Spike S1 of M5 (docs/research/07-ocr-spike.md): tesseract.js offline under the app's CSP, accuracy and timing, and the glyphless invisible text layer. Evidence, not product code.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "spike": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
+  },
+  "devDependencies": {
+    "@cantoo/fontkit": "2.0.12",
+    "@cantoo/pdf-lib": "2.11.1",
+    "@embedpdf/pdfium": "2.15.1",
+    "@pdf-editor/document-model": "workspace:*",
+    "@pdf-editor/engine": "workspace:*",
+    "@tesseract.js-data/eng": "1.0.0",
+    "@tesseract.js-data/tur": "1.0.0",
+    "pdfjs-dist": "6.3.289",
+    "tesseract.js": "7.0.0",
+    "tesseract.js-core": "7.0.0"
+  }
+}
