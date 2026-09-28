@@ -99,12 +99,8 @@
   "privacy_local_only": "Yalnızca yerel",
   "privacy_external_requests": [
     {
-      "declarations": [
-        "input count"
-      ],
-      "selectors": [
-        "count"
-      ],
+      "declarations": ["input count"],
+      "selectors": ["count"],
       "match": {
         "count=0": "Dış istek yok",
         "count=*": "{count} dış istek"
