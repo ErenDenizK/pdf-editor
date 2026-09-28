@@ -142,3 +142,16 @@ export {
   validateSignatures,
 } from './signatures';
 export { createSignatureProxy, type SignatureProxy } from './worker/signature-proxy';
+// Compare and convert (M5 §2, §4). In the app they run in the analysis worker
+// (`@pdf-editor/engine/analysis.worker`, wrapped by `createAnalysisProxy`), fed with page
+// text and renders from the PDFium worker; `createLocalAnalysisBackend` runs the same code
+// on the calling thread.
+export * from './analysis';
+export * from './convert';
+export {
+  buildComparisonReport,
+  buildComparisonReportWithCounts,
+  type ComparisonReportCounts,
+  type ComparisonReportOptions,
+} from './pdflib/compare-report';
+export { type AnalysisProxy, createAnalysisProxy } from './worker/create-analysis-proxy';
