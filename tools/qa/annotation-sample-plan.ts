@@ -101,20 +101,59 @@ export interface PlanEntry {
   readonly geometry: Rect;
   /** What must be drawn; every entry of the sample has one. */
   readonly appearance?: Appearance;
+  /**
+   * A variable-width ink (ADR-0018): how its drawn width must vary along the stroke. Its
+   * annotation carries the per-point `widths`; its `strokeWidth` is the nominal /BS /W.
+   */
+  readonly widthProfile?: WidthProfile;
 }
 
-/** One row of the results table: aspects of one plan entry. */
+/** How the drawn width of a straight variable-width stroke is checked. */
+export interface WidthProfile {
+  /** The centre line: one straight stroke (user space). */
+  readonly from: Point;
+  readonly to: Point;
+  /** /InkList points along it, evenly spaced. */
+  readonly points: number;
+  /** Full width at `from` and at `to` (points); linear in between, one per /InkList point. */
+  readonly startWidth: number;
+  readonly endWidth: number;
+  /** Where along the stroke (0–1) the drawn width is measured, across the stroke. */
+  readonly at: readonly number[];
+  /**
+   * Allowed difference between the drawn and the planned width, and between the drawn and
+   * the planned centre (points, at 2× render).
+   */
+  readonly tolerance: number;
+  /** The drawn width must grow at least this much from the first to the last sample. */
+  readonly minRatio: number;
+}
+
+/** One row of the results table: aspects of one plan entry, or of several checked alike. */
 export interface MatrixRow {
   readonly title: string;
   readonly key: string;
+  /** Further entries the row checks the same way (problems then name the entry). */
+  readonly alsoKeys?: readonly string[];
   /**
    * `appearance`: the rendered pixels (presence, colour, placement, see-through);
    * `upright`: a note on a rotated page is drawn like the upright note of page 1, not turned
    * with the page; `data`: subtype, /Rect, QuadPoints and /Contents as the renderer reports
    * them; `contents`, `open`, `uri`: what a comment UI or link handler gets (and, for pdf.js,
-   * what its annotation layer shows).
+   * what its annotation layer shows); `width`: the drawn width varies along the stroke as the
+   * entry's `widthProfile` plans; `nominal-width`: the width the renderer reports (/BS /W)
+   * is the annotation's `strokeWidth`.
    */
-  readonly aspects: readonly ('appearance' | 'upright' | 'data' | 'contents' | 'open' | 'uri')[];
+  readonly aspects: readonly (
+    | 'appearance'
+    | 'upright'
+    | 'data'
+    | 'contents'
+    | 'open'
+    | 'uri'
+    | 'width'
+    | 'nominal-width'
+  )[];
 }
 
 function textQuad(x: number, baseline: number): Rect {
@@ -234,6 +273,66 @@ export const NOTE_CONTENTS = 'This note text must appear in the comment UI.';
 export const LINK_URI = 'https://example.org/';
 /** The engine's default ink for positive named stamps (annotations/stamp-appearance.ts). */
 const APPROVED_GREEN = '#218C21';
+
+function profilePath(profile: WidthProfile): Point[] {
+  const { from, to, points } = profile;
+  return Array.from({ length: points }, (_, i) => {
+    const t = i / (points - 1);
+    return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+  });
+}
+
+/** The planned full width at `t` (0–1) along the stroke. */
+export function plannedWidth(profile: WidthProfile, t: number): number {
+  return profile.startWidth + (profile.endWidth - profile.startWidth) * t;
+}
+
+/**
+ * A variable-width ink (ADR-0018, spike S1): a straight stroke whose width grows linearly,
+ * with the nominal width 4 pt in /BS /W. The generator writes its `widths`; the engine draws
+ * the outline in the appearance stream and keeps the widths in `/PdfEditorInkWidths`.
+ */
+function variableInk(
+  key: string,
+  label: string,
+  pageIndex: number,
+  at: readonly [number, number],
+  colour: string,
+  opacity: number,
+  profile: WidthProfile,
+): PlanEntry {
+  const path = profilePath(profile);
+  const widths = path.map((_, i) => plannedWidth(profile, i / (path.length - 1)));
+  return {
+    key,
+    label,
+    at,
+    subtype: 'Ink',
+    geometry: bbox(path, 0.5),
+    annotation: {
+      ...common,
+      id: id(key),
+      kind: 'ink',
+      pageIndex,
+      rect: ZERO,
+      paths: [path],
+      widths: [widths],
+      strokeWidth: 4,
+      color: colour,
+      ...(opacity < 1 ? { opacity } : {}),
+    },
+    appearance: {
+      region: bbox(path, profile.endWidth / 2),
+      placement: 'rect',
+      colour: opacity < 1 ? overWhite(colour, opacity) : colour,
+      span: 'x',
+    },
+    widthProfile: profile,
+  };
+}
+
+const TAPER = { points: 25, startWidth: 1, endWidth: 9, tolerance: 0.6, minRatio: 3 } as const;
+const TAPER_AT = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
 
 export const PLAN: readonly PlanEntry[] = [
   markup(
@@ -523,6 +622,21 @@ export const PLAN: readonly PlanEntry[] = [
     },
     appearance: { region: SQUARE_2, placement: 'rect', colour: '#1E88E5', span: 'both' },
   },
+  variableInk('ink-variable', 'ink, variable width 1-9 pt', 0, [300, 125], '#1E5BD8', 1, {
+    ...TAPER,
+    from: { x: 300, y: 105 },
+    to: { x: 540, y: 105 },
+    at: TAPER_AT,
+  }),
+  variableInk(
+    'rotated-ink-variable',
+    'ink, variable width, 60% opacity, on a rotated page',
+    1,
+    [72, 470],
+    '#E53935',
+    0.6,
+    { ...TAPER, from: { x: 72, y: 450 }, to: { x: 312, y: 450 }, at: TAPER_AT },
+  ),
 ];
 
 export const ROWS: readonly MatrixRow[] = [
@@ -578,6 +692,18 @@ export const ROWS: readonly MatrixRow[] = [
     title: 'Page 2: square placed in display space',
     key: 'rotated-square',
     aspects: ['appearance', 'data'],
+  },
+  {
+    title: 'Ink, variable width (appearance)',
+    key: 'ink-variable',
+    alsoKeys: ['rotated-ink-variable'],
+    aspects: ['width'],
+  },
+  {
+    title: 'Ink `/BS /W` equals the nominal width',
+    key: 'ink-variable',
+    alsoKeys: ['rotated-ink-variable'],
+    aspects: ['nominal-width'],
   },
 ];
 
@@ -638,144 +764,3 @@ export function displayRegion(appearance: Appearance, rotation: number): Rect {
 export function entriesOnPage(pageIndex: number): PlanEntry[] {
   return PLAN.filter((e) => e.annotation.pageIndex === pageIndex);
 }
-
-// ---------------------------------------------------------------------------------------
-// Proposal for M6 P4 (spike S1): variable-width ink
-// ---------------------------------------------------------------------------------------
-
-/**
- * Off until P4 lands. The generator and the matrix read only PLAN and ROWS, so neither the
- * committed sample nor the results table in docs/qa/annotations-matrix.md changes. P4 sets
- * this to true, moves the entries into PLAN and the rows into ROWS, has the generator write
- * the widths (`InkAnnotation.widths`, spec experience-redesign.md §9) and adds the `width` and
- * `nominal-width` checks to annotation-matrix.ts. Spike S1
- * (packages/engine/src/pdfium/ink-appearance.spike.test.ts) measures the same strokes, with
- * the same criteria, on the committed sample in both renderers
- * (docs/research/09-ink-appearance-spike.md §4).
- */
-export const PROPOSED_INK_WIDTH_ENABLED = false;
-
-/** How the drawn width of a straight variable-width stroke is checked. */
-export interface WidthProfile {
-  /** The centre line: one straight stroke (user space). */
-  readonly from: Point;
-  readonly to: Point;
-  /** /InkList points along it, evenly spaced. */
-  readonly points: number;
-  /** Full width at `from` and at `to` (points); linear in between, one per /InkList point. */
-  readonly startWidth: number;
-  readonly endWidth: number;
-  /** Where along the stroke (0–1) the drawn width is measured, across the stroke. */
-  readonly at: readonly number[];
-  /**
-   * Allowed difference between the drawn and the planned width, and between the drawn and
-   * the planned centre (points, at 2× render).
-   */
-  readonly tolerance: number;
-  /** The drawn width must grow at least this much from the first to the last sample. */
-  readonly minRatio: number;
-}
-
-export interface ProposedInkEntry {
-  /** An ink entry; its `strokeWidth` is the nominal width written to /BS /W. */
-  readonly entry: PlanEntry;
-  /** Per-point widths, parallel to the entry's paths (P4: `InkAnnotation.widths`). */
-  readonly widths: readonly (readonly number[])[];
-  readonly profile: WidthProfile;
-}
-
-/** A proposed row: `width` = drawn width varies as planned; `nominal-width` = /BS /W. */
-export interface ProposedMatrixRow {
-  readonly title: string;
-  readonly keys: readonly string[];
-  readonly aspects: readonly ('width' | 'nominal-width')[];
-}
-
-function profilePath(profile: WidthProfile): Point[] {
-  const { from, to, points } = profile;
-  return Array.from({ length: points }, (_, i) => {
-    const t = i / (points - 1);
-    return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
-  });
-}
-
-/** The planned full width at `t` (0–1) along the stroke. */
-export function plannedWidth(profile: WidthProfile, t: number): number {
-  return profile.startWidth + (profile.endWidth - profile.startWidth) * t;
-}
-
-function proposedInk(
-  key: string,
-  label: string,
-  pageIndex: number,
-  at: readonly [number, number],
-  colour: string,
-  opacity: number,
-  profile: WidthProfile,
-): ProposedInkEntry {
-  const path = profilePath(profile);
-  const widths = path.map((_, i) => plannedWidth(profile, i / (path.length - 1)));
-  const shown = opacity < 1 ? overWhite(colour, opacity) : colour;
-  return {
-    entry: {
-      key,
-      label,
-      at,
-      subtype: 'Ink',
-      geometry: bbox(path, 0),
-      annotation: {
-        ...common,
-        id: id(key),
-        kind: 'ink',
-        pageIndex,
-        rect: ZERO,
-        paths: [path],
-        strokeWidth: 4,
-        color: colour,
-        ...(opacity < 1 ? { opacity } : {}),
-      },
-      appearance: {
-        region: bbox(path, profile.endWidth / 2),
-        placement: 'rect',
-        colour: shown,
-        span: 'x',
-      },
-    },
-    widths: [widths],
-    profile,
-  };
-}
-
-const TAPER = { points: 25, startWidth: 1, endWidth: 9, tolerance: 0.6, minRatio: 3 } as const;
-const TAPER_AT = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
-
-export const PROPOSED_INK_ENTRIES: readonly ProposedInkEntry[] = [
-  proposedInk('ink-variable', 'ink, variable width 1-9 pt', 0, [300, 125], '#1E5BD8', 1, {
-    ...TAPER,
-    from: { x: 300, y: 105 },
-    to: { x: 540, y: 105 },
-    at: TAPER_AT,
-  }),
-  proposedInk(
-    'rotated-ink-variable',
-    'ink, variable width, 60% opacity, on a rotated page',
-    1,
-    [72, 470],
-    '#E53935',
-    0.6,
-    { ...TAPER, from: { x: 72, y: 450 }, to: { x: 312, y: 450 }, at: TAPER_AT },
-  ),
-];
-
-export const PROPOSED_INK_ROWS: readonly ProposedMatrixRow[] = [
-  {
-    title: 'Ink, variable width (appearance)',
-    keys: ['ink-variable', 'rotated-ink-variable'],
-    aspects: ['width'],
-  },
-  {
-    title: 'Ink `/BS /W` equals the nominal width',
-    keys: ['ink-variable', 'rotated-ink-variable'],
-    aspects: ['nominal-width'],
-  },
-];

@@ -48,7 +48,7 @@ comment. Right panel "Properties" shows the same plus author, dates and the note
 | Kind | Creation | Geometry | Notes |
 |---|---|---|---|
 | Highlight / Underline / Strikeout / Squiggly | Select text then tool, or tool then drag over text | QuadPoints from text runs (upper-left, upper-right, lower-left, lower-right order) | Multiply blend in the AP; merges adjacent quads on one line |
-| Ink | Freehand drag, pressure ignored, smoothing (Catmull-Rom → Bézier) | InkList paths | Straight line with Shift; eraser mode removes whole strokes |
+| Ink | Freehand; width from pressure (pen) or speed (mouse, touch); `/InkList` centre lines with a constant `/BS /W` (the nominal width); the varying width lives only in our appearance stream, with the per-point widths in the private `/PdfEditorInkWidths` so a later session regenerates it after an edit (ADR-0018). Viewers that redraw ink from `/InkList` show the nominal width. Strokes written in a burst share one annotation. (M6 amendment A7) | InkList paths | Straight line with Shift; eraser mode removes whole strokes |
 | Rectangle / Ellipse / Line / Arrow | Drag | Rect / vertices | Arrow = Line with `/LE [/None /OpenArrow]`; snap to 45° with Shift |
 | Text box (FreeText) | Click or drag a box, type | Rect, `/DA` font size and color | Auto-grow height; font: bundled Inter subset embedded by the engine; no rich text in M2 |
 | Note (Text) | Click | 20×20 icon rect | Popup with author, date, text; comment icon; open state persisted |

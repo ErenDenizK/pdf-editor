@@ -9,10 +9,11 @@ Edge cannot be automated here; they get an optional five-minute spot check (belo
 Sample: [`samples/annotations-sample.pdf`](samples/annotations-sample.pdf), written by the
 app's own PDFium adapter (`createAnnotation` + `save()`, the path export uses) and checked
 with `checkAnnotationConformance` before it is written. Page 1 has one annotation of each
-kind with a printed label next to it (the 50 % square covers the words "text under fill");
-page 2 has `/Rotate 90` with a highlight, a note and a square. What each annotation is and
-what a viewer must show for it lives in one place, `tools/qa/annotation-sample-plan.ts`,
-which both the generator and the checker use.
+kind with a printed label next to it (the 50 % square covers the words "text under fill")
+and a variable-width ink (1 → 9 pt along a straight stroke, nominal width 4 pt; ADR-0018);
+page 2 has `/Rotate 90` with a highlight, a note, a square and a variable-width ink at 60 %
+opacity. What each annotation is and what a viewer must show for it lives in one place,
+`tools/qa/annotation-sample-plan.ts`, which both the generator and the checker use.
 
 ## Automated results
 
@@ -42,10 +43,15 @@ For every row the checker looks at:
   square stays readable (dark pixels present); underline, strikeout and squiggly strokes sit
   at the right height of the text line; the link shows its blue underline appearance and
   nothing else; on page 2 the note icon matches the upright page-1 icon (not turned) and
-  hangs from the display position of its `/Rect`'s upper-left corner.
+  hangs from the display position of its `/Rect`'s upper-left corner; the variable-width
+  inks are drawn as wide as planned (within 0.6 pt) at 10, 30, 50, 70 and 90 % of the
+  stroke, centred on it, and at least 3× wider at the end than at the start (coverage of
+  the expected colour integrated across the stroke, through the page rotation).
 - **Data** as the renderer reports it: subtype, `/Rect` covering the geometry, QuadPoints,
   contents; the note text and `/Open true` (for pdf.js also: the popup is shown on load or
-  on click with the text); the link's URI (for pdf.js also: an `<a href>` over the link).
+  on click with the text); the link's URI (for pdf.js also: an `<a href>` over the link);
+  for the variable-width inks, the stroke width the renderer reports (`/BS /W`) is the
+  nominal width.
 
 Cell values: `ok`; `fail: <what>` (the command exits non-zero, so CI goes red); or
 `differs: <what>` for a renderer behaviour that departs from ISO 32000 for every file, not
@@ -79,8 +85,10 @@ rewritten on every run; the versions in its header are the ones that ran.
 | Page 2: note icon upright (NoRotate: not turned with the page), text in the comment UI | ok | ok |
 | Page 2: note icon hung from the /Rect upper-left corner (ISO 32000-2 §12.5.3) | ok | differs: icon placed in the rotated /Rect footprint (x 580–600, y 72–92 pt), not hung from the /Rect's upper-left corner (x 600–620, y 72–92 pt) |
 | Page 2: square placed in display space | ok | ok |
+| Ink, variable width (appearance) | ok | ok |
+| Ink `/BS /W` equals the nominal width | ok | ok |
 
-41 ok, 1 differs, 0 fail (of 42). Contact sheets: [pdfium](samples/annotations-matrix-pdfium.png), [pdfjs](samples/annotations-matrix-pdfjs.png).
+45 ok, 1 differs, 0 fail (of 46). Contact sheets: [pdfium](samples/annotations-matrix-pdfium.png), [pdfjs](samples/annotations-matrix-pdfjs.png).
 <!-- matrix:auto:end -->
 
 Contact sheets (each checked region outlined: green ok, amber differs, red fail):
@@ -110,6 +118,10 @@ Set `QA_MATRIX_EVIDENCE_DIR=<dir>` to also get a 2× crop of every region that i
   sample: the row turns `ok`). Until the engine does, the row is `fail` for pdf.js.
 - **NoZoom** is ignored by most renderers, ours included: note icons scale with the zoom.
   Cosmetic; not checked.
+- **Variable-width ink** lives in the ink's appearance stream (ADR-0018): `/InkList` keeps
+  the centre line and `/BS /W` the nominal width, so a viewer that redraws ink from
+  `/InkList` (an editor rebuilding the appearance) shows it at the nominal width. Both
+  renderers here draw the appearance.
 - The PDFium column is our build (`@embedpdf/pdfium`). Chrome and Edge ship their own,
   newer PDFium builds with their own viewer UI; Firefox ships its own pdf.js version.
 
@@ -136,9 +148,10 @@ release; do it when one of these viewers is at hand, or when a user reports a di
    (Acrobat Reader: also open the Comments pane; Preview: View → Show Markup Toolbar).
 2. Open the [PDFium contact sheet](samples/annotations-matrix-pdfium.png) next to it.
 3. Confirm nothing differs: every outlined annotation is there, in its colour; the
-   highlight and the square let their text show through; on page 2 the note icon is upright;
-   the note text appears in the viewer's comment UI; the link opens https://example.org/.
-   Optionally print to PDF and check that the annotations are printed.
+   highlight and the square let their text show through; the two variable-width inks taper
+   from thin to thick; on page 2 the note icon is upright; the note text appears in the
+   viewer's comment UI; the link opens https://example.org/. Optionally print to PDF and
+   check that the annotations are printed.
 4. Record the result below. File an issue for a difference, linking this file.
 
 | Viewer | Version, OS | Date | Result (`ok` or what differs) |
@@ -157,8 +170,9 @@ pnpm --filter @pdf-editor/qa-tool matrix:fresh
 ```
 
 `sample` runs `tools/qa/make-annotation-sample.ts` in Vitest browser mode (the adapter needs
-EmbedPDF's worker and WASM), asserts conformance and writes the file through Vitest's
-`commands.writeFile`. The output is reproducible: /NM values come from the plan, every date
+PDFium's WASM; it runs on the hosted engine with raw access, as in the app's PDFium worker,
+so variable-width inks get the engine's appearance), asserts conformance and writes the
+file through Vitest's `commands.writeFile`. The output is reproducible: /NM values come from the plan, every date
 is 2026-01-01 (the clock is frozen while the adapter saves) and the stamp image is drawn
 pixel by pixel, so a regeneration changes the file only when the engine's output changed.
 

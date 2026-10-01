@@ -88,6 +88,9 @@ function getAdapter(): PdfiumAdapter {
       wasmUrl,
       fontFallback: fontFallback ?? null,
       engineFactory: () => host().then((hosted) => hosted.engine),
+      // Adapter calls already hold the source's shared lock (`onSource`): one queue task,
+      // not `withRawAccess` (variable-width ink, ADR-0018).
+      rawTask: async (sourceId, fn, options) => (await host()).withRawTask(sourceId, fn, options),
       ...(inspector ? { inspector } : {}),
     });
   }

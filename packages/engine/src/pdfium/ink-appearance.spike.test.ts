@@ -108,8 +108,8 @@ interface Taper {
 }
 
 /**
- * A straight stroke whose width grows linearly. The matrix proposal in
- * tools/qa/annotation-sample-plan.ts (`PROPOSED_INK_ENTRIES`) uses the same shape: 25
+ * A straight stroke whose width grows linearly. The matrix entries `ink-variable` and
+ * `rotated-ink-variable` in tools/qa/annotation-sample-plan.ts (P4) use the same shape: 25
  * points, 1 → 9 pt, nominal 4 pt, measured at 10/30/50/70/90 % with 0.6 pt tolerance.
  */
 function taperStroke(t: Taper, points = 25): { path: InkPoint[]; widths: number[] } {
@@ -931,7 +931,10 @@ describe('S1 Q3: a 64-path annotation', () => {
 // Q4: the two proposed matrix rows, on the committed matrix sample (in memory)
 // ---------------------------------------------------------------------------
 
-/** Mirrors `PROPOSED_INK_ENTRIES` in tools/qa/annotation-sample-plan.ts. */
+/**
+ * The S1 proposal, now the `ink-variable` entries of tools/qa/annotation-sample-plan.ts (the
+ * committed sample holds them since P4, so these strokes are drawn over the same ones).
+ */
 const PROPOSED: readonly {
   key: string;
   pageIndex: number;

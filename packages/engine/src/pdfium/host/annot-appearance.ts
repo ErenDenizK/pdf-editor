@@ -1,9 +1,9 @@
 /**
  * Raw annotation appearance and private-key access (ADR-0011 §2), added by spike S1
- * (docs/research/09-ink-appearance-spike.md) for variable-width ink. Exported for P4; the
- * app does not use it yet. Every function is valid only inside `HostedEngine.withRawAccess`
- * (it holds the source's lock and the orchestrator's queue slot) and finds the annotation
- * by its /NM, as EmbedPDF does.
+ * (docs/research/09-ink-appearance-spike.md) and used by the adapter for variable-width ink
+ * (ADR-0018). Every function is valid only inside raw access (`HostedEngine.withRawAccess`,
+ * or `withRawTask` from inside an adapter call: both hold the orchestrator's queue slot) and
+ * finds the annotation by its /NM, as EmbedPDF does.
  *
  * - `setAnnotationAppearance`: optionally widens /Rect (`FPDFAnnot_SetRect`), replaces the
  *   normal appearance with our content (`FPDFAnnot_SetAP`: a new Form XObject whose /BBox is
@@ -12,10 +12,14 @@
  *   (`FPDFAnnot_SetStringValue`, a PDF text string). Then drops the executor's page cache.
  * - `annotationAppearance` / `annotationString`: read them back (`FPDFAnnot_GetAP`,
  *   `FPDFAnnot_GetStringValue`), e.g. after a reopen in a later session.
+ * - `annotationStringsOnPage`: one key of every annotation of a page that has it, by /NM
+ *   (one pass over the page, for `listAnnotations`).
+ * - `clearAnnotationString`: empties a private key (PDFium has no public call that removes
+ *   a key); an empty `/PdfEditorInkWidths` reads as "no widths".
  *
- * EmbedPDF's `updatePageAnnotation(…, { regenerateAppearance: true })` (what
- * `PdfiumAdapter.updateAnnotation` calls) regenerates the appearance from /InkList and
- * /BS /W, replacing ours; private keys survive it. Re-apply after every such update.
+ * EmbedPDF's `updatePageAnnotation(…, { regenerateAppearance: true })` regenerates the
+ * appearance from /InkList and /BS /W, replacing ours; private keys survive it. The adapter
+ * updates inks with widths with `regenerateAppearance: false` and writes ours right after.
  */
 import { EngineError } from '../../types';
 import type { RawAccess } from './hosted-engine';
@@ -137,4 +141,65 @@ export function annotationString(
         )
       : undefined,
   );
+}
+
+/**
+ * The value of `key` of every annotation on `pageIndex` that has it, by /NM (annotations
+ * without /NM are skipped). One pass over the page's annotations.
+ */
+export function annotationStringsOnPage(
+  access: RawAccess,
+  pageIndex: number,
+  key: string,
+): Map<string, string> {
+  const m = access.module;
+  const values = new Map<string, string>();
+  const page = access.doc.acquirePage(pageIndex);
+  try {
+    const count = m.FPDFPage_GetAnnotCount(page.pagePtr);
+    for (let i = 0; i < count; i++) {
+      const annot = m.FPDFPage_GetAnnot(page.pagePtr, i);
+      if (!annot) continue;
+      try {
+        if (!m.FPDFAnnot_HasKey(annot, key)) continue;
+        const name = annotationName(access, annot);
+        if (name === '') continue;
+        values.set(
+          name,
+          access.memory.readUtf16Result((buf, len) =>
+            m.FPDFAnnot_GetStringValue(annot, key, buf, len),
+          ),
+        );
+      } finally {
+        m.FPDFPage_CloseAnnot(annot);
+      }
+    }
+  } finally {
+    page.release();
+  }
+  return values;
+}
+
+/**
+ * Empties the private key `key` of annotation `name` when it has a non-empty value.
+ * Returns whether it wrote. The appearance and the page cache are left alone.
+ */
+export function clearAnnotationString(
+  access: RawAccess,
+  pageIndex: number,
+  name: string,
+  key: string,
+): boolean {
+  const m = access.module;
+  const mem = access.memory;
+  return withAnnotation(access, pageIndex, name, (annot) => {
+    if (!m.FPDFAnnot_HasKey(annot, key)) return false;
+    const value = mem.readUtf16Result((buf, len) =>
+      m.FPDFAnnot_GetStringValue(annot, key, buf, len),
+    );
+    if (value === '') return false;
+    const ok = mem.withWideString('', (ptr) => m.FPDFAnnot_SetStringValue(annot, key, ptr));
+    if (!ok) throw new EngineError('internal', `FPDFAnnot_SetStringValue(${key}) failed`);
+    return true;
+  });
 }

@@ -9,7 +9,9 @@
  *   pnpm --filter @pdf-editor/qa-tool sample
  *
  * Runs as a Vitest browser-mode file (see vitest.config.ts): the adapter needs a browser
- * (EmbedPDF's worker and WASM), and `commands.writeFile` stores the bytes. The sample must
+ * (PDFium's WASM), and `commands.writeFile` stores the bytes. The adapter runs on the hosted
+ * engine with raw access, as in the app's PDFium worker, so variable-width inks get the
+ * engine's appearance and `/PdfEditorInkWidths` (ADR-0018). The sample must
  * pass `checkAnnotationConformance` before it is written. Page 1 is upright; page 2 has
  * /Rotate 90 (annotations are placed in unrotated user space and shown rotated).
  *
@@ -23,6 +25,7 @@ import { degrees, PDFDocument, StandardFonts } from '@cantoo/pdf-lib';
 import wasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
 import {
   checkAnnotationConformance,
+  createHostedEngine,
   describeConformanceProblems,
   type NewAnnotation,
   PdfiumAdapter,
@@ -129,7 +132,13 @@ test('build docs/qa/samples/annotations-sample.pdf', async () => {
   // pdf-lib (/ModDate on load) and the adapter's post-pass (popup /M) read the clock.
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date(SAMPLE_DATE));
-  const adapter = new PdfiumAdapter({ wasmUrl, inspector: new PdfLibAssembler() });
+  const host = await createHostedEngine({ wasm: wasmUrl });
+  const adapter = new PdfiumAdapter({
+    wasmUrl,
+    engineFactory: () => host.engine,
+    rawTask: (sourceId, fn, options) => host.withRawTask(sourceId, fn, options),
+    inspector: new PdfLibAssembler(),
+  });
   const id = 'qa-sample' as SourceId;
   try {
     await adapter.open(id, await basePdf());
@@ -140,6 +149,8 @@ test('build docs/qa/samples/annotations-sample.pdf', async () => {
           : entry.annotation;
       const created = await adapter.createAnnotation(id, annotation);
       expect(created.id).toBe(entry.annotation.id);
+      // Variable-width inks come back with their widths (stored, two decimals).
+      if (entry.widthProfile) expect(created.kind === 'ink' && created.widths).toBeTruthy();
     }
     const bytes = await adapter.save(id);
     const report = await checkAnnotationConformance(bytes.slice(0));

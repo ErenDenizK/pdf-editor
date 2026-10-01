@@ -110,6 +110,20 @@ export interface HostedEngine {
     options?: RawAccessOptions,
   ): Promise<R>;
   /**
+   * Runs `fn` with raw access to `sourceId` as one task on the orchestrator's queue (no
+   * EmbedPDF task runs meanwhile) **without** taking the source's lock: for an adapter call
+   * that already holds it (shared; the lock is not re-entrant, so `withRawAccess` from there
+   * would wait for itself). Only for raw work that leaves the document whole for every other
+   * adapter call, whatever task it runs between: reads, or one self-contained annotation write
+   * (the adapter's variable-width ink, ADR-0018). Edits made of several steps use
+   * `withRawAccess`. `fn` must not await engine or adapter calls.
+   */
+  withRawTask<R>(
+    sourceId: string,
+    fn: (raw: RawAccess) => R | Promise<R>,
+    options?: RawAccessOptions,
+  ): Promise<R>;
+  /**
    * The executor's `disposeImmediate` on the page's cached context. Only inside
    * `withRawAccess` (or `raw.dropPageCache`), after a raw edit.
    */
@@ -255,6 +269,7 @@ export async function createHostedEngine(options: HostedEngineOptions): Promise<
         () => runOnQueue(sourceId, fn, callOptions.signal),
         callOptions.signal,
       ),
+    withRawTask: (sourceId, fn, callOptions = {}) => runOnQueue(sourceId, fn, callOptions.signal),
     dropPageCache,
   };
 }

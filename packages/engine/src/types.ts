@@ -232,6 +232,12 @@ export interface InkAnnotation extends AnnotationBase {
    * the filled outline of `annotations/ink-outline.ts`; the file keeps the widths in the
    * private `/PdfEditorInkWidths` string. Absent, or not matching `paths`, the stroke is
    * constant width (`strokeWidth`).
+   *
+   * The PDFium adapter (with raw access, as in the PDFium worker) writes the appearance, a
+   * /Rect of the outline bounds and the widths on create and on every update, and lists them
+   * back stored: two decimals, at least 0.01 pt. An update carries the full state, so one
+   * without widths makes the ink constant width. A move or resize of the box moves and
+   * scales the paths, not the widths (like `strokeWidth`).
    */
   readonly widths?: readonly (readonly number[])[];
 }

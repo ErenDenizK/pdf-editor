@@ -48,6 +48,12 @@ import type {
 
 import { checkAnnotationConformance, describeProblems } from '../annotations/conformance';
 import { finalizeAnnotations } from '../annotations/finalize';
+import {
+  INK_WIDTHS_KEY,
+  inkAppearance,
+  parseInkWidths,
+  storedInkWidths,
+} from '../annotations/ink-appearance';
 import { namedStampAppearance } from '../annotations/stamp-appearance';
 import {
   type Annotation,
@@ -105,11 +111,35 @@ import {
   unrotatedSize,
   userToDeviceRect,
 } from './coords';
+import {
+  annotationStringsOnPage,
+  clearAnnotationString,
+  setAnnotationAppearance,
+} from './host/annot-appearance';
+import type { RawAccess, RawAccessOptions } from './host/hosted-engine';
 import { type ErrorContext, runTask, throwIfAborted } from './task-bridge';
 import { edgeDeviation, locateWords, OCR_RECT_TOLERANCE } from '../ocr/verify';
 import type { PageChar } from '../redaction/engine-session';
 
 export type { FontFallbackConfig };
+
+/**
+ * One raw PDFium task on an open source from inside an adapter call: the
+ * `HostedEngine.withRawTask` of the host the engine runs on (ADR-0011).
+ */
+export type RawTaskRunner = <R>(
+  sourceId: string,
+  fn: (raw: RawAccess) => R | Promise<R>,
+  options?: RawAccessOptions,
+) => Promise<R>;
+
+/**
+ * Whether an update of an ink with widths lets EmbedPDF regenerate its constant-width
+ * appearance before ours replaces it. Off (ADR-0018 §2, measured by P4): EmbedPDF writes the
+ * data only, so there is no constant-width intermediate and one replaced stream per update
+ * instead of two.
+ */
+const INK_UPDATE_REGENERATES = false;
 
 export type PdfiumEngineFactory = (
   wasmUrl: string,
@@ -146,6 +176,14 @@ export interface PdfiumAdapterOptions {
    * carry no labels and label expectations cannot be verified.
    */
   readonly inspector?: SourceInspector;
+  /**
+   * Raw access from inside adapter calls (`HostedEngine.withRawTask` of the host that runs
+   * `engineFactory`'s engine), for what EmbedPDF cannot write or read: variable-width ink
+   * (ADR-0018), whose appearance and `/PdfEditorInkWidths` the adapter writes after
+   * EmbedPDF's create or update and reads back on listing. Without it, ink `widths` are
+   * neither written nor read and every ink is drawn at its nominal width.
+   */
+  readonly rawTask?: RawTaskRunner;
 }
 
 /**
@@ -210,6 +248,7 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   private readonly logger: Logger | undefined;
   private readonly engineFactory: PdfiumEngineFactory;
   private readonly inspector: SourceInspector | undefined;
+  private readonly rawTask: RawTaskRunner | undefined;
   private enginePromise: Promise<PdfEngine> | undefined;
   private readonly docs = new Map<SourceId, OpenEntry>();
   /** Sources whose form values were set since open (save regenerates appearances). */
@@ -227,6 +266,7 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     this.logger = options.logger;
     this.engineFactory = options.engineFactory ?? defaultEngineFactory;
     this.inspector = options.inspector;
+    this.rawTask = options.rawTask;
   }
 
   // -------------------------------------------------------------------------
@@ -724,7 +764,64 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
         );
       }
     }
-    return result;
+    return this.withInkWidths(id, pageIndex, result, options);
+  }
+
+  /**
+   * Inks of `annotations` with the widths stored in their `/PdfEditorInkWidths` (one raw
+   * read per page with ink), kept only when they match the ink's paths point for point
+   * (ADR-0018 §4). Without raw access, or for a page without ink, `annotations` as given.
+   */
+  private async withInkWidths(
+    id: SourceId,
+    pageIndex: number,
+    annotations: Annotation[],
+    options: EngineCallOptions | undefined,
+  ): Promise<Annotation[]> {
+    const rawTask = this.rawTask;
+    if (!rawTask || !annotations.some((a) => a.kind === 'ink')) return annotations;
+    const stored = await rawTask(
+      id,
+      (raw) => annotationStringsOnPage(raw, pageIndex, INK_WIDTHS_KEY),
+      options?.signal ? { signal: options.signal } : {},
+    );
+    return annotations.map((a) => {
+      if (a.kind !== 'ink') return a;
+      const widths = parseInkWidths(stored.get(a.id), a.paths);
+      return widths ? { ...a, widths } : a;
+    });
+  }
+
+  /**
+   * After EmbedPDF's create or update of ink `nm`: with widths that match its paths, writes
+   * our appearance, the outline's /Rect and `/PdfEditorInkWidths` in one raw task (ADR-0018);
+   * without, empties a stored `/PdfEditorInkWidths` so it cannot come back on a later listing.
+   * Returns whether our appearance was written. Never aborted: EmbedPDF's half of the edit
+   * has happened.
+   */
+  private async writeInk(
+    id: SourceId,
+    nm: string,
+    ink: Extract<NewAnnotation, { kind: 'ink' }>,
+    clear: boolean,
+  ): Promise<boolean> {
+    const rawTask = this.rawTask;
+    if (!rawTask) return false;
+    const write = inkAppearance(ink);
+    if (!write) {
+      if (clear) {
+        await rawTask(id, (raw) => clearAnnotationString(raw, ink.pageIndex, nm, INK_WIDTHS_KEY));
+      }
+      return false;
+    }
+    await rawTask(id, (raw) => {
+      setAnnotationAppearance(raw, ink.pageIndex, nm, {
+        content: write.content,
+        rect: write.rect,
+        strings: { [INK_WIDTHS_KEY]: write.widths },
+      });
+    });
+    return true;
   }
 
   private async findAnnotation(
@@ -754,7 +851,10 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     const raw = await this.rawAnnotations(id, pageIndex, options);
     const found = raw.find((a) => a.id === annotationId);
     const g = pageGeometry(this.page(id, pageIndex).page);
-    return (found ? this.mapRaw(id, found, g) : undefined) ?? fallback;
+    const mapped = found ? this.mapRaw(id, found, g) : undefined;
+    if (!mapped) return fallback;
+    const [withWidths] = await this.withInkWidths(id, pageIndex, [mapped], options);
+    return withWidths ?? mapped;
   }
 
   /**
@@ -863,6 +963,14 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
         : engine.createPageAnnotation(doc, page, object);
     const newId = await this.run(task, options, 'createAnnotation');
     this.remember(id, annotation, newId);
+    if (annotation.kind === 'ink') {
+      try {
+        await this.writeInk(id, newId, annotation, false);
+      } catch (error) {
+        // EmbedPDF's constant-width appearance stays: the ink exists, at its nominal width.
+        this.logger?.warn(LOG_SOURCE, 'Annotations', 'variable-width ink not written', error);
+      }
+    }
     const { id: _requested, ...rest } = annotation;
     return this.reread(id, annotation.pageIndex, newId, { ...rest, id: newId }, options);
   }
@@ -905,12 +1013,38 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
       return this.createAnnotation(id, next, options);
     }
     const object = { ...existing, ...toEmbedPdf(next, annotation.id, g) };
+    // An ink with widths gets our appearance right after (writeInk); EmbedPDF's own would
+    // only be replaced.
+    const ours =
+      next.kind === 'ink' &&
+      this.rawTask !== undefined &&
+      storedInkWidths(next.paths, next.widths) !== undefined;
+    const regenerateAppearance = !ours || INK_UPDATE_REGENERATES;
     await this.run(
-      engine.updatePageAnnotation(doc, page, object, { regenerateAppearance: true }),
+      engine.updatePageAnnotation(doc, page, object, { regenerateAppearance }),
       options,
       'updateAnnotation',
     );
     this.remember(id, next, annotation.id);
+    if (next.kind === 'ink') {
+      try {
+        await this.writeInk(id, annotation.id, next, true);
+      } catch (error) {
+        // Fall back to a constant width: EmbedPDF's appearance from the new data, and no
+        // widths that could come back on a later listing.
+        this.logger?.warn(LOG_SOURCE, 'Annotations', 'variable-width ink not written', error);
+        if (!regenerateAppearance) {
+          await this.run(
+            engine.updatePageAnnotation(doc, page, object, { regenerateAppearance: true }),
+            {},
+            'updateAnnotation',
+          );
+        }
+        await this.rawTask?.(id, (raw) =>
+          clearAnnotationString(raw, next.pageIndex, annotation.id, INK_WIDTHS_KEY),
+        );
+      }
+    }
     return this.reread(id, annotation.pageIndex, annotation.id, next, options);
   }
 

@@ -4,6 +4,7 @@ export {
   PdfiumAdapter,
   type PdfiumAdapterOptions,
   type PdfiumEngineFactory,
+  type RawTaskRunner,
   type FontFallbackConfig,
 } from './pdfium/pdfium-adapter';
 /** Charset keys for a self-hosted `FontFallbackConfig`. */

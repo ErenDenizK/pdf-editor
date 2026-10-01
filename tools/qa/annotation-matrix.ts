@@ -38,6 +38,8 @@ import {
   type MatrixRow,
   type PlanEntry,
   planEntry,
+  plannedWidth,
+  pointToDisplay,
   type Rect,
   ROWS,
   SAMPLE_PATH,
@@ -75,6 +77,8 @@ interface ReportedAnnotation {
   readonly contents?: string;
   readonly open?: boolean;
   readonly uri?: string;
+  /** Ink: the stroke width the renderer reports (/BS /W). */
+  readonly strokeWidth?: number;
   /** pdf.js: the annotation id its layer uses (`data-annotation-id`). */
   readonly layerId?: string;
 }
@@ -131,6 +135,7 @@ function fromEngine(a: Annotation): ReportedAnnotation {
     ...(a.contents === undefined ? {} : { contents: a.contents }),
     ...(a.kind === 'text' && a.open !== undefined ? { open: a.open } : {}),
     ...(a.kind === 'link' && a.uri !== undefined ? { uri: a.uri } : {}),
+    ...(a.kind === 'ink' ? { strokeWidth: a.strokeWidth } : {}),
   };
 }
 
@@ -178,6 +183,7 @@ interface PdfjsAnnotationData {
   readonly url?: string;
   readonly open?: boolean;
   readonly popupRef?: string | null;
+  readonly borderStyle?: { readonly width: number } | null;
 }
 
 function rectOf(r: readonly number[]): Rect {
@@ -216,6 +222,7 @@ function fromPdfjs(all: readonly PdfjsAnnotationData[]): ReportedAnnotation[] {
         ...(a.contentsObj?.str ? { contents: a.contentsObj.str } : {}),
         ...(popup ? { open: popup.open === true } : {}),
         ...(a.url === undefined ? {} : { uri: a.url }),
+        ...(a.subtype === 'Ink' && a.borderStyle ? { strokeWidth: a.borderStyle.width } : {}),
       };
     });
 }
@@ -602,6 +609,97 @@ function checkAppearance(entry: PlanEntry, rendered: RenderedPage): Problem[] {
 }
 
 // ---------------------------------------------------------------------------------------
+// Variable-width ink (ADR-0018)
+// ---------------------------------------------------------------------------------------
+
+/**
+ * Share (0–1) of the expected colour in a pixel: its ink projected onto "white → expected"
+ * (anti-aliased edges count partly); pixels of another colour count 0.
+ */
+function coverage(raster: Raster, x: number, y: number, expected: Rgb): number {
+  if (x < 0 || y < 0 || x >= raster.width || y >= raster.height) return 0;
+  const i = (y * raster.width + x) * 4;
+  const v = [0, 1, 2].map((c) => 255 - (raster.data[i + c] ?? 255));
+  const d = expected.map((c) => 255 - c);
+  const dd = d.reduce((sum, e) => sum + e * e, 0);
+  if (dd === 0) return 0;
+  const a = v.reduce((sum, e, c) => sum + e * (d[c] ?? 0), 0) / dd;
+  const residual = Math.hypot(...v.map((e, c) => e - a * (d[c] ?? 0)));
+  return residual > 48 ? 0 : Math.min(Math.max(a, 0), 1);
+}
+
+/** Bilinear coverage at a continuous pixel position. */
+function coverageAt(raster: Raster, x: number, y: number, expected: Rgb): number {
+  const fx = x - 0.5;
+  const fy = y - 0.5;
+  const i = Math.floor(fx);
+  const j = Math.floor(fy);
+  const u = fx - i;
+  const v = fy - j;
+  return (
+    coverage(raster, i, j, expected) * (1 - u) * (1 - v) +
+    coverage(raster, i + 1, j, expected) * u * (1 - v) +
+    coverage(raster, i, j + 1, expected) * (1 - u) * v +
+    coverage(raster, i + 1, j + 1, expected) * u * v
+  );
+}
+
+/**
+ * The drawn width of a straight variable-width stroke at each planned position: coverage
+ * integrated across the stroke (in points, through the page rotation), and where its centre
+ * lies relative to the centre line. Spike S1's measure (docs/research/09-ink-appearance-spike.md).
+ */
+function checkWidth(entry: PlanEntry, rendered: RenderedPage): Problem[] {
+  const profile = entry.widthProfile;
+  const appearance = entry.appearance;
+  if (!profile || !appearance) return [problem('the plan has no width profile for it')];
+  const rotation = PAGE_ROTATIONS[entry.annotation.pageIndex] ?? 0;
+  const expected = hexRgb(appearance.colour);
+  const dx = profile.to.x - profile.from.x;
+  const dy = profile.to.y - profile.from.y;
+  const length = Math.hypot(dx, dy);
+  const normal = { x: -dy / length, y: dx / length };
+  const step = 0.05;
+  const reach = Math.max(profile.startWidth, profile.endWidth) + 4;
+  const samples = profile.at.map((t) => {
+    const c = { x: profile.from.x + dx * t, y: profile.from.y + dy * t };
+    let sum = 0;
+    let moment = 0;
+    for (let s = -reach; s <= reach; s += step) {
+      const p = pointToDisplay(c.x + normal.x * s, c.y + normal.y * s, rotation);
+      const cov = coverageAt(rendered.raster, p.x * SCALE, p.y * SCALE, expected) * step;
+      sum += cov;
+      moment += cov * s;
+    }
+    return { t, planned: plannedWidth(profile, t), width: sum, offset: sum > 0 ? moment / sum : 0 };
+  });
+  const drawn = samples.map((s) => s.width.toFixed(2)).join('/');
+  const planned = samples.map((s) => s.planned.toFixed(1)).join('/');
+  const problems: Problem[] = [];
+  if (samples.some((s) => Math.abs(s.width - s.planned) > profile.tolerance)) {
+    problems.push(problem(`drawn width ${drawn} pt, planned ${planned} pt`));
+  }
+  if (samples.some((s) => Math.abs(s.offset) > profile.tolerance)) {
+    const offsets = samples.map((s) => s.offset.toFixed(2)).join('/');
+    problems.push(problem(`drawn off the centre line by ${offsets} pt`));
+  }
+  const first = samples[0]?.width ?? 0;
+  const last = samples[samples.length - 1]?.width ?? 0;
+  if (first <= 0 || last / first < profile.minRatio) {
+    problems.push(problem(`width does not vary (${drawn} pt)`));
+  }
+  return problems;
+}
+
+function checkNominalWidth(entry: PlanEntry, a: ReportedAnnotation): Problem[] {
+  const nominal = entry.annotation.kind === 'ink' ? entry.annotation.strokeWidth : undefined;
+  if (nominal === undefined) return [problem('not an ink')];
+  return a.strokeWidth === nominal
+    ? []
+    : [problem(`stroke width ${a.strokeWidth ?? 'missing'}, expected ${nominal}`)];
+}
+
+// ---------------------------------------------------------------------------------------
 // Orientation of a note icon on a rotated page
 // ---------------------------------------------------------------------------------------
 
@@ -782,20 +880,35 @@ function checkData(entry: PlanEntry, a: ReportedAnnotation): Problem[] {
   return problems;
 }
 
+/** The plan entries a row checks. */
+function rowKeys(row: MatrixRow): string[] {
+  return [row.key, ...(row.alsoKeys ?? [])];
+}
+
 function checkRow(run: RendererRun, row: MatrixRow): Problem[] {
-  const entry = planEntry(row.key);
+  const keys = rowKeys(row);
+  if (keys.length === 1) return checkEntry(run, row, row.key);
+  // Several entries: each problem names its entry.
+  return keys.flatMap((key) =>
+    checkEntry(run, row, key).map((p) => ({ ...p, text: `${key}: ${p.text}` })),
+  );
+}
+
+function checkEntry(run: RendererRun, row: MatrixRow, key: string): Problem[] {
+  const entry = planEntry(key);
   const { aspects } = row;
   const rendered = run.pages[entry.annotation.pageIndex];
   if (!rendered) return [problem('page not rendered')];
   const problems: Problem[] = [];
   if (aspects.includes('appearance')) problems.push(...checkAppearance(entry, rendered));
   if (aspects.includes('upright')) problems.push(...checkUpright(entry, run));
-  if (!aspects.some((a) => a === 'data' || a === 'contents' || a === 'open' || a === 'uri')) {
-    return problems;
-  }
+  if (aspects.includes('width')) problems.push(...checkWidth(entry, rendered));
+  const reads = ['data', 'contents', 'open', 'uri', 'nominal-width'] as const;
+  if (!aspects.some((a) => (reads as readonly string[]).includes(a))) return problems;
   const reported = reportedFor(entry, rendered);
   if (!reported) return [...problems, problem(`no ${entry.subtype} annotation reported`)];
   if (aspects.includes('data')) problems.push(...checkData(entry, reported));
+  if (aspects.includes('nominal-width')) problems.push(...checkNominalWidth(entry, reported));
   const contents = entry.annotation.contents ?? '';
   const layer = rendered.layer;
   const layerId = reported.layerId ?? '';
@@ -1019,9 +1132,12 @@ test('annotation cross-viewer matrix (PDFium, pdf.js)', async () => {
     const pixel = new Map<string, Verdict['status']>();
     const rank = { ok: 0, differs: 1, fail: 2 } as const;
     for (const [index, row] of ROWS.entries()) {
-      if (!row.aspects.includes('appearance') && !row.aspects.includes('upright')) continue;
+      const pixels: readonly string[] = ['appearance', 'upright', 'width'];
+      if (!row.aspects.some((a) => pixels.includes(a))) continue;
       const status = verdicts[index]?.[r]?.status ?? 'ok';
-      if (rank[status] > rank[pixel.get(row.key) ?? 'ok']) pixel.set(row.key, status);
+      for (const key of rowKeys(row)) {
+        if (rank[status] > rank[pixel.get(key) ?? 'ok']) pixel.set(key, status);
+      }
     }
     await commands.writeFile(SHEET_PATH(run.id), await contactSheet(run, pixel), 'base64');
     if (EVIDENCE_DIR) {
