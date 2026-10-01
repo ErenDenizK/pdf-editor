@@ -1,0 +1,15 @@
+{
+  "$comment": "Size limits per published file in out/media/ (docs/specs/presentation.md §2.4), in bytes, decimal (1 KB = 1000 B). `check` fails on a file over its limit, on a listed file that is missing, and on a file with no entry. `readme` lists the files the README shows on first view; their total has its own limit.",
+  "files": {
+    "00-hero.png": 600000,
+    "00-hero.webp": 600000,
+    "01-open-many.gif": 3000000,
+    "01-open-many.mp4": 1500000,
+    "01-open-many.webm": 1500000,
+    "01-open-many.poster.webp": 1500000
+  },
+  "readme": {
+    "limit": 12000000,
+    "files": ["00-hero.png"]
+  }
+}

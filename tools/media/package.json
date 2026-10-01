@@ -1,0 +1,15 @@
+{
+  "name": "@pdf-editor/media-tool",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Scripted README and about-page media (docs/specs/presentation.md §2): Playwright scenes against the preview build, ffmpeg encoding, size budgets and a request log.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "capture": "playwright test",
+    "encode": "node --experimental-strip-types --no-warnings=ExperimentalWarning lib/encode.ts",
+    "check": "node --experimental-strip-types --no-warnings=ExperimentalWarning lib/check.ts",
+    "all": "pnpm run capture && pnpm run encode && pnpm run check",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

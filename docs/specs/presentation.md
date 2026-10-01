@@ -4,7 +4,7 @@
 
 M7 makes the project presentable and releases it: a README that shows the product working,
 media produced by a script rather than by hand, a small about page beside the app, the
-repository's metadata, the rename to Recto with the move to its own domain, and the first
+repository's metadata, the rename to Recto at its new address, and the first
 public release. Every public sentence is a claim a reader can check. Source: the
 presentation and naming studies of 2026-10-01.
 
@@ -13,7 +13,7 @@ presentation and naming studies of 2026-10-01.
 | Topic | Decision | Source |
 |---|---|---|
 | Name | Recto; descriptor "Recto PDF"; storage names unchanged | ADR-0015 |
-| Address | own domain (`rectopdf.app` recommended), one step with the rename | ADR-0016 |
+| Address | GitHub Pages only for now: repository `recto`, app at `erendenizk.github.io/recto/`, redirect folder and kill switch at `/pdf-editor/` in the portfolio repository (ADR-0016 decision 6); a domain later | ADR-0016 |
 | App location | stays at the site root; no `/app/`; `/about/` is a sibling | ADR-0016 §4 |
 | First release | `1.0.0-beta.0`, Changesets pre mode, GitHub pre-release | ADR-0017 |
 | Media storage | built in CI, served from the site under `media/`, never committed | §2.6 |
@@ -188,7 +188,8 @@ Playwright container, whose ffmpeg is stripped): `playwright install --with-deps
 chromium`, `apt-get install -y ffmpeg`, serve `dist`, run the scenes, check budgets, add
 `media/` to the Pages artifact. The release workflow zips the same files onto the release.
 `media/**` is added to Workbox `globIgnores`, so it is never precached. README image URLs
-point at the domain (`https://rectopdf.app/media/<id>.gif`).
+point at the site (`https://erendenizk.github.io/recto/media/<id>.gif`); a later domain move
+changes one prefix.
 
 ## 3. The about page (`/about/`)
 
@@ -219,7 +220,7 @@ point at the domain (`https://rectopdf.app/media/<id>.gif`).
 - **Description**: "Recto PDF: a PDF editor that runs entirely in your browser. Arrange
   pages across many PDFs, annotate, fill forms, redact, edit text, OCR, compare and sign.
   Nothing is uploaded; works offline. Apache-2.0."
-- **Website**: the custom domain.
+- **Website**: `https://erendenizk.github.io/recto/`.
 - **Topics** (20): `pdf` `pdf-editor` `pdf-viewer` `merge-pdf` `split-pdf`
   `pdf-annotation` `redaction` `ocr` `digital-signature` `pdfium` `webassembly` `pwa`
   `offline-first` `local-first` `privacy` `client-side` `tesseract` `react` `typescript`
@@ -264,7 +265,7 @@ scan, 5 both report versions, 6 and 8 the report. Clip 7 shows the test certific
 The README uses the hero still and clips 2, 3, 4 and 5 as GIFs; the about page uses all
 eight as MP4, plus an optional ninth (batch recipes).
 
-## 7. Rename checklist (one pass, after the owner confirms and the domain exists)
+## 7. Rename checklist (one pass, after the owner confirms the name)
 
 | Place | Change |
 |---|---|
@@ -318,18 +319,18 @@ format id `pdf-editor-recipe`; file-picker ids; the `@pdf-editor/*` scope; the t
 | WP6 | In-app About dialog, build-time version, EN/TR strings | 0.5 day | — |
 | WP7 | README rewrite, copy review against §1.2–1.3, link checker | 0.5 day | WP3 |
 | WP8 | Social template; metadata (manual in Settings) | 2 hours | WP3 |
-| WP9 | Portfolio repository with redirect folder and kill switch, e2e | 1 day | domain |
+| WP9 | Redirect folder and kill switch (`tools/portfolio-redirect/`, copied into `ErenDenizK.github.io`), e2e | 1 day | owner creates the repository |
 | WP10 | Rename pass (§7) and migration steps (ADR-0016 §5) | 0.5 day | owner, WP9 |
 | WP11 | Docs: CONTRIBUTING, `.changeset/README.md`, ARCHITECTURE §7 | 2 hours | WP4 |
 | WP12 | Release `1.0.0-beta.0` (ADR-0017 §2) | 2 hours | all |
 
 Order:
 
-1. WP1, WP6 and WP9 in parallel; WP2 after WP1. The owner buys the domain and runs the
-   trademark searches meanwhile.
+1. WP1, WP6 and WP9 in parallel; WP2 after WP1. The owner creates the portfolio repository
+   and runs the trademark searches meanwhile.
 2. WP3 once M6's layout is frozen (the clips show the M6 UI); then WP4, WP5, WP7, WP8.
-3. WP10 when the owner confirms ADR-0015 and the domain resolves; the README and about page
-   switch to the domain URLs in the same commit.
+3. WP10 when the owner confirms ADR-0015 and the portfolio repository serves `/pdf-editor/`;
+   the README and about page switch to the `/recto/` URLs in the same commit.
 4. WP11, an independent review of the public copy and the migration, then WP12.
 
 ## 10. Out of scope
