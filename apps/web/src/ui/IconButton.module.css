@@ -38,15 +38,35 @@
   background: var(--surface-active);
 }
 
-/* Chrome toggles are neutral; only the active tool (a selection state) uses the accent. */
+/* Chrome toggles are neutral; only option choices and the armed tool use the accent. */
 .button[aria-pressed='true'],
 .button[aria-selected='true'] {
   background: var(--surface-active);
   color: var(--text-primary);
 }
 
+/* An option toggle on a bar (the Compare heat map) is an option choice: --accent-muted. */
 .button[data-size='toolbar'][aria-pressed='true'] {
   background: var(--accent-muted);
+}
+
+/* The armed tool (a bar button with data-tool) is a solid accent fill with a canvas-dark icon,
+   >= 3:1 against the glass over any page (DESIGN.md §3). Hover and press move one accent step,
+   like the primary button. */
+.button[data-size='toolbar'][data-tool][aria-pressed='true'] {
+  background: var(--tool-active-fill);
+  color: var(--tool-active-ink);
+}
+
+@media (hover: hover) {
+  .button[data-size='toolbar'][data-tool][aria-pressed='true']:hover {
+    background: var(--accent-hover);
+    color: var(--tool-active-ink);
+  }
+}
+
+.button[data-size='toolbar'][data-tool][aria-pressed='true']:active {
+  background: var(--accent-pressed);
 }
 
 .button[aria-disabled='true'] {

@@ -11,7 +11,8 @@
   opacity: 0;
 }
 
-/* Glass with a solid fallback; the scrim underneath keeps contrast predictable. */
+/* Glass with a solid fallback; the scrim underneath keeps contrast predictable. It rises in
+   like the menus (--motion-rise). */
 .popup {
   composes: glass from global;
   position: fixed;
@@ -35,7 +36,7 @@
 .popup[data-starting-style],
 .popup[data-ending-style] {
   opacity: 0;
-  transform: translateX(-50%) scale(var(--enter-scale));
+  transform: translateX(-50%) var(--motion-rise);
 }
 
 .searchRow {

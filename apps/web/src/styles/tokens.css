@@ -13,23 +13,39 @@
  *   glass stays at #3f4043 or darker, where every glass text colour is AA: primary 8.4:1,
  *   --glass-text-secondary 5.2:1, --glass-danger 4.6:1, warning 6.4:1, the accent (non-text
  *   only) 3.5:1.
+ * - Experience redesign M6 (docs/specs/experience-redesign.md §7, docs/design/audit-2026-10/
+ *   V1-RESULTS.md): the canvas goes darker and docked surfaces step up (canvas to panel 1.05:1 ->
+ *   1.14:1, an L* step of 6.9), --text-tertiary #858a92 -> #8f949c (4.71:1 on the new
+ *   --surface-3), and the glass gets lighter (rgb(48 51 58 / 0.66) over a backdrop darkened to
+ *   0.36), so the bar reads over the canvas (1.03:1 -> 1.27:1) while a white page still blends to
+ *   #3f4145 at worst: primary 8.3:1, --glass-text-secondary 5.1:1, --glass-danger 4.5:1, warning
+ *   6.3:1, the accent (non-text only) 3.4:1. Floating chrome carries one elevation token.
+ *   tokens.test.ts asserts every ratio against this file.
  */
 :root,
 [data-theme='dark'] {
   color-scheme: dark;
 
-  /* Surface ladder: canvas -> panel -> raised -> overlay. Elevation is a tonal step. */
-  --surface-0: #0a0b0d;
-  --surface-1: #101215;
-  --surface-2: #16181c;
-  --surface-3: #1c1f24;
+  /* Surface ladder: canvas -> panel -> raised -> overlay. Docked surfaces are flat: elevation is
+     a tonal step plus a hairline. The canvas (and Home) sits darkest, so the page and the
+     floating bar stand out of a near-black field and the panels read as a frame. */
+  --surface-0: #08090b; /* canvas, Home background */
+  --surface-1: #181a1f; /* panels, title bar, status bar, navigator */
+  --surface-2: #1f2227; /* raised: cards, inputs, --glass-solid */
+  --surface-3: #272a30; /* view switch on, disabled primary */
   --surface-hover: rgb(255 255 255 / 0.045);
   --surface-active: rgb(255 255 255 / 0.075);
   /* Floating chrome over the document (.glass in global.css). --glass-solid is the opaque
      fallback. */
-  --glass: rgb(24 26 31 / 0.5);
-  --glass-filter: blur(24px) saturate(1.8) brightness(0.4);
-  --glass-solid: #16181c;
+  --glass: rgb(48 51 58 / 0.66);
+  --glass-filter: blur(28px) saturate(1.8) brightness(0.36);
+  --glass-solid: var(--surface-2);
+  /* The one elevation token, for floating chrome only (every .glass surface): a 1px inner top
+     highlight, a dark hairline ring that holds the edge over a white page, and one soft
+     shadow. Docked surfaces, dialogs and tooltips stay flat. No other shadow, glow or halo. */
+  --elevation-float:
+    inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.5),
+    0 8px 24px -8px rgb(0 0 0 / 0.55);
   --scrim: rgb(5 6 8 / 0.56);
 
   /* One border alpha (0.10) for dividers, surfaces, glass, keycaps and the page hairline,
@@ -42,11 +58,11 @@
 
   --text-primary: #e6e7ea;
   --text-secondary: #9a9ea6;
-  --text-tertiary: #858a92;
+  --text-tertiary: #8f949c;
   --text-disabled: #4a4e55;
   /* Text on glass: two steps, both AA over a white page. Tertiary maps to secondary. */
   --glass-text-secondary: #b4b8bf;
-  --glass-text-disabled: #6f737b; /* disabled icons stay visible (2.2:1) over a white page */
+  --glass-text-disabled: #6f737b; /* disabled icons stay visible (2.1:1) over a white page */
   --glass-danger: #ff8a8a; /* #ff6b6b would be 3.7:1 there */
 
   /* One accent: focus, selection, primary action. Nothing else. */
@@ -55,6 +71,11 @@
      (--surface-0) stays AA on all three: 6.6:1, 7.9:1, 5.7:1. */
   --accent-hover: #8f9dff;
   --accent-pressed: #6f7ff5;
+  /* The armed tool on a floating bar: a solid accent fill with a canvas-dark icon (6.7:1). The
+     fill stays >= 3:1 against the bar over any page (3.4:1 over a white page, 5.3:1 over the
+     canvas). Other option choices keep --accent-muted. */
+  --tool-active-fill: var(--accent);
+  --tool-active-ink: var(--surface-0);
   /* Four accent alphas (plus the current search hit):
      subtle: washes, hover fills, previews · muted: selected and current fills ·
      line: 1px rings and borders on non-focus states · highlight: multiply highlights on the
@@ -97,13 +118,15 @@
   --leading-base: 20px;
 
   /* Radius scale: 2 (on-page marks, page sheets) · 4 (small controls, keycaps, badges) ·
-     6 (buttons, rows, inputs, menus, popovers, tooltips) · 10 (floating bars, palette,
-     dialogs, cards) · round (dots, discs, pills). */
+     6 (buttons, rows, inputs, menus, popovers, tooltips) · 10 (contextual bars, palette,
+     dialogs, cards) · round (dots, discs, pills) · capsule (the floating tool bar and the pen
+     bar). */
   --radius-page: 2px;
   --radius-1: 4px;
   --radius-2: 6px;
   --radius-3: 10px;
   --radius-round: 999px;
+  --radius-capsule: var(--radius-round);
 
   --space-1: 4px;
   --space-2: 8px;
@@ -115,12 +138,16 @@
   --space-12: 48px;
 
   /* One curve. instant: drag feedback only · fast: state changes, popup enter and exit ·
-     base: scrims, drag-over. Popups, the palette and dialogs enter from one scale. */
+     base: scrims, drag-over. Menus, popovers and the palette rise in: they start
+     --rise-distance nearer their anchor (--motion-rise for a popup above it) at opacity 0 and
+     settle over --duration-fast. Tooltips and dialogs enter from --enter-scale. */
   --duration-instant: 60ms;
   --duration-fast: 120ms;
   --duration-base: 180ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
   --enter-scale: 0.98;
+  --rise-distance: 4px;
+  --motion-rise: translateY(var(--rise-distance));
 
   /* Shell metrics. */
   --titlebar-height: 40px;
@@ -138,10 +165,12 @@
     --duration-instant: 0ms;
     --duration-fast: 0ms;
     --duration-base: 0ms;
+    --rise-distance: 0px;
   }
 }
 
-/* Floating chrome falls back to a solid surface when transparency is unwelcome. */
+/* Floating chrome falls back to a solid surface when transparency is unwelcome; the ring and
+   the shadow stay, so the surface still floats. */
 @media (prefers-reduced-transparency: reduce) {
   :root {
     --glass: var(--glass-solid);
@@ -156,6 +185,8 @@
     --border-hairline: rgb(255 255 255 / 0.22);
     --border-strong: rgb(255 255 255 / 0.36);
     --border-glass: rgb(255 255 255 / 0.36);
+    /* Edges come from the strong border alone: no shadow and no highlight. */
+    --elevation-float: none;
     --text-secondary: #c2c5cb;
     --text-tertiary: #a9adb4;
   }
@@ -167,5 +198,6 @@
     --glass-solid: Canvas;
     --glass-filter: none;
     --border-glass: CanvasText;
+    --elevation-float: none;
   }
 }

@@ -7,7 +7,8 @@ visual explorations will be added under `docs/design/` as they are produced.
 
 Quiet, dense, professional. The document is the only bright thing on screen; the
 application recedes into a near-black field. Nothing glows. Hierarchy comes from tonal
-steps and hairline borders, not from shadows or saturated color. The product should feel
+steps and hairline borders, not from shadows or saturated color; only floating chrome
+floats, with one elevation token (§3). The product should feel
 closer to Linear, Raycast and Apple Preview than to Acrobat or any "PDF tools" site.
 
 References studied in `research/02-market-and-ux.md` §5: Linear (surface ladder, single
@@ -15,6 +16,8 @@ accent), Raycast (no shadows, hairline borders, keycap shortcut hints), Vercel G
 (neutrals only, accent as punctuation), Apple Preview (thumbnail sidebar you drag pages
 into), tldraw (canvas app layout, selection-driven style panel), Excalidraw (island
 containers; and the anti-pattern of CSS-invert dark mode).
+
+*Amended 2026-10-01 (M6, A1): floating chrome carries one elevation token.*
 
 ## 2. Layout
 
@@ -80,6 +83,9 @@ and is a v1.x item, not a v1 blocker. The source of truth is
   --glass-text-secondary: #b4b8bf;      /* secondary and tertiary text on glass */
   --glass-text-disabled: #6f737b;
   --glass-danger: #ff8a8a;
+  /* the one elevation, floating chrome only: inner top highlight, hairline ring, one soft shadow */
+  --elevation-float: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.5),
+                     0 8px 24px -8px rgb(0 0 0 / 0.55);
 
   /* borders: one alpha, one control step, one swatch ring */
   --border-hairline: rgb(255 255 255 / 0.10);  /* dividers, surfaces, keycaps, page hairline */
@@ -96,6 +102,8 @@ and is a v1.x item, not a v1 blocker. The source of truth is
   --accent:          #7c8cff;
   --accent-hover:    #8f9dff;  /* primary button hover */
   --accent-pressed:  #6f7ff5;  /* primary button pressed */
+  --tool-active-fill: var(--accent);     /* the armed tool: a solid fill … */
+  --tool-active-ink:  var(--surface-0);  /* … with a canvas-dark icon */
   --accent-subtle:   rgb(124 140 255 / 0.08);  /* washes, hover fills, previews */
   --accent-muted:    rgb(124 140 255 / 0.16);  /* selected and current fills */
   --accent-line:     rgb(124 140 255 / 0.45);  /* 1px rings on non-focus states */
@@ -113,14 +121,18 @@ and is a v1.x item, not a v1 blocker. The source of truth is
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
   --tracking-ui: 0.01em;      /* slight positive tracking on dark backgrounds */
 
-  /* radius: 2 on the page · 4 small controls · 6 buttons, rows, menus, popovers · 10 bars, dialogs */
+  /* radius: 2 on the page · 4 small controls · 6 buttons, rows, menus, popovers ·
+     10 contextual bars, palette, dialogs · capsule: the floating tool bar and the pen bar */
   --radius-page: 2px; --radius-1: 4px; --radius-2: 6px; --radius-3: 10px; --radius-round: 999px;
+  --radius-capsule: var(--radius-round);
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px;
 
-  /* motion: one curve; instant is drag feedback only; one enter scale for popups and dialogs */
+  /* motion: one curve; instant is drag feedback only; menus, popovers and the palette rise in,
+     tooltips and dialogs enter from one scale */
   --duration-instant: 60ms; --duration-fast: 120ms; --duration-base: 180ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
   --enter-scale: 0.98;
+  --rise-distance: 4px; --motion-rise: translateY(var(--rise-distance));  /* 0px under reduced motion */
 
   --focus-ring: 2px solid var(--accent); --focus-offset: 2px;
 }
@@ -128,9 +140,13 @@ and is a v1.x item, not a v1 blocker. The source of truth is
 
 Rules:
 
-- **No drop shadows** on working surfaces; elevation is a tonal step plus a hairline. No
-  halos and no side stripes either: the only `box-shadow`s are the page hairline, the inset
-  hairline of a view switch and 1px on-page rings.
+- **One elevation, for floating chrome only.** Docked surfaces are flat: elevation is a
+  tonal step plus a hairline. Floating chrome carries exactly one elevation token,
+  `--elevation-float` (hairline ring, 1 px inner top highlight, one soft shadow), applied by
+  the global `.glass` rule. No other shadow, glow or halo, and no side stripes: every other
+  `box-shadow` is the page hairline, the inset hairline of a view switch or a 1px on-page
+  ring. Under `prefers-contrast: more` and forced colours the elevation is dropped for the
+  border. *Amended 2026-10-01 (M6, A1).*
 - **Translucency only for floating chrome** (§2): tool bars, contextual bars, the palette,
   menus and popovers. Each surface composes one global `.glass` rule: a 50% tint over a
   backdrop that is blurred, colour-boosted and darkened, so a white page shows through as
@@ -146,9 +162,11 @@ Rules:
   6px dots next to a name.
 - **State patterns.** "On" has two looks: a view switch is `--surface-3` with an inset
   hairline (Read | Arrange, page layout, signature tabs); an option choice is
-  `--accent-muted` with no accent border (presets, segments, fit choices, search toggles,
-  the active tool). Chrome toggles such as the panel buttons stay neutral
-  (`--surface-active`). A current
+  `--accent-muted` with no accent border (presets, segments, fit choices, search toggles).
+  The active tool is a solid `--accent` fill with a `--surface-0` icon
+  (`--tool-active-fill`, `--tool-active-ink`), at least 3:1 against the bar over any page;
+  other option choices keep `--accent-muted`. *Amended 2026-10-01 (M6, A5).* Chrome
+  toggles such as the panel buttons stay neutral (`--surface-active`). A current
   row (history step, current file, search hit, comment, field, redaction mark) is always
   `--accent-muted`, and tertiary text inside it steps up to secondary. Hover is one step,
   `--surface-hover`, including on small icon buttons.
@@ -164,9 +182,14 @@ Rules:
   page white with page ink, including the selected glyphs.
 - **Icons**: one consistent 1.5px stroke set (Lucide or Phosphor), 16px in chrome, 20px in
   the tool bar.
+- **Shape.** The floating tool bar and the pen bar are capsules (`--radius-capsule`, that is
+  `--radius-round`). *Amended 2026-10-01 (M6, A6).*
 - **Motion**: short, eased, disable-able. No bouncing, no springs in the chrome. Drag
-  ghosts are slightly scaled and translucent. Popups, the palette and dialogs enter from
+  ghosts are slightly scaled and translucent. Menus, popovers and the palette rise in: they
+  start 4 px nearer their anchor at opacity 0 and settle over `--duration-fast`
+  (`--motion-rise`); reduced motion shows them at once. Tooltips and dialogs enter from
   `scale(var(--enter-scale))`; side dialogs and the toast slide in from their edge.
+  *Amended 2026-10-01 (M6, A6).*
 - **Typography**: 13px UI base, 12px secondary, 11px labels with tracking; numerals
   tabular in the status bar and page numbers.
 - **The document canvas is never themed.** Pages render as authored; we do not invert or

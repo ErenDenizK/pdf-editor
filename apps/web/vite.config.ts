@@ -72,8 +72,8 @@ export default defineConfig({
         scope: base,
         display: 'standalone',
         lang: 'en',
-        theme_color: '#101215',
-        background_color: '#0a0b0d',
+        theme_color: '#181a1f',
+        background_color: '#08090b',
         icons: [
           { src: 'icons/glyph.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
           {

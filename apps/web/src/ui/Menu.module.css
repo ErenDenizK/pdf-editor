@@ -1,4 +1,5 @@
-/* Menus float over the document: frosted glass with a hairline (global .glass); no shadow. */
+/* Menus float over the document: frosted glass with a hairline and --elevation-float (global
+   .glass). */
 .popup {
   composes: glass from global;
   min-width: 180px;
@@ -7,16 +8,32 @@
   color: var(--text-primary);
   font-size: var(--text-md);
   outline: none;
-  transform-origin: var(--transform-origin);
   transition:
     opacity var(--duration-fast) var(--ease-out),
     transform var(--duration-fast) var(--ease-out);
 }
 
+/* Rise-in (DESIGN.md §3 motion): the popup starts --rise-distance nearer its anchor at opacity 0
+   and settles away from it. Reduced motion sets the distance and the duration to 0. */
 .popup[data-starting-style],
 .popup[data-ending-style] {
   opacity: 0;
-  transform: scale(var(--enter-scale));
+  transform: var(--motion-rise);
+}
+
+.popup[data-side='bottom'][data-starting-style],
+.popup[data-side='bottom'][data-ending-style] {
+  transform: translateY(calc(-1 * var(--rise-distance)));
+}
+
+.popup:is([data-side='left'], [data-side='inline-start'])[data-starting-style],
+.popup:is([data-side='left'], [data-side='inline-start'])[data-ending-style] {
+  transform: translateX(var(--rise-distance));
+}
+
+.popup:is([data-side='right'], [data-side='inline-end'])[data-starting-style],
+.popup:is([data-side='right'], [data-side='inline-end'])[data-ending-style] {
+  transform: translateX(calc(-1 * var(--rise-distance)));
 }
 
 .item {

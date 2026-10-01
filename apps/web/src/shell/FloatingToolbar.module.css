@@ -1,7 +1,8 @@
 /*
- * Glass over the document (the global .glass rule in styles/global.css), with its opaque
- * fallbacks for browsers without backdrop-filter and for reduced transparency, more
- * contrast and forced colours.
+ * Glass over the document (the global .glass rule in styles/global.css: tint, blur, hairline,
+ * --elevation-float), with its opaque fallbacks for browsers without backdrop-filter and for
+ * reduced transparency, more contrast and forced colours. The bar is a capsule; the armed
+ * tool's solid accent fill lives in ui/IconButton.module.css.
  */
 .toolbar {
   composes: glass from global;
@@ -13,8 +14,14 @@
   align-items: center;
   gap: 2px;
   padding: var(--space-1);
-  border-radius: var(--radius-3);
+  border-radius: var(--radius-capsule);
   transform: translateX(-50%);
+}
+
+/* Buttons in the capsule are round, concentric with its ends (23 - 1 border - 4 padding = 18,
+   half of a 36px target), so the armed tool's fill and the hover wash follow the bar's shape. */
+.toolbar [data-size='toolbar'] {
+  border-radius: var(--radius-round);
 }
 
 .divider {
@@ -37,6 +44,11 @@
   height: 9px;
   /* A text step, not opacity, so it does not stack over the glass (design audit I9). */
   color: var(--text-tertiary);
+}
+
+/* On the armed tool's accent fill the chevron takes the icon colour. */
+.menuTrigger[aria-pressed='true'] .chevron {
+  color: currentColor;
 }
 
 .menuIcon {

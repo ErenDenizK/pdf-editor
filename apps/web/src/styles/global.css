@@ -127,11 +127,13 @@ textarea,
  * the crop banner, the command palette, menus, popovers and the popovers anchored to the page.
  * Each surface's CSS module composes this global class (`composes: glass from global;`), so
  * the rule ships once, and sets no border, background or backdrop filter of its own.
- * Docked panels, dialogs and tooltips stay opaque.
+ * Docked panels, dialogs and tooltips stay opaque and flat.
  *
- * The backdrop is blurred, colour-boosted and darkened before the 50% tint is laid on it, so a
- * white page shows through as #3f4043 at worst and every text colour used on the glass stays
- * AA (docs/design/audit/translucency.md §6). The backdrop filter sits on the surface itself,
+ * The backdrop is blurred, colour-boosted and darkened before the 66% tint is laid on it, so a
+ * white page shows through as #3f4145 at worst and every text colour used on the glass stays
+ * AA (docs/design/audit/translucency.md §6, docs/specs/experience-redesign.md §7.2). Every glass
+ * surface floats with the one elevation token, --elevation-float: inner top highlight, dark
+ * hairline ring and one soft shadow (no other shadow anywhere in the chrome). The backdrop filter sits on the surface itself,
  * never on a pseudo-element: popups fade with `opacity`, which would make the surface the
  * backdrop root of a child layer and drop its blur for the whole fade.
  */
@@ -139,13 +141,14 @@ textarea,
   /* Opaque first: this is what browsers without backdrop-filter render. */
   border: 1px solid var(--border-glass);
   background: var(--glass-solid);
+  box-shadow: var(--elevation-float);
 }
 
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
   .glass {
     /* Text on glass has two steps, both AA over a white page. Tertiary maps to secondary
-       (#858a92 cannot reach 4.5:1 on glass that visibly shows a white page); accent text
-       must stay off the glass (3.48:1), the accent is used here for non-text only. */
+       (--text-tertiary is 3.4:1 on glass over a white page); accent text must stay off the
+       glass (3.4:1), the accent is used here for non-text only (focus ring, armed tool). */
     --text-secondary: var(--glass-text-secondary);
     --text-tertiary: var(--glass-text-secondary);
     --text-disabled: var(--glass-text-disabled);
@@ -158,8 +161,9 @@ textarea,
 
 /* Opaque when transparency is unwelcome or more contrast is asked for. Without the darkened
    backdrop the glass text steps are not needed, so the normal ladder comes back (in
-   `prefers-contrast: more` that ladder is the lighter one from tokens.css). Under forced
-   colours tokens.css makes the glass Canvas with a CanvasText border. */
+   `prefers-contrast: more` that ladder is the lighter one from tokens.css, and the elevation is
+   dropped for the strong border). Under forced colours tokens.css makes the glass Canvas with a
+   CanvasText border and no elevation. */
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
   .glass {
     --text-secondary: inherit;
