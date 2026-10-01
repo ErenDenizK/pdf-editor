@@ -23,6 +23,30 @@ export function styleGroupOf(tool: ToolMode): StyleGroup {
   }
 }
 
+/**
+ * The style a tool draws with, for the tools that have one: what the style controls change
+ * while that tool is armed and nothing is selected (spec §6.3). The eraser, stamps, the
+ * signature, redaction and the page tools have none.
+ */
+export function toolStyleGroup(tool: ToolMode): StyleGroup | undefined {
+  switch (tool) {
+    case 'highlight':
+    case 'underline':
+    case 'strikeout':
+    case 'squiggly':
+    case 'ink':
+    case 'rectangle':
+    case 'ellipse':
+    case 'line':
+    case 'arrow':
+    case 'text-box':
+    case 'note':
+      return styleGroupOf(tool);
+    default:
+      return undefined;
+  }
+}
+
 function rectUnion(a: Rect, b: Rect): Rect {
   return rectFromPoints(
     { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) },

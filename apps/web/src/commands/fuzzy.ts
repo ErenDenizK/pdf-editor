@@ -4,7 +4,9 @@
  * match rather than the first greedy one.
  *
  * Scoring favours, in order: matches at word starts ("zi" -> "Zoom In"), consecutive runs,
- * a match at the very beginning, and short gaps. Everything is case-insensitive.
+ * a match at the very beginning, and short gaps. Everything is case- and
+ * diacritic-insensitive, with Turkish folding (spec experience-redesign §8): "ciz" finds
+ * "çiz", "birlestir" finds "birleştir", "IZ" finds "ız".
  */
 
 export interface FuzzyMatch {
@@ -25,6 +27,37 @@ const PENALTY_GAP_START = 3;
 const PENALTY_GAP_EXTEND = 0.5;
 const PENALTY_LEADING_MAX = 3;
 
+/** Turkish letters whose plain Latin twin is not reached by stripping combining marks. */
+const TURKISH_FOLD: Readonly<Record<string, string>> = {
+  ı: 'i',
+  İ: 'i',
+  I: 'i',
+};
+
+/**
+ * Folds one UTF-16 unit to its lower-case, mark-free form: "Ç" -> "c", "ğ" -> "g",
+ * "İ" -> "i", "é" -> "e". Always returns exactly one unit, so positions in the folded text
+ * are positions in the original.
+ */
+function foldChar(char: string): string {
+  const turkish = TURKISH_FOLD[char];
+  if (turkish !== undefined) return turkish;
+  const lower = char.toLowerCase();
+  if (lower.length !== 1) return char;
+  const base = lower.normalize('NFD').charAt(0);
+  return base === '' ? lower : base;
+}
+
+/**
+ * Case- and diacritic-insensitive form of `text` with the same length (one unit per unit),
+ * used for matching only. Exported for tests and for callers that compare keywords.
+ */
+export function foldForSearch(text: string): string {
+  let out = '';
+  for (let i = 0; i < text.length; i++) out += foldChar(text.charAt(i));
+  return out;
+}
+
 function positionBonus(text: string, index: number): number {
   if (index === 0) return BONUS_FIRST_CHAR;
   const prev = text[index - 1] ?? '';
@@ -42,9 +75,10 @@ function gapPenalty(gap: number): number {
 
 /** Scores `text` against `query`. Returns null when `query` is not a subsequence. */
 export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
-  const q = query.trim().toLowerCase().replace(/\s+/g, ' ');
+  // NFC first: a query typed as "c" + combining cedilla folds like "ç".
+  const q = foldForSearch(query.normalize('NFC').trim().replace(/\s+/g, ' '));
   if (q === '') return { score: 0, positions: [] };
-  const t = text.toLowerCase();
+  const t = foldForSearch(text);
   const m = q.length;
   const n = t.length;
   if (m > n) return null;

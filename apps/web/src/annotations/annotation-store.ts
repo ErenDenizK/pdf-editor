@@ -5,6 +5,10 @@
  *
  * Content lives in the engine; this is a cache. Pages reload after every engine edit that
  * touches them (edit-runner `onPagesChanged`).
+ *
+ * Tool styles follow one rule (experience-redesign spec §6.3): `applyStyle` edits the
+ * selection when there is one, else the armed tool's style (`setStyle`), which persists
+ * per device (`TOOL_STYLES_STORAGE_KEY`). Recolouring a selection never changes a tool.
  */
 import type { PageId, Rect, SourceId } from '@pdf-editor/document-model';
 import type { Annotation } from '@pdf-editor/engine';
@@ -12,9 +16,19 @@ import { create } from 'zustand';
 
 import { getEngineService } from '../engine/engine-service';
 import { readJson, writeJson } from '../state/safe-storage';
+import { useToolStore } from '../viewer/tool-store';
+// actions.ts imports this module too; both only use each other inside functions.
+import { updateAnnotations } from './actions';
+import { hasStrokeWidth, normalizeHex, withColor } from './colors';
+import { toolStyleGroup } from './drafts';
 import { onPagesChanged, readAnnotations } from './edit-runner';
 
 export const AUTHOR_STORAGE_KEY = 'pdf-editor:annotations:author:v1';
+/**
+ * Tool styles, per device (spec §6.3, §9). Under the `ui:` namespace with its own version:
+ * a change of shape gets a new key, and anything unreadable falls back to the defaults.
+ */
+export const TOOL_STYLES_STORAGE_KEY = 'pdf-editor:ui:tool-styles:v1';
 
 /** The fixed palette (spec §2); a custom colour is available next to it. */
 export const SWATCHES = [
@@ -57,6 +71,52 @@ export const DEFAULT_STYLES: Readonly<Record<StyleGroup, ToolStyle>> = {
   text: { ...base, color: '#000000' },
   note: { ...base, color: '#FFEB3B' },
 };
+
+/** Accepted ranges of stored style values (the pen range of spec §6.2 for widths). */
+export const STYLE_LIMITS = {
+  opacity: { min: 0.1, max: 1 },
+  strokeWidth: { min: 0.25, max: 24 },
+  fontSize: { min: 4, max: 144 },
+} as const;
+
+const STYLE_GROUPS = Object.keys(DEFAULT_STYLES) as StyleGroup[];
+
+/** The style with only valid fields of `patch` applied (colours as #RRGGBB, numbers clamped). */
+function validStyle(current: ToolStyle, patch: unknown): ToolStyle {
+  if (typeof patch !== 'object' || patch === null) return current;
+  const p = patch as Record<string, unknown>;
+  const number = (x: unknown, range: { min: number; max: number }, fallback: number) =>
+    typeof x === 'number' && Number.isFinite(x)
+      ? Math.min(range.max, Math.max(range.min, x))
+      : fallback;
+  return {
+    color:
+      typeof p.color === 'string' && /^#[0-9a-f]{6}$/i.test(p.color)
+        ? p.color.toUpperCase()
+        : current.color,
+    opacity: number(p.opacity, STYLE_LIMITS.opacity, current.opacity),
+    strokeWidth: number(p.strokeWidth, STYLE_LIMITS.strokeWidth, current.strokeWidth),
+    fontSize: number(p.fontSize, STYLE_LIMITS.fontSize, current.fontSize),
+  };
+}
+
+/**
+ * Reads stored tool styles, field by field (like `parseLayout`): an unknown version, group
+ * or value keeps the default for that field only.
+ */
+export function parseToolStyles(value: unknown): Readonly<Record<StyleGroup, ToolStyle>> {
+  if (typeof value !== 'object' || value === null) return DEFAULT_STYLES;
+  const v = value as { v?: unknown; styles?: unknown };
+  if (v.v !== 1 || typeof v.styles !== 'object' || v.styles === null) return DEFAULT_STYLES;
+  const stored = v.styles as Record<string, unknown>;
+  return Object.fromEntries(
+    STYLE_GROUPS.map((group) => [group, validStyle(DEFAULT_STYLES[group], stored[group])]),
+  ) as Record<StyleGroup, ToolStyle>;
+}
+
+function readToolStyles(): Readonly<Record<StyleGroup, ToolStyle>> {
+  return parseToolStyles(readJson(TOOL_STYLES_STORAGE_KEY));
+}
 
 /** Where an annotation lives: the source page, and the document page showing it. */
 export interface PageTarget {
@@ -121,7 +181,14 @@ interface AnnotationState {
   reloadPage: (source: SourceId, pageIndex: number) => Promise<void>;
   select: (selection: AnnotationSelection | null) => void;
   setEditor: (editor: InlineEditor | null) => void;
+  /** Changes the style new annotations of `group` get, and remembers it on this device. */
   setStyle: (group: StyleGroup, patch: Partial<ToolStyle>) => void;
+  /**
+   * The one entry point of the style controls (spec §6.3): with a selection it edits the
+   * selected annotations (one coalesced history entry per control); without one it changes
+   * the armed tool's style through `setStyle`. With neither it does nothing.
+   */
+  applyStyle: (patch: Partial<ToolStyle>) => void;
   setAuthor: (author: string) => void;
   setPendingStamp: (stamp: PendingStamp | null) => void;
   setSignatureDialogOpen: (open: boolean) => void;
@@ -143,7 +210,7 @@ export const useAnnotationStore = create<AnnotationState>()((set, get) => ({
   pages: {},
   selection: null,
   editor: null,
-  styles: DEFAULT_STYLES,
+  styles: readToolStyles(),
   author: readAuthor(),
   pendingStamp: null,
   signatureDialogOpen: false,
@@ -183,8 +250,22 @@ export const useAnnotationStore = create<AnnotationState>()((set, get) => ({
   select: (selection) =>
     set({ selection: selection && selection.ids.length > 0 ? selection : null }),
   setEditor: (editor) => set({ editor }),
-  setStyle: (group, patch) =>
-    set((s) => ({ styles: { ...s.styles, [group]: { ...s.styles[group], ...patch } } })),
+  setStyle: (group, patch) => {
+    const current = get().styles;
+    const next = validStyle(current[group], { ...current[group], ...patch });
+    const styles = { ...current, [group]: next };
+    writeJson(TOOL_STYLES_STORAGE_KEY, { v: 1, styles });
+    set({ styles });
+  },
+  applyStyle: (patch) => {
+    const { selection } = get();
+    if (selection) {
+      styleSelection(selection, patch);
+      return;
+    }
+    const group = toolStyleGroup(useToolStore.getState().mode);
+    if (group) get().setStyle(group, patch);
+  },
   setAuthor: (author) => {
     const value = author.slice(0, 200);
     writeJson(AUTHOR_STORAGE_KEY, value);
@@ -193,6 +274,70 @@ export const useAnnotationStore = create<AnnotationState>()((set, get) => ({
   setPendingStamp: (pendingStamp) => set({ pendingStamp }),
   setSignatureDialogOpen: (signatureDialogOpen) => set({ signatureDialogOpen }),
 }));
+
+/** Latest-value slots per coalescing key: a burst of slider events sends one update. */
+const pendingStyle = new Map<string, { value: Partial<ToolStyle> }>();
+
+/**
+ * Edits the selected annotations' style: colour, opacity, stroke width or font size, each
+ * coalesced into one history entry per control and selection (800 ms window, edit-runner).
+ * While an update waits in the edit queue, newer values of the same control replace its
+ * value, so a slider drag sends only the latest one.
+ */
+function styleSelection(selection: AnnotationSelection, patch: Partial<ToolStyle>): void {
+  const idsKey = [...selection.ids].sort().join(',');
+  const send = (
+    control: 'color' | 'opacity' | 'stroke' | 'font',
+    value: Partial<ToolStyle>,
+    change: (a: Annotation, value: Partial<ToolStyle>) => Annotation | undefined,
+  ) => {
+    const key = `${control}:${idsKey}`;
+    const slot = pendingStyle.get(key);
+    if (slot) {
+      slot.value = value;
+      return;
+    }
+    const fresh = { value };
+    pendingStyle.set(key, fresh);
+    void updateAnnotations(
+      selection,
+      selection.ids,
+      (a) => {
+        pendingStyle.delete(key);
+        return change(a, fresh.value);
+      },
+      { action: control, coalesceKey: key },
+    ).finally(() => {
+      if (pendingStyle.get(key) === fresh) pendingStyle.delete(key);
+    });
+  };
+  if (patch.color !== undefined) {
+    const color = normalizeHex(patch.color);
+    send('color', { color }, (a) =>
+      a.kind === 'stamp' || a.kind === 'link' ? undefined : withColor(a, color),
+    );
+  }
+  if (patch.opacity !== undefined) {
+    send('opacity', { opacity: patch.opacity }, (a, v) => ({
+      ...a,
+      opacity: Math.round((v.opacity ?? 1) * 100) / 100,
+    }));
+  }
+  if (patch.strokeWidth !== undefined) {
+    send('stroke', { strokeWidth: patch.strokeWidth }, (a, v) =>
+      hasStrokeWidth(a) && v.strokeWidth !== undefined
+        ? { ...a, strokeWidth: v.strokeWidth }
+        : undefined,
+    );
+  }
+  if (patch.fontSize !== undefined) {
+    send('font', { fontSize: patch.fontSize }, (a, v) =>
+      a.kind === 'free-text' && v.fontSize !== undefined
+        ? { ...a, fontSize: v.fontSize }
+        : undefined,
+    );
+  }
+}
 
 /** Visible annotations of a page (hidden ones are not shown or listed). */
 export function visibleAnnotations(entry: PageEntry | undefined): readonly Annotation[] {
@@ -229,14 +374,18 @@ export function selectedAnnotations(
   return sel.ids.flatMap((id) => list.filter((a) => a.id === id));
 }
 
-/** Tests: forget cached pages and UI state. */
+/**
+ * Tests: forget cached pages and UI state. Tool styles are read again from storage, as a
+ * reload would; tests that change them remove `TOOL_STYLES_STORAGE_KEY` afterwards.
+ */
 export function resetAnnotationStore(): void {
   loads.clear();
+  pendingStyle.clear();
   useAnnotationStore.setState({
     pages: {},
     selection: null,
     editor: null,
-    styles: DEFAULT_STYLES,
+    styles: readToolStyles(),
     pendingStamp: null,
     signatureDialogOpen: false,
   });

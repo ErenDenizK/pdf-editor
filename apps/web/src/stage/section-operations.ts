@@ -44,6 +44,7 @@ import {
   type StoredBlob,
   useWorkspaceStore,
 } from '../state/workspace-store';
+import { shownInArrangeNow } from './arrange-data';
 import { askImageSizing } from './operation-dialogs-store';
 import { type TitleProblem, validateTitle } from './operation-plans';
 
@@ -55,11 +56,9 @@ function createdDocuments(before: Workspace, after: Workspace): DocumentId[] {
   return after.documentOrder.filter((id) => before.documents[id] === undefined);
 }
 
-/** Whether any of the documents is on the light table (pinned, or the active tab). */
+/** Whether any of the documents is on the light table (not hidden, or the active tab). */
 function isShown(inputs: readonly DocumentId[]): boolean {
-  const { arrangePinned } = ui();
-  const active = model().workspace.activeDocument;
-  return inputs.some((id) => arrangePinned.includes(id) || id === active);
+  return inputs.some((id) => shownInArrangeNow(id));
 }
 
 /**
@@ -241,11 +240,7 @@ export function renameDocumentTo(
 /** Starts renaming in place: in the section header in Arrange mode, else in the tab. */
 export function startRename(documentId: DocumentId, surface?: 'tab' | 'section'): void {
   const where =
-    surface ??
-    (ui().viewMode === 'arrange' &&
-    (ui().arrangePinned.includes(documentId) || model().workspace.activeDocument === documentId)
-      ? 'section'
-      : 'tab');
+    surface ?? (ui().viewMode === 'arrange' && shownInArrangeNow(documentId) ? 'section' : 'tab');
   ui().setRenaming({ documentId, surface: where });
 }
 

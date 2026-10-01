@@ -26,6 +26,7 @@ import { m } from '../i18n';
 import { registerLanguageCommands } from '../i18n/language-commands';
 import { registerOcrCommands } from '../ocr';
 import { announce } from '../shell/announcer';
+import { useAuthorPrompt } from '../shell/comment-author';
 import { openImagesAsDocument } from '../stage/section-operations';
 import { selectAllOf, useSelectionStore } from '../state/selection-store';
 import { ARRANGE_SIZES, useUiStore } from '../state/ui-store';
@@ -249,6 +250,16 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     }),
     // Before the page commands: in Read mode R, Delete, ... act on annotations.
     registerAnnotationCommands(registry),
+    // The author name is asked once at the first comment; this asks again (§4.1).
+    registry.register({
+      id: 'comments.setAuthor',
+      title: m.cmd_set_author(),
+      group: m.group_edit(),
+      run: () => {
+        useUiStore.setState({ leftPanelOpen: true, leftPanelView: 'comments' });
+        useAuthorPrompt.getState().edit();
+      },
+    }),
     registry.register({
       id: 'edit.undo',
       title: m.cmd_undo(),

@@ -1,7 +1,9 @@
 /**
  * Annotations end to end (spec viewer-annotations §2–§5): draw with the mouse, one history
- * entry per annotation, undo and redo through the engine. Screenshots for the design
- * review with `CAPTURE_SCREENSHOTS=1` (written to docs/design/screenshots/).
+ * entry per annotation, undo and redo through the engine. Creating never selects
+ * (experience-redesign spec §6.1), and a tool style set before drawing is used and
+ * remembered (§6.3). Screenshots for the design review with `CAPTURE_SCREENSHOTS=1`
+ * (written to docs/design/screenshots/).
  */
 import { fileURLToPath } from 'node:url';
 
@@ -86,9 +88,9 @@ test.describe('annotations', () => {
     const rectangle = layer(page).locator('[data-annotation-kind="square"]');
     await expect(rectangle).toHaveCount(1, { timeout: 10_000 });
     await expect(historyRow(page, /Rectangle on page 1/)).toHaveAttribute('data-state', 'present');
-    await expect(page.getByTestId('annotation-bar')).toBeVisible();
+    // Creating does not select: no contextual bar (experience-redesign §6.1).
+    await expect(page.getByTestId('annotation-bar')).toHaveCount(0);
 
-    await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
     await expect(layer(page)).toHaveAttribute('data-tool', 'select');
 
@@ -146,7 +148,7 @@ test.describe('annotations', () => {
     await page.locator('body').press('Shift+E');
     await drag(page, 0, [0.45, 0.4], [0.45, 0.52]);
     await expect(layer(page).locator('[data-annotation-kind="ink"]')).toHaveCount(0);
-    await expect(historyRow(page, /Delete ink/)).toBeVisible();
+    await expect(historyRow(page, /Delete (ink|pen)/)).toBeVisible();
 
     // Built-in stamp from the tool bar menu.
     await page.getByRole('button', { name: 'Stamp or image' }).click();
@@ -197,6 +199,79 @@ test.describe('annotations', () => {
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 3);
     await expect(page.getByTestId('annotation-bar')).toBeVisible();
     await expect(layer(page, 1).locator('[data-selected-annotation]')).toHaveCount(1);
+  });
+
+  test('pen: strokes never select; a colour set before drawing is used after a reload', async ({
+    browserName,
+    page,
+  }) => {
+    test.skip(browserName !== 'chromium', 'Covered in Chromium');
+    await page.goto('./');
+    await openFixtures(page, ['simple-text.pdf']);
+    await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
+      timeout: 20_000,
+    });
+    // Records any contextual bar or selection outline, however briefly it appears.
+    await page.evaluate(() => {
+      const seen: string[] = [];
+      (window as unknown as { __creationSelected: string[] }).__creationSelected = seen;
+      new MutationObserver(() => {
+        if (document.querySelector('[data-testid="annotation-bar"]')) seen.push('bar');
+        if (document.querySelector('[data-selected-annotation]')) seen.push('selection');
+      }).observe(document.body, { childList: true, subtree: true, attributes: true });
+    });
+    const ink = layer(page).locator('[data-annotation-kind="ink"]');
+    await page.locator('body').press('p');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    for (const [i, y] of [0.3, 0.34, 0.38].entries()) {
+      await drag(page, 0, [0.2, y], [0.55, y + 0.01]);
+      await expect(ink).toHaveCount(i + 1, { timeout: 10_000 });
+    }
+    await expect(historyRow(page, /(Ink|Pen) on page 1/).first()).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __creationSelected: string[] }).__creationSelected,
+      ),
+    ).toEqual([]);
+    await expect(page.getByTestId('annotation-bar')).toHaveCount(0);
+    await expect(layer(page).locator('[data-selected-annotation]')).toHaveCount(0);
+
+    // With the pen armed and nothing selected, the inspector edits the pen's style.
+    const inspector = page.locator('#right-panel');
+    if (!(await inspector.isVisible())) await page.keyboard.press('ControlOrMeta+Alt+b');
+    const penStyle = inspector.getByRole('region', { name: /tool style$/ });
+    await penStyle.getByRole('radio', { name: 'Blue' }).click();
+    await expect(penStyle.getByRole('radio', { name: 'Blue' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+
+    await page.reload();
+    await openFixtures(page, ['simple-text.pdf']);
+    await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
+      timeout: 20_000,
+    });
+    await page.locator('body').press('p');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    if (!(await inspector.isVisible())) await page.keyboard.press('ControlOrMeta+Alt+b');
+    await expect(penStyle.getByRole('radio', { name: 'Blue' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await drag(page, 0, [0.25, 0.5], [0.6, 0.5]);
+    await expect(ink).toHaveCount(1, { timeout: 10_000 });
+    await expect(page.getByTestId('annotation-bar')).toHaveCount(0);
+
+    // Selecting the stroke shows its colour: the remembered blue.
+    await page.locator('body').press('Escape');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'select');
+    const box = await layer(page).boundingBox();
+    if (!box) throw new Error('page not rendered');
+    await page.mouse.click(box.x + box.width * 0.42, box.y + box.height * 0.5);
+    const bar = page.getByTestId('annotation-bar');
+    await expect(bar).toBeVisible();
+    await expect(bar.getByRole('radio', { name: 'Blue' })).toHaveAttribute('aria-checked', 'true');
   });
 
   test('screenshots for design review', async ({ browserName, page }) => {
@@ -253,9 +328,13 @@ test.describe('annotations', () => {
     await page.getByRole('menuitem', { name: 'Approved' }).click();
     await drag(page, 0, [0.72, 0.68], [0.72, 0.68]);
     await tool('Escape');
-    // A rectangle, selected, with the contextual bar.
+    // A rectangle, then selected (creating does not select), with the contextual bar.
     await tool('r');
     await drag(page, 0, [0.12, 0.5], [0.45, 0.62]);
+    await tool('Escape');
+    const square = await layer(page).locator('[data-annotation-kind="square"]').boundingBox();
+    if (!square) throw new Error('rectangle hit target not rendered');
+    await page.mouse.click(square.x + 4, square.y + square.height / 2);
     await expect(page.getByTestId('annotation-bar')).toBeVisible();
     await page.waitForTimeout(600);
     await page.screenshot({

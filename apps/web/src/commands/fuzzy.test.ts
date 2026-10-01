@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { fuzzyFilter, fuzzyMatch } from './fuzzy';
+import { foldForSearch, fuzzyFilter, fuzzyMatch } from './fuzzy';
 
 describe('fuzzyMatch', () => {
   it('returns null when the query is not a subsequence', () => {
@@ -36,6 +36,34 @@ describe('fuzzyMatch', () => {
   });
 });
 
+describe('diacritic-insensitive matching', () => {
+  it('folds Turkish letters and accents without changing the length', () => {
+    expect(foldForSearch('Çizim BİRLEŞTİR ığüöş')).toBe('cizim birlestir iguos');
+    expect(foldForSearch('Café Ålesund')).toBe('cafe alesund');
+    for (const text of ['İİİ', 'el yazısı', 'Dışa aktar…']) {
+      expect(foldForSearch(text)).toHaveLength(text.length);
+    }
+  });
+
+  it('finds Turkish words typed without diacritics, and the other way round', () => {
+    expect(fuzzyMatch('ciz', 'çiz')).not.toBeNull();
+    expect(fuzzyMatch('birlestir', 'birleştir')).not.toBeNull();
+    expect(fuzzyMatch('karsilastir', 'karşılaştır')).not.toBeNull();
+    expect(fuzzyMatch('el yazisi', 'el yazısı')).not.toBeNull();
+    expect(fuzzyMatch('çiz', 'Ciz')).not.toBeNull();
+    expect(fuzzyMatch('İMZA', 'imza')).not.toBeNull();
+    // A query in decomposed form (c + combining cedilla) matches too.
+    expect(fuzzyMatch('c\u0327iz', 'çiz')).not.toBeNull();
+  });
+
+  it('scores a folded exact match like an exact match and keeps positions', () => {
+    const folded = fuzzyMatch('birlestir', 'birleştir');
+    const plain = fuzzyMatch('birlestir', 'birlestir');
+    expect(folded?.score).toBe(plain?.score);
+    expect(fuzzyMatch('dondur', 'Sayfayı döndür')?.positions).toEqual([8, 9, 10, 11, 12, 13]);
+  });
+});
+
 describe('fuzzyFilter', () => {
   const items = [
     { title: 'Toggle left panel', keywords: ['sidebar'] },
@@ -63,5 +91,21 @@ describe('fuzzyFilter', () => {
   it('matches keywords when the title does not', () => {
     expect(run('sidebar')).toEqual(['Toggle left panel']);
     expect(run('import')).toEqual(['Open files…']);
+  });
+
+  it('matches keywords without diacritics', () => {
+    const tools = [
+      { title: 'Pen', keywords: ['draw', 'kalem', 'çiz'] },
+      { title: 'Merge all open documents…', keywords: ['combine', 'birleştir'] },
+    ];
+    const find = (q: string) =>
+      fuzzyFilter(
+        q,
+        tools,
+        (t) => t.title,
+        (t) => t.keywords,
+      ).map((r) => r.item.title);
+    expect(find('ciz')[0]).toBe('Pen');
+    expect(find('birlestir')).toEqual(['Merge all open documents…']);
   });
 });

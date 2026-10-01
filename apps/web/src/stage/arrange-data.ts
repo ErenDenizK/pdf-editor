@@ -1,7 +1,7 @@
 /**
  * Derived data for the light table, memoized on model identity so selectors return stable
- * references: which documents are shown as sections, where each page sits, and which
- * pages are outline targets (spec §6).
+ * references: which documents are shown as sections (all open ones unless hidden), where
+ * each page sits, and which pages are outline targets (spec §6).
  */
 import {
   type DocumentId,
@@ -17,30 +17,39 @@ import { useWorkspaceStore } from '../state/workspace-store';
 export interface ShownSection {
   readonly doc: VirtualDocument;
   readonly collapsed: boolean;
-  readonly pinned: boolean;
+  /** Whether "Hide from Arrange" applies: every section but the active document's. */
+  readonly hideable: boolean;
 }
 
 /**
- * Sections in tab order: the active document plus every pinned one (spec §1). Pinned ids
- * of closed documents are skipped.
+ * Whether a document is on the light table: every open document is, unless hidden with
+ * "Hide from Arrange" (experience-redesign §8, decision 12); the active one always is.
  */
+export function isShownInArrange(
+  ws: Workspace,
+  hidden: readonly DocumentId[],
+  id: DocumentId,
+): boolean {
+  return ws.documents[id] !== undefined && (id === ws.activeDocument || !hidden.includes(id));
+}
+
+/** Sections in tab order: every open document that is not hidden, and the active one. */
 export function shownSections(
   ws: Workspace,
-  pinned: readonly DocumentId[],
+  hidden: readonly DocumentId[],
   collapsed: readonly DocumentId[],
 ): ShownSection[] {
   return ws.documentOrder.flatMap((id): ShownSection[] => {
     const doc = ws.documents[id];
-    const isPinned = pinned.includes(id);
-    if (doc === undefined || (!isPinned && id !== ws.activeDocument)) return [];
-    return [{ doc, collapsed: collapsed.includes(id), pinned: isPinned }];
+    if (doc === undefined || !isShownInArrange(ws, hidden, id)) return [];
+    return [{ doc, collapsed: collapsed.includes(id), hideable: id !== ws.activeDocument }];
   });
 }
 
 let last:
   | {
       ws: Workspace;
-      pinned: readonly DocumentId[];
+      hidden: readonly DocumentId[];
       collapsed: readonly DocumentId[];
       value: ShownSection[];
     }
@@ -48,11 +57,11 @@ let last:
 
 function cachedSections(
   ws: Workspace,
-  pinned: readonly DocumentId[],
+  hidden: readonly DocumentId[],
   collapsed: readonly DocumentId[],
 ): ShownSection[] {
-  if (last?.ws === ws && last.pinned === pinned && last.collapsed === collapsed) return last.value;
-  const value = shownSections(ws, pinned, collapsed);
+  if (last?.ws === ws && last.hidden === hidden && last.collapsed === collapsed) return last.value;
+  const value = shownSections(ws, hidden, collapsed);
   // Keep the previous array when nothing shown changed (e.g. an edit in a hidden tab).
   const previous = last?.value;
   const same =
@@ -61,18 +70,27 @@ function cachedSections(
       (s, i) =>
         s.doc === value[i]?.doc &&
         s.collapsed === value[i].collapsed &&
-        s.pinned === value[i].pinned,
+        s.hideable === value[i].hideable,
     );
   const result = same ? previous : value;
-  last = { ws, pinned, collapsed, value: result };
+  last = { ws, hidden, collapsed, value: result };
   return result;
 }
 
 export function useShownSections(): ShownSection[] {
   const ws = useWorkspaceStore((s) => s.workspace);
-  const pinned = useUiStore((s) => s.arrangePinned);
+  const hidden = useUiStore((s) => s.arrangeHidden);
   const collapsed = useUiStore((s) => s.arrangeCollapsed);
-  return cachedSections(ws, pinned, collapsed);
+  return cachedSections(ws, hidden, collapsed);
+}
+
+/** Non-hook form of `isShownInArrange` for commands and operations. */
+export function shownInArrangeNow(id: DocumentId): boolean {
+  return isShownInArrange(
+    useWorkspaceStore.getState().workspace,
+    useUiStore.getState().arrangeHidden,
+    id,
+  );
 }
 
 const indexCache = new WeakMap<VirtualDocument, ReadonlyMap<PageId, number>>();

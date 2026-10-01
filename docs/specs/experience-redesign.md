@@ -209,7 +209,7 @@ opacity. Edits change that preset and persist per device. Nothing opens on its o
 `applyStyle(patch)` replaces direct calls: with a selection it edits the selection
 (`updateAnnotations`, coalesced as today); without one it calls `setStyle(group, patch)`
 for the armed tool and, for the pen, updates the armed preset. Tool styles persist
-(`pdf-editor:styles:v1`).
+(`pdf-editor:ui:tool-styles:v1`).
 
 ### 6.4 Bursts: many strokes, one annotation
 

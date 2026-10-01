@@ -1,12 +1,13 @@
 /**
  * Left rail "Comments" (spec §9): every annotation of the active document as a navigable
  * list grouped by page, with kind, author and text. Activating one shows its page in Read
- * mode and selects it. The header holds the author name new annotations get (a local
- * setting, persisted in localStorage).
+ * mode and selects it. The author name new annotations get (a local setting, persisted in
+ * localStorage) is asked once, inline, above the list when the first comment appears
+ * (experience-redesign §4.1); "Set comment author name…" in the palette asks again.
  */
 import type { PageId, SourceId, VirtualDocument } from '@pdf-editor/document-model';
 import type { Annotation } from '@pdf-editor/engine';
-import { useEffect, useId } from 'react';
+import { type SyntheticEvent, useEffect, useId, useRef, useState } from 'react';
 
 import { useAnnotationStore, visibleAnnotations } from '../annotations/annotation-store';
 import { annotationIcon } from '../annotations/icons';
@@ -15,6 +16,8 @@ import { getLocale, m } from '../i18n';
 import { useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 import { useActiveDocument } from '../state/workspace-store';
+import { announce } from './announcer';
+import { useAuthorPrompt } from './comment-author';
 import styles from './CommentsPanel.module.css';
 import { EmptyNote } from './EmptyNote';
 
@@ -38,9 +41,10 @@ const dateFormat = (iso: string) => {
 
 export function CommentsPanel() {
   const doc = useActiveDocument();
+  const editing = useAuthorPrompt((s) => s.editing);
   return (
     <div className={styles.panel} data-comments-panel="">
-      <AuthorField />
+      {editing ? <AuthorPrompt focusOnMount /> : null}
       {doc ? (
         <CommentList doc={doc} />
       ) : (
@@ -52,25 +56,52 @@ export function CommentsPanel() {
   );
 }
 
-function AuthorField() {
+/** "Name on your comments [______] Save · Skip": either answer marks the name as asked. */
+function AuthorPrompt({ focusOnMount = false }: { readonly focusOnMount?: boolean }) {
   const author = useAnnotationStore((s) => s.author);
-  const setAuthor = useAnnotationStore((s) => s.setAuthor);
+  const [value, setValue] = useState(author);
+  const input = useRef<HTMLInputElement>(null);
   const id = useId();
+  useEffect(() => {
+    // Asked from the palette: the person is waiting to type. Never on the first comment.
+    if (focusOnMount) input.current?.focus();
+  }, [focusOnMount]);
+  const save = (event: SyntheticEvent) => {
+    event.preventDefault();
+    const name = value.trim();
+    useAnnotationStore.getState().setAuthor(name);
+    useAuthorPrompt.getState().answer();
+    if (name !== '') announce(m.comments_author_saved({ name }));
+  };
   return (
-    <div className={styles.author}>
+    <form className={styles.author} data-author-prompt="" onSubmit={save}>
       <label htmlFor={id} className={styles.authorLabel}>
-        {m.comments_author()}
+        {m.comments_author_prompt()}
       </label>
-      <input
-        id={id}
-        className={styles.authorInput}
-        value={author}
-        placeholder={m.comments_author_placeholder()}
-        autoComplete="name"
-        spellCheck={false}
-        onChange={(e) => setAuthor(e.target.value)}
-      />
-    </div>
+      <div className={styles.authorRow}>
+        <input
+          ref={input}
+          id={id}
+          className={styles.authorInput}
+          value={value}
+          placeholder={m.comments_author_placeholder()}
+          autoComplete="name"
+          spellCheck={false}
+          maxLength={200}
+          onChange={(e) => setValue(e.target.value)}
+        />
+        <button type="submit" className={styles.authorButton}>
+          {m.comments_author_save()}
+        </button>
+        <button
+          type="button"
+          className={styles.authorButton}
+          onClick={() => useAuthorPrompt.getState().answer()}
+        >
+          {m.comments_author_skip()}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -78,6 +109,7 @@ function CommentList({ doc }: { readonly doc: VirtualDocument }) {
   const pages = useAnnotationStore((s) => s.pages);
   const ensurePage = useAnnotationStore((s) => s.ensurePage);
   const selection = useAnnotationStore((s) => s.selection);
+  const ask = useAuthorPrompt((s) => !s.asked && !s.editing);
 
   useEffect(() => {
     for (const page of doc.pages) {
@@ -130,60 +162,63 @@ function CommentList({ doc }: { readonly doc: VirtualDocument }) {
   };
 
   return (
-    <div className={styles.scroll} aria-busy={loading}>
-      {groups.map((group) => (
-        <section
-          key={group.pageId}
-          className={styles.group}
-          aria-label={m.comments_page({ page: group.position })}
-        >
-          <h3 className={styles.pageTitle}>{m.comments_page({ page: group.position })}</h3>
-          <ul className={styles.list}>
-            {group.annotations.map((a) => {
-              const Icon = annotationIcon(a);
-              const text = a.kind === 'free-text' ? a.text : (a.contents ?? '');
-              const selected = selection?.pageId === group.pageId && selection.ids.includes(a.id);
-              return (
-                <li key={a.id}>
-                  <button
-                    type="button"
-                    className={styles.item}
-                    aria-current={selected ? 'true' : undefined}
-                    data-annotation-row={a.id}
-                    onClick={() => open(group, a)}
-                  >
-                    <span
-                      className={styles.icon}
-                      style={{ color: a.color ?? undefined }}
-                      aria-hidden="true"
+    <>
+      {ask ? <AuthorPrompt /> : null}
+      <div className={styles.scroll} aria-busy={loading}>
+        {groups.map((group) => (
+          <section
+            key={group.pageId}
+            className={styles.group}
+            aria-label={m.comments_page({ page: group.position })}
+          >
+            <h3 className={styles.pageTitle}>{m.comments_page({ page: group.position })}</h3>
+            <ul className={styles.list}>
+              {group.annotations.map((a) => {
+                const Icon = annotationIcon(a);
+                const text = a.kind === 'free-text' ? a.text : (a.contents ?? '');
+                const selected = selection?.pageId === group.pageId && selection.ids.includes(a.id);
+                return (
+                  <li key={a.id}>
+                    <button
+                      type="button"
+                      className={styles.item}
+                      aria-current={selected ? 'true' : undefined}
+                      data-annotation-row={a.id}
+                      onClick={() => open(group, a)}
                     >
-                      <Icon />
-                    </span>
-                    <span className={styles.body}>
-                      <span className={styles.meta}>
-                        <span className={styles.kind}>{capitalize(annotationName(a))}</span>
-                        <span className={styles.who}>
-                          {a.author && a.author !== '' ? a.author : m.annot_no_author()}
-                        </span>
-                        {a.modified ? (
-                          <time className={styles.when} dateTime={a.modified}>
-                            {dateFormat(a.modified)}
-                          </time>
-                        ) : null}
+                      <span
+                        className={styles.icon}
+                        style={{ color: a.color ?? undefined }}
+                        aria-hidden="true"
+                      >
+                        <Icon />
                       </span>
-                      {text !== '' ? (
-                        <span className={styles.text}>{text}</span>
-                      ) : (
-                        <span className={styles.noText}>{m.comments_no_text()}</span>
-                      )}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ))}
-    </div>
+                      <span className={styles.body}>
+                        <span className={styles.meta}>
+                          <span className={styles.kind}>{capitalize(annotationName(a))}</span>
+                          <span className={styles.who}>
+                            {a.author && a.author !== '' ? a.author : m.annot_no_author()}
+                          </span>
+                          {a.modified ? (
+                            <time className={styles.when} dateTime={a.modified}>
+                              {dateFormat(a.modified)}
+                            </time>
+                          ) : null}
+                        </span>
+                        {text !== '' ? (
+                          <span className={styles.text}>{text}</span>
+                        ) : (
+                          <span className={styles.noText}>{m.comments_no_text()}</span>
+                        )}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </>
   );
 }

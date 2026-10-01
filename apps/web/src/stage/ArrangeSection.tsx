@@ -356,31 +356,26 @@ function SectionHeader({
         </span>
       ) : null}
       <span className={styles.headerSpacer} />
-      {section.pinned ? (
-        <Tooltip label={m.section_pinned_tooltip()}>
-          <span className={styles.pinnedMark} data-testid="section-pinned">
-            {m.section_pinned()}
-          </span>
-        </Tooltip>
-      ) : null}
       <SectionMenu section={section} />
     </header>
   );
 }
 
 function SectionMenu({ section }: { readonly section: ShownSection }) {
-  const { doc, collapsed, pinned } = section;
+  const { doc, collapsed, hideable } = section;
   const ui = useUiStore.getState;
   const apply = useSelectionStore((s) => s.apply);
   const focused = useSelectionStore((s) => s.focused);
 
   const builtIn: { key: string; label: string; run: () => void; disabled?: boolean }[] = [
+    // Every open document is shown (experience-redesign §8); the active one stays.
     {
-      key: 'pin',
-      label: pinned ? m.arrange_remove() : m.arrange_keep(),
+      key: 'hide',
+      label: m.arrange_hide(),
+      disabled: !hideable,
       run: () => {
-        if (pinned) ui().unpinFromArrange(doc.id);
-        else ui().pinToArrange([doc.id]);
+        ui().hideFromArrange(doc.id);
+        announce(m.announce_removed_from_arrange({ title: doc.title }));
       },
     },
     {

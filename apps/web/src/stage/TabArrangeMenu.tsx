@@ -1,8 +1,10 @@
 /**
  * Light-table affordances on a document tab (spec §1, §5): the tab can be dragged onto the
- * table to show the document as a section, and its context menu has "Show in Arrange" and
- * the section operations (Reverse, Interleave, Split, Merge into, Insert images, Rename,
- * Close) with the same enablement and hints as the section menu.
+ * table to show the document as a section, and its context menu has "Hide from Arrange"
+ * (every open document is shown by default, experience-redesign §8; the active one always
+ * is), "Show in Arrange" for a hidden one, and the section operations (Reverse,
+ * Interleave, Split, Merge into, Insert images, Rename, Close) with the same enablement
+ * and hints as the section menu.
  * Wraps the tab's element (the context-menu trigger renders it).
  */
 import { draggable } from '@atlaskit/pragmatic-drag-and-drop/adapter/element-adapter';
@@ -15,6 +17,7 @@ import type { TabDragData } from '../dnd/page-drag';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { useUiStore } from '../state/ui-store';
+import { useWorkspaceStore } from '../state/workspace-store';
 import menuStyles from '../ui/Menu.module.css';
 import { SectionMenuEntries } from './SectionMenuEntries';
 
@@ -27,7 +30,8 @@ export function TabArrangeMenu({
   readonly title: string;
   readonly children: ReactElement;
 }) {
-  const pinned = useUiStore((s) => s.arrangePinned.includes(documentId));
+  const hidden = useUiStore((s) => s.arrangeHidden.includes(documentId));
+  const active = useWorkspaceStore((s) => s.workspace.activeDocument === documentId);
   const dragRef = useCallback(
     (element: HTMLElement | null) => {
       if (element === null) return;
@@ -47,26 +51,27 @@ export function TabArrangeMenu({
       <ContextMenu.Portal>
         <ContextMenu.Positioner collisionPadding={8}>
           <ContextMenu.Popup className={menuStyles.popup} data-testid="tab-menu">
-            <ContextMenu.Item
-              className={menuStyles.item}
-              onClick={() => {
-                showInArrange(documentId);
-                useUiStore.getState().setViewMode('arrange');
-              }}
-            >
-              <span className={menuStyles.label}>{m.arrange_show()}</span>
-            </ContextMenu.Item>
-            {pinned ? (
+            {active ? null : hidden ? (
               <ContextMenu.Item
                 className={menuStyles.item}
                 onClick={() => {
-                  useUiStore.getState().unpinFromArrange(documentId);
+                  showInArrange(documentId);
+                  useUiStore.getState().setViewMode('arrange');
+                }}
+              >
+                <span className={menuStyles.label}>{m.arrange_show()}</span>
+              </ContextMenu.Item>
+            ) : (
+              <ContextMenu.Item
+                className={menuStyles.item}
+                onClick={() => {
+                  useUiStore.getState().hideFromArrange(documentId);
                   announce(m.announce_removed_from_arrange({ title }));
                 }}
               >
-                <span className={menuStyles.label}>{m.arrange_remove()}</span>
+                <span className={menuStyles.label}>{m.arrange_hide()}</span>
               </ContextMenu.Item>
-            ) : null}
+            )}
             <SectionMenuEntries documentId={documentId} origin="tab" />
           </ContextMenu.Popup>
         </ContextMenu.Positioner>

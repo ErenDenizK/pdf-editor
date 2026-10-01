@@ -55,7 +55,7 @@ describe('AppShell', () => {
     const input = await screen.findByRole('combobox', { name: 'Search commands' });
     await userEvent.type(input, 'arrange');
     await waitFor(() => {
-      expect(screen.getAllByRole('option')[0]).toHaveTextContent('Switch to Arrange');
+      expect(screen.getAllByRole('option')[0]).toHaveTextContent('Arrange pages');
     });
     await userEvent.keyboard('{Enter}');
     await waitFor(() => {

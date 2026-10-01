@@ -35,6 +35,33 @@
   color: var(--warning);
 }
 
+.honestyText {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.honestyMore {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .honestyMore:hover {
+    color: var(--text-primary);
+  }
+}
+
+.honestyDetail {
+  color: var(--text-secondary);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

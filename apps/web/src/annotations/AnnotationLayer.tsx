@@ -11,15 +11,23 @@
  *
  * With the Select tool the layer lets pointer events through (to the text layer) except
  * on annotations; with a drawing tool it captures the whole page.
+ *
+ * Writing is never interrupted (experience-redesign spec §6.1): what a drawing tool creates
+ * is not selected (no contextual bar, no inspector change), its preview stays until the
+ * page bitmap shows the committed annotation (`whenPainted`), and a press while an inline
+ * editor is open commits the editor and draws in the same press.
  */
 import type { Rect } from '@pdf-editor/document-model';
 import type { Annotation, NewAnnotation } from '@pdf-editor/engine';
 import { Lock } from 'lucide-react';
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react';
 
+import { getEngineService } from '../engine/engine-service';
 import { m } from '../i18n';
+import { announce } from '../shell/announcer';
 import type { PageOverlayProps } from '../stage/page-overlays';
 import { pageFrame } from '../viewer/page-frame';
+import { whenPainted } from '../viewer/read-controller';
 import { type ToolMode, useToolStore } from '../viewer/tool-store';
 import { createAnnotations, deleteAnnotations, updateAnnotations } from './actions';
 import { AnnotationBar } from './AnnotationBar';
@@ -42,7 +50,7 @@ import {
   roundRect,
   userToCss,
 } from './geometry';
-import { InlineEditorView } from './InlineEditors';
+import { commitOpenEditor, InlineEditorView } from './InlineEditors';
 import {
   boundsOf,
   distanceToPolyline,
@@ -94,6 +102,16 @@ type Gesture =
       readonly points: readonly Point[];
     };
 
+type DrawGesture = Extract<Gesture, { type: 'draw' }>;
+
+/** A finished drawing gesture whose preview stays until the page shows what it created. */
+interface SettlingPreview {
+  readonly key: number;
+  readonly gesture: DrawGesture;
+}
+
+let settlingSerial = 0;
+
 const MARKUP_TOOLS = new Set<ToolMode>(['highlight', 'underline', 'strikeout', 'squiggly']);
 const DRAWING_TOOLS = new Set<ToolMode>([
   'highlight',
@@ -124,6 +142,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const gestureRef = useRef<Gesture | null>(null);
+  const [settling, setSettling] = useState<readonly SettlingPreview[]>([]);
 
   useEffect(() => {
     if (sourceId !== undefined && visible) ensurePage(sourceId, sourceIndex);
@@ -198,9 +217,15 @@ export function AnnotationLayer(props: PageOverlayProps) {
     const store = useAnnotationStore.getState();
     store.select(null);
     if (store.editor) {
-      // preventDefault above keeps focus where it is: blur the editor so it commits.
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-      return;
+      // Commit the editor and go on with the press (spec §6.1): the first stroke after
+      // typing a label is not lost. preventDefault above keeps focus in the editor, so an
+      // editor that is not mounted (its page scrolled away) is committed by a blur.
+      if (!commitOpenEditor() && document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      // With the text box or note tool the press only finishes the editor; going on would
+      // open a second, empty editor under the pointer at once.
+      if (mode === 'text-box' || mode === 'note') return;
     }
     const start = localPoint(event);
     if (mode === 'eraser') {
@@ -260,12 +285,34 @@ export function AnnotationLayer(props: PageOverlayProps) {
       },
       (p, e) => {
         const g = gestureRef.current;
-        update(null);
-        if (g?.type !== 'draw') return;
+        if (g?.type !== 'draw') {
+          update(null);
+          return;
+        }
         const final = { ...g, current: p, points: [...g.points, p], shift: e.shiftKey };
-        void (markup ? withQuads(final) : Promise.resolve(final)).then((done) =>
-          finishDraw(done, frame, target),
-        );
+        // The preview moves from the gesture to the settling list in the same render, so
+        // there is no frame without it; it goes once the page shows the annotation.
+        const key = ++settlingSerial;
+        setSettling((list) => [...list, { key, gesture: final }]);
+        update(null);
+        const release = () => {
+          setSettling((list) => list.filter((x) => x.key !== key));
+        };
+        void (markup ? withQuads(final) : Promise.resolve(final))
+          .then((done) => finishDraw(done, frame, target))
+          .catch((error: unknown) => {
+            console.warn('Creating the annotation failed', error);
+            return 'failed' as const;
+          })
+          .then(async (outcome) => {
+            if (outcome === 'committed') {
+              const generation = getEngineService().pageRevision(target.source, target.pageIndex);
+              await whenPainted(target.source, target.pageIndex, generation);
+            } else if (outcome === 'failed' && final.tool === 'ink') {
+              announce(m.annot_stroke_not_saved());
+            }
+            release();
+          });
       },
     );
   };
@@ -408,6 +455,9 @@ export function AnnotationLayer(props: PageOverlayProps) {
             single={selected.length === 1}
             onHandle={onHandlePointerDown}
           />
+        ))}
+        {settling.map((x) => (
+          <DrawPreview key={x.key} gesture={x.gesture} frame={frame} settling />
         ))}
         {gesture?.type === 'draw' ? <DrawPreview gesture={gesture} frame={frame} /> : null}
         {gesture?.type === 'erase' ? <EraseTrail points={gesture.points} /> : null}
@@ -729,7 +779,7 @@ function GhostShape({
 // Creation feedback and commit
 // ---------------------------------------------------------------------------
 
-function constrainedEnd(g: Extract<Gesture, { type: 'draw' }>): Point {
+function constrainedEnd(g: DrawGesture): Point {
   if (!g.shift) return g.current;
   if (g.tool === 'line' || g.tool === 'arrow' || g.tool === 'ink')
     return snapAngle(g.start, g.current);
@@ -740,10 +790,14 @@ function constrainedEnd(g: Extract<Gesture, { type: 'draw' }>): Point {
 function DrawPreview({
   gesture: g,
   frame,
+  settling = false,
 }: {
-  readonly gesture: Extract<Gesture, { type: 'draw' }>;
+  readonly gesture: DrawGesture;
   readonly frame: PageFrame;
+  /** Released, waiting for the page to show the committed annotation (`data-settling`). */
+  readonly settling?: boolean;
 }) {
+  const marker = settling ? { 'data-settling': '' } : {};
   const style = useAnnotationStore((s) => s.styles[styleGroupOf(g.tool)]);
   const stroke = style.color;
   const width = Math.max(1, style.strokeWidth * frame.scale);
@@ -764,6 +818,7 @@ function DrawPreview({
           stroke={g.tool === 'rectangle' ? stroke : undefined}
           strokeWidth={g.tool === 'rectangle' ? width : undefined}
           data-testid="annotation-preview"
+          {...marker}
         />
       );
     }
@@ -779,6 +834,7 @@ function DrawPreview({
           stroke={stroke}
           strokeWidth={width}
           data-testid="annotation-preview"
+          {...marker}
         />
       );
     }
@@ -792,6 +848,7 @@ function DrawPreview({
           strokeWidth={width}
           markerEnd={g.tool === 'arrow' ? 'url(#annotation-arrow)' : undefined}
           data-testid="annotation-preview"
+          {...marker}
         />
       );
     case 'ink':
@@ -803,6 +860,7 @@ function DrawPreview({
           strokeWidth={width}
           opacity={style.opacity}
           data-testid="annotation-preview"
+          {...marker}
         />
       );
     case 'highlight':
@@ -810,7 +868,12 @@ function DrawPreview({
     case 'strikeout':
     case 'squiggly':
       return (
-        <g className={styles.previewMarkup} data-tool={g.tool} data-testid="annotation-preview">
+        <g
+          className={styles.previewMarkup}
+          data-tool={g.tool}
+          data-testid="annotation-preview"
+          {...marker}
+        >
           {(g.quads ?? []).map((q, i) => {
             const b = rectToCss(frame, q);
             return (
@@ -882,16 +945,26 @@ async function commitErase(
   }
 }
 
-function dragged(g: Extract<Gesture, { type: 'draw' }>): boolean {
+function dragged(g: DrawGesture): boolean {
   return Math.hypot(g.current.x - g.start.x, g.current.y - g.start.y) >= DRAG_THRESHOLD;
 }
 
-/** Turns a finished drawing gesture into an annotation (or an in-place editor). */
+/**
+ * What became of a finished drawing gesture: nothing to create (too small, or an editor
+ * opened), an annotation committed to the history, or a commit that did not happen.
+ */
+type DrawOutcome = 'none' | 'committed' | 'failed';
+
+/**
+ * Turns a finished drawing gesture into an annotation (or an in-place editor). Nothing it
+ * creates is selected (spec §6.1), except a placed stamp or signature: those are placed to
+ * be moved and sized at once, and are not part of a writing flow.
+ */
 async function finishDraw(
-  g: Extract<Gesture, { type: 'draw' }>,
+  g: DrawGesture,
   frame: PageFrame,
   target: PageTarget,
-): Promise<void> {
+): Promise<DrawOutcome> {
   const store = useAnnotationStore.getState();
   const style = store.styles[styleGroupOf(g.tool)];
   const pageIndex = target.pageIndex;
@@ -902,7 +975,7 @@ async function finishDraw(
   switch (g.tool) {
     case 'rectangle':
     case 'ellipse': {
-      if (!dragged(g)) return;
+      if (!dragged(g)) return 'none';
       const rect = roundRect(cssBoxToUser(frame, boxFromPoints(g.start, end)));
       draft = {
         ...base,
@@ -915,7 +988,7 @@ async function finishDraw(
     }
     case 'line':
     case 'arrow': {
-      if (!dragged(g)) return;
+      if (!dragged(g)) return 'none';
       const vertices = [cssPointToUser(frame, g.start), cssPointToUser(frame, end)];
       draft = {
         ...base,
@@ -936,7 +1009,7 @@ async function finishDraw(
       if (path.length < 2 && !dragged(g)) {
         // A dot: a tiny stroke so a tap leaves a mark.
         const p = user[0];
-        if (!p) return;
+        if (!p) return 'none';
         path.push({ x: p.x + 0.5, y: p.y });
       }
       draft = {
@@ -954,7 +1027,7 @@ async function finishDraw(
     case 'strikeout':
     case 'squiggly': {
       const quads = g.quads ?? [];
-      if (quads.length === 0) return;
+      if (quads.length === 0) return 'none';
       draft = markupDraft(g.tool, pageIndex, quads, style.color, style.opacity);
       break;
     }
@@ -971,7 +1044,7 @@ async function finishDraw(
         text: '',
         fixedWidth: isDrag,
       });
-      return;
+      return 'none';
     }
     case 'note': {
       const p = cssPointToUser(frame, g.start);
@@ -981,12 +1054,12 @@ async function finishDraw(
         rect: { x: Math.round(p.x), y: Math.round(p.y - 20), width: 20, height: 20 },
         text: '',
       });
-      return;
+      return 'none';
     }
     case 'stamp':
     case 'signature': {
       const pending = store.pendingStamp;
-      if (!pending) return;
+      if (!pending) return 'none';
       const natural = naturalStampSize(pending);
       const ratio = natural.height / natural.width;
       let rect: Rect;
@@ -1010,7 +1083,12 @@ async function finishDraw(
       break;
     }
     default:
-      return;
+      return 'none';
   }
-  await createAnnotations(target, [draft], labelKind ? { labelKind } : {});
+  const placed = g.tool === 'stamp' || g.tool === 'signature';
+  const created = await createAnnotations(target, [draft], {
+    ...(labelKind ? { labelKind } : {}),
+    ...(placed ? { select: true } : {}),
+  });
+  return created && created.length > 0 ? 'committed' : 'failed';
 }

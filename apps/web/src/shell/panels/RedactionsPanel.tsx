@@ -1,8 +1,9 @@
 /**
  * Left rail "Redactions" (redaction spec §1.1–§1.2): every redaction mark of the workspace,
  * grouped by document and page, with the text under it, a tick for a later "apply
- * selected", reveal on click, J / K review and delete. The header states honestly what a
- * mark is (only a mark until applied; applying is irreversible after export) and holds
+ * selected", reveal on click, J / K review and delete. The header states honestly, in one
+ * line with a "Why?" disclosure (experience-redesign §4.1), what a mark is (only a mark
+ * until applied; applying is irreversible after export) and holds
  * the sensitive-data finder, whose matches are reviewed here before "Mark selected".
  * "Apply redactions" is enabled while a listed mark is ticked and opens the confirmation
  * dialog (redaction/ApplyRedactionsDialog.tsx), which applies the ticked marks.
@@ -76,10 +77,7 @@ export function RedactionsPanel() {
   return (
     <div className={styles.panel} data-redactions-panel="" data-annotation-keep="">
       <div className={styles.header}>
-        <p className={styles.honesty} role="note">
-          <ShieldAlert aria-hidden="true" />
-          <span>{m.redaction_honesty()}</span>
-        </p>
+        <Honesty />
         <Actions ticked={included.size} />
         {total > 0 ? (
           <p className={styles.summary} data-testid="redaction-summary">
@@ -105,6 +103,34 @@ export function RedactionsPanel() {
       ) : (
         <MarkList entries={entries} multipleDocuments={workspace.documentOrder.length > 1} />
       )}
+    </div>
+  );
+}
+
+/** "Marks hide nothing until you apply them. Why?": one line, the full text on demand. */
+function Honesty() {
+  const [open, setOpen] = useState(false);
+  const detailId = useId();
+  return (
+    <div className={styles.honesty} role="note" data-testid="redaction-honesty">
+      <ShieldAlert aria-hidden="true" />
+      <div className={styles.honestyText}>
+        <p>
+          {m.redaction_honesty_short()}{' '}
+          <button
+            type="button"
+            className={styles.honestyMore}
+            aria-expanded={open}
+            aria-controls={detailId}
+            onClick={() => setOpen(!open)}
+          >
+            {m.redaction_honesty_more()}
+          </button>
+        </p>
+        <p id={detailId} className={styles.honestyDetail} hidden={!open}>
+          {m.redaction_honesty()}
+        </p>
+      </div>
     </div>
   );
 }

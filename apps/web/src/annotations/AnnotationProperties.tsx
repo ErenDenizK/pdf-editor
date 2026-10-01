@@ -1,17 +1,22 @@
 /**
  * Right panel "Properties" for selected annotations (spec §2): the contextual bar's
- * controls plus kind, author, dates and the comment text. Renders `fallback` when no
- * annotation is selected.
+ * controls plus kind, author, dates and the comment text. With nothing selected and a
+ * drawing tool armed it shows that tool's style, so colour and width can be chosen before
+ * drawing (experience-redesign spec §6.3; the tool bar's options tier takes this over in
+ * T1). Renders `fallback` otherwise.
  */
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 
 import { getLocale, m } from '../i18n';
+import { useToolStore } from '../viewer/tool-store';
 import { updateAnnotations } from './actions';
 import { selectedAnnotations, useAnnotationStore } from './annotation-store';
+import { toolStyleGroup } from './drafts';
 import { annotationName, capitalize } from './labels';
 import styles from './AnnotationProperties.module.css';
 import { StyleControls } from './StyleControls';
+import { toolDefinition } from './tools';
 
 const dateFormat = (iso: string) => {
   const date = new Date(iso);
@@ -25,9 +30,29 @@ const dateFormat = (iso: string) => {
 export function AnnotationProperties({ fallback }: { readonly fallback: ReactNode }) {
   const selection = useAnnotationStore((s) => s.selection);
   const pages = useAnnotationStore((s) => s.pages);
+  const mode = useToolStore((s) => s.mode);
+  const titleId = useId();
   const annotations = selectedAnnotations({ selection, pages });
   const first = annotations[0];
-  if (!selection || !first) return <>{fallback}</>;
+  if (!selection || !first) {
+    const group = toolStyleGroup(mode);
+    if (group === undefined) return <>{fallback}</>;
+    const title = m.annot_tool_style({ tool: toolDefinition(mode).title() });
+    return (
+      <section
+        className={styles.properties}
+        aria-labelledby={titleId}
+        data-annotation-keep=""
+        data-testid="tool-style"
+      >
+        <p id={titleId} className={styles.label}>
+          {title}
+        </p>
+        <p className={styles.note}>{m.annot_tool_style_hint()}</p>
+        <StyleControls variant="tool" group={group} />
+      </section>
+    );
+  }
   const single = annotations.length === 1;
   const locked = annotations.every((a) => a.flags?.locked);
   return (

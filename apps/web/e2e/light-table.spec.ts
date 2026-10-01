@@ -1,6 +1,7 @@
 /**
  * Light table end to end: real native drag and drop driven by mouse events (Playwright
- * intercepts HTML5 drags in Chromium), tab context menu pinning, merging every open
+ * intercepts HTML5 drags in Chromium), every open document shown by default with "Hide
+ * from Arrange" / "Show in Arrange" on the tabs, merging every open
  * document and exporting the result, and screenshots for the design review
  * (`CAPTURE_SCREENSHOTS=1`, written to docs/design/screenshots/).
  */
@@ -15,11 +16,14 @@ import { openFixtures, useFileInputPicker } from './helpers';
 const screenshots = new URL('../../../docs/design/screenshots/', import.meta.url);
 const capture = Boolean(process.env.CAPTURE_SCREENSHOTS);
 
-/** Shows every open document in Arrange through the tab context menu. */
-async function showBothInArrange(page: Page, second: string): Promise<void> {
-  await page.getByRole('tab', { name: second }).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Show in Arrange' }).click();
-  await expect(page.getByRole('grid')).toHaveCount(2);
+/** Switches to Arrange, which shows every open document (experience-redesign §8). */
+async function showAllInArrange(page: Page, count = 2): Promise<void> {
+  await page
+    .getByRole('tablist', { name: /^(Open documents|Açık belgeler)$/ })
+    .getByRole('tab', { selected: true })
+    .click();
+  await page.keyboard.press('2');
+  await expect(page.getByRole('grid')).toHaveCount(count);
 }
 
 /** Waits until at least `count` light-table thumbnails have rendered. */
@@ -43,7 +47,7 @@ test.describe('light table', () => {
   test('drags a page from one document into another', async ({ page }) => {
     await page.goto('./');
     await openFixtures(page, ['simple-text.pdf', 'rotated-pages.pdf']);
-    await showBothInArrange(page, 'rotated-pages');
+    await showAllInArrange(page);
 
     const source = grid(page, 'simple-text').getByRole('gridcell').nth(0);
     const target = grid(page, 'rotated-pages').getByRole('gridcell').nth(1);
@@ -72,10 +76,31 @@ test.describe('light table', () => {
     await expect(grid(page, 'simple-text').getByRole('gridcell')).toHaveCount(3);
   });
 
+  test('shows every open document; a tab hides one and shows it again', async ({ page }) => {
+    await page.goto('./?lang=en');
+    await openFixtures(page, ['simple-text.pdf', 'rotated-pages.pdf', 'forms-a.pdf']);
+    // Three documents open: Arrange shows all three, not only the active one.
+    await showAllInArrange(page, 3);
+    await expect(grid(page, 'simple-text')).toBeVisible();
+    await expect(grid(page, 'rotated-pages')).toBeVisible();
+    await expect(grid(page, 'forms-a')).toBeVisible();
+    await expect(page.getByTestId('status-shown')).toHaveText('3 documents shown');
+
+    await page.getByRole('tab', { name: 'rotated-pages' }).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Hide from Arrange' }).click();
+    await expect(page.getByRole('grid')).toHaveCount(2);
+    await expect(grid(page, 'rotated-pages')).toHaveCount(0);
+    await expect(page.getByTestId('status-shown')).toHaveText('2 documents shown');
+
+    await page.getByRole('tab', { name: 'rotated-pages' }).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Show in Arrange' }).click();
+    await expect(page.getByRole('grid')).toHaveCount(3);
+  });
+
   test('marquee selects across sections', async ({ page }) => {
     await page.goto('./');
     await openFixtures(page, ['simple-text.pdf', 'rotated-pages.pdf']);
-    await showBothInArrange(page, 'rotated-pages');
+    await showAllInArrange(page);
     const last = grid(page, 'simple-text').getByRole('gridcell').nth(2);
     const first = grid(page, 'rotated-pages').getByRole('gridcell').nth(0);
     const from = await last.boundingBox();
@@ -134,7 +159,7 @@ test.describe('light table', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('./');
     await openFixtures(page, ['outline-named-dests.pdf', 'forms-a.pdf']);
-    await showBothInArrange(page, 'forms-a');
+    await showAllInArrange(page);
     await rendered(page, 8);
     const cells = grid(page, 'outline-named-dests').getByRole('gridcell');
     await cells.nth(1).click();
@@ -163,9 +188,8 @@ test.describe('light table', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('./?lang=en');
     await openFixtures(page, ['outline-named-dests.pdf', 'forms-a.pdf', 'simple-text.pdf']);
-    await showBothInArrange(page, 'forms-a');
     await page.getByRole('tab', { name: 'outline-named-dests' }).click();
-    await page.keyboard.press('2');
+    await showAllInArrange(page, 3);
     await rendered(page, 6);
 
     await page.getByRole('button', { name: 'outline-named-dests actions' }).click();
@@ -206,9 +230,7 @@ test.describe('light table', () => {
     // Turkish: the light table with its section menu open, then the split dialog.
     await page.goto('./?lang=tr');
     await openFixtures(page, ['outline-named-dests.pdf', 'forms-a.pdf']);
-    await page.getByRole('tab', { name: 'forms-a' }).click({ button: 'right' });
-    await page.getByRole('menuitem', { name: 'Sıralama’da göster' }).click();
-    await expect(page.getByRole('grid')).toHaveCount(2);
+    await showAllInArrange(page);
     await rendered(page, 8);
     await page.getByRole('button', { name: 'outline-named-dests işlemleri' }).click();
     await page.getByRole('menuitem', { name: /Başka belgeye ekle/ }).hover();

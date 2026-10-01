@@ -18,7 +18,15 @@
   font-size: var(--text-sm);
 }
 
+.authorRow {
+  display: flex;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
 .authorInput {
+  flex: 1;
+  min-width: 0;
   height: var(--control-height);
   padding: 0 var(--space-2);
   border: 1px solid var(--border-strong);
@@ -30,6 +38,24 @@
 
 .authorInput:focus-visible {
   outline-offset: 0;
+}
+
+.authorButton {
+  flex: none;
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .authorButton:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
 }
 
 .empty {

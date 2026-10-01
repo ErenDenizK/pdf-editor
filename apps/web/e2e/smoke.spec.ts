@@ -50,3 +50,38 @@ test('the status bar stays put while the privacy popover opens and closes', asyn
   expect((await label.boundingBox())?.x).toBe(before?.x);
   expect(before?.x).toBeGreaterThanOrEqual(bar?.x ?? Number.POSITIVE_INFINITY);
 });
+
+test('the start card says what several files do', async ({ page }) => {
+  await page.goto('./?lang=en');
+  await expect(
+    page.getByText(
+      'Several files open as tabs. With two or more open you can combine them, arrange their pages together or compare them, from the command palette or a tab’s menu.',
+    ),
+  ).toBeVisible();
+});
+
+test('the palette finds commands by keywords in both languages, without diacritics', async ({
+  page,
+}) => {
+  await page.goto('./?lang=en');
+  const search = async (query: string) => {
+    await page.keyboard.press('ControlOrMeta+k');
+    const input = page.getByRole('combobox', { name: /^(Search commands|Komut ara)$/ });
+    await input.fill(query);
+    return page.getByRole('option').first();
+  };
+  await expect(await search('kalem')).toContainText('Pen tool');
+  await page.keyboard.press('Escape');
+  await expect(await search('ciz')).toContainText('Pen tool');
+  await page.keyboard.press('Escape');
+  await expect(await search('birlestir')).toContainText(/Merge (all open documents|document into)/);
+  await page.keyboard.press('Escape');
+  await expect(await search('sertifika')).toContainText('Sign with certificate…');
+  await page.keyboard.press('Escape');
+
+  // The Turkish UI matches English keywords too.
+  await page.goto('./?lang=tr');
+  await expect(await search('draw')).toContainText('Kalem aracı');
+  await page.keyboard.press('Escape');
+  await expect(await search('birlestir')).toContainText(/birleştir|başka belgeye ekle/);
+});

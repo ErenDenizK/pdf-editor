@@ -1,9 +1,9 @@
 /**
  * Arrange mode: the light table (docs/specs/light-table.md). One scroll container with a
- * stack of sections (the active document plus pinned ones), each a virtualized grid of
- * page cells. TanStack Virtual picks the rendered range over a flat list of header / row /
- * gap items; positions come from `dnd/geometry.ts`, which also does hit testing, so drops
- * and marquees work on rows that are not in the DOM.
+ * stack of sections (every open document unless hidden; the active one always), each a
+ * virtualized grid of page cells. TanStack Virtual picks the rendered range over a flat
+ * list of header / row / gap items; positions come from `dnd/geometry.ts`, which also does
+ * hit testing, so drops and marquees work on rows that are not in the DOM.
  *
  * Interaction:
  * - Click / Shift / Mod select (Shift ranges within a section); marquee on empty space

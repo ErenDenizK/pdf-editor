@@ -117,6 +117,12 @@ export interface UiState extends PersistedLayout {
    * Session only; ids of closed documents are ignored by readers and pruned on unpin.
    */
   arrangePinned: readonly DocumentId[];
+  /**
+   * Documents hidden from the light table (experience-redesign §8: Arrange shows every open
+   * document by default; "Hide from Arrange" takes one out). The active document is always
+   * shown. Session only; ids of closed documents are ignored by readers.
+   */
+  arrangeHidden: readonly DocumentId[];
   /** Light-table sections shown collapsed (header only). Session only. */
   arrangeCollapsed: readonly DocumentId[];
   /** A document title being edited in place: in its tab or its light-table section. */
@@ -151,6 +157,8 @@ export interface UiState extends PersistedLayout {
    */
   pinToArrange: (ids: readonly DocumentId[], alsoKeep?: DocumentId) => void;
   unpinFromArrange: (id: DocumentId) => void;
+  /** Takes a document off the light table until it is shown again (`pinToArrange`). */
+  hideFromArrange: (id: DocumentId) => void;
   setArrangeCollapsed: (id: DocumentId, collapsed: boolean) => void;
   setRenaming: (renaming: UiState['renaming']) => void;
 }
@@ -174,6 +182,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
   recents: [],
   tool: 'select',
   arrangePinned: [],
+  arrangeHidden: [],
   arrangeCollapsed: [],
   renaming: null,
 
@@ -217,13 +226,28 @@ export const useUiStore = create<UiState>()((set, get) => ({
   pinToArrange: (ids, alsoKeep) =>
     set((s) => {
       const arrangePinned = withIds(s.arrangePinned, [alsoKeep, ...ids]);
-      return arrangePinned === s.arrangePinned ? s : { arrangePinned };
+      const shown = new Set([alsoKeep, ...ids]);
+      const arrangeHidden = s.arrangeHidden.some((id) => shown.has(id))
+        ? s.arrangeHidden.filter((id) => !shown.has(id))
+        : s.arrangeHidden;
+      return arrangePinned === s.arrangePinned && arrangeHidden === s.arrangeHidden
+        ? s
+        : { arrangePinned, arrangeHidden };
     }),
   unpinFromArrange: (id) =>
     set((s) =>
       s.arrangePinned.includes(id)
         ? { arrangePinned: s.arrangePinned.filter((pinned) => pinned !== id) }
         : s,
+    ),
+  hideFromArrange: (id) =>
+    set((s) =>
+      s.arrangeHidden.includes(id)
+        ? s
+        : {
+            arrangeHidden: [...s.arrangeHidden, id],
+            arrangePinned: s.arrangePinned.filter((pinned) => pinned !== id),
+          },
     ),
   setRenaming: (renaming) => set({ renaming }),
   setArrangeCollapsed: (id, collapsed) =>

@@ -105,7 +105,7 @@ test('sign simple-text.pdf through the export dialog; the download re-opens as I
 test('a legacy 3DES .p12 is refused with the re-export command', async ({ page }) => {
   await start(page, ['simple-text.pdf']);
   await page.getByTestId('document-menu').click();
-  await page.getByRole('menuitem', { name: 'Sign…' }).click();
+  await page.getByRole('menuitem', { name: 'Sign with certificate…' }).click();
   const sign = page.getByTestId('sign-dialog');
   await expect(sign).toBeVisible();
   await sign

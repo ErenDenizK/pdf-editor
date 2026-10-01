@@ -24,6 +24,9 @@
  *
  * - Content edits (annotations) bump the page's revision in the engine service
  *   (`invalidatePage`): the canvas keeps its current pixels and requests a fresh render.
+ *   An `exact` (Read mode) canvas reports each revision it has drawn at its final scale to
+ *   `notePagePainted` (viewer/read-controller.ts), so the ink preview can stay until the
+ *   committed stroke is on screen (experience-redesign spec §6.1, `whenPainted`).
  *
  * The canvas exposes `data-state`: placeholder | preview | rendered | error ("rendered"
  * only while it shows a bitmap at the requested scale; a stretched one is a "preview") and
@@ -40,6 +43,7 @@ import {
   getEngineService,
 } from '../engine/engine-service';
 import { useWorkspaceStore } from '../state/workspace-store';
+import { notePagePainted } from '../viewer/read-controller';
 import styles from './PageCanvas.module.css';
 
 /** Decoded image blobs, shared by every canvas that shows the same image page. */
@@ -200,8 +204,14 @@ export function PageCanvas({
       canvas.dataset.bucket = '0';
       canvas.dataset.revision = revisionKey;
     }
+    const painted = () => {
+      if (exact) notePagePainted(sourceId, index, revision);
+    };
     const hit = service.peek(sourceId, index, rotation, bucket);
-    if (hit && draw(canvas, hit, 'rendered')) return;
+    if (hit && draw(canvas, hit, 'rendered')) {
+      painted();
+      return;
+    }
     const shownBucket = Number(canvas.dataset.bucket ?? 0);
     const preview = service.preview(sourceId, index, rotation, bucket);
     if (preview && canvas.dataset.state !== 'rendered' && preview.bucket > shownBucket) {
@@ -216,7 +226,7 @@ export function PageCanvas({
         .then((result) => {
           if (cancelled) return;
           if (result.ok) {
-            draw(canvas, result.value, 'rendered');
+            if (draw(canvas, result.value, 'rendered')) painted();
           } else if (result.error.code !== 'aborted' && canvas.dataset.state === 'placeholder') {
             canvas.dataset.state = 'error';
           }
@@ -232,7 +242,7 @@ export function PageCanvas({
       // Abort after the next effect (if any) has subscribed to the same job.
       queueMicrotask(() => controller.abort());
     };
-  }, [sourceId, index, rotation, bucket, priority, delayMs, revision]);
+  }, [sourceId, index, rotation, bucket, priority, delayMs, revision, exact]);
 
   return <canvas ref={ref} className={styles.canvas} data-state="placeholder" aria-hidden="true" />;
 }

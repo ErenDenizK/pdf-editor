@@ -1,7 +1,8 @@
 /**
- * Signature commands (spec recognize-and-compare §3.4): "Sign…" in the Document group, so
- * it appears in the command palette and the tab bar's Document menu. It opens the Sign
- * dialog, which continues to the export dialog (signing is the last step of export).
+ * Signature commands (spec recognize-and-compare §3.4): "Sign with certificate…" in the
+ * Document group, so it appears in the command palette and the tab bar's Document menu.
+ * It opens the Sign dialog, which continues to the export dialog (signing is the last step
+ * of export).
  */
 import { getActiveDocument } from '@pdf-editor/document-model';
 

@@ -75,7 +75,12 @@ async function create(
 export interface CreateOptions {
   /** Kind named in the history label (arrow, signature) when it differs from the engine's. */
   readonly labelKind?: DisplayKind;
-  /** Select the new annotation (default true). */
+  /**
+   * Select the new annotations (default false). Creating does not select (experience-redesign
+   * spec §6.1, amendment A2): a selection opens the contextual bar and the inspector, which
+   * must not interrupt writing. Only callers that want the new annotation adjusted at once
+   * pass true (a placed stamp or signature, AnnotationLayer `finishDraw`).
+   */
   readonly select?: boolean;
 }
 
@@ -97,7 +102,7 @@ export function createAnnotations(
     if (!first) return undefined;
     const label = createLabel(options.labelKind ?? displayKind(first), target.position);
     announce(label);
-    if (options.select ?? true) {
+    if (options.select === true) {
       useAnnotationStore.getState().select({ ...target, ids: created.map((a) => a.id) });
     }
     return { edits, label, value: created };

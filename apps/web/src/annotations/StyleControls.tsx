@@ -1,8 +1,12 @@
 /**
  * The controls shared by the contextual bar and the Properties panel (spec §2): colour
- * swatches (8 fixed + custom), opacity, stroke width, font size, comment, delete. Slider
- * changes coalesce into one history entry (800 ms window) and only the latest value of a
- * burst is sent to the engine.
+ * swatches (8 fixed + custom), opacity, stroke width, font size, comment, delete.
+ *
+ * Every style control goes through `applyStyle` (experience-redesign spec §6.3): with a
+ * selection it edits the selection (slider changes coalesce into one history entry, and
+ * only the latest value of a burst is sent to the engine); without one it changes the armed
+ * tool's style, which persists per device. The `tool` variant shows the armed tool's style
+ * (Properties panel with nothing selected), so a colour or width can be set before drawing.
  */
 import type { Annotation } from '@pdf-editor/engine';
 import { MessageSquare, Trash2 } from 'lucide-react';
@@ -10,10 +14,15 @@ import { type CSSProperties, useRef, useState } from 'react';
 
 import { formatPercent, m } from '../i18n';
 import { IconButton } from '../ui/IconButton';
-import { deleteAnnotations, updateAnnotations } from './actions';
-import { type PageTarget, SWATCHES, useAnnotationStore } from './annotation-store';
-import { hasStrokeWidth, normalizeHex, primaryColor, withColor } from './colors';
-import type { UpdateAction } from './labels';
+import { deleteAnnotations } from './actions';
+import {
+  type PageTarget,
+  type StyleGroup,
+  SWATCHES,
+  type ToolStyle,
+  useAnnotationStore,
+} from './annotation-store';
+import { hasStrokeWidth, normalizeHex, primaryColor } from './colors';
 import styles from './StyleControls.module.css';
 
 export const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72] as const;
@@ -29,90 +38,89 @@ const SWATCH_NAMES: readonly (() => string)[] = [
   m.color_black,
 ];
 
-/** Latest-value slots per coalescing key: a burst of slider events sends one update. */
-const pending = new Map<string, { value: number | string }>();
+/** Style groups whose annotations have a stroke width (ink and shapes). */
+const STROKED_GROUPS: ReadonlySet<StyleGroup> = new Set(['ink', 'shape']);
 
-function applyLatest<T extends number | string>(
-  key: string,
-  value: T,
-  send: (read: () => T) => void,
-): void {
-  const slot = pending.get(key);
-  if (slot) {
-    slot.value = value;
-    return;
-  }
-  const fresh = { value };
-  pending.set(key, fresh);
-  send(() => {
-    pending.delete(key);
-    return fresh.value;
-  });
+export type StyleControlsProps =
+  | {
+      /** The selected annotations, in the contextual bar or the Properties panel. */
+      readonly variant: 'bar' | 'panel';
+      readonly target: PageTarget;
+      readonly annotations: readonly Annotation[];
+    }
+  | {
+      /** The armed tool's style (nothing selected): what the next annotation gets. */
+      readonly variant: 'tool';
+      readonly group: StyleGroup;
+    };
+
+/** What the controls show, from the selection or from a tool style. */
+interface Shown {
+  readonly disabled: boolean;
+  readonly colorable: boolean;
+  readonly color: string | undefined;
+  readonly opacity: number;
+  readonly strokeWidth: number | undefined;
+  readonly fontSize: number | undefined;
 }
 
-export function StyleControls({
-  target,
-  annotations,
-  variant,
-}: {
-  readonly target: PageTarget;
-  readonly annotations: readonly Annotation[];
-  readonly variant: 'bar' | 'panel';
-}) {
-  const editable = annotations.filter((a) => !a.flags?.locked);
-  const ids = editable.map((a) => a.id);
-  const idsKey = [...ids].sort().join(',');
+function shownForSelection(editable: readonly Annotation[]): Shown {
   const first = editable[0];
-  const disabled = first === undefined;
-  const color = first ? primaryColor(first) : undefined;
-  const opacity = first?.opacity ?? 1;
   const stroke = editable.find(hasStrokeWidth);
   const freeText = editable.find((a) => a.kind === 'free-text');
-  const colorable = editable.some((a) => primaryColor(a) !== undefined || a.kind !== 'stamp');
+  return {
+    disabled: first === undefined,
+    colorable: editable.some((a) => primaryColor(a) !== undefined || a.kind !== 'stamp'),
+    color: first ? primaryColor(first) : undefined,
+    opacity: first?.opacity ?? 1,
+    strokeWidth: stroke?.strokeWidth,
+    fontSize: freeText?.kind === 'free-text' ? freeText.fontSize : undefined,
+  };
+}
 
-  const update = (
-    action: UpdateAction,
-    change: (a: Annotation) => Annotation | undefined,
-    key?: string,
-  ) =>
-    void updateAnnotations(target, ids, change, {
-      action,
-      ...(key === undefined ? {} : { coalesceKey: key }),
-    });
+function shownForTool(group: StyleGroup, style: ToolStyle): Shown {
+  return {
+    disabled: false,
+    colorable: true,
+    color: style.color,
+    opacity: style.opacity,
+    strokeWidth: STROKED_GROUPS.has(group) ? style.strokeWidth : undefined,
+    fontSize: group === 'text' ? style.fontSize : undefined,
+  };
+}
+
+export function StyleControls(props: StyleControlsProps) {
+  const { variant } = props;
+  const applyStyle = useAnnotationStore((s) => s.applyStyle);
+  const toolStyle = useAnnotationStore((s) =>
+    props.variant === 'tool' ? s.styles[props.group] : undefined,
+  );
+  const editable =
+    props.variant === 'tool' ? [] : props.annotations.filter((a) => !a.flags?.locked);
+  const ids = editable.map((a) => a.id);
+  const first = editable[0];
+  const shown =
+    props.variant === 'tool' && toolStyle
+      ? shownForTool(props.group, toolStyle)
+      : shownForSelection(editable);
+  const { disabled, color, opacity } = shown;
 
   const setColor = (value: string) => {
-    const hex = normalizeHex(value);
-    update(
-      'color',
-      (a) => (a.kind === 'stamp' || a.kind === 'link' ? undefined : withColor(a, hex)),
-      `color:${idsKey}`,
-    );
+    applyStyle({ color: normalizeHex(value) });
   };
-
   const setOpacity = (value: number) => {
-    const key = `opacity:${idsKey}`;
-    applyLatest(key, value, (read) =>
-      update('opacity', (a) => ({ ...a, opacity: Math.round(read() * 100) / 100 }), key),
-    );
+    applyStyle({ opacity: value });
   };
-
   const setStroke = (value: number) => {
-    const key = `stroke:${idsKey}`;
-    applyLatest(key, value, (read) =>
-      update('stroke', (a) => (hasStrokeWidth(a) ? { ...a, strokeWidth: read() } : undefined), key),
-    );
+    applyStyle({ strokeWidth: value });
   };
-
-  const setFontSize = (value: number) =>
-    update(
-      'font',
-      (a) => (a.kind === 'free-text' ? { ...a, fontSize: value } : undefined),
-      `font:${idsKey}`,
-    );
+  const setFontSize = (value: number) => {
+    applyStyle({ fontSize: value });
+  };
 
   return (
     <div className={styles.controls} data-variant={variant}>
-      {colorable ? (
+      {shown.colorable ? (
         <div role="radiogroup" aria-label={m.annot_color()} className={styles.swatches}>
           {SWATCHES.map((swatch, i) => (
             <button
@@ -151,7 +159,7 @@ export function StyleControls({
           onValue={(v) => setOpacity(v / 100)}
         />
       </label>
-      {stroke ? (
+      {shown.strokeWidth !== undefined ? (
         <label className={styles.slider}>
           <span className={styles.sliderLabel}>{m.annot_stroke_width()}</span>
           <LiveRange
@@ -159,21 +167,21 @@ export function StyleControls({
             max={12}
             step={0.5}
             disabled={disabled}
-            value={stroke.strokeWidth}
+            value={shown.strokeWidth}
             valueText={(v) => m.annot_points({ value: v })}
             onValue={setStroke}
           />
         </label>
       ) : null}
-      {freeText?.kind === 'free-text' ? (
+      {shown.fontSize !== undefined ? (
         <label className={styles.select}>
           <span className={styles.sliderLabel}>{m.annot_font_size()}</span>
           <select
-            value={Math.round(freeText.fontSize)}
+            value={Math.round(shown.fontSize)}
             disabled={disabled}
             onChange={(e) => setFontSize(Number(e.target.value))}
           >
-            {[...new Set([...FONT_SIZES, Math.round(freeText.fontSize)])]
+            {[...new Set([...FONT_SIZES, Math.round(shown.fontSize)])]
               .sort((a, b) => a - b)
               .map((size) => (
                 <option key={size} value={size}>
@@ -194,7 +202,7 @@ export function StyleControls({
               if (!first) return;
               useAnnotationStore.getState().setEditor({
                 kind: 'note',
-                target,
+                target: props.target,
                 id: first.id,
                 rect: first.rect,
                 text: first.contents ?? '',
@@ -203,12 +211,14 @@ export function StyleControls({
           />
         </>
       ) : null}
-      <IconButton
-        label={m.annot_delete()}
-        icon={<Trash2 />}
-        disabled={disabled}
-        onClick={() => void deleteAnnotations(target, ids)}
-      />
+      {props.variant === 'tool' ? null : (
+        <IconButton
+          label={m.annot_delete()}
+          icon={<Trash2 />}
+          disabled={disabled}
+          onClick={() => void deleteAnnotations(props.target, ids)}
+        />
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@
  * The command registry. Every user-facing action is a command: it appears in the command
  * palette and the shortcut overlay, and may be bound to a shortcut (DESIGN.md §4.1).
  */
+import { messageKeywords } from './keywords';
 import { type ParsedShortcut, parseShortcut } from './shortcuts';
 
 export interface CommandDefinition {
@@ -12,7 +13,10 @@ export interface CommandDefinition {
   readonly group: string;
   /** One shortcut, or several; the first is the one displayed. */
   readonly shortcut?: string | readonly string[];
-  /** Extra search terms for the palette. */
+  /**
+   * Extra search terms for the palette. The registry adds the command's catalog keywords
+   * (`cmd_<id>_keywords`, every UI language; see `keywords.ts`).
+   */
   readonly keywords?: readonly string[];
   /** Short note shown in the shortcut overlay, e.g. browser caveats. */
   readonly note?: string;
@@ -45,7 +49,16 @@ export class CommandRegistry {
     }
     const raw = definition.shortcut;
     const list: readonly string[] = raw === undefined ? [] : typeof raw === 'string' ? [raw] : raw;
-    const command: Command = { ...definition, shortcuts: list.map(parseShortcut) };
+    const catalog = messageKeywords(definition.id);
+    const keywords =
+      catalog.length === 0
+        ? definition.keywords
+        : [...new Set([...(definition.keywords ?? []), ...catalog])];
+    const command: Command = {
+      ...definition,
+      ...(keywords === undefined ? {} : { keywords }),
+      shortcuts: list.map(parseShortcut),
+    };
     this.byId.set(command.id, command);
     this.emit();
     return () => {

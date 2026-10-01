@@ -5,7 +5,9 @@
  * page in Read mode and opens the field's editor.
  *
  * Toolbar: "Highlight fields" (translucent fill over the widgets), "Clear all" (one
- * history entry) and "Flatten on export" (read by the export dialog).
+ * history entry) and "Flatten on export" (read by the export dialog). These, and "Edit
+ * fields", show only when the document has fields (experience-redesign §4.1); otherwise
+ * the panel says so and offers "Add field".
  *
  * XFA honesty: a source with /XFA and AcroForm widgets fills through the AcroForm (a
  * badge explains that export removes the XFA part); one without widgets shows that no
@@ -150,7 +152,11 @@ function FormList({ doc }: { readonly doc: VirtualDocument }) {
 
   return (
     <>
-      <Toolbar fillable={rows.some((r) => isFillable(r.field))} hasPages={doc.pages.length > 0} />
+      <Toolbar
+        fillable={rows.some((r) => isFillable(r.field))}
+        hasFields={rows.length > 0}
+        hasPages={doc.pages.length > 0}
+      />
       {xfaWithFields.length > 0 ? <XfaBadge /> : null}
       {xfaOnly.length > 0 ? (
         <p className={styles.warning} role="note">
@@ -213,9 +219,11 @@ function AddFieldMenu({ disabled }: { readonly disabled: boolean }) {
 
 function Toolbar({
   fillable,
+  hasFields,
   hasPages,
 }: {
   readonly fillable: boolean;
+  readonly hasFields: boolean;
   readonly hasPages: boolean;
 }) {
   const highlight = useFormStore((s) => s.highlight);
@@ -227,45 +235,53 @@ function Toolbar({
     <div className={styles.toolbar} data-annotation-keep="">
       <div className={styles.buttons}>
         <AddFieldMenu disabled={!hasPages} />
-        <button
-          type="button"
-          className={styles.button}
-          aria-pressed={design}
-          disabled={!hasPages}
-          data-edit-fields=""
-          onClick={() => setDesign(!design)}
-        >
-          <SquareDashedMousePointer aria-hidden="true" />
-          {m.forms_design()}
-        </button>
-        <button
-          type="button"
-          className={styles.button}
-          aria-pressed={highlight}
-          onClick={() => useFormStore.getState().setHighlight(!highlight)}
-        >
-          <Highlighter aria-hidden="true" />
-          {m.forms_highlight()}
-        </button>
-        <button
-          type="button"
-          className={styles.button}
-          disabled={!fillable}
-          onClick={() => void clearActiveForm()}
-        >
-          <Eraser aria-hidden="true" />
-          {m.forms_clear_all()}
-        </button>
+        {hasFields || design ? (
+          <button
+            type="button"
+            className={styles.button}
+            aria-pressed={design}
+            disabled={!hasPages}
+            data-edit-fields=""
+            onClick={() => setDesign(!design)}
+          >
+            <SquareDashedMousePointer aria-hidden="true" />
+            {m.forms_design()}
+          </button>
+        ) : null}
+        {hasFields ? (
+          <>
+            <button
+              type="button"
+              className={styles.button}
+              aria-pressed={highlight}
+              onClick={() => useFormStore.getState().setHighlight(!highlight)}
+            >
+              <Highlighter aria-hidden="true" />
+              {m.forms_highlight()}
+            </button>
+            <button
+              type="button"
+              className={styles.button}
+              disabled={!fillable}
+              onClick={() => void clearActiveForm()}
+            >
+              <Eraser aria-hidden="true" />
+              {m.forms_clear_all()}
+            </button>
+          </>
+        ) : null}
       </div>
-      <label className={styles.check} htmlFor={id}>
-        <input
-          id={id}
-          type="checkbox"
-          checked={flatten}
-          onChange={(e) => useFormStore.getState().setFlattenOnExport(e.target.checked)}
-        />
-        {m.forms_flatten_on_export()}
-      </label>
+      {hasFields ? (
+        <label className={styles.check} htmlFor={id}>
+          <input
+            id={id}
+            type="checkbox"
+            checked={flatten}
+            onChange={(e) => useFormStore.getState().setFlattenOnExport(e.target.checked)}
+          />
+          {m.forms_flatten_on_export()}
+        </label>
+      ) : null}
       {placing !== null ? (
         <p className={styles.hint} role="status">
           {m.forms_create_placing({ kind: kindName(placing) })}

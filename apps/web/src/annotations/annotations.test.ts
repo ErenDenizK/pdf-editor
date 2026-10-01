@@ -140,7 +140,7 @@ describe('annotations through the engine', () => {
     if (!id) throw new Error('not created');
     expect(await deleteAnnotations(t, [id])).toBe(1);
     expect((await readAnnotations(source, 0)).some((a) => a.id === id)).toBe(false);
-    expect(labels().at(-1)).toBe('Delete ink');
+    expect(labels().at(-1)).toMatch(/^Delete (ink|pen)$/);
 
     model().undo();
     await whenIdle();

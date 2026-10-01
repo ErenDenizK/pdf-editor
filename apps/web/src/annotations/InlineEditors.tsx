@@ -2,6 +2,10 @@
  * In-place editors (spec §3): the free-text box (auto-growing, font size from the style)
  * and the note popup (also used to edit any annotation's comment). They commit one history
  * entry: create on first commit, update when editing an existing annotation.
+ *
+ * The open editor registers its commit (`commitOpenEditor`): a press on the page with a
+ * drawing tool commits the editor and goes on with the press (experience-redesign §6.1).
+ * Neither commit selects what it created: creating does not select (§6.1, amendment A2).
  */
 import type { Rect } from '@pdf-editor/document-model';
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -11,6 +15,38 @@ import { createAnnotations, updateAnnotations } from './actions';
 import { type InlineEditor, useAnnotationStore } from './annotation-store';
 import { noteIconRect, type PageFrame, rectToCss, roundRect } from './geometry';
 import styles from './AnnotationLayer.module.css';
+
+/** The open editor's commit (at most one editor is open at a time). */
+let openCommit: (() => void) | null = null;
+
+/**
+ * Commits the open inline editor: the text box creates or updates its annotation, the note
+ * saves its comment (a new note with no text is dropped, as an empty text box is). Returns
+ * whether an editor was open.
+ */
+export function commitOpenEditor(): boolean {
+  const commit = openCommit;
+  if (!commit) return false;
+  commit();
+  return true;
+}
+
+/** Registers the mounted editor's latest `commit` for `commitOpenEditor`. */
+function useOpenCommit(commit: () => void): void {
+  const latest = useRef(commit);
+  useLayoutEffect(() => {
+    latest.current = commit;
+  });
+  useEffect(() => {
+    const run = () => {
+      latest.current();
+    };
+    openCommit = run;
+    return () => {
+      if (openCommit === run) openCommit = null;
+    };
+  }, []);
+}
 
 export function InlineEditorView({
   editor,
@@ -107,6 +143,8 @@ function FreeTextEditor({
     );
   };
 
+  useOpenCommit(commit);
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey))) {
       event.preventDefault();
@@ -190,6 +228,11 @@ function NoteEditor({
       action: 'comment',
     });
   };
+
+  useOpenCommit(() => {
+    if (editor.id === undefined && text.trim() === '') close();
+    else save();
+  });
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Escape') {

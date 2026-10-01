@@ -16,7 +16,6 @@ import {
 
 import { targetPages } from '../commands/app-commands';
 import { type CommandRegistry, commandRegistry } from '../commands/registry';
-import { showInArrange } from '../dnd/drop';
 import { pickFiles } from '../files/open-files';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
@@ -33,6 +32,7 @@ import {
   reverseSelectedPages,
   selectParity,
 } from './arrange-actions';
+import { shownInArrangeNow } from './arrange-data';
 import { openOperationDialog } from './operation-dialogs-store';
 import {
   copyPagesToNewDocument,
@@ -285,26 +285,14 @@ export function registerArrangeCommands(registry: CommandRegistry = commandRegis
         },
       }),
     ),
-    registry.register({
-      id: 'arrange.keep',
-      title: m.cmd_keep_in_arrange(),
-      group: view,
-      keywords: ['pin', 'light table', 'section', 'show'],
-      when: () => {
-        const active = model().workspace.activeDocument;
-        return active !== undefined && !ui().arrangePinned.includes(active);
-      },
-      run: () => {
-        const active = model().workspace.activeDocument;
-        if (active !== undefined) showInArrange(active);
-      },
-    }),
+    // Arrange shows every open document unless hidden (experience-redesign §8), so the
+    // command brings back the hidden ones.
     registry.register({
       id: 'arrange.showAll',
       title: m.cmd_show_all_in_arrange(),
       group: view,
-      keywords: ['pin', 'light table', 'sections', 'merge'],
-      when: () => model().workspace.documentOrder.length > 1,
+      keywords: ['pin', 'light table', 'sections', 'merge', 'unhide'],
+      when: () => model().workspace.documentOrder.some((id) => !shownInArrangeNow(id)),
       run: () => {
         const ws = model().workspace;
         ui().pinToArrange(ws.documentOrder);
