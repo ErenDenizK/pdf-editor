@@ -24,3 +24,4 @@ only after discussion with the project owner; the discussion summary is appended
 | 0015 | Product name: Recto | accepted |
 | 0016 | Addresses: portfolio root, project paths, custom domain and migration | accepted (GitHub Pages only for now) |
 | 0017 | Versioning and public releases: `1.0.0-beta.N` first | accepted |
+| 0018 | Variable-width ink as a standard Ink annotation with our appearance | accepted |
