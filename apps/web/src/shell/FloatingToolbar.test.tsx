@@ -366,12 +366,16 @@ describe('tool bar (mounted)', () => {
     const { doc } = await mount();
     await userEvent.click(within(bar()).getByRole('button', { name: 'Pages' }));
     await settle();
-    const rotate = within(bar()).getByRole('button', { name: 'Rotate page 1' });
-    expect(within(bar()).getByRole('button', { name: 'Delete page 1' })).toBeVisible();
+    // The Read view derives the current page from the viewport once it has laid out, so the
+    // test reads it after the bar has settled instead of assuming page 1.
+    const index = useViewStore.getState().currentPage;
+    const n = index + 1;
+    const rotate = within(bar()).getByRole('button', { name: `Rotate page ${n}` });
+    expect(within(bar()).getByRole('button', { name: `Delete page ${n}` })).toBeVisible();
     await userEvent.click(rotate);
     const after = getActiveDocument(useWorkspaceStore.getState().workspace);
-    expect(after?.pages[0]?.rotation).toBe(((doc.pages[0]?.rotation ?? 0) + 90) % 360);
-    expect(useAnnouncer.getState().message).toBe('Rotated page 1');
+    expect(after?.pages[index]?.rotation).toBe(((doc.pages[index]?.rotation ?? 0) + 90) % 360);
+    expect(useAnnouncer.getState().message).toBe(`Rotated page ${n}`);
   });
 });
 
