@@ -14,8 +14,11 @@
  * Per-point widths (ADR-0018) stay parallel to the paths on both sides: each path keeps its
  * own widths. Widths that no longer match the paths (written elsewhere) are dropped, and
  * those strokes are constant width. A width change scales a path's per-point widths by the
- * same factor as the nominal width, so a pressure stroke keeps its shape. A move translates
- * the points only. Each annotation's rect is recomputed from its paths and widest width.
+ * same factor as the nominal width, so a pressure stroke keeps its shape, and keeps the
+ * points and the rect: the engine writes /Rect from the stroke's outline (or grows it to
+ * enclose a wider constant-width stroke) and does not take a width change for a resize. A
+ * move translates the points only. A new or moved annotation's rect is recomputed from its
+ * paths and widest width.
  * The update and the create of a split are one history entry (`editInkPaths`, actions.ts).
  */
 import type { Rect } from '@pdf-editor/document-model';
@@ -86,7 +89,8 @@ export function translateInk(ink: InkAnnotation, dx: number, dy: number): InkAnn
 
 /**
  * The ink with a style patch applied: colour, opacity, and a width that scales the
- * per-point widths with the nominal one.
+ * per-point widths with the nominal one. Points and rect are kept: an update whose rect
+ * changed while its points did not would be taken for a resize of the box.
  */
 export function restyleInk(ink: InkAnnotation, patch: Partial<ToolStyle>): InkAnnotation {
   let next: InkAnnotation = ink;
@@ -100,12 +104,7 @@ export function restyleInk(ink: InkAnnotation, patch: Partial<ToolStyle>): InkAn
     const factor = next.strokeWidth > 0 ? strokeWidth / next.strokeWidth : 1;
     const scaled = widths?.map((w) => w.map((x) => Math.round(x * factor * 1000) / 1000));
     const { widths: _old, ...base } = next;
-    next = {
-      ...base,
-      strokeWidth,
-      ...(scaled ? { widths: scaled } : {}),
-      rect: inkRect(next.paths, strokeWidth, scaled),
-    };
+    next = { ...base, strokeWidth, ...(scaled ? { widths: scaled } : {}) };
   }
   return next;
 }
@@ -170,7 +169,7 @@ export function splitInk(
   } = applyPathEdit(inkWithPaths(ink, plan.taken), edit);
   return {
     update: rest,
-    create: { ...taken, id: newId },
+    create: { ...taken, id: newId, rect: inkRect(taken.paths, taken.strokeWidth, taken.widths) },
     remove: false,
     picks: { [newId]: plan.taken.map((_, i) => i) },
     count,

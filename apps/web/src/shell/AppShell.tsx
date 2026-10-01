@@ -20,6 +20,7 @@ import { announce } from './announcer';
 import styles from './AppShell.module.css';
 import { CommandPalette } from './CommandPalette';
 import { LeftRail } from './LeftRail';
+import { useRegionCycling } from './LeftRail.regions';
 import { LiveRegion } from './LiveRegion';
 import { PasswordDialog } from './PasswordDialog';
 import { RightPanel } from './RightPanel';
@@ -33,6 +34,9 @@ export function AppShell() {
   const [dragging, setDragging] = useState(false);
   // dragenter/dragleave fire for every child crossed; count depth to avoid flicker.
   const depth = useRef(0);
+  // F6 / Shift+F6 between the regions (experience-redesign §10).
+  const shellRef = useRef<HTMLDivElement>(null);
+  useRegionCycling(shellRef);
 
   const onDragEnter = (event: DragEvent) => {
     if (!dragHasFiles(event.dataTransfer)) return;
@@ -66,13 +70,14 @@ export function AppShell() {
       // Two or more files dropped on an empty workspace, or any dropped on Home: Home with
       // the new cards selected (experience-redesign §3).
       const wasEmpty = useWorkspaceStore.getState().workspace.documentOrder.length === 0;
-      showOpened(await openDocuments(files), { wasEmpty, dropped: true });
+      showOpened(await openDocuments(files), { wasEmpty });
     });
   };
 
   return (
     <TooltipProvider>
       <div
+        ref={shellRef}
         className={styles.shell}
         data-testid="app-shell"
         onDragEnter={onDragEnter}

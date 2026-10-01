@@ -13,6 +13,7 @@ import bUrl from '../../../../test/fixtures/compare-b.pdf?url';
 import { fixtureFile } from '../../test/store-harness';
 import { commandRegistry } from '../commands/registry';
 import { getAnalysisWorkers } from '../engine/engine-service';
+import { useAnnouncer } from '../shell/announcer';
 import { useUiStore } from '../state/ui-store';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { buildChangeList } from './changes';
@@ -312,6 +313,9 @@ describe('compare-a.pdf against compare-b.pdf', () => {
     useWorkspaceStore.getState().rotatePages([page.id], 90);
     const notice = await within(panel).findByTestId('changes-stale');
     expect(notice).toHaveTextContent('The documents changed since this comparison');
+    // Said once through the live region; the notice itself is not a live region.
+    expect(useAnnouncer.getState().message).toMatch(/^The documents changed since this comparison/);
+    expect(notice).not.toHaveAttribute('role');
     expect(within(notice).getByRole('button', { name: 'Run again' })).toBeVisible();
     expect(report).toBeDisabled();
     expect(enabled('compare.exportReport')).toBe(false);

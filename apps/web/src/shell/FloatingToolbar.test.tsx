@@ -239,8 +239,8 @@ describe('tool bar (mounted)', () => {
     expect(within(bar()).getByRole('button', { name: 'Eraser' })).toBeVisible();
     expect(within(bar()).getByRole('button', { name: /^Shapes/ })).toBeVisible();
     expect(useAnnouncer.getState().message).toBe('Draw tools');
-    // The bar keeps its height.
-    expect(bar().getBoundingClientRect().height).toBeCloseTo(46, 0);
+    // The bar keeps its height (44 px, spec §7.3).
+    expect(bar().getBoundingClientRect().height).toBeCloseTo(44, 0);
 
     await userEvent.click(chip);
     expect(groupNames()).toEqual(['Read', 'Mark up', 'Draw', 'Fill & sign', 'Pages', 'Redact']);
@@ -249,6 +249,33 @@ describe('tool bar (mounted)', () => {
     expect(remembered).toHaveAttribute('data-last');
     expect(remembered.tabIndex).toBe(0);
     expect(useToolStore.getState().lastGroup).toBe('draw');
+  });
+
+  it('picking Draw arms the active preset, so the first stroke draws; Esc disarms', async () => {
+    await mount();
+    useAnnotationStore.getState().armPreset(1);
+    expect(useToolStore.getState().mode).toBe('select');
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Draw' }));
+    expect(useToolStore.getState().mode).toBe('ink');
+    const { pen, styles } = useAnnotationStore.getState();
+    expect(pen.active).toBe(1);
+    expect(styles.ink.color.toUpperCase()).toBe(pen.presets[1].color.toUpperCase());
+    expect(styles.ink.strokeWidth).toBe(pen.presets[1].width);
+    expect(useAnnouncer.getState().message).toBe('Draw tools');
+
+    // Esc rules unchanged: the first disarms, the second returns to the row.
+    within(bar()).getByRole('button', { name: 'Eraser' }).focus();
+    await userEvent.keyboard('{Escape}');
+    expect(useToolStore.getState().mode).toBe('select');
+    expect(useToolStore.getState().barGroup).toBe('draw');
+    await userEvent.keyboard('{Escape}');
+    expect(useToolStore.getState().barGroup).toBeNull();
+
+    // A Draw tool armed already (the eraser, from its shortcut) stays armed.
+    useToolStore.getState().setMode('eraser');
+    useToolStore.getState().showGroup(null);
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Draw' }));
+    expect(useToolStore.getState().mode).toBe('eraser');
   });
 
   it('does not move under reduced motion', async () => {

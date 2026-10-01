@@ -28,6 +28,7 @@ import { hasStrokeWidth, normalizeHex, withColor } from './colors';
 import { toolStyleGroup } from './drafts';
 import { onPagesChanged, readAnnotations } from './edit-runner';
 import { styleLassoSelection } from './lasso/edits';
+import { restyleInk } from './lasso/split';
 import {
   DEFAULT_PRESETS,
   parsePenSettings,
@@ -482,11 +483,13 @@ function styleSelection(selection: AnnotationSelection, patch: Partial<ToolStyle
     }));
   }
   if (patch.strokeWidth !== undefined) {
-    send('stroke', { strokeWidth: patch.strokeWidth }, (a, v) =>
-      hasStrokeWidth(a) && v.strokeWidth !== undefined
-        ? { ...a, strokeWidth: v.strokeWidth }
-        : undefined,
-    );
+    // Ink scales its per-point widths with the nominal one (restyleInk), as the lasso does:
+    // the stored widths, not /BS /W, are what the appearance draws.
+    send('stroke', { strokeWidth: patch.strokeWidth }, (a, v) => {
+      if (!hasStrokeWidth(a) || v.strokeWidth === undefined) return undefined;
+      if (a.kind === 'ink') return restyleInk(a, { strokeWidth: v.strokeWidth });
+      return { ...a, strokeWidth: v.strokeWidth };
+    });
   }
   if (patch.fontSize !== undefined) {
     send('font', { fontSize: patch.fontSize }, (a, v) =>

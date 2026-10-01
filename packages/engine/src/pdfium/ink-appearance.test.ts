@@ -242,6 +242,77 @@ describe('update', () => {
     await adapter.close(id);
   });
 
+  test('a width change keeps every point of a two-stroke ink; the strokes draw wider', async () => {
+    const { id, opened } = await open(await twoPageDoc());
+    const upper: Taper = {
+      from: { x: 120, y: 500 },
+      to: { x: 420, y: 500 },
+      startWidth: 1,
+      endWidth: 9,
+    };
+    const lower = shifted(upper, 0, -45);
+    const a = taperStroke(upper);
+    const b = taperStroke(lower);
+    const created = await create(id, {
+      kind: 'ink',
+      pageIndex: 0,
+      rect: ZERO,
+      paths: [a.path, b.path],
+      widths: [a.widths, b.widths],
+      strokeWidth: 1.5,
+      color: BLUE,
+    });
+    const samePoints = (ink: InkAnnotation) => {
+      created.paths.forEach((path, i) =>
+        path.forEach((p, j) => {
+          const q = ink.paths[i]?.[j];
+          expect(Math.abs((q?.x ?? NaN) - p.x), `path ${i} point ${j} x`).toBeLessThanOrEqual(0.01);
+          expect(Math.abs((q?.y ?? NaN) - p.y), `path ${i} point ${j} y`).toBeLessThanOrEqual(0.01);
+        }),
+      );
+    };
+    const twice = (t: Taper): Taper => ({
+      ...t,
+      startWidth: t.startWidth * 2,
+      endWidth: t.endWidth * 2,
+    });
+
+    // Nominal and per-point widths ×2, with a rect recomputed for the wider stroke: a width
+    // change, not a resize of the box.
+    const before = await listed(id, 0, created.id);
+    const widths = before.widths?.map((ws) => ws.map((w) => w * 2)) ?? [];
+    const grown = {
+      x: before.rect.x - 2,
+      y: before.rect.y - 2,
+      width: before.rect.width + 4,
+      height: before.rect.height + 4,
+    };
+    const wider = (await adapter.updateAnnotation(id, {
+      ...before,
+      strokeWidth: 3,
+      widths,
+      rect: grown,
+    })) as InkAnnotation;
+    samePoints(wider);
+    samePoints(await listed(id, 0, created.id));
+    expect(wider.widths).toEqual(storedInkWidths(wider.paths, widths));
+    // The rect is the outline's: it grows by the width only (no scaled points).
+    expectRectNear(wider.rect, inkAppearance(wider)?.rect ?? ZERO);
+    expect(wider.rect.height - created.rect.height).toBeLessThanOrEqual(9.01);
+    const rendered = await renderPdfium(adapter, id, opened, 0);
+    expectVariable(widthProfile(rendered, twice(upper), rgbOf(BLUE)), 'upper ×2');
+    expectVariable(widthProfile(rendered, twice(lower), rgbOf(BLUE)), 'lower ×2');
+
+    // The same width with the rect kept: nothing moves either.
+    const again = (await adapter.updateAnnotation(id, {
+      ...wider,
+      strokeWidth: 3,
+    })) as InkAnnotation;
+    samePoints(again);
+    expectRectNear(again.rect, wider.rect);
+    await adapter.close(id);
+  });
+
   test('an eraser split keeps the width of the remaining path; mismatched widths are dropped', async () => {
     const { id, opened } = await open(await twoPageDoc());
     const stroke = STROKES[0] as Stroke;

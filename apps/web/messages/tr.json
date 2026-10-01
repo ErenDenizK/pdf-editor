@@ -15,7 +15,7 @@
   "empty_title": "Başlamak için PDF bırakın",
   "empty_title_dragging": "Açmak için bırakın",
   "empty_body_local": "Dosyalar bu cihazda açılır ve hiçbir yere yüklenmez.",
-  "empty_body_combine": "Birden çok dosya ayrı sekmelerde açılır. İki veya daha fazla dosya açıkken komut paletinden ya da bir sekmenin menüsünden onları birleştirebilir, sayfalarını birlikte düzenleyebilir veya karşılaştırabilirsiniz.",
+  "empty_body_combine": "PDF’leri buraya bırakın ya da açın. İki veya daha fazla dosya açıkken onları ana ekranda ya da Belge menüsünden birleştirebilir, sayfalarını birlikte düzenleyebilir veya karşılaştırabilirsiniz.",
   "empty_hints_label": "Başlarken",
   "keyboard_shortcuts": "Klavye kısayolları",
   "stage_start_label": "Başlangıç",
@@ -2177,7 +2177,6 @@
   "home_announce_selected": "{count} dosya seçildi",
   "home_combine_count": "{count} dosyayı birleştir",
   "home_combine_all": "{count} dosyanın tümünü birleştir",
-  "home_combine_none": "Dosyaları birleştir",
   "home_combine_title": "{count} belgeyi birleştir",
   "home_drop_combine": "{title} ile birleştir",
   "home_modified": "Değiştirilme: {date}",
@@ -2233,6 +2232,8 @@
   "nav_files_list": "Açık belgeler",
   "nav_files_meta": "{pages} · {size}",
   "nav_files_close": "{name} belgesini kapat",
+  "nav_files_select": "{name} belgesini seç",
+  "nav_files_show_home": "Ana ekranı göster",
   "review_filter_label": "Göster",
   "review_filter_all": "Tümü",
   "review_filter_comments": "Yorumlar",
@@ -2246,5 +2247,6 @@
   "docinfo_title": "Belge bilgisi",
   "docinfo_open": "Belge bilgisi…",
   "docinfo_file": "Dosya",
-  "bar_in_group": "Araç çubuğu: {group}"
+  "bar_in_group": "Araç çubuğu: {group}",
+  "a11y_pages_viewport": "{title} belgesinin sayfaları"
 }

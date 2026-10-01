@@ -8,7 +8,7 @@ import '../../styles/tokens.css';
 import '../../styles/reset.css';
 import '../../styles/global.css';
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { userEvent } from 'vitest/browser';
 
@@ -21,7 +21,17 @@ import {
 } from '../annotation-store';
 import { penSession, resetPenSession } from './ink-input';
 import { PenBar, PenTier } from './PenBar';
-import { DEFAULT_PRESETS, PEN_PRESETS_STORAGE_KEY } from './presets';
+import {
+  contrastRatio,
+  DEFAULT_PRESETS,
+  DOT_CONTRAST_MIN,
+  needsDotRing,
+  overRgb,
+  PEN_PRESETS_STORAGE_KEY,
+  PEN_SWATCHES,
+  type PenPreset,
+  type Rgb,
+} from './presets';
 
 const store = () => useAnnotationStore.getState();
 
@@ -183,6 +193,78 @@ describe('pen bar', () => {
     const blue = await screen.findByRole('dialog', { name: 'Edit Blue pen' });
     await waitFor(() => expect(blue).toBeVisible());
     expect(store().pen.active).toBe(2);
+  });
+
+  it('dark dots get a light inner ring, 3:1 or more on the bar over a page and the canvas', () => {
+    render(<Harness />);
+    // The bar's fill from the tokens: the glass tint over the backdrop (the page or the
+    // canvas) at the filter's brightness (saturation leaves these greys alone).
+    const root = getComputedStyle(document.documentElement);
+    const token = (name: string) => root.getPropertyValue(name).trim();
+    const rgb = (value: string): Rgb => {
+      if (value.startsWith('#')) {
+        const n = Number.parseInt(value.slice(1), 16);
+        return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      }
+      const [r = 0, g = 0, b = 0] = (value.match(/[\d.]+/g) ?? []).map(Number);
+      return [r, g, b];
+    };
+    const glass = token('--glass');
+    const tintAlpha = Number(/\/\s*([\d.]+)/.exec(glass)?.[1]);
+    const brightness = Number(/brightness\(([\d.]+)\)/.exec(token('--glass-filter'))?.[1]);
+    expect(tintAlpha).toBeGreaterThan(0);
+    expect(brightness).toBeGreaterThan(0);
+    const fill = (backdrop: string): Rgb => {
+      const dimmed = rgb(token(backdrop)).map((c) => c * brightness) as unknown as Rgb;
+      return overRgb(rgb(glass), tintAlpha, dimmed);
+    };
+    const fills = { page: fill('--page-background'), canvas: fill('--surface-0') };
+    const ring = rgb(token('--glass-text-secondary'));
+
+    const inks: PenPreset[] = [
+      ...DEFAULT_PRESETS,
+      ...PEN_SWATCHES.map((swatch) => ({ color: swatch.color, width: 1.5, opacity: 1 })),
+    ];
+    for (const ink of inks) {
+      for (const [where, under] of Object.entries(fills)) {
+        const edge = needsDotRing(ink) ? ring : overRgb(rgb(ink.color), ink.opacity, under);
+        expect(
+          contrastRatio(edge, under),
+          `${ink.color} at ${ink.opacity} over the bar on the ${where}`,
+        ).toBeGreaterThanOrEqual(DOT_CONTRAST_MIN);
+      }
+    }
+    // Black, blue, red and the 40 % yellow have the ring; it is drawn in the ring colour.
+    expect(DEFAULT_PRESETS.map((p) => needsDotRing(p))).toEqual([true, true, true, true]);
+    const marks = within(presets())
+      .getAllByRole('radio')
+      .map((r) => r.querySelector<HTMLElement>('span') as HTMLElement);
+    for (const mark of marks) {
+      expect(mark).toHaveAttribute('data-ring');
+      expect(getComputedStyle(mark).borderTopColor).toBe(`rgb(${ring.join(', ')})`);
+    }
+    // A light ink keeps the plain swatch border.
+    expect(needsDotRing({ color: '#FB8C00', width: 1.5, opacity: 1 })).toBe(false);
+  });
+
+  it('the preset ring shows only while the pen is armed, not with another Draw tool', () => {
+    render(<Harness />);
+    const ringOf = (el: HTMLElement) => getComputedStyle(el, '::before').borderTopColor;
+    act(() => useToolStore.getState().setMode('ink'));
+    const armed = dot('Black pen, 1.5 pt');
+    expect(armed).toHaveAttribute('data-armed');
+    expect(ringOf(armed)).not.toBe('rgba(0, 0, 0, 0)');
+    for (const mode of ['eraser', 'lasso', 'rectangle', 'arrow'] as const) {
+      act(() => useToolStore.getState().setMode(mode));
+      const radios = within(presets()).getAllByRole('radio');
+      expect(
+        radios.filter((r) => r.hasAttribute('data-armed')),
+        mode,
+      ).toEqual([]);
+      for (const radio of radios) expect(ringOf(radio), mode).toBe('rgba(0, 0, 0, 0)');
+      // The armed preset is still the pen's (the radio), only its ring is gone.
+      expect(dot('Black pen, 1.5 pt')).toHaveAttribute('aria-checked', 'true');
+    }
   });
 
   it('the tier shows the variable-width note only once a pen with pressure was seen', async () => {

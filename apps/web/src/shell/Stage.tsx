@@ -6,7 +6,7 @@
  * first use), brings its own bar; its segment in the mode switch shows only while a
  * comparison is open (being set up, running or kept after leaving the view; spec
  * recognize-and-compare §2.2). Home (`home/HomeView`, experience-redesign §3) shows the
- * open files as cards; its segment shows only while Home is showing.
+ * open files as cards; its segment is always first (Home · Read · Arrange · Compare).
  */
 import { type KeyboardEvent, lazy, Suspense, useRef } from 'react';
 
@@ -55,6 +55,7 @@ export function Stage({ dragging }: { readonly dragging: boolean }) {
         aria-label={m.home_label()}
         aria-busy={opening > 0}
       >
+        <h1 className="visually-hidden">{m.home_long()}</h1>
         <div className={styles.header}>
           <ModeSwitch />
         </div>
@@ -64,13 +65,15 @@ export function Stage({ dragging }: { readonly dragging: boolean }) {
   }
 
   return (
+    // The main landmark, named by the active document's tab (which controls it). Not a
+    // `tabpanel`: that role would take the landmark away (axe: landmark-one-main).
     <main
       id={STAGE_ID}
-      role="tabpanel"
       aria-labelledby={doc ? tabDomId(doc.id) : undefined}
       aria-busy={opening > 0}
       className={styles.stage}
     >
+      <h1 className="visually-hidden">{VIEW_HEADINGS[viewMode]()}</h1>
       <div className={styles.header}>
         <ModeSwitch />
         {viewMode === 'read' && doc && doc.pages.length > 0 ? (
@@ -105,6 +108,14 @@ export function Stage({ dragging }: { readonly dragging: boolean }) {
   );
 }
 
+/** The stage's heading, for screen readers: the view's long name. */
+const VIEW_HEADINGS: Readonly<Record<ViewMode, () => string>> = {
+  home: m.home_long,
+  read: m.mode_read_long,
+  arrange: m.mode_arrange_long,
+  compare: m.compare_mode_long,
+};
+
 const MODES: readonly {
   id: ViewMode;
   label: () => string;
@@ -123,10 +134,8 @@ function ModeSwitch() {
   const setViewMode = useUiStore((s) => s.setViewMode);
   const compareOpen = useCompareStore((s) => comparisonOpen(viewMode === 'compare', s.status));
   // Compare is entered with its command (3, the palette); the segment returns to it.
-  // Home's segment shows only while Home is showing (0 and the app glyph lead there).
-  const modes = MODES.filter(
-    (mode) => (mode.id !== 'compare' || compareOpen) && (mode.id !== 'home' || viewMode === 'home'),
-  );
+  // Home's segment is always there, a labelled way back besides 0 and the app glyph.
+  const modes = MODES.filter((mode) => mode.id !== 'compare' || compareOpen);
   const shortcuts = {
     home: useCommandShortcut('view.home'),
     read: useCommandShortcut('mode.read'),

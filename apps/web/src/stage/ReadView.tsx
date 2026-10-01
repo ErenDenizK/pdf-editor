@@ -267,7 +267,13 @@ export function ReadView({ doc }: { readonly doc: VirtualDocument }) {
       className={styles.viewport}
       data-read-viewport
       data-layout={readLayout}
-      tabIndex={-1}
+      // A Tab stop, so the pages scroll from the keyboard (the canvases hold no focusable
+      // content); named for the document.
+      role="region"
+      aria-label={m.a11y_pages_viewport({ title: doc.title })}
+      // A scrollable region must take focus (WCAG 2.1.1; axe scrollable-region-focusable).
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+      tabIndex={0}
     >
       {viewport ? (
         <PageColumn
@@ -279,6 +285,7 @@ export function ReadView({ doc }: { readonly doc: VirtualDocument }) {
           scrollElement={viewport}
           viewportRef={viewportRef}
           fingerprint={fingerprint}
+          fitting={fitMode !== null}
         />
       ) : null}
       <GoToPageDialog doc={doc} />
@@ -297,6 +304,8 @@ interface Anchor {
   /** Horizontal distance of the point from the canvas centre, CSS px, at `scale`. */
   readonly fromCentre: number;
   readonly scale: number;
+  /** Taken with the view scrolled to the very top. */
+  readonly atTop?: boolean;
 }
 
 function PageColumn({
@@ -308,6 +317,7 @@ function PageColumn({
   scrollElement,
   viewportRef,
   fingerprint,
+  fitting,
 }: {
   readonly doc: VirtualDocument;
   readonly ws: Workspace;
@@ -322,6 +332,12 @@ function PageColumn({
   readonly scrollElement: HTMLDivElement;
   readonly viewportRef: RefObject<HTMLDivElement | null>;
   readonly fingerprint: string | undefined;
+  /**
+   * The zoom follows the viewport (fit width / fit page): a resize keeps the line at the
+   * viewport's top in place, not the centre, so a page read from its top stays at its top
+   * (1440 → 1024 → 1440 px left page 1's only text scrolled out of view).
+   */
+  readonly fitting: boolean;
 }) {
   'use no memo'; // TanStack Virtual mutates its instance; the React Compiler must not cache it.
   const setCurrentPage = useViewStore((s) => s.setCurrentPage);
@@ -385,8 +401,11 @@ function PageColumn({
     }, NAV_SETTLE_MS);
   };
 
-  // Keep the anchored point in place across zoom changes.
+  // Keep the anchored point in place across zoom changes: the pointer's, else the
+  // viewport centre's (zoom buttons and keys), or its top edge while the zoom fits the
+  // viewport (a window or panel resize); a view scrolled to the very top stays there.
   const anchor = useRef<Anchor | null>(null);
+  const topAnchor = useRef<Anchor | null>(null);
   const pointerAnchor = useRef<Anchor | null>(null);
   const lastScale = useRef(cssScale);
   useLayoutEffect(() => {
@@ -394,9 +413,14 @@ function PageColumn({
     lastScale.current = cssScale;
     virtualizer.measure();
     const el = viewportRef.current;
-    const a = pointerAnchor.current ?? anchor.current;
+    const fromTop = pointerAnchor.current === null && fitting;
+    const a = pointerAnchor.current ?? (fromTop ? topAnchor.current : anchor.current);
     pointerAnchor.current = null;
     if (!el || !a) return;
+    if (fromTop && a.atTop) {
+      el.scrollTop = 0;
+      return;
+    }
     const start = virtualizer.getOffsetForIndex(a.row, 'start')?.[0];
     if (start === undefined) return;
     el.scrollTop = start + a.fraction * heightOf(a.row) - a.viewportY;
@@ -434,6 +458,8 @@ function PageColumn({
       }
       const centre = anchorAt(el.clientWidth / 2, el.clientHeight / 2);
       if (centre) anchor.current = centre;
+      const edge = anchorAt(el.clientWidth / 2, 0);
+      if (edge) topAnchor.current = { ...edge, atTop: top <= 0 };
       const page = current ? rows[current.index]?.pages[0] : undefined;
       if (page === undefined) return;
       setCurrentPage(page);

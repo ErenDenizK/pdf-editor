@@ -375,6 +375,66 @@ describe('lasso on the annotation layer', () => {
     await waitFor(() => expect(layer.querySelector('[data-lasso-bar]')).toBeNull());
   });
 
+  it('a width change on a whole two-stroke ink keeps every point; widths scale', async () => {
+    const { layer, source, target } = await mountLayer();
+    await createAnnotations(target, [inkDraft([stroke(100, 600), stroke(110, 588)])]);
+    await cachedInks(1);
+    const [ink] = await inks(source);
+    if (!ink) throw new Error('no ink');
+
+    await armLasso(layer);
+    lasso(layer, { x: 80, y: 620 }, { x: 190, y: 575 });
+    await waitFor(() => expect(layer.querySelectorAll('[data-lasso-path]')).toHaveLength(2));
+    const expectSamePoints = (now: InkAnnotation | undefined) => {
+      expect(now?.paths).toHaveLength(2);
+      ink.paths.forEach((path, i) =>
+        path.forEach((p, j) => {
+          const q = now?.paths[i]?.[j];
+          expect(Math.abs((q?.x ?? NaN) - p.x)).toBeLessThanOrEqual(0.01);
+          expect(Math.abs((q?.y ?? NaN) - p.y)).toBeLessThanOrEqual(0.01);
+        }),
+      );
+    };
+
+    // 1.5 → 6 pt: four times the widths; the points stay, the rect grows with the stroke only.
+    useAnnotationStore.getState().applyStyle({ strokeWidth: 6 });
+    await whenIdle();
+    let [now] = await inks(source);
+    expect(now?.id).toBe(ink.id);
+    expect(now?.strokeWidth).toBe(6);
+    expectSamePoints(now);
+    expect(now?.widths?.flat()).toEqual(ink.widths?.flat().map((w) => w * 4));
+    const widest = Math.max(...(now?.widths?.flat() ?? [0]));
+    const widestBefore = Math.max(...(ink.widths?.flat() ?? [0]));
+    expect(now?.rect.height ?? 0).toBeLessThanOrEqual(ink.rect.height + widest - widestBefore + 2);
+
+    // A second change does not compound a move: 6 → 3 pt, points still in place.
+    await new Promise((r) => setTimeout(r, 900));
+    useAnnotationStore.getState().applyStyle({ strokeWidth: 3 });
+    await whenIdle();
+    [now] = await inks(source);
+    expectSamePoints(now);
+    expect(now?.widths?.flat()).toEqual(ink.widths?.flat().map((w) => w * 2));
+  });
+
+  it('a width change on a whole-annotation selection scales the per-point widths', async () => {
+    const { source, target } = await mountLayer();
+    await createAnnotations(target, [inkDraft([stroke(100, 600), stroke(100, 560)])]);
+    await cachedInks(1);
+    const [ink] = await inks(source);
+    if (!ink) throw new Error('no ink');
+    useAnnotationStore.getState().select({ ...target, ids: [ink.id] });
+    expect(activePathSelection(useAnnotationStore.getState())).toBeNull();
+
+    useAnnotationStore.getState().applyStyle({ strokeWidth: 4.5 });
+    await whenIdle();
+    const [now] = await inks(source);
+    expect(now?.strokeWidth).toBe(4.5);
+    // The same factor as /BS /W (×3), so the appearance draws the change.
+    expect(now?.widths?.flat()).toEqual(ink.widths?.flat().map((w) => w * 3));
+    expect(now?.paths).toEqual(ink.paths);
+  });
+
   it('a click outside clears the selection; leaving the Lasso drops the path selection', async () => {
     const { layer, target } = await mountLayer();
     await createAnnotations(target, [inkDraft([stroke(100, 600)])]);

@@ -69,7 +69,8 @@ export async function activateTool(tool: ToolDefinition): Promise<void> {
   }
   if (tool.mode !== 'select') store.select(null);
   tools.setMode(tool.mode);
-  announce(m.announce_tool({ tool: tool.title() }));
+  // Keyed: a more precise word said with it (the armed pen preset) replaces it.
+  announce(m.announce_tool({ tool: tool.title() }), { key: 'tool' });
 }
 
 export function registerAnnotationCommands(registry: CommandRegistry): () => void {

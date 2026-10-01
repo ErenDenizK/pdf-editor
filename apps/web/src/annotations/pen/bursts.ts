@@ -5,12 +5,17 @@
  *
  * **Joining.** A stroke joins the open burst when (1) it is on the same page of the same
  * document, with the same preset; (2) the pause from the burst's last pointer-up to this
- * stroke's pointer-down is at most `INK_BURST_PAUSE_MS`; (3) the gap between this stroke's
- * bounds and the burst's bounds (centre lines, page space, so zoom does not change it) is at
- * most `INK_BURST_GAP_PT`; and (4) the burst has fewer than `INK_BURST_MAX_PATHS` paths. The
- * pause and the gap can be overridden in the stored pen settings (`burstPauseMs`,
- * `burstGapPt`, no UI). The first stroke creates the Ink; each joining stroke appends a path
- * (with its widths) through `annotation.update` (`appendInkPath`).
+ * stroke's pointer-down is at most `INK_BURST_PAUSE_MS`; (3) the horizontal gap between this
+ * stroke's bounds and the burst's bounds (centre lines, page space, so zoom does not change
+ * it) is at most `INK_BURST_GAP_PT`; (4) it is on the line of the burst's last stroke
+ * (`onBurstLine`): their vertical bands overlap by at least `INK_BURST_LINE_OVERLAP` of the
+ * smaller band, or, when they do not overlap at all, the gap between them is at most
+ * `INK_BURST_LINE_GAP` times the burst's median stroke height (a dot or a bar just above or
+ * below joins; the next line of writing does not); and (5) the burst has fewer than
+ * `INK_BURST_MAX_PATHS` paths. The pause and the gap can be overridden in the stored pen
+ * settings (`burstPauseMs`, `burstGapPt`, no UI). The first stroke creates the Ink; each
+ * joining stroke appends a path (with its widths) through `annotation.update`
+ * (`appendInkPath`).
  *
  * **One undo step.** The create and every append carry the burst's `coalesceKey`
  * (`ink-burst:<uuid>`), so the history replaces its present entry instead of pushing a new
@@ -19,20 +24,31 @@
  * own window (`BURST_HISTORY_WINDOW_MS`, unbounded): the join rule above decides, and a key
  * is never reused, so nothing else can join the entry.
  *
+ * **Undo inside a burst.** While a burst of several strokes is open and its entry is the
+ * present one, Mod+Z removes its last stroke only (`undoBurstStroke`, `removeLastInkPath`):
+ * the entry shrinks by one path and keeps its key, so the burst stays open and a rewritten
+ * stroke joins it again. With one stroke left Mod+Z is the ordinary undo, which removes the
+ * Ink and closes the burst.
+ *
  * **Closing.** A burst closes when the pause passes (a timer from the last pointer-up,
  * stopped by the next press), on a tool or group change, Esc, a selection, a preset arm or
  * edit, a document change, window blur, and whenever the present history entry is no longer
  * the burst's (undo, redo, any other edit). A stroke on another page, after the pause, too far
  * away or past the path limit starts a new burst. Closing a burst of several strokes says so
  * once ("Pen: 5 strokes on page 1", spec §10); single strokes are announced by their create.
+ * A stroke whose append was still queued when the history moved (an undo right after it) is
+ * not saved and does not start a burst of its own: the layer says "Stroke not saved".
  */
 import type { Rect } from '@pdf-editor/document-model';
 import type { NewAnnotation } from '@pdf-editor/engine';
 
+import { currentPlatform, matchShortcut, parseShortcut } from '../../commands/shortcuts';
+import { isEditableTarget } from '../../commands/use-shortcuts';
+import { m } from '../../i18n';
 import { announce } from '../../shell/announcer';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { useToolStore } from '../../viewer/tool-store';
-import { appendInkPath, createAnnotations } from '../actions';
+import { appendInkPath, createAnnotations, removeLastInkPath } from '../actions';
 import { type PageTarget, type ToolStyle, useAnnotationStore } from '../annotation-store';
 import { roundRect } from '../geometry';
 import { boundsOf, type Point } from '../ink';
@@ -45,6 +61,12 @@ export const INK_BURST_PAUSE_MS = 1500;
 export const INK_BURST_GAP_PT = 36;
 /** Most paths in one burst. */
 export const INK_BURST_MAX_PATHS = 64;
+/** Least vertical overlap with the last stroke's band, as a share of the smaller band. */
+export const INK_BURST_LINE_OVERLAP = 0.3;
+/** Largest vertical gap to the last stroke's band, times the burst's median stroke height. */
+export const INK_BURST_LINE_GAP = 0.6;
+/** A stroke's band is at least this tall (points), so dots and flat bars have one. */
+export const INK_BURST_MIN_BAND_PT = 4;
 /** The burst's history coalescing window: the join rule decides, not the clock. */
 export const BURST_HISTORY_WINDOW_MS = Number.POSITIVE_INFINITY;
 
@@ -77,6 +99,8 @@ export interface InkBurst {
   readonly preset: PenPreset;
   /** Union of the centre lines' bounds, user space. */
   readonly bounds: Rect;
+  /** Each path's centre-line bounds, user space, in path order (the last is the newest). */
+  readonly strokes: readonly Rect[];
   /** The last stroke's pointer-up (`performance.now()` clock). */
   readonly lastUpAt: number;
   readonly paths: number;
@@ -95,18 +119,52 @@ export interface BurstStroke {
   readonly downAt: number;
 }
 
-/** Distance between two rectangles (0 when they touch or overlap). */
-export function rectGap(a: Rect, b: Rect): number {
-  const dx = Math.max(0, b.x - (a.x + a.width), a.x - (b.x + b.width));
-  const dy = Math.max(0, b.y - (a.y + a.height), a.y - (b.y + b.height));
-  return Math.hypot(dx, dy);
+/** Horizontal distance between two rectangles (0 when their x ranges touch or overlap). */
+export function horizontalGap(a: Rect, b: Rect): number {
+  return Math.max(0, b.x - (a.x + a.width), a.x - (b.x + b.width));
+}
+
+/** A stroke's vertical band: its y range, grown to `INK_BURST_MIN_BAND_PT` about its middle. */
+function band(r: Rect): { readonly lo: number; readonly hi: number } {
+  const grow = Math.max(0, INK_BURST_MIN_BAND_PT - r.height) / 2;
+  return { lo: r.y - grow, hi: r.y + r.height + grow };
+}
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length === 0) return 0;
+  return sorted.length % 2 === 1
+    ? (sorted[mid] ?? 0)
+    : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+}
+
+/**
+ * Whether `next` is on the line of the burst's last stroke (spec §6.4, condition 4): the
+ * bands overlap by at least `INK_BURST_LINE_OVERLAP` of the smaller one, or they are apart
+ * by at most `INK_BURST_LINE_GAP` times the median band height of `strokes`.
+ */
+export function onBurstLine(strokes: readonly Rect[], next: Rect): boolean {
+  const last = strokes[strokes.length - 1];
+  if (!last) return true;
+  const a = band(last);
+  const b = band(next);
+  const overlap = Math.min(a.hi, b.hi) - Math.max(a.lo, b.lo);
+  if (overlap > 0) {
+    return overlap >= INK_BURST_LINE_OVERLAP * Math.min(a.hi - a.lo, b.hi - b.lo) - 1e-9;
+  }
+  const heights = strokes.map((r) => {
+    const s = band(r);
+    return s.hi - s.lo;
+  });
+  return -overlap <= INK_BURST_LINE_GAP * median(heights) + 1e-9;
 }
 
 function samePage(a: PageTarget, b: PageTarget): boolean {
   return a.source === b.source && a.pageIndex === b.pageIndex && a.pageId === b.pageId;
 }
 
-/** Whether `stroke` joins `burst` (spec §6.4, conditions 1–4). */
+/** Whether `stroke` joins `burst` (spec §6.4, conditions 1–5). */
 export function joinsBurst(
   burst: InkBurst | null,
   stroke: BurstStroke,
@@ -119,8 +177,13 @@ export function joinsBurst(
   }
   // A press before the last release (a second pointer) counts as no pause.
   if (stroke.downAt - burst.lastUpAt > limits.pauseMs) return false;
-  if (rectGap(burst.bounds, stroke.bounds) > limits.gapPt) return false;
+  if (horizontalGap(burst.bounds, stroke.bounds) > limits.gapPt) return false;
+  if (!onBurstLine(burst.strokes, stroke.bounds)) return false;
   return burst.paths < limits.maxPaths;
+}
+
+function unionAll(rects: readonly Rect[]): Rect {
+  return rects.reduce(union);
 }
 
 function union(a: Rect, b: Rect): Rect {
@@ -144,6 +207,8 @@ interface OpenBurst {
   readonly id: Promise<string | undefined>;
   /** The present history entry has been the burst's (its create committed). */
   committed: boolean;
+  /** The burst closed because the history moved away from its entry (undo, another edit). */
+  moved: boolean;
   /** Widths of the paths as sent, parallel to the Ink's paths. */
   readonly widths: (readonly number[])[];
 }
@@ -226,6 +291,7 @@ async function startBurst(stroke: PenStroke, candidate: BurstStroke, pauseMs: nu
       presetIndex: candidate.presetIndex,
       preset: candidate.preset,
       bounds: candidate.bounds,
+      strokes: [candidate.bounds],
       lastUpAt: stroke.upAt,
       paths: 1,
       coalesceKey,
@@ -235,6 +301,7 @@ async function startBurst(stroke: PenStroke, candidate: BurstStroke, pauseMs: nu
       () => undefined,
     ),
     committed: false,
+    moved: false,
     widths: [stroke.widths],
   };
   open = entry;
@@ -273,6 +340,7 @@ export async function commitPenStroke(stroke: PenStroke): Promise<boolean> {
     entry.burst = {
       ...entry.burst,
       bounds: union(entry.burst.bounds, candidate.bounds),
+      strokes: [...entry.burst.strokes, candidate.bounds],
       lastUpAt: stroke.upAt,
       paths: entry.burst.paths + 1,
     };
@@ -296,7 +364,10 @@ export async function commitPenStroke(stroke: PenStroke): Promise<boolean> {
       console.warn('Adding the stroke failed', error);
     }
     if (appended) return true;
-    // Nothing to append to (the Ink is gone or the history moved): a new burst.
+    // The history moved under the burst (an undo before this append ran): the stroke
+    // belonged to what was undone, so it is not saved rather than coming back on its own.
+    if (entry.moved) return false;
+    // Nothing to append to (the Ink was deleted or locked): a new burst.
     if (open === entry) {
       open = null;
       stopTimer();
@@ -306,6 +377,47 @@ export async function commitPenStroke(stroke: PenStroke): Promise<boolean> {
   closeBurst();
   return startBurst(stroke, candidate, limits.pauseMs);
 }
+
+/**
+ * Undo inside an open burst (spec §6.4): removes the burst's last stroke when it has several
+ * and its history entry is the present one; the entry shrinks by one path and the burst stays
+ * open. Returns false when this is not the case (the ordinary undo applies).
+ */
+export function undoBurstStroke(): boolean {
+  const entry = open;
+  if (!entry?.committed || entry.burst.paths < 2) return false;
+  const { history } = useWorkspaceStore.getState();
+  if (history.present.coalesceKey !== entry.burst.coalesceKey || history.future.length > 0) {
+    return false;
+  }
+  const strokes = entry.burst.strokes.slice(0, -1);
+  entry.widths.pop();
+  entry.burst = {
+    ...entry.burst,
+    strokes,
+    bounds: unionAll(strokes),
+    paths: entry.burst.paths - 1,
+  };
+  startTimer(entry, burstLimits(useAnnotationStore.getState().pen).pauseMs);
+  const { position } = entry.burst.target;
+  void removeLastInkPath(entry.burst.target, () => entry.id, {
+    label: (paths) => burstLabel(position, paths),
+    coalesceKey: entry.burst.coalesceKey,
+    coalesceWindowMs: BURST_HISTORY_WINDOW_MS,
+  })
+    .catch((error: unknown) => {
+      console.warn('Removing the stroke failed', error);
+      return undefined;
+    })
+    .then((done) => {
+      // Not removed (the ink changed meanwhile): the burst no longer matches it.
+      if (done === undefined && open === entry) closeBurst();
+    });
+  announce(m.announce_undid({ label: m.lasso_strokes({ count: 1 }) }));
+  return true;
+}
+
+const UNDO = parseShortcut('Mod+Z');
 
 /** Tests: forget the open burst without announcing it. */
 export function resetBursts(): void {
@@ -338,14 +450,29 @@ export function installBurstRules(): void {
     const entry = open;
     if (!entry || state.history === previous.history) return;
     if (state.history.present.coalesceKey === entry.burst.coalesceKey) entry.committed = true;
-    else if (entry.committed) closeBurst();
+    else if (entry.committed) {
+      entry.moved = true;
+      closeBurst();
+    }
   });
   if (typeof window !== 'undefined') {
     window.addEventListener('blur', closeBurst);
     window.addEventListener(
       'keydown',
       (event) => {
-        if (event.key === 'Escape') closeBurst();
+        if (event.key === 'Escape') {
+          closeBurst();
+          return;
+        }
+        // Before the shortcut listener (bubble phase), which skips a handled key.
+        if (
+          !event.defaultPrevented &&
+          !isEditableTarget(event.target) &&
+          matchShortcut(event, UNDO, currentPlatform) &&
+          undoBurstStroke()
+        ) {
+          event.preventDefault();
+        }
       },
       { capture: true },
     );

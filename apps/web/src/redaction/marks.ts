@@ -96,7 +96,11 @@ export interface MarkRequest {
 export interface CreateMarksOptions {
   /** History label when more than one mark is created (default "Mark n areas…"). */
   readonly label?: (count: number) => string;
-  /** Select a single new mark (default true). */
+  /**
+   * Select a single new mark (default false): a new mark never selects itself, so no
+   * contextual bar covers the next line (experience-redesign §5.2); edits follow an
+   * explicit select (a Review row, J / K, the Select tool).
+   */
   readonly select?: boolean;
   /** Fill colour (/IC). */
   readonly fill?: string;
@@ -160,7 +164,7 @@ export function createMarks(
             created.length,
           );
     announce(label);
-    if ((options.select ?? true) && created.length === 1) {
+    if (options.select === true && created.length === 1) {
       useAnnotationStore.getState().select({ ...first.target, ids: [first.annotation.id] });
     }
     const result: ActionResult<readonly Annotation[]> = {

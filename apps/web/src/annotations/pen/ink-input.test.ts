@@ -276,6 +276,30 @@ describe('ink input on a layer', () => {
     expect(rig.session.lastPenUpAt).toBe(rig.clock);
   });
 
+  it('a zoom in the middle of a stroke keeps it straight; it is handed over at the new zoom', () => {
+    // A pen moving along y = 40 (CSS px at zoom 1) from x = 20 to 220; at half way the page
+    // zooms to 150 %, so the same page points arrive at 1.5 times the CSS px.
+    const pen = (type: string, x: number, zoom: number, pressure = 0.5) =>
+      rig.layer.dispatchEvent(
+        pointer(type, { x: x * zoom, y: 40 * zoom, id: 4, kind: 'pen', pressure }),
+      );
+    pen('pointerdown', 20, 1);
+    for (let i = 1; i <= 10; i++) pen('pointermove', 20 + i * 10, 1);
+    rig.layer.style.width = '1800px';
+    rig.layer.style.height = '2400px';
+    for (let i = 11; i <= 20; i++) pen('pointermove', 20 + i * 10, 1.5);
+    pen('pointerup', 220, 1.5, 0);
+    expect(rig.strokes).toHaveLength(1);
+    const points = rig.strokes[0]?.points ?? [];
+    expect(points).toHaveLength(21);
+    points.forEach((p, i) => {
+      expect(p.y).toBeCloseTo(60, 3);
+      expect(p.x).toBeCloseTo((20 + i * 10) * 1.5, 3);
+    });
+    // Widths stay in points: the preset's nominal width at the constant 0.5 of a pen.
+    for (const w of rig.strokes[0]?.widths ?? []) expect(w).toBeGreaterThan(0.9);
+  });
+
   it('a mouse draws with speed-derived widths', () => {
     drag(rig.layer, 'mouse', 1, [20, 40], [300, 40], { steps: 30 });
     expect(rig.strokes).toHaveLength(1);

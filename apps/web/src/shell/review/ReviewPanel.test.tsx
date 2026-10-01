@@ -111,8 +111,11 @@ describe('Review list', () => {
     setAnnotations({ 0: [note, mark, pen] });
     render(<ReviewPanel />);
     const page1 = await screen.findByRole('region', { name: 'Page 1' });
-    // Fields come from the form store once read.
+    // Fields come from the form store once read; every row is rendered (a short list).
     await expect.poll(() => kinds().filter((k) => k === 'field').length).toBeGreaterThan(1);
+    await expect
+      .poll(() => radio(/^All/).textContent, { timeout: 5000 })
+      .toBe(`All${kinds().length}`);
     const fields = kinds().filter((k) => k === 'field').length;
     const fieldsOnPage1 = within(page1)
       .getAllByRole('listitem')
@@ -189,13 +192,100 @@ describe('Review list', () => {
     }
   });
 
-  it('says what to open without a document, and keeps the four chips', () => {
+  it('says what to open without a document, with the All chip alone', () => {
     render(<ReviewPanel />);
     expect(screen.getByText('No document open')).toBeVisible();
     expect(
       screen.getByText('Open a PDF to review its comments, redaction marks and form fields.'),
     ).toBeVisible();
-    expect(within(screen.getByRole('radiogroup')).getAllByRole('radio')).toHaveLength(4);
+    expect(
+      within(screen.getByRole('radiogroup'))
+        .getAllByRole('radio')
+        .map((r) => r.textContent),
+    ).toEqual(['All0']);
+  });
+
+  it('shows chips only for the kinds present, and the chosen one', async () => {
+    await openFixture(annotationsUrl, 'annotations.pdf');
+    setAnnotations({ 0: [note, pen] });
+    render(<ReviewPanel />);
+    await screen.findByRole('region', { name: 'Page 1' });
+    const chips = () =>
+      within(screen.getByRole('radiogroup', { name: 'Show' }))
+        .getAllByRole('radio')
+        .map((r) => r.textContent);
+    expect(chips()).toEqual(['All2', 'Comments2']);
+    // A mark appears: so does its chip.
+    act(() => setAnnotations({ 0: [note, pen, mark] }));
+    expect(chips()).toEqual(['All3', 'Comments2', 'Marks1']);
+    // The chosen filter keeps its chip when it empties (the Redact group opens it too).
+    await userEvent.click(radio(/^Marks/));
+    act(() => setAnnotations({ 0: [note, pen] }));
+    expect(chips()).toEqual(['All2', 'Comments2', 'Marks0']);
+    await userEvent.click(radio(/^All/));
+    expect(chips()).toEqual(['All2', 'Comments2']);
+  });
+});
+
+describe('Review: a long list', () => {
+  /** 500 items on the first two pages: notes, pen strokes and redaction marks. */
+  function fiveHundred(): { first: Annotation[]; second: Annotation[] } {
+    const make = (page: number, i: number): Annotation => {
+      const id = `a-${page}-${i}`;
+      const at = { ...rect, y: 700 - (i % 40) * 15 };
+      if (i % 3 === 0) return { ...note, id, pageIndex: page, rect: at, contents: `Note ${i}` };
+      if (i % 3 === 1) return { ...pen, id, pageIndex: page, rect: at };
+      return { id, kind: 'redact', pageIndex: page, rect: at, quads: [at] };
+    };
+    return {
+      first: Array.from({ length: 250 }, (_, i) => make(0, i)),
+      second: Array.from({ length: 250 }, (_, i) => make(1, i)),
+    };
+  }
+
+  // The time budgets (first row < 100 ms, no long task > 50 ms) are measured on the production
+  // build in e2e/viewer.spec.ts; here, in a development build, what keeps them is checked: the
+  // list renders the rows in view, not the 500.
+  it('renders only the rows in view of 500, reaches the end and follows a selection', async () => {
+    await openFixture(annotationsUrl, 'annotations.pdf');
+    const { first, second } = fiveHundred();
+    setAnnotations({ 0: first, 1: second });
+    render(
+      <div style={{ display: 'flex', flexDirection: 'column', height: 600 }}>
+        <ReviewPanel />
+      </div>,
+    );
+    await expect.poll(() => kinds().length).toBeGreaterThan(5);
+    expect(radio(/^All/)).toHaveTextContent('All500');
+    expect(kinds().length).toBeLessThan(40);
+    expect(screen.getByRole('heading', { name: 'Page 1' })).toBeVisible();
+
+    // The end of the list is reachable by scrolling, page 2's heading with it.
+    const scroller = document.querySelector<HTMLElement>('[data-review-scroll]');
+    if (!scroller) throw new Error('no scroller');
+    for (let i = 0; i < 4; i++) {
+      scroller.scrollTop = scroller.scrollHeight;
+      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 20)));
+    }
+    expect(screen.getByRole('region', { name: 'Page 2' })).toBeVisible();
+    expect(screen.getByText('Note 249')).toBeVisible();
+    expect(screen.queryByText('Note 0')).toBeNull();
+    expect(kinds().length).toBeLessThan(40);
+
+    // A selection on the page brings its row into view.
+    const target = first[30];
+    const [{ source, index } = { source: '' as SourceId, index: 0 }] = sourcePages();
+    const ws = useWorkspaceStore.getState().workspace;
+    const pageId = ws.documents[ws.activeDocument ?? ('' as never)]?.pages[0]?.id;
+    if (!target || !pageId) throw new Error('no target');
+    act(() => {
+      useAnnotationStore.setState({
+        selection: { source, pageIndex: index, pageId, position: 1, ids: [target.id] },
+      });
+    });
+    await expect
+      .poll(() => document.querySelector(`[data-annotation-row="${target.id}"]`))
+      .not.toBeNull();
   });
 });
 

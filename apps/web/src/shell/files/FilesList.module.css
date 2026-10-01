@@ -1,5 +1,46 @@
+.panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
 .list {
   display: grid;
   gap: 2px;
   margin: 0 calc(var(--space-2) * -1);
+}
+
+/* The same Combine as Home's header, and the way to Home (spec §4.1). */
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.combine {
+  composes: primary-button from global;
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-2);
+  font-size: var(--text-md);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.link {
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .link:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
 }

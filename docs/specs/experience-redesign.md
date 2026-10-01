@@ -214,17 +214,30 @@ for the armed tool and, for the pen, updates the armed preset. Tool styles persi
 ### 6.4 Bursts: many strokes, one annotation
 
 A new stroke joins the open burst when (1) document, page and preset are the same; (2) the
-pause from the previous pointer-up to this pointer-down is ≤ **N = 1,500 ms**; (3) the gap
-between this stroke's bounds and the burst's bounds is ≤ **D = 36 pt** in page space (zoom
-does not change it); and (4) the burst has fewer than 64 paths. The first stroke creates an
-Ink annotation; each joining stroke appends a path through `annotation.update` with the
-burst's `coalesceKey`, so a burst is one history entry ("Pen on page 1 · 5 strokes") and one
-Review row. A burst closes on a tool or group change, Esc, undo or redo, a selection, a
-page or document change, a preset edit, window blur, or when N passes. N and D are
-constants in `ink-burst.ts`, overridable in the stored pen settings (300–5,000 ms, 6–144 pt)
-with no UI. The defaults assume word gaps well under a second and 18–30 pt line spacing in
-normal handwriting; P2 confirms them with the owner on a tablet before M6 exits. The eraser
-removes the path under it (`annotation.update`), and the annotation with its last path.
+pause from the previous pointer-up to this pointer-down is ≤ **N = 1,500 ms**; (3) the
+horizontal gap between this stroke's bounds and the burst's bounds is ≤ **D = 36 pt** in page
+space (zoom does not change it); (4) it is on the line of the burst's last stroke: their
+vertical bands (centre-line y ranges, at least 4 pt tall) overlap by ≥ 30 % of the smaller
+band, or, when they do not overlap at all, are ≤ 0.6 × the burst's median band height apart;
+and (5) the burst has fewer than 64 paths. Rule (4) keeps the dot of an i, the bar of a t and
+an underline in the word's burst, while the next line of writing (a 10 pt gap under 8 pt
+letters, or an ascender reaching less than 30 % into the line above) starts a new one, though
+it is within D. (As built after the M6 review: D was a distance in any direction, and at
+normal line spacing two lines became one annotation.) The first stroke creates an Ink
+annotation; each joining stroke appends a path through `annotation.update` with the burst's
+`coalesceKey`, so a burst is one history entry ("Pen on page 1 · 5 strokes") and one Review
+row. While a burst of several strokes is open and its entry is the present one, Mod+Z
+removes only its last stroke: the entry keeps its key with one path fewer, the burst stays
+open, and a rewritten stroke joins it; with one stroke left Mod+Z is the ordinary undo. A
+stroke whose append was still queued when the history moved is not saved ("Stroke not
+saved") rather than coming back as an annotation of its own. A burst closes on a tool or
+group change, Esc, an undo or redo of the entry, a selection, a page or document change, a
+preset edit, window blur, or when N passes. N and D are constants in `pen/bursts.ts`,
+overridable in the stored pen settings (300–5,000 ms, 6–144 pt) with no UI; the line rule's
+30 %, 0.6 and 4 pt are constants there too. The defaults assume word gaps well under a second
+and 18–30 pt line spacing in normal handwriting; P2 confirms them with the owner on a tablet
+before M6 exits. The eraser removes the path under it (`annotation.update`), and the
+annotation with its last path.
 
 ### 6.5 Lasso
 

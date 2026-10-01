@@ -324,8 +324,10 @@ describe('tokens.css', () => {
   });
 
   describe('glass and elevation (§7.2)', () => {
-    it('models the spec composites: #3f4145 over a white page, #212328 over the canvas', () => {
-      expect(glassOver(literal('#ffffff'))).toEqual(literal('#3f4145'));
+    // M6 review (A4): the backdrop is darkened less (0.36 -> 0.45), so the bar over a white page
+    // reads as glass (#47494d, was #3f4145) rather than a slab; over the canvas nothing changes.
+    it('models the composites: #47494d over a white page, #212328 over the canvas', () => {
+      expect(glassOver(literal('#ffffff'))).toEqual(literal('#47494d'));
       expect(glassOver(canvas())).toEqual(literal('#212328'));
     });
 
@@ -341,12 +343,17 @@ describe('tokens.css', () => {
       expect(contrast(colour('--accent'), glass), 'focus ring').toBeGreaterThanOrEqual(AA_NON_TEXT);
     });
 
-    it('meets the white-page numbers of the spec (primary 8.27, secondary 5.14, danger 4.51, warning 6.28)', () => {
+    it('meets the white-page numbers (primary 7.30, secondary 4.94, danger 4.63, warning 5.54)', () => {
       const glass = glassOver(literal('#ffffff'));
-      expect(contrast(colour('--text-primary'), glass)).toBeGreaterThanOrEqual(8.265);
-      expect(contrast(colour('--glass-text-secondary'), glass)).toBeGreaterThanOrEqual(5.135);
-      expect(contrast(colour('--glass-danger'), glass)).toBeGreaterThanOrEqual(4.505);
-      expect(contrast(colour('--warning'), glass)).toBeGreaterThanOrEqual(6.275);
+      expect(contrast(colour('--text-primary'), glass)).toBeGreaterThanOrEqual(7.29);
+      expect(contrast(colour('--glass-text-secondary'), glass)).toBeGreaterThanOrEqual(4.93);
+      expect(contrast(colour('--glass-danger'), glass)).toBeGreaterThanOrEqual(4.63);
+      expect(contrast(colour('--warning'), glass)).toBeGreaterThanOrEqual(5.535);
+    });
+
+    it('lifts the bar over a white page (9.0:1 to the page, against 10.2:1 at brightness 0.36)', () => {
+      expect(glassFilter().brightness).toBe(0.45);
+      expect(contrast(glassOver(literal('#ffffff')), literal('#ffffff'))).toBeLessThan(9.05);
     });
 
     it('keeps the opaque fallback on the raised surface', () => {
@@ -426,10 +433,10 @@ describe('tokens.css', () => {
       }
     });
 
-    it('keeps the fill ≥ 3:1 against the bar (5.28:1 over the canvas, 3.43:1 over a white page)', () => {
+    it('keeps the fill ≥ 3:1 against the bar (5.28:1 over the canvas, 3.03:1 over a white page)', () => {
       const fill = colour('--tool-active-fill');
       expect(contrast(fill, glassOver(canvas()))).toBeGreaterThanOrEqual(5.275);
-      expect(contrast(fill, glassOver(literal('#ffffff')))).toBeGreaterThanOrEqual(3.425);
+      expect(contrast(fill, glassOver(literal('#ffffff')))).toBeGreaterThanOrEqual(3.025);
       for (const [name, backdrop] of BACKDROPS) {
         expect(contrast(fill, glassOver(backdrop())), name).toBeGreaterThanOrEqual(AA_NON_TEXT);
       }

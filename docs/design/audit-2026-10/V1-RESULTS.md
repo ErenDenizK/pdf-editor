@@ -111,3 +111,38 @@ show the wording and annotation changes other M6 packages had in progress at the
   V1's files.
 - Ink dots (§7.4) belong to the pen bar (P2); the bar's width transition on a group change (§7.5)
   to T1.
+
+## Addendum 2026-10-01: glass over a white page (M6 review A4)
+
+The independent M6 review found the bar over a white page still a grey slab (`#3f4145`, close to
+the audit's) and 46 px tall instead of the spec's 44. Change: `--glass-filter` darkens the
+backdrop less, `brightness(0.36)` → `brightness(0.45)`; the review asked for about 0.5, but 0.45 is
+the brightest that keeps the armed tool's accent fill at 3:1 against the bar over a white page
+(0.5 gives 2.84:1). Two glass text tokens step up to stay AA there: `--glass-text-secondary`
+`#b4b8bf` → `#bcc0c6`, `--glass-danger` `#ff8a8a` → `#ffa0a0` (and `--glass-text-disabled`
+`#6f737b` → `#787c84`, which keeps disabled icons at 2.15:1). The capsule is 44 px by padding
+alone: 4 px → 3 px around the 36 px targets (radius 22 − 1 border − 3 padding = 18, still
+concentric). Measured as above (model in `tokens.test.ts`, sampled in the app: Read,
+`images.pdf`, 1440×900, SwiftShader, the bar's padding at mid-height).
+
+| Backdrop | Glass before → after | vs canvas | primary | glass-secondary | glass-danger | warning | accent (non-text) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| white page | `#3f4145` → `#47494d` | 1.95 → 2.21 | 8.27 → **7.30** | 5.14 → **4.94** | 4.51 → **4.63** | 6.28 → 5.54 | 3.43 → **3.03** |
+| yellow figure `#f3d933` | `#3f3d26` → `#474426` | — | 8.91 → 8.00 | 5.53 → 5.41 | 4.85 → 5.08 | 6.76 → 6.08 | 3.70 → 3.32 |
+| mid grey | `#303236` → `#33353a` | — | 10.39 → 9.93 | 6.45 → 6.72 | 5.66 → 6.31 | 7.89 → 7.54 | 4.31 → 4.12 |
+| saturated blue `#2a6fd6` | `#203045` → `#20344d` | — | 10.82 → 10.23 | 6.72 → 6.93 | 5.89 → 6.50 | 8.21 → 7.77 | 4.49 → 4.25 |
+| black page | `#202226` (same) | 1.25 | 12.88 | 8.00 → 8.72 | 7.02 → 8.18 | 9.78 | 5.35 |
+| app canvas | `#212328` (same) | 1.27 | 12.71 | 7.90 → 8.61 | 6.93 → 8.08 | 9.66 | 5.28 |
+| white page under the palette scrim | `#2e3034` → `#313338` | — | 10.69 → 10.22 | 6.64 → 6.92 | 5.83 → 6.49 | 8.12 → 7.76 | 4.44 → 4.25 |
+
+Every glass text colour stays AA over every backdrop; the minimum is now `--glass-danger` over a
+white page at 4.63:1 (was 4.51:1). The bar over a white page is lighter (L* 27.5 → 31.0) and
+stands 9.0:1 from the page instead of 10.2:1, so it reads as a lighter, see-through layer rather
+than a dark slab; over the canvas nothing changes. Armed tool: fill against the bar 5.28:1 over
+the canvas (same), **3.03:1** over a white page (was 3.43:1), 5.36:1 on the opaque bar; icon on
+the fill 6.69:1 (same). In the app the bar's fill over the page was sampled `#3f4145` (before)
+and `#47494d` (after), equal to the model; the bar measures 46 → 44 px.
+
+| Scene | Before | After |
+| --- | --- | --- |
+| Tool bar over the page (1×) | [before](m6-a4-before-bar-crop.png) | [after](m6-a4-after-bar-crop.png) |

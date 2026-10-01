@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import simpleUrl from '../../../../../test/fixtures/simple-text.pdf?url';
 import { fixtureFile } from '../../../test/store-harness';
+import { currentPlatform } from '../../commands/shortcuts';
 import { useAnnouncer } from '../../shell/announcer';
 import { resetWorkspace, useWorkspaceStore } from '../../state/workspace-store';
 import { resetToolStore, useToolStore } from '../../viewer/tool-store';
@@ -30,12 +31,16 @@ import {
   commitPenStroke,
   currentBurst,
   DEFAULT_BURST_LIMITS,
+  horizontalGap,
   INK_BURST_GAP_PT,
+  INK_BURST_LINE_GAP,
+  INK_BURST_LINE_OVERLAP,
   INK_BURST_MAX_PATHS,
+  INK_BURST_MIN_BAND_PT,
   INK_BURST_PAUSE_MS,
   type InkBurst,
   joinsBurst,
-  rectGap,
+  onBurstLine,
   resetBursts,
 } from './bursts';
 import { DEFAULT_PRESETS, PEN_PRESETS_STORAGE_KEY } from './presets';
@@ -45,11 +50,13 @@ const T1: PageTarget = { source: 's1' as never, pageIndex: 0, pageId: 'p1' as ne
 const box = (x: number, y: number, width = 40, height = 10): Rect => ({ x, y, width, height });
 
 function burst(over: Partial<InkBurst> = {}): InkBurst {
+  const bounds = over.bounds ?? box(100, 100);
   return {
     target: T1,
     presetIndex: 0,
     preset: DEFAULT_PRESETS[0],
-    bounds: box(100, 100),
+    bounds,
+    strokes: [bounds],
     lastUpAt: 10_000,
     paths: 3,
     coalesceKey: 'ink-burst:test',
@@ -88,15 +95,43 @@ describe('joinsBurst (spec §6.4)', () => {
     expect(joinsBurst(burst(), next({ downAt: 9_900 }))).toBe(true);
   });
 
-  it('gap: up to D in page space joins, beyond does not (diagonal gaps included)', () => {
-    expect(rectGap(box(0, 0), box(20, 5))).toBe(0);
-    expect(rectGap(box(0, 0), box(43, 14))).toBeCloseTo(5, 6);
+  it('gap: up to D across in page space joins, beyond does not', () => {
+    expect(horizontalGap(box(0, 0), box(20, 5))).toBe(0);
+    expect(horizontalGap(box(0, 0), box(43, 14))).toBe(3);
+    expect(horizontalGap(box(50, 0), box(0, 30))).toBe(10);
     expect(joinsBurst(burst(), next({ bounds: box(140 + 36, 100) }))).toBe(true);
     expect(joinsBurst(burst(), next({ bounds: box(140 + 36.5, 100) }))).toBe(false);
-    // Below the burst, a line further down: 30 pt gap joins.
-    expect(joinsBurst(burst(), next({ bounds: box(100, 140) }))).toBe(true);
-    // Diagonal: 30 pt across and 30 pt down is 42 pt away.
-    expect(joinsBurst(burst(), next({ bounds: box(170, 140) }))).toBe(false);
+    expect(joinsBurst(burst(), next({ bounds: box(100 - 40 - 36.5, 100) }))).toBe(false);
+  });
+
+  it('line: the next line of writing starts a new burst; a dot or a bar on the line joins', () => {
+    expect([INK_BURST_LINE_OVERLAP, INK_BURST_LINE_GAP, INK_BURST_MIN_BAND_PT]).toEqual([
+      0.3, 0.6, 4,
+    ]);
+    // Letters 8 pt tall on a line at y 100–108 (user space, y up).
+    const word = [box(100, 100, 6, 8), box(108, 100, 6, 8), box(116, 100, 6, 8)];
+    const line = burst({ strokes: word, bounds: box(100, 100, 22, 8), paths: 3 });
+    // The next letter on the line, even shifted down a little: joins.
+    expect(joinsBurst(line, next({ bounds: box(124, 98, 6, 8) }))).toBe(true);
+    // The next line 18 pt lower (a 10 pt gap between the bands): a new burst, although it
+    // is well within D = 36 pt.
+    expect(joinsBurst(line, next({ bounds: box(100, 82, 6, 8) }))).toBe(false);
+    // A tall letter of the next line reaching 1.5 pt into this one (< 30 % overlap): new.
+    expect(joinsBurst(line, next({ bounds: box(100, 91.5, 6, 10) }))).toBe(false);
+    // The dot of an i just above (its 4 pt band 1.25 pt above, ≤ 0.6 × 8 pt) and the bar of
+    // a t across: join.
+    expect(joinsBurst(line, next({ bounds: box(117, 111, 0.5, 0.5) }))).toBe(true);
+    expect(joinsBurst(line, next({ bounds: box(114, 104, 8, 0) }))).toBe(true);
+    // A dot whose band is 5.25 pt above is beyond 0.6 × 8 = 4.8 pt.
+    expect(joinsBurst(line, next({ bounds: box(117, 115, 0.5, 0.5) }))).toBe(false);
+    // Flat strokes (a dash, a line) 5 pt apart: their 4 pt bands are 1 pt apart, which joins;
+    // 10 pt apart they do not.
+    const dash = burst({ strokes: [box(100, 100, 20, 0)], bounds: box(100, 100, 20, 0) });
+    expect(joinsBurst(dash, next({ bounds: box(124, 95, 20, 0) }))).toBe(true);
+    expect(joinsBurst(dash, next({ bounds: box(124, 90, 20, 0) }))).toBe(false);
+    // The band is the last stroke's: after a dot, the letters under it still join.
+    expect(onBurstLine([...word, box(117, 111, 0, 0)], box(124, 100, 6, 8))).toBe(true);
+    expect(onBurstLine([], box(0, 0, 1, 1))).toBe(true);
   });
 
   it('count: a burst of 63 paths takes one more, one of 64 none', () => {
@@ -220,7 +255,7 @@ describe('bursts on the engine', () => {
     const saved = await Promise.all([
       stroke(page1, 100, 600, 1000),
       stroke(page1, 150, 600, 1500),
-      stroke(page1, 100, 620, 2000),
+      stroke(page1, 200, 601, 2000),
     ]);
     expect(saved).toEqual([true, true, true]);
     const [ink, ...others] = await inks(page1);
@@ -273,6 +308,82 @@ describe('bursts on the engine', () => {
     const page1Inks = await inks(page1);
     expect(page1Inks.map((a) => a.paths.length)).toEqual([1, 1, 1]);
     expect(page1Inks.at(-1)?.color?.toUpperCase()).toBe('#1E5BD8');
+  });
+
+  it('the next line of writing is a new burst, though within D', async () => {
+    const [page1] = await openSimple();
+    if (!page1) throw new Error('no page');
+    await stroke(page1, 100, 600, 1000);
+    await stroke(page1, 150, 600, 1400);
+    // 18 pt lower, starting under the first stroke: a new line.
+    await stroke(page1, 100, 582, 1800);
+    expect((await inks(page1)).map((a) => a.paths.length)).toEqual([2, 1]);
+  });
+
+  it('Mod+Z inside an open burst removes the last stroke only; the burst stays open', async () => {
+    const [page1] = await openSimple();
+    if (!page1) throw new Error('no page');
+    const before = model().history.past.length;
+    await stroke(page1, 100, 600, 1000);
+    await stroke(page1, 150, 600, 1400);
+    await stroke(page1, 200, 600, 1800);
+    expect((await inks(page1))[0]?.paths).toHaveLength(3);
+    const undoKey = () => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'z',
+        code: 'KeyZ',
+        bubbles: true,
+        cancelable: true,
+        ...(currentPlatform === 'mac' ? { metaKey: true } : { ctrlKey: true }),
+      });
+      document.body.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+
+    expect(undoKey()).toBe(true);
+    await whenIdle();
+    let [ink] = await inks(page1);
+    expect(ink?.paths.map((p) => p[0]?.x)).toEqual([100, 150]);
+    expect(ink?.widths).toHaveLength(2);
+    // The same history entry, one path fewer.
+    expect(model().history.past.length).toBe(before + 1);
+    expect(model().history.present.label).toBe('Pen on page 1 · 2 strokes');
+    expect(currentBurst()?.paths).toBe(2);
+    expect(useAnnouncer.getState().message).toBe('Undid 1 stroke');
+
+    // A rewritten stroke joins the same burst.
+    await stroke(page1, 210, 600, 2400);
+    [ink] = await inks(page1);
+    expect(ink?.paths.map((p) => p[0]?.x)).toEqual([100, 150, 210]);
+    expect(model().history.past.length).toBe(before + 1);
+
+    expect(undoKey()).toBe(true);
+    expect(undoKey()).toBe(true);
+    await whenIdle();
+    expect((await inks(page1))[0]?.paths).toHaveLength(1);
+    // One stroke left: the ordinary undo (not handled here) removes the Ink.
+    expect(undoKey()).toBe(false);
+    model().undo();
+    await whenIdle();
+    expect(await inks(page1)).toEqual([]);
+    expect(currentBurst()).toBeNull();
+  });
+
+  it('an undo before a queued append runs: the stroke is not saved and does not come back', async () => {
+    const [page1] = await openSimple();
+    if (!page1) throw new Error('no page');
+    expect(await stroke(page1, 100, 600, 1000)).toBe(true);
+    // The append is queued; Mod+Z lands before it runs.
+    const second = stroke(page1, 150, 600, 1400);
+    model().undo();
+    expect(await second).toBe(false);
+    await whenIdle();
+    expect(await inks(page1)).toEqual([]);
+    expect(currentBurst()).toBeNull();
+    // Redo brings back the first stroke only.
+    model().redo();
+    await whenIdle();
+    expect((await inks(page1)).map((a) => a.paths.length)).toEqual([1]);
   });
 
   it('closes on Esc, a tool change, a selection, a preset edit, blur, undo and the pause', async () => {

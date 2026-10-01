@@ -1,6 +1,8 @@
 /**
  * Contextual bar above the selected annotations (spec §2): replaces property dialogs.
- * One Tab stop per control group; Escape (the global command) deselects.
+ * A toolbar with one Tab stop and a roving tabindex, as the tool bar (DESIGN.md §5):
+ * Left / Right move between its controls, Home / End to the ends; Escape (the global
+ * command) deselects.
  *
  * For a lasso selection (`paths`, experience-redesign spec §6.5) it sits above the taken
  * paths rather than the whole annotations, names the stroke count and shows the lasso's
@@ -11,6 +13,8 @@ import { Lock } from 'lucide-react';
 import { useLayoutEffect, useRef, useState } from 'react';
 
 import { m } from '../i18n';
+import { useRovingTabindex } from '../shell/FloatingToolbar.roving';
+import { useFocusRescue } from '../ui/use-focus-rescue';
 import type { PageTarget } from './annotation-store';
 import { displayRect, type PageFrame, rectToCss } from './geometry';
 import { annotationName, capitalize } from './labels';
@@ -18,6 +22,9 @@ import { type PathPicks, pickCount, pickedCssBounds } from './lasso/geometry';
 import { LassoBarControls } from './lasso/LassoSelection';
 import styles from './AnnotationLayer.module.css';
 import { StyleControls } from './StyleControls';
+
+/** Esc or Delete from the bar: focus stays on the page rather than falling to <body>. */
+const pageViewport = (bar: HTMLElement) => bar.closest<HTMLElement>('[data-read-viewport]');
 
 const BAR_HEIGHT = 40;
 /** Width assumed before the bar has been measured. */
@@ -37,6 +44,8 @@ export function AnnotationBar({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(INITIAL_WIDTH);
+  const roving = useRovingTabindex(ref);
+  useFocusRescue(ref, pageViewport);
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
@@ -95,6 +104,8 @@ export function AnnotationBar({
       data-annotation-keep=""
       style={{ left: x, top: y }}
       onPointerDown={(e) => e.stopPropagation()}
+      onKeyDown={roving.onKeyDown}
+      onFocus={roving.onFocus}
     >
       <span className={styles.barName}>{name}</span>
       {locked ? (

@@ -40,6 +40,15 @@ import rotatedUrl from '../../../test/fixtures/rotated-pages.pdf?url';
 import { afterAll, describe, expect, test } from 'vitest';
 
 import { planExport } from '../src/export-plan';
+import { createHostedEngine } from '../src/pdfium/host';
+import {
+  expectVariable,
+  renderPdfium,
+  rgbOf,
+  type Taper,
+  taperStroke,
+  widthProfile,
+} from '../src/pdfium/ink-width-probe';
 import { PdfiumAdapter } from '../src/pdfium/pdfium-adapter';
 import {
   boxRect,
@@ -51,6 +60,7 @@ import { PdfLibAssembler } from '../src/pdflib/pdflib-assembler';
 import type {
   AssemblyResult,
   EngineOutlineNode,
+  InkAnnotation,
   LinkAnnotation,
   VerificationResult,
 } from '../src/types';
@@ -552,5 +562,79 @@ describe('verification: annotations inside resized pages', () => {
     expect(
       await adapter.verify(bytes.slice(0), { ...expectation, annotationsInsidePages: [0] }),
     ).toEqual({ ok: false, problems: ['Page 1: 1 annotation outside the resized page'] });
+  });
+});
+
+describe('variable-width ink: widths follow the resize (ADR-0018)', () => {
+  test('resize 50 %, reopen: the widths are halved and the first edit keeps the visual width', async () => {
+    const host = await createHostedEngine({ wasm: wasmUrl });
+    const inkAdapter = new PdfiumAdapter({
+      wasmUrl,
+      engineFactory: () => host.engine,
+      rawTask: (sourceId, fn, options) => host.withRawTask(sourceId, fn, options),
+    });
+    try {
+      // One taper 2 → 18 pt on a Letter page, saved with our appearance and widths.
+      const taper: Taper = {
+        from: { x: 120, y: 500 },
+        to: { x: 420, y: 500 },
+        startWidth: 2,
+        endWidth: 18,
+      };
+      const { path, widths } = taperStroke(taper);
+      const original = sid('resize-ink-src');
+      await inkAdapter.open(original, await makePdf([{ size: [612, 792] }]));
+      const created = (await inkAdapter.createAnnotation(original, {
+        kind: 'ink',
+        pageIndex: 0,
+        rect: { x: 0, y: 0, width: 0, height: 0 },
+        paths: [path],
+        widths: [widths],
+        strokeWidth: 8,
+        color: '#1E5BD8',
+      })) as InkAnnotation;
+      const bytes = await inkAdapter.save(original);
+      await inkAdapter.close(original);
+
+      // Fit into half the size: x' = x / 2, y' = y / 2.
+      const source = sid('resize-ink-in');
+      const result = await assembler.assemble({
+        document: vdoc([
+          {
+            ...vpage({ kind: 'source', source, index: 0 }),
+            resize: { width: 306, height: 396, mode: 'fit', anchor: 'center' },
+          },
+        ]),
+        sources: new Map([[source, bytes.slice(0)]]),
+        blobs: new Map(),
+      });
+
+      const out = sid('resize-ink-out');
+      const opened = await inkAdapter.open(out, result.bytes.slice(0));
+      const [listed] = (await inkAdapter.listAnnotations(out, 0)).filter(
+        (a): a is InkAnnotation => a.kind === 'ink',
+      );
+      expect(listed?.id).toBe(created.id);
+      expect(listed?.paths[0]?.[0]?.x).toBeCloseTo(60, 1);
+      const halved = (created.widths?.[0] ?? []).map((w) => Math.round(w * 50) / 100);
+      expect(listed?.widths?.[0]?.length).toBe(halved.length);
+      listed?.widths?.[0]?.forEach((w, i) => expect(w).toBeCloseTo(halved[i] ?? 0, 2));
+
+      // The first edit regenerates the appearance from the stored widths: still half.
+      const half: Taper = {
+        from: { x: 60, y: 250 },
+        to: { x: 210, y: 250 },
+        startWidth: 1,
+        endWidth: 9,
+      };
+      const green = '#2E7D32';
+      if (!listed) throw new Error('no ink');
+      await inkAdapter.updateAnnotation(out, { ...listed, color: green });
+      const rendered = await renderPdfium(inkAdapter, out, opened, 0);
+      expectVariable(widthProfile(rendered, half, rgbOf(green)), 'after the first edit');
+      await inkAdapter.close(out);
+    } finally {
+      await inkAdapter.destroy();
+    }
   });
 });

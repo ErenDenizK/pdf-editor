@@ -94,6 +94,8 @@ export function LassoBarControls({ pageId }: { readonly pageId: PageId }) {
         icon={<Move />}
         className={styles.grip}
         data-lasso-move=""
+        // Its arrows nudge the selection (keys.ts), not move along the bar.
+        data-keeps-arrows=""
         onPointerDown={(e) => {
           if (e.button !== 0) return;
           e.preventDefault();

@@ -104,6 +104,8 @@ test('mark by selection and by area, list them, export and re-open with the mark
   await expect(page.locator('[data-redaction-layer="0"] [data-redaction-mark]')).toHaveCount(1);
   await expect(historyRow(page, 'Redaction mark on page 1')).toBeVisible();
   await expect(layer(page)).toHaveAttribute('data-tool', 'select');
+  // A new mark never selects itself: no contextual bar over the line above (spec §5.2).
+  await expect(page.getByTestId('annotation-bar')).toHaveCount(0);
 
   // 2. The Redact tool: drag an area where there is no text.
   await page.keyboard.press('Escape');
@@ -118,6 +120,7 @@ test('mark by selection and by area, list them, export and re-open with the mark
   await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.65, { steps: 8 });
   await page.mouse.up();
   await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(2);
+  await expect(page.getByTestId('annotation-bar')).toHaveCount(0);
   await page.keyboard.press('Escape');
 
   // 3. The Review tab's Marks filter lists both, with the text under each.

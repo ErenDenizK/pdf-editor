@@ -1,9 +1,11 @@
 /**
- * Status bar: selection summary and the privacy indicator on the left; zoom and view mode
- * on the right. Numerals are tabular so counts never jitter (DESIGN.md §3).
+ * Status bar: page, selection summary and the privacy indicator on the left; zoom on the
+ * right. The view switch lives once, over the stage (experience-redesign §1, A1), so the
+ * bar does not repeat Read / Arrange. Numerals are tabular so counts never jitter
+ * (DESIGN.md §3).
  */
 import { Menu } from '@base-ui/react/menu';
-import { BookOpen, LayoutGrid, Minus, Plus, Search } from 'lucide-react';
+import { Minus, Plus, Search } from 'lucide-react';
 
 import { formatNumber, formatPercent, m } from '../i18n';
 import { OcrStatus } from '../ocr';
@@ -134,8 +136,6 @@ export function StatusBar() {
       {hasDocuments ? (
         <div className={styles.right}>
           <ZoomControls />
-          <span className={styles.divider} aria-hidden="true" />
-          <ModeToggles />
         </div>
       ) : null}
     </footer>
@@ -217,35 +217,6 @@ function ZoomControls() {
         className={styles.small}
         disabled={zoom >= MAX_ZOOM}
         onClick={zoomIn}
-      />
-    </div>
-  );
-}
-
-function ModeToggles() {
-  const viewMode = useUiStore((s) => s.viewMode);
-  const setViewMode = useUiStore((s) => s.setViewMode);
-  const readShortcut = useCommandShortcut('mode.read');
-  const arrangeShortcut = useCommandShortcut('mode.arrange');
-  return (
-    <div className={styles.modes}>
-      <IconButton
-        label={m.mode_read_long()}
-        icon={<BookOpen />}
-        shortcut={readShortcut}
-        tooltipSide="top"
-        className={styles.small}
-        aria-pressed={viewMode === 'read'}
-        onClick={() => setViewMode('read')}
-      />
-      <IconButton
-        label={m.mode_arrange_long()}
-        icon={<LayoutGrid />}
-        shortcut={arrangeShortcut}
-        tooltipSide="top"
-        className={styles.small}
-        aria-pressed={viewMode === 'arrange'}
-        onClick={() => setViewMode('arrange')}
       />
     </div>
   );

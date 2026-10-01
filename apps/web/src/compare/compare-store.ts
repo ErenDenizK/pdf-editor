@@ -28,6 +28,8 @@ import type {
 } from '@pdf-editor/engine';
 import { create } from 'zustand';
 
+import { m } from '../i18n';
+import { announce } from '../shell/announcer';
 import type { SidePage } from './side-page';
 
 export type CompareStatus = 'setup' | 'preparing' | 'running' | 'done' | 'failed';
@@ -217,5 +219,8 @@ export function refreshCompareStale(ws: Workspace): void {
   const { basis, stale } = useCompareStore.getState();
   if (!basis) return;
   const changed = sideChanged(basis.a, ws) || sideChanged(basis.b, ws);
-  if (changed !== stale) useCompareStore.setState({ stale: changed });
+  if (changed === stale) return;
+  useCompareStore.setState({ stale: changed });
+  // Said once, here; the inline notices (the view and Changes) are not live regions.
+  if (changed) announce(m.compare_stale());
 }

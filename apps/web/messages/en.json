@@ -42,7 +42,7 @@
   "empty_title": "Drop PDFs to start",
   "empty_title_dragging": "Release to open",
   "empty_body_local": "Files open on this device and are never uploaded.",
-  "empty_body_combine": "Several files open as tabs. With two or more open you can combine them, arrange their pages together or compare them, from the command palette or a tab’s menu.",
+  "empty_body_combine": "Drop PDFs here or open them. With two or more open you can combine them on Home or from the Document menu, arrange their pages together or compare them.",
   "empty_hints_label": "Get started",
   "keyboard_shortcuts": "Keyboard shortcuts",
   "stage_start_label": "Start",
@@ -3329,7 +3329,6 @@
       }
     }
   ],
-  "home_combine_none": "Combine files",
   "home_combine_title": [
     {
       "declarations": ["input count", "local countPlural = count: plural"],
@@ -3466,6 +3465,8 @@
   "nav_files_list": "Open documents",
   "nav_files_meta": "{pages} · {size}",
   "nav_files_close": "Close {name}",
+  "nav_files_select": "Select {name}",
+  "nav_files_show_home": "Show Home",
   "review_filter_label": "Show",
   "review_filter_all": "All",
   "review_filter_comments": "Comments",
@@ -3488,5 +3489,6 @@
   "docinfo_title": "Document info",
   "docinfo_open": "Document info…",
   "docinfo_file": "File",
-  "bar_in_group": "Tool bar: {group}"
+  "bar_in_group": "Tool bar: {group}",
+  "a11y_pages_viewport": "Pages of {title}"
 }

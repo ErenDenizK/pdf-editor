@@ -2,10 +2,12 @@
  * Read-mode viewer (spec viewer-annotations §1): text selection and copy, find in document,
  * internal and external links, go to page, and the two-up layout, on outline-named-dests.pdf.
  * The navigator's four tabs and the closed inspector on first run, with Document info in the
- * Document menu (experience-redesign §4).
+ * Document menu (experience-redesign §4); the status bar without a second view switch; Read
+ * through a narrow-then-wide window resize.
  */
 import { fileURLToPath } from 'node:url';
 
+import { PDFDocument, PDFName, PDFString } from '@cantoo/pdf-lib';
 import { expect, type Page, test } from '@playwright/test';
 
 import { openFixtures, useFileInputPicker } from './helpers';
@@ -197,6 +199,108 @@ test('two-up layout shows pages side by side', async ({ page }) => {
   await expect(page.getByTestId('status-pages')).toHaveText('Page 3 of 6');
 });
 
+test('the status bar keeps page, privacy and zoom; the view switch lives over the stage', async ({
+  page,
+}) => {
+  const status = page.getByRole('contentinfo');
+  await expect(status.getByTestId('status-pages')).toHaveText('Page 1 of 6');
+  await expect(status.getByTestId('privacy-indicator')).toBeVisible();
+  await expect(status.getByRole('button', { name: 'Zoom in' })).toBeVisible();
+  await expect(status.getByRole('button', { name: 'Read mode' })).toHaveCount(0);
+  await expect(status.getByRole('button', { name: 'Arrange pages' })).toHaveCount(0);
+  const modes = page.getByRole('radiogroup', { name: 'View mode' }).getByRole('radio');
+  await expect(modes).toHaveText(['Home', 'Read', 'Arrange']);
+});
+
+/** A PDF with 500 annotations, 50 on each of 10 pages: notes, squares and pen strokes. */
+async function fiveHundredAnnotations(): Promise<Buffer> {
+  const doc = await PDFDocument.create();
+  const ctx = doc.context;
+  for (let p = 0; p < 10; p++) {
+    const page = doc.addPage([612, 792]);
+    const annots = [];
+    for (let i = 0; i < 50; i++) {
+      const x = 40 + (i % 10) * 55;
+      const y = 680 - Math.floor(i / 10) * 120;
+      const Rect = [x, y, x + 40, y + 30];
+      const NM = PDFString.of(`a-${p}-${i}`);
+      const dict =
+        i % 3 === 0
+          ? ctx.obj({
+              Type: 'Annot',
+              Subtype: 'Text',
+              Rect,
+              NM,
+              Contents: PDFString.of(`Note ${i}`),
+            })
+          : i % 3 === 1
+            ? ctx.obj({ Type: 'Annot', Subtype: 'Square', Rect, NM, C: [1, 0, 0] })
+            : ctx.obj({
+                Type: 'Annot',
+                Subtype: 'Ink',
+                Rect,
+                NM,
+                C: [0, 0, 1],
+                InkList: [[x + 2, y + 2, x + 20, y + 25, x + 38, y + 5]],
+              });
+      annots.push(ctx.register(dict));
+    }
+    page.node.set(PDFName.of('Annots'), ctx.obj(annots));
+  }
+  return Buffer.from(await doc.save());
+}
+
+// M6 review: Review with 500 items took 284 ms to its first row, with a 114 ms long task.
+test('the Review tab shows the first of 500 items within 100 ms, without a long task', async ({
+  page,
+}) => {
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Open files' }).first().click();
+  await (await chooser).setFiles({
+    name: 'review-500.pdf',
+    mimeType: 'application/pdf',
+    buffer: await fiveHundredAnnotations(),
+  });
+  const review = page.getByRole('tab', { name: /^Review/ });
+  // Every page's annotations are read (the badge counts them) before the tab opens.
+  await expect(review).toHaveAccessibleName('Review, 500 items', { timeout: 30_000 });
+  await page.waitForTimeout(500);
+
+  // Three openings from the Pages tab; the median keeps one slow frame of a loaded machine
+  // from deciding.
+  const runs: { firstRow: number; longest: number; rows: number }[] = [];
+  for (let run = 0; run < 3; run++) {
+    await page.getByRole('tab', { name: /^Pages/ }).click();
+    await expect(page.locator('[data-review-panel]')).toHaveCount(0);
+    await page.waitForTimeout(500);
+    runs.push(
+      await review.evaluate(async (tab: HTMLElement) => {
+        const long: number[] = [];
+        const observer = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) long.push(entry.duration);
+        });
+        observer.observe({ type: 'longtask' });
+        const start = performance.now();
+        tab.click();
+        let firstRow = Number.POSITIVE_INFINITY;
+        for (let i = 0; i < 600 && firstRow === Number.POSITIVE_INFINITY; i++) {
+          if (document.querySelector('[data-review-panel] [data-review-kind]')) {
+            firstRow = performance.now() - start;
+          } else await new Promise((resolve) => setTimeout(resolve, 1));
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        observer.disconnect();
+        const rows = document.querySelectorAll('[data-review-panel] [data-review-kind]').length;
+        return { firstRow, longest: Math.max(0, ...long), rows };
+      }),
+    );
+  }
+  const median = (values: number[]) => values.sort((a, b) => a - b)[1] ?? Number.NaN;
+  expect(median(runs.map((run) => run.firstRow))).toBeLessThan(100);
+  expect(median(runs.map((run) => run.longest))).toBeLessThanOrEqual(50);
+  for (const run of runs) expect(run.rows).toBeLessThan(60);
+});
+
 /** The first Read page canvas that holds a rendered bitmap. */
 const readBitmap = (page: Page) =>
   page.locator('[data-read-viewport] canvas[data-state="rendered"]').first();
@@ -211,6 +315,53 @@ test('Read mode renders pages after Arrange without a resize', async ({ page }) 
   await expect(page.locator('[data-read-viewport] [data-page-index="0"]')).toBeVisible();
   await expect(readBitmap(page)).toBeVisible({ timeout: 5_000 });
   await expect(page.getByTestId('status-pages')).toHaveText('Page 1 of 6');
+});
+
+// Regression (M6 review): the fitted zoom kept the viewport centre in place across a resize,
+// so 1440 → 1024 → 1440 px scrolled page 1's only text (its heading) out of view.
+test('page 1 keeps its text in view through 1440 → 1024 → 1440 px', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const viewport = page.locator('[data-read-viewport]');
+  const first = viewport.locator('[data-page-index="0"] canvas[data-state="rendered"]');
+  /** Dark pixels of page 1's bitmap in the part of the page the viewport shows. */
+  const visibleInk = () =>
+    first.evaluate((canvas: HTMLCanvasElement) => {
+      const sheet = canvas.getBoundingClientRect();
+      const view = canvas.closest('[data-read-viewport]')?.getBoundingClientRect();
+      if (!view) return 0;
+      const top = Math.max(sheet.top, view.top);
+      const bottom = Math.min(sheet.bottom, view.bottom);
+      if (bottom <= top) return 0;
+      const ratio = canvas.width / sheet.width;
+      const data = canvas
+        .getContext('2d')
+        ?.getImageData(
+          0,
+          Math.floor((top - sheet.top) * ratio),
+          canvas.width,
+          Math.max(1, Math.floor((bottom - top) * ratio)),
+        ).data;
+      let ink = 0;
+      for (let i = 0; data && i < data.length; i += 4) if ((data[i] ?? 255) < 160) ink++;
+      return ink;
+    });
+  const settle = async (width: number) => {
+    await page.setViewportSize({ width, height: 900 });
+    await expect
+      .poll(() =>
+        first.evaluate(
+          (canvas: HTMLCanvasElement) =>
+            canvas.width === Math.round(canvas.getBoundingClientRect().width),
+        ),
+      )
+      .toBe(true);
+  };
+  await settle(1440);
+  await expect.poll(visibleInk).toBeGreaterThan(0);
+  await settle(1024);
+  await settle(1440);
+  expect(await viewport.evaluate((el) => el.scrollTop)).toBe(0);
+  await expect.poll(visibleInk).toBeGreaterThan(0);
 });
 
 test('a document opened in Read mode renders its pages, and so does the tab left', async ({

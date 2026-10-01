@@ -93,13 +93,14 @@ export async function openDocuments(files: readonly File[]): Promise<readonly Do
 }
 
 /**
- * "Open files…" and the tab bar's "+": PDFs and images (images become one document). On
- * Home the new cards come selected (experience-redesign §3).
+ * "Open files…" and the tab bar's "+": PDFs and images (images become one document). Like a
+ * drop: two or more on an empty workspace, or any while Home shows, land on Home with the
+ * new cards selected (experience-redesign §3).
  */
 export async function openFilesFromPicker(): Promise<void> {
   const files = await pickFiles('openable');
   const wasEmpty = model().workspace.documentOrder.length === 0;
-  showOpened(await openDocuments(files), { wasEmpty, dropped: false });
+  showOpened(await openDocuments(files), { wasEmpty });
 }
 
 /**

@@ -6,7 +6,8 @@
  *
  * In the options tier a slider or a select keeps Up/Down (and Home/End) for its value, as
  * in the APG toolbar pattern; Left/Right still move between controls. Keys a control has
- * claimed (`preventDefault`) are left alone.
+ * claimed (`preventDefault`) are left alone, and so are all keys of a control marked
+ * `data-keeps-arrows` (the lasso's move grip nudges with them).
  */
 import {
   type FocusEvent,
@@ -47,8 +48,10 @@ function applyRoving(
     (preferred === '' ? undefined : list.find((el) => el.matches(preferred))) ??
     list[0];
   for (const el of list) {
-    const tabIndex = el === chosen ? 0 : -1;
-    if (el.tabIndex !== tabIndex) el.tabIndex = tabIndex;
+    // The attribute, not only the property: a button's tabIndex is 0 without one, and the
+    // F6 regions find a region's Tab stop by `[tabindex="0"]`.
+    const tabIndex = el === chosen ? '0' : '-1';
+    if (el.getAttribute('tabindex') !== tabIndex) el.setAttribute('tabindex', tabIndex);
   }
   return chosen ?? null;
 }
@@ -85,7 +88,7 @@ export function useRovingTabindex(ref: RefObject<HTMLElement | null>, preferred 
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
     const list = itemsOf(ref.current);
     const index = list.indexOf(document.activeElement as HTMLElement);
-    if (index < 0) return;
+    if (index < 0 || list[index]?.hasAttribute('data-keeps-arrows')) return;
     const valueControl = isValueControl(list[index] ?? null);
     let next: number | null = null;
     if (event.key === 'ArrowRight') next = (index + 1) % list.length;

@@ -9,7 +9,10 @@
  *     content is scaled and moved, and clipped to what the crop showed before (content the
  *     old CropBox hid does not appear in the margins a larger canvas opens up);
  * (c) every annotation's geometry goes through the same matrix: /Rect, /QuadPoints, /L,
- *     /Vertices, /InkList, /Path, /CL; /RD margins and /LL, /LLE, /LLO lengths are scaled.
+ *     /Vertices, /InkList, /Path, /CL; /RD margins and /LL, /LLE, /LLO lengths are scaled,
+ *     and so are the per-point ink widths in `/PdfEditorInkWidths` (ADR-0018, by the
+ *     geometric mean of the two factors), so the first edit after the resize redraws the
+ *     stroke at the width it shows.
  *     Appearance streams are left alone: a reader maps an appearance's transformed /BBox
  *     onto /Rect (ISO 32000-2 §12.5.5), so a scaled /Rect scales the appearance with it and
  *     streams shared between page occurrences are never rewritten;
@@ -44,17 +47,22 @@ import {
   PDFArray,
   PDFDict,
   type PDFDocument,
+  PDFHexString,
   PDFName,
   PDFNumber,
   type PDFObject,
   type PDFPage,
   PDFRef,
   PDFStream,
+  PDFString,
   popGraphicsState,
   pushGraphicsState,
   rectangle,
 } from '@cantoo/pdf-lib';
 import { type PageResize, type Rect, resizeTransform } from '@pdf-editor/document-model';
+
+import { MIN_INK_WIDTH } from '../annotations/ink-appearance';
+import { decodeInkWidths, encodeInkWidths, INK_WIDTHS_KEY } from '../annotations/ink-outline';
 
 /** x' = a·x + e, y' = d·y + f. */
 export interface ResizeMatrix {
@@ -74,6 +82,7 @@ const K = {
   Contents: name('Contents'),
   CropBox: name('CropBox'),
   InkList: name('InkList'),
+  InkWidths: name(INK_WIDTHS_KEY),
   L: name('L'),
   LL: name('LL'),
   LLE: name('LLE'),
@@ -189,6 +198,7 @@ function transformAnnotation(doc: PDFDocument, annot: PDFDict, m: ResizeMatrix):
     const flat = numbers(doc, annot.get(key));
     if (flat) annot.set(key, pointsArray(doc, m, flat));
   }
+  scaleInkWidths(doc, annot, Math.sqrt(m.a * m.d));
   for (const key of [K.InkList, K.Path]) {
     const lists = doc.context.lookupMaybe(annot.get(key), PDFArray);
     if (!lists) continue;
@@ -210,6 +220,30 @@ function transformAnnotation(doc: PDFDocument, annot: PDFDict, m: ResizeMatrix):
     if (value instanceof PDFNumber) annot.set(key, PDFNumber.of(value.asNumber() * lengthScale));
   }
   return moved;
+}
+
+/**
+ * Scales the widths in an ink's `/PdfEditorInkWidths` by `factor` (two decimals, at least
+ * `MIN_INK_WIDTH`, as the adapter stores them). A value that does not match the /InkList
+ * (empty, of another version, edited elsewhere) is left alone: it already reads as "no
+ * widths". Called before the /InkList is transformed (only its point counts are read).
+ */
+function scaleInkWidths(doc: PDFDocument, annot: PDFDict, factor: number): void {
+  const raw = doc.context.lookup(annot.get(K.InkWidths));
+  if (!(raw instanceof PDFString || raw instanceof PDFHexString)) return;
+  const lists = doc.context.lookupMaybe(annot.get(K.InkList), PDFArray);
+  if (!lists) return;
+  const paths: { x: number; y: number }[][] = [];
+  for (let i = 0; i < lists.size(); i++) {
+    const flat = numbers(doc, lists.get(i)) ?? [];
+    paths.push(Array.from({ length: Math.floor(flat.length / 2) }, () => ({ x: 0, y: 0 })));
+  }
+  const widths = decodeInkWidths(raw.decodeText(), paths);
+  if (!widths) return;
+  const scaled = widths.map((ws) =>
+    ws.map((w) => Math.max(MIN_INK_WIDTH, Math.round(w * factor * 100) / 100)),
+  );
+  annot.set(K.InkWidths, PDFString.of(encodeInkWidths(scaled)));
 }
 
 export interface PageResizeOutcome {

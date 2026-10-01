@@ -55,11 +55,17 @@ test('the status bar stays put while the privacy popover opens and closes', asyn
   expect(before?.x).toBeGreaterThanOrEqual(bar?.x ?? Number.POSITIVE_INFINITY);
 });
 
-test('the start card says what several files do', async ({ page }) => {
+test('the start card says what several files do, in both languages', async ({ page }) => {
   await page.goto('./?lang=en');
   await expect(
     page.getByText(
-      'Several files open as tabs. With two or more open you can combine them, arrange their pages together or compare them, from the command palette or a tab’s menu.',
+      'Drop PDFs here or open them. With two or more open you can combine them on Home or from the Document menu, arrange their pages together or compare them.',
+    ),
+  ).toBeVisible();
+  await page.goto('./?lang=tr');
+  await expect(
+    page.getByText(
+      'PDF’leri buraya bırakın ya da açın. İki veya daha fazla dosya açıkken onları ana ekranda ya da Belge menüsünden birleştirebilir, sayfalarını birlikte düzenleyebilir veya karşılaştırabilirsiniz.',
     ),
   ).toBeVisible();
 });

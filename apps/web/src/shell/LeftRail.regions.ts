@@ -3,6 +3,10 @@
  * navigator, stage, tool bar and, when open, the inspector. Focus lands on the region's
  * current item (the selected tab, the page viewport, the armed tool) or its first control.
  * Not while a dialog or menu has focus: those keep their own keyboard.
+ *
+ * Installed by the app shell (`AppShell.tsx`). The tool bar is the floating bar itself
+ * (`data-region="toolbar"`), never a contextual bar or the options tier that sit before it
+ * in the stage.
  */
 import { useEffect } from 'react';
 
@@ -11,13 +15,15 @@ const REGIONS = [
   ':scope > header',
   ':scope > [data-region="navigator"]',
   ':scope > main',
-  ':scope > main [role="toolbar"]',
+  ':scope > main [data-region="toolbar"]',
   ':scope > #right-panel',
 ] as const;
 
 /** Where focus lands in a region, best first. */
 const TARGETS = [
   '[role="tab"][tabindex="0"]',
+  // Home: the card that holds the grid's Tab stop.
+  '[role="option"][tabindex="0"]',
   '[data-read-viewport]',
   '[aria-pressed="true"][tabindex="0"]',
   '[tabindex="0"]',

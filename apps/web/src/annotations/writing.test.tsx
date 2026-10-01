@@ -214,7 +214,7 @@ describe('writing is never interrupted', () => {
     vi.spyOn(editor, 'createAnnotation').mockRejectedValueOnce(new Error('refused'));
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     stroke(layer, [0.2, 0.6], [0.5, 0.62]);
-    await waitFor(() => expect(useAnnouncer.getState().message).toBe(m.annot_stroke_not_saved()));
+    await waitFor(() => expect(useAnnouncer.getState().alert).toBe(m.annot_stroke_not_saved()));
     await waitFor(() => expect(container.querySelector('[data-settling]')).toBeNull());
     expect(await inkOnPage(target)).toHaveLength(0);
   });

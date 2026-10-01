@@ -33,7 +33,9 @@ export verification green on 18 corpus pages.
    `perfect-freehand` are not used in the engine: their outline cannot be rebuilt from
    `/InkList`.
 4. Widths whose counts do not match `/InkList` are dropped and the ink renders at the
-   nominal width; ink without the key is unchanged.
+   nominal width; ink without the key is unchanged. Clearing the widths (an update without
+   them) leaves the key in place as an empty string, which reads as "no widths"; a page
+   resize scales stored widths with the geometry (`pdflib/page-resize.ts`).
 5. Export keeps collecting garbage (ADR-0011 §5), which removes the streams replaced by
    in-session rewrites.
 

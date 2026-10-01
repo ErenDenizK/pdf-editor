@@ -41,6 +41,7 @@ import { penSession } from './ink-input';
 import {
   dotSize,
   isHighlighter,
+  needsDotRing,
   PEN_SWATCHES,
   type PenPreset,
   PRESET_INDICES,
@@ -64,6 +65,7 @@ function InkMark({ preset }: { readonly preset: PenPreset }) {
     <span
       className={styles.mark}
       data-shape={isHighlighter(preset) ? 'capsule' : 'dot'}
+      data-ring={needsDotRing(preset) ? '' : undefined}
       style={
         {
           '--dot': `${dotSize(preset.width)}px`,
@@ -73,6 +75,35 @@ function InkMark({ preset }: { readonly preset: PenPreset }) {
       aria-hidden="true"
     />
   );
+}
+
+/**
+ * The editor's radio groups (APG radio group): one Tab stop on the chosen radio, and the
+ * arrows move to a neighbour and choose it.
+ */
+const RADIO_STEPS: Readonly<Record<string, number>> = {
+  ArrowRight: 1,
+  ArrowDown: 1,
+  ArrowLeft: -1,
+  ArrowUp: -1,
+};
+
+function onRadioKeyDown(event: KeyboardEvent<HTMLElement>): void {
+  const step = RADIO_STEPS[event.key];
+  if (step === undefined || event.altKey || event.ctrlKey || event.metaKey) return;
+  const group = event.currentTarget.closest('[role="radiogroup"]');
+  const radios = Array.from(group?.querySelectorAll<HTMLElement>('[role="radio"]') ?? []);
+  const at = radios.indexOf(event.currentTarget);
+  if (at < 0) return;
+  event.preventDefault();
+  const next = radios[(at + step + radios.length) % radios.length];
+  next?.focus();
+  next?.click();
+}
+
+/** The radio that holds a group's Tab stop: the chosen one, else the first. */
+function radioTabIndex(checked: boolean, index: number, anyChecked: boolean): 0 | -1 {
+  return checked || (!anyChecked && index === 0) ? 0 : -1;
 }
 
 /** The preset whose editor is (or was last) shown, and the dot it rises from. */
@@ -103,7 +134,10 @@ export function PenBar({ armed, arm }: PenBarProps) {
     setOpen(false);
     useAnnotationStore.getState().armPreset(index);
     arm();
-    announce(presetLabel(index, useAnnotationStore.getState().pen.presets[index]));
+    // Said instead of the generic "Pen tool" (same key), after a closed burst if any.
+    announce(presetLabel(index, useAnnotationStore.getState().pen.presets[index]), {
+      key: 'tool',
+    });
   };
 
   const onDotKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: PresetIndex) => {
@@ -187,6 +221,8 @@ function PresetEditor({
   const preset = useAnnotationStore((s) => s.pen.presets[i]);
   const name = presetName(i, preset);
   const edit = (patch: Partial<PenPreset>) => useAnnotationStore.getState().editPreset(i, patch);
+  const swatchChosen = PEN_SWATCHES.some((swatch) => swatch.color === preset.color);
+  const stopChosen = WIDTH_STOPS.some((stop) => stop === preset.width);
 
   return (
     <Popover.Root
@@ -222,12 +258,14 @@ function PresetEditor({
             </Popover.Title>
 
             <div role="radiogroup" aria-label={m.annot_color()} className={styles.swatches}>
-              {PEN_SWATCHES.map((swatch) => (
+              {PEN_SWATCHES.map((swatch, n) => (
                 <button
                   key={swatch.color}
                   type="button"
                   role="radio"
                   aria-checked={preset.color === swatch.color}
+                  tabIndex={radioTabIndex(preset.color === swatch.color, n, swatchChosen)}
+                  onKeyDown={onRadioKeyDown}
                   aria-label={swatch.name()}
                   title={swatch.name()}
                   className={styles.swatch}
@@ -251,12 +289,14 @@ function PresetEditor({
                 {m.pen_editor_width()}
               </span>
               <div role="radiogroup" aria-labelledby={`pen-width-${i}`} className={styles.stops}>
-                {WIDTH_STOPS.map((stop) => (
+                {WIDTH_STOPS.map((stop, n) => (
                   <button
                     key={stop}
                     type="button"
                     role="radio"
                     aria-checked={preset.width === stop}
+                    tabIndex={radioTabIndex(preset.width === stop, n, stopChosen)}
+                    onKeyDown={onRadioKeyDown}
                     aria-label={widthText(stop)}
                     className={styles.stop}
                     onClick={() => edit({ width: stop })}

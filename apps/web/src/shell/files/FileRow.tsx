@@ -1,7 +1,7 @@
 /**
- * One open document in compact form (experience-redesign §4.1, the Files tab): the tag dot,
- * the name, "12 pages · 2.8 MB", the active marker and a close button. A plain row over
- * plain props, so Home's list form can use it too.
+ * One open document in compact form (experience-redesign §4.1, the Files tab): a checkbox
+ * for Home's selection, the tag dot, the name, "12 pages · 2.8 MB", the active marker and a
+ * close button. A plain row over plain props, so Home's list form can use it too.
  */
 import { X } from 'lucide-react';
 
@@ -18,17 +18,42 @@ export interface FileRowProps {
   /** Index into the tag colours (`data-tag`). */
   readonly tag: number;
   readonly active: boolean;
+  /** In Home's selection (the checkbox). */
+  readonly selected: boolean;
+  readonly onToggle: () => void;
   readonly onOpen: () => void;
   readonly onClose: () => void;
 }
 
-export function FileRow({ name, pages, size, tag, active, onOpen, onClose }: FileRowProps) {
+export function FileRow({
+  name,
+  pages,
+  size,
+  tag,
+  active,
+  selected,
+  onToggle,
+  onOpen,
+  onClose,
+}: FileRowProps) {
   const meta = m.nav_files_meta({
     pages: m.pages_count({ count: pages }),
     size: formatBytes(size),
   });
   return (
-    <li className={styles.row} aria-current={active ? 'true' : undefined} data-file-row="">
+    <li
+      className={styles.row}
+      aria-current={active ? 'true' : undefined}
+      data-file-row=""
+      data-selected={selected || undefined}
+    >
+      <input
+        type="checkbox"
+        className={styles.check}
+        aria-label={m.nav_files_select({ name })}
+        checked={selected}
+        onChange={onToggle}
+      />
       <button type="button" className={styles.open} title={name} onClick={onOpen}>
         <span className={styles.tag} data-tag={tag} aria-hidden="true" />
         <span className={styles.text}>

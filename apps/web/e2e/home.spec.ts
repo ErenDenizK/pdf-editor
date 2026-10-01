@@ -1,8 +1,10 @@
 /**
- * Home end to end (experience-redesign §3, §11): a new user merges two dropped files in
- * under five actions (every click, key press and drop is counted), a card dragged onto
- * another opens the merge dialog as [target, dragged], and the keyboard path through the
- * cards. Drops use a script-built DataTransfer, which Chromium accepts (as in batch.spec).
+ * Home end to end (experience-redesign §3, §11): a new user merges two files in under five
+ * actions, dropped or opened with "Open files" (every click, key press, drop and file
+ * dialog choice is counted), the Files tab's selection, Combine and "Show Home", a card
+ * dragged onto another opens the merge dialog as [target, dragged], the keyboard path
+ * through the cards, and the navigator collapsed while no file is open. Drops use a
+ * script-built DataTransfer, which Chromium accepts (as in batch.spec).
  */
 import { readFile } from 'node:fs/promises';
 
@@ -25,6 +27,14 @@ class User {
   async press(key: string): Promise<void> {
     this.actions += 1;
     await this.page.keyboard.press(key);
+  }
+
+  /** Picks corpus files in the file dialog `opener` opens: the click, then the choice. */
+  async pick(opener: Locator, names: readonly string[]): Promise<void> {
+    const chooser = this.page.waitForEvent('filechooser');
+    await this.click(opener);
+    this.actions += 1;
+    await (await chooser).setFiles(names.map(fixturePath));
   }
 
   /** Drops corpus files on `target` (dragenter, dragover, drop: one gesture). */
@@ -94,6 +104,103 @@ test('a new user merges two dropped files in under five actions', async ({ page 
   expect(user.actions).toBe(3);
 });
 
+test('a new user merges two files opened with "Open files" in under five actions', async ({
+  page,
+}) => {
+  await useFileInputPicker(page);
+  await page.goto('./?lang=en');
+  const user = new User(page);
+
+  // 1–2. "Open files" on the empty card, two files chosen: Home, both cards selected, as
+  // after a drop.
+  await user.pick(page.getByTestId('home').getByRole('button', { name: 'Open files' }), [
+    'simple-text.pdf',
+    'rotated-pages.pdf',
+  ]);
+  await expect(page.getByTestId('home')).toBeVisible();
+  await expect(cards(page)).toHaveCount(2);
+  await expect(cards(page).and(page.getByRole('option', { selected: true }))).toHaveCount(2);
+  await expect(page.getByRole('radio', { name: 'Home' })).toBeChecked();
+
+  // 3. Combine. 4. Confirm the dialog's default.
+  await user.click(page.getByRole('button', { name: 'Combine 2 files' }));
+  const dialog = page.getByTestId('merge-all-dialog');
+  await expect(dialog.getByTestId('merge-row')).toHaveCount(2);
+  await user.click(dialog.getByRole('button', { name: 'Merge', exact: true }));
+  await expect(dialog).toBeHidden();
+
+  await expect(documentTabs(page)).toHaveCount(1);
+  await expect(page.getByTestId('status-pages')).toHaveText('Page 1 of 7');
+  expect(user.actions).toBeLessThanOrEqual(5);
+  expect(user.actions).toBe(4);
+});
+
+test('the Files tab shares Home’s selection, combines and leads to Home', async ({ page }) => {
+  await useFileInputPicker(page);
+  await page.goto('./?lang=en');
+  await openFixtures(page, ['simple-text.pdf', 'rotated-pages.pdf', 'mixed-sizes.pdf']);
+  await expect(page.getByTestId('home')).toBeVisible();
+
+  // Read keeps the Home segment: a labelled way back.
+  await page.getByRole('radio', { name: 'Read' }).click();
+  await expect(page.getByTestId('home')).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'Home' })).not.toBeChecked();
+
+  await page.getByRole('tab', { name: /^Files/ }).click();
+  const panel = page.locator('#left-panel');
+  const boxes = panel.getByRole('checkbox');
+  await expect(boxes).toHaveCount(3);
+  // The three opened together are still selected.
+  await expect(panel.getByRole('button', { name: 'Combine 3 files' })).toBeVisible();
+  await panel.getByRole('checkbox', { name: 'Select simple-text' }).uncheck();
+  await expect(panel.getByRole('button', { name: 'Combine 2 files' })).toBeVisible();
+  await panel.getByRole('checkbox', { name: 'Select rotated-pages' }).uncheck();
+  // One selected: nothing to combine, so no button (never a disabled one).
+  await expect(panel.getByTestId('files-combine')).toHaveCount(0);
+  await panel.getByRole('checkbox', { name: 'Select mixed-sizes' }).uncheck();
+  await expect(panel.getByRole('button', { name: 'Combine all 3 files' })).toBeVisible();
+
+  await panel.getByRole('checkbox', { name: 'Select rotated-pages' }).check();
+  await panel.getByRole('checkbox', { name: 'Select simple-text' }).check();
+  await panel.getByRole('button', { name: 'Show Home' }).click();
+  await expect(page.getByTestId('home')).toBeVisible();
+  await expect(
+    cards(page)
+      .and(page.getByRole('option', { selected: true }))
+      .evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')?.split(',')[0])),
+  ).resolves.toEqual(['simple-text', 'rotated-pages']);
+
+  await panel.getByRole('button', { name: 'Combine 2 files' }).click();
+  const dialog = page.getByTestId('merge-all-dialog');
+  // Selection order: rotated-pages was ticked first.
+  await expect(dialog.getByTestId('merge-row').nth(0)).toContainText('rotated-pages');
+  await expect(dialog.getByTestId('merge-row').nth(1)).toContainText('simple-text');
+});
+
+test('the navigator stays collapsed while no file is open and reopens as it was', async ({
+  page,
+}) => {
+  await useFileInputPicker(page);
+  await page.goto('./?lang=en');
+  const panel = page.locator('#left-panel');
+  const rail = page.getByRole('tablist', { name: 'Navigator views' });
+  await expect(rail.getByRole('tab')).toHaveCount(4);
+  await expect(panel).toHaveCount(0);
+  await expect(rail.getByRole('tab', { selected: true })).toHaveCount(0);
+
+  await openFixtures(page, ['simple-text.pdf']);
+  await expect(panel).toBeVisible();
+  await expect(rail.getByRole('tab', { name: /^Pages/ })).toHaveAttribute('aria-selected', 'true');
+
+  // Closing the last file collapses it again; a tab picked meanwhile opens it.
+  await rail.getByRole('tab', { name: /^Files/ }).click();
+  await panel.getByRole('button', { name: 'Close simple-text' }).click();
+  await expect(panel).toHaveCount(0);
+  await rail.getByRole('tab', { name: 'Files' }).click();
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText('No files open')).toBeVisible();
+});
+
 test('a card dragged onto another opens the merge dialog with the target first', async ({
   page,
 }) => {
@@ -137,14 +244,20 @@ test('the keyboard path: Tab to the cards, arrows, Space and Enter', async ({ pa
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['simple-text.pdf', 'rotated-pages.pdf', 'mixed-sizes.pdf']);
-  await page.keyboard.press('0');
+  // Opened together on an empty app: Home, the new cards selected.
   await expect(page.getByTestId('home')).toBeVisible();
   await expect(page.getByRole('radio', { name: 'Home' })).toBeChecked();
+  await expect(cards(page).and(page.getByRole('option', { selected: true }))).toHaveCount(3);
 
   // Tab from the last toolbar button into the cards: one card is in the tab order.
   await page.getByTestId('home-combine').focus();
   await page.keyboard.press('Tab');
   await expect(card(page, 'simple-text')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(cards(page).and(page.getByRole('option', { selected: true }))).toHaveCount(0);
+  // Compare and Close show only when they apply (never disabled).
+  await expect(page.getByRole('button', { name: 'Compare', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Close', exact: true })).toHaveCount(0);
 
   await page.keyboard.press('ArrowRight');
   await expect(card(page, 'rotated-pages')).toBeFocused();
@@ -152,8 +265,9 @@ test('the keyboard path: Tab to the cards, arrows, Space and Enter', async ({ pa
   await expect(card(page, 'rotated-pages')).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Shift+ArrowRight');
   await expect(card(page, 'mixed-sizes')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('button', { name: 'Combine 2 files' })).toBeEnabled();
-  await expect(page.getByRole('button', { name: 'Compare', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Combine 2 files' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Compare', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Close', exact: true })).toBeVisible();
 
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('home')).toHaveCount(0);
@@ -161,7 +275,7 @@ test('the keyboard path: Tab to the cards, arrows, Space and Enter', async ({ pa
     documentTabs(page).and(page.getByRole('tab', { selected: true })),
   ).toHaveAccessibleName(/mixed-sizes/);
   await expect(page.getByRole('radio', { name: 'Read' })).toBeChecked();
-  await expect(page.getByRole('radio', { name: 'Home' })).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'Home' })).not.toBeChecked();
 
   // The app glyph leads back to Home.
   await page.getByTestId('home-button').click();

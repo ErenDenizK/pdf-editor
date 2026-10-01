@@ -23,6 +23,7 @@ import { commandRegistry } from '../commands/registry';
 import { currentPlatform } from '../commands/shortcuts';
 import { resetCompareStore, useCompareStore } from '../compare/compare-store';
 import { closeOperationDialog } from '../stage/operation-dialogs-store';
+import { useAnnouncer } from '../shell/announcer';
 import { useUiStore } from '../state/ui-store';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { HOME_CARD_TYPE } from './HomeView';
@@ -154,6 +155,8 @@ describe('Home', () => {
       'simple-text',
     ]);
     expect(screen.getByText('2 selected')).toBeVisible();
+    // Said for a click as for the keyboard (spec §10).
+    expect(useAnnouncer.getState().message).toBe('2 files selected');
 
     await userEvent.keyboard('{Shift>}');
     await userEvent.click(card('mixed-sizes'));
@@ -170,15 +173,15 @@ describe('Home', () => {
     const combine = screen.getByTestId('home-combine');
     expect(combine).toHaveTextContent('Combine all 3 files');
     await userEvent.click(card('simple-text'));
-    expect(combine).toHaveTextContent('Combine files');
-    expect(combine).toBeDisabled();
+    // One selected: nothing to combine, so no button (never a disabled one, §3).
+    expect(screen.queryByTestId('home-combine')).toBeNull();
 
     await userEvent.click(card('mixed-sizes'));
     await userEvent.keyboard(`{${MOD}>}`);
     await userEvent.click(card('simple-text'));
     await userEvent.keyboard(`{/${MOD}}`);
-    expect(combine).toHaveTextContent('Combine 2 files');
-    await userEvent.click(combine);
+    expect(screen.getByTestId('home-combine')).toHaveTextContent('Combine 2 files');
+    await userEvent.click(screen.getByTestId('home-combine'));
 
     const dialog = await screen.findByTestId('merge-all-dialog');
     expect(
@@ -244,14 +247,15 @@ describe('Home', () => {
 
   it('compares exactly two selected files with A and B filled in', async () => {
     await openOnHome('simple-text.pdf', 'rotated-pages.pdf', 'mixed-sizes.pdf');
-    const compare = within(screen.getByTestId('home')).getByRole('button', { name: 'Compare' });
-    expect(compare).toBeDisabled();
+    const home = () => within(screen.getByTestId('home'));
+    // Shown only when it applies (exactly two selected), never disabled.
+    expect(home().queryByRole('button', { name: 'Compare' })).toBeNull();
     await userEvent.click(card('mixed-sizes'));
+    expect(home().queryByRole('button', { name: 'Compare' })).toBeNull();
     await userEvent.keyboard(`{${MOD}>}`);
     await userEvent.click(card('simple-text'));
     await userEvent.keyboard(`{/${MOD}}`);
-    expect(compare).toBeEnabled();
-    await userEvent.click(compare);
+    await userEvent.click(home().getByRole('button', { name: 'Compare' }));
     await waitFor(() => {
       expect(useUiStore.getState().viewMode).toBe('compare');
     });
@@ -264,6 +268,8 @@ describe('Home', () => {
 
   it('arranges the selection and closes selected files in one undoable step', async () => {
     await openOnHome('simple-text.pdf', 'rotated-pages.pdf', 'mixed-sizes.pdf');
+    // Close waits for a selection: hidden, not disabled.
+    expect(within(screen.getByTestId('home')).queryByRole('button', { name: 'Close' })).toBeNull();
     await userEvent.click(card('rotated-pages'));
     await userEvent.keyboard(`{${MOD}>}`);
     await userEvent.click(card('mixed-sizes'));
@@ -316,16 +322,25 @@ describe('Home', () => {
     expect(titleOf(ws().activeDocument ?? undefined)).toBe('simple-text');
   });
 
-  it('opens a card in Read on a double click; the segment shows Home only on Home', async () => {
+  it('opens a card in Read on a double click; the segment keeps Home first', async () => {
     await openOnHome('simple-text.pdf', 'rotated-pages.pdf');
-    const segment = screen.getByRole('radiogroup', { name: 'View mode' });
-    expect(within(segment).getByRole('radio', { name: 'Home' })).toBeChecked();
+    const segment = () => screen.getByRole('radiogroup', { name: 'View mode' });
+    expect(within(segment()).getByRole('radio', { name: 'Home' })).toBeChecked();
     await userEvent.dblClick(card('rotated-pages'));
     await waitFor(() => {
       expect(useUiStore.getState().viewMode).toBe('read');
     });
     expect(titleOf(ws().activeDocument ?? undefined)).toBe('rotated-pages');
-    expect(within(segment).queryByRole('radio', { name: 'Home' })).toBeNull();
+    // Home · Read · Arrange in Read too: a labelled way back.
+    expect(
+      within(segment())
+        .getAllByRole('radio')
+        .map((radio) => radio.textContent),
+    ).toEqual(['Home', 'Read', 'Arrange']);
+    expect(within(segment()).getByRole('radio', { name: 'Home' })).not.toBeChecked();
+    await userEvent.click(within(segment()).getByRole('radio', { name: 'Home' }));
+    expect(useUiStore.getState().viewMode).toBe('home');
+    useUiStore.getState().setViewMode('read');
 
     // The app glyph and 0 lead back.
     await userEvent.click(screen.getByRole('button', { name: 'Home' }));
@@ -367,6 +382,34 @@ describe('Home', () => {
       },
       { timeout: 20_000 },
     );
+  }, 45_000);
+
+  it('shows Home with the new cards selected after two files are picked with "Open files"', async () => {
+    const files = await Promise.all([
+      fixture(simpleUrl, 'simple-text.pdf'),
+      fixture(rotatedUrl, 'rotated-pages.pdf'),
+    ]);
+    const picker = Object.getOwnPropertyDescriptor(window, 'showOpenFilePicker');
+    Object.defineProperty(window, 'showOpenFilePicker', {
+      configurable: true,
+      value: () => Promise.resolve(files.map((file) => ({ getFile: () => Promise.resolve(file) }))),
+    });
+    try {
+      render(<App />);
+      const empty = await screen.findByTestId('home');
+      await userEvent.click(within(empty).getByRole('button', { name: 'Open files' }));
+      await waitFor(
+        () => {
+          expect(within(grid()).getAllByRole('option', { selected: true })).toHaveLength(2);
+        },
+        { timeout: 20_000 },
+      );
+      expect(useUiStore.getState().viewMode).toBe('home');
+      expect(screen.getByTestId('home-combine')).toHaveTextContent('Combine 2 files');
+    } finally {
+      if (picker) Object.defineProperty(window, 'showOpenFilePicker', picker);
+      else Reflect.deleteProperty(window, 'showOpenFilePicker');
+    }
   }, 45_000);
 
   it('opens a single dropped file in Read', async () => {

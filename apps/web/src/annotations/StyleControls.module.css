@@ -11,10 +11,11 @@
   gap: var(--space-3);
 }
 
+/* 18 px swatches 24 px apart: the WCAG 2.2 target-spacing exception (DESIGN.md §5). */
 .swatches {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .swatch {

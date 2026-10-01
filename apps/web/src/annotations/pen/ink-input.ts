@@ -3,9 +3,12 @@
  * annotation layer while the pen is armed. Framework-free: no React state per move, so a
  * stroke does not re-render the layer.
  *
- * - **Samples.** Every point (x, y in CSS pixels of the page, pressure, time) goes into a
- *   growable `Float32Array`, read from `getCoalescedEvents()` when the browser has it.
- *   `getPredictedEvents()` points are drawn for the current frame only, never committed.
+ * - **Samples.** Every point (x, y, pressure, time) goes into a growable `Float32Array`, read
+ *   from `getCoalescedEvents()` when the browser has it. x and y are in CSS pixels of the
+ *   page at the zoom the stroke started with: a sample taken after a zoom change is scaled
+ *   back by the layer's size, so a zoom in the middle of a stroke does not bend it, and the
+ *   finished stroke is handed over at the zoom of the release. `getPredictedEvents()` points
+ *   are drawn for the current frame only, never committed.
  * - **Preview.** One `InkPreview` canvas per page, drawn once per animation frame.
  * - **Width.** Pen pressure, or speed when there is no pressure (mice, touch, pens whose
  *   browser reports the constant default); see `widthFromPressure` and `speedPressure`.
@@ -131,7 +134,10 @@ export function isDefaultPressure(pressure: number): boolean {
 // Samples
 // ---------------------------------------------------------------------------
 
-/** Fields per sample: x, y (CSS px), pressure, time (ms since the first sample), width (pt). */
+/**
+ * Fields per sample: x, y (CSS px at the stroke's starting zoom), pressure, time (ms since
+ * the first sample), width (pt).
+ */
 const FIELDS = 5;
 
 /** A growable buffer of stroke samples. */
@@ -287,7 +293,12 @@ interface ActiveStroke {
   readonly samples: InkSamples;
   readonly widths: StrokeWidths;
   readonly nominal: number;
+  /** CSS px per point when the stroke started. */
   readonly scale: number;
+  /** The layer's width (CSS px) when the stroke started. */
+  readonly baseWidth: number;
+  /** The layer's size now relative to `baseWidth`: the zoom since the stroke started. */
+  zoom: number;
   readonly startTime: number;
   straight: boolean;
   predicted: PreviewPoint[];
@@ -325,23 +336,34 @@ export function attachInkInput(options: InkInputOptions): () => void {
   let panBase: { x: number; y: number; left: number; top: number } | null = null;
   let listening = false;
 
+  /** The stroke in CSS px of the page at the current zoom. */
   const view = (s: ActiveStroke): PreviewPath => {
-    const { samples, scale } = s;
+    const { samples, zoom } = s;
+    const scale = s.scale * zoom;
     if (s.straight && samples.length > 1) {
       const last = samples.length - 1;
       return {
         length: 2,
-        x: (i) => samples.x(i === 0 ? 0 : last),
-        y: (i) => samples.y(i === 0 ? 0 : last),
+        x: (i) => samples.x(i === 0 ? 0 : last) * zoom,
+        y: (i) => samples.y(i === 0 ? 0 : last) * zoom,
         w: () => s.nominal * scale,
       };
     }
     return {
       length: samples.length,
-      x: (i) => samples.x(i),
-      y: (i) => samples.y(i),
+      x: (i) => samples.x(i) * zoom,
+      y: (i) => samples.y(i) * zoom,
       w: (i) => samples.width(i) * scale,
     };
+  };
+
+  /** Follows a zoom change since the stroke started (the preview is rebuilt at the new size). */
+  const measure = (s: ActiveStroke, rect: DOMRect) => {
+    const zoom = s.baseWidth > 0 && rect.width > 0 ? rect.width / s.baseWidth : 1;
+    if (Math.abs(zoom - s.zoom) > 1e-6) {
+      s.zoom = zoom;
+      s.restart = true;
+    }
   };
 
   const paint = () => {
@@ -366,8 +388,11 @@ export function attachInkInput(options: InkInputOptions): () => void {
     y: e.clientY - rect.top,
   });
 
+  /** Adds a sample at (x, y), CSS px of the page at the current zoom. */
   const addSample = (s: ActiveStroke, x: number, y: number, pressure: number, time: number) => {
     const t = time - s.startTime;
+    x /= s.zoom;
+    y /= s.zoom;
     const { width, rewrote } = s.widths.take(x, y, pressure, t);
     s.samples.push(x, y, pressure, t, width);
     if (rewrote) s.restart = true;
@@ -464,6 +489,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
     }
     if (e.pointerType === 'pen') session.pensDown.add(e.pointerId);
     const samples = new InkSamples();
+    const rect = element.getBoundingClientRect();
     const s: ActiveStroke = {
       pointerId: e.pointerId,
       pointerType: e.pointerType,
@@ -471,6 +497,8 @@ export function attachInkInput(options: InkInputOptions): () => void {
       widths: new StrokeWidths(samples, context.width, e.pointerType, session.pressureSeen),
       nominal: context.width,
       scale: context.scale,
+      baseWidth: rect.width,
+      zoom: 1,
       startTime: e.timeStamp,
       straight: e.shiftKey,
       predicted: [],
@@ -478,7 +506,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
     };
     stroke = s;
     preview.begin({ color: context.color, opacity: context.opacity });
-    const p = local(e, element.getBoundingClientRect());
+    const p = local(e, rect);
     addSample(s, p.x, p.y, e.pressure, e.timeStamp);
     if (s.widths.source === 'pressure' && e.pointerType === 'pen') session.pressureSeen = true;
     startListening();
@@ -489,6 +517,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
     const s = stroke;
     if (s?.pointerId === e.pointerId) {
       const rect = element.getBoundingClientRect();
+      measure(s, rect);
       const coalesced = e.getCoalescedEvents?.() ?? [];
       for (const c of coalesced.length > 0 ? coalesced : [e]) {
         const p = local(c, rect);
@@ -500,7 +529,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
         s.restart = true;
       }
       const last = s.samples.length - 1;
-      const w = s.samples.width(last) * s.scale;
+      const w = s.samples.width(last) * s.scale * s.zoom;
       s.predicted = (e.getPredictedEvents?.() ?? []).map((c) => ({ ...local(c, rect), w }));
       schedule();
       return;
@@ -521,9 +550,13 @@ export function attachInkInput(options: InkInputOptions): () => void {
     const s = stroke;
     if (s?.pointerId === e.pointerId) {
       const rect = element.getBoundingClientRect();
+      measure(s, rect);
       const p = local(e, rect);
       const last = s.samples.length - 1;
-      if (p.x !== s.samples.x(last) || p.y !== s.samples.y(last)) {
+      if (
+        Math.fround(p.x / s.zoom) !== s.samples.x(last) ||
+        Math.fround(p.y / s.zoom) !== s.samples.y(last)
+      ) {
         addSample(s, p.x, p.y, e.pressure > 0 ? e.pressure : s.samples.pressure(last), e.timeStamp);
       }
       s.straight = e.shiftKey;
@@ -537,7 +570,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
       const v = view(s);
       const input: InkStrokeInput = {
         points: Array.from({ length: v.length }, (_, i) => ({ x: v.x(i), y: v.y(i) })),
-        widths: Array.from({ length: v.length }, (_, i) => v.w(i) / s.scale),
+        widths: Array.from({ length: v.length }, (_, i) => v.w(i) / (s.scale * s.zoom)),
         pointerType: s.pointerType,
         widthSource: s.widths.source,
         straight: s.straight && s.samples.length > 1,

@@ -358,3 +358,261 @@ test.describe('lasso', () => {
     await expect(layer(page)).toHaveAttribute('data-tool', 'lasso');
   });
 });
+
+/** Points (CSS px) of every ink path on the first page, as the layer draws them. */
+async function inkPoints(page: Page): Promise<number[][][]> {
+  return layer(page)
+    .locator('[data-annotation-kind="ink"] polyline')
+    .evaluateAll((lines) =>
+      lines.map((line) =>
+        (line.getAttribute('points') ?? '')
+          .trim()
+          .split(/\s+/)
+          .map((pair) => pair.split(',').map(Number)),
+      ),
+    );
+}
+
+function expectSamePoints(actual: number[][][], expected: number[][][], tolerance = 0.5): void {
+  expect(actual.map((path) => path.length)).toEqual(expected.map((path) => path.length));
+  actual.forEach((path, i) =>
+    path.forEach(([x = 0, y = 0], j) => {
+      const [ex = 0, ey = 0] = expected[i]?.[j] ?? [];
+      expect(Math.abs(x - ex), `path ${i} point ${j} x`).toBeLessThanOrEqual(tolerance);
+      expect(Math.abs(y - ey), `path ${i} point ${j} y`).toBeLessThanOrEqual(tolerance);
+    }),
+  );
+}
+
+/** Share of dark pixels (ink) in a region of the screen, decoded in the page. */
+async function darkShare(
+  page: Page,
+  clip: { x: number; y: number; width: number; height: number },
+): Promise<number> {
+  const png = await page.screenshot({ clip });
+  return page.evaluate(async (base64) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext('2d');
+    if (!context) return 0;
+    context.drawImage(image, 0, 0);
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let dark = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if ((data[i] ?? 0) + (data[i + 1] ?? 0) + (data[i + 2] ?? 0) < 3 * 120) dark++;
+    }
+    return dark / (data.length / 4);
+  }, png.toString('base64'));
+}
+
+test.describe('pen: width changes, zoom, Draw, lines and undo', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test.beforeEach(async ({ page }) => {
+    await useFileInputPicker(page);
+    await recordInkWidths(page);
+  });
+
+  test('a width change on a whole burst thickens it, scales its widths and moves no point', async ({
+    page,
+  }) => {
+    await openSimple(page);
+    await page.locator('body').press('p');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    const ink = layer(page).locator('[data-annotation-kind="ink"]');
+    await mouseStroke(page, [0.2, 0.55], [0.35, 0.56]);
+    await mouseStroke(page, [0.37, 0.55], [0.5, 0.56]);
+    await expect(ink.locator('polyline')).toHaveCount(2, { timeout: 10_000 });
+    await expect(ink).toHaveCount(1);
+    await expect(layer(page).locator('[data-settling]')).toHaveCount(0, { timeout: 5_000 });
+    const before = await inkPoints(page);
+    const widthsBefore = (await sentInkWidths(page)).at(-1) ?? [];
+    expect(widthsBefore).toHaveLength(2);
+    const box = await layer(page).boundingBox();
+    if (!box) throw new Error('page not rendered');
+    const height = Math.min(box.height, 800);
+    const clip = {
+      x: box.x + box.width * 0.18,
+      y: box.y + height * 0.55 - 20,
+      width: box.width * 0.34,
+      height: 48,
+    };
+    const thin = await darkShare(page, clip);
+    expect(thin).toBeGreaterThan(0);
+
+    // The Select tool: the whole annotation, its bar's width slider 1.5 → 6.5 pt.
+    await page.keyboard.press('Escape');
+    await page.locator('body').press('v');
+    const first = before[0]?.[Math.floor((before[0]?.length ?? 0) / 2)] ?? [0, 0];
+    await page.mouse.click(box.x + (first[0] ?? 0), box.y + (first[1] ?? 0));
+    const bar = page.getByTestId('annotation-bar');
+    await expect(bar).toBeVisible();
+    const slider = bar.getByRole('slider', { name: /^Stroke width/ });
+    await slider.fill('6.5');
+    await expect(slider).toHaveValue('6.5');
+    await page.keyboard.press('Escape');
+    await expect(bar).toHaveCount(0);
+    // The stored widths scale with /BS /W, so the drawn stroke gets thicker.
+    await expect.poll(() => darkShare(page, clip), { timeout: 10_000 }).toBeGreaterThan(thin * 2);
+    const widthsAfter = (await sentInkWidths(page)).at(-1) ?? [];
+    widthsAfter.forEach((path, i) =>
+      path.forEach((w, j) => {
+        const ratio = w / (widthsBefore[i]?.[j] ?? 1);
+        expect(Math.abs(ratio - 6.5 / 1.5), `width ${i}.${j}`).toBeLessThan(0.05);
+      }),
+    );
+    expectSamePoints(await inkPoints(page), before);
+
+    // The Lasso around both strokes: another width change, and still no point moves.
+    await page.locator('body').press('q');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'lasso');
+    const loop = [
+      { x: clip.x - 10, y: clip.y - 10 },
+      { x: clip.x + clip.width + 10, y: clip.y - 10 },
+      { x: clip.x + clip.width + 10, y: clip.y + clip.height + 10 },
+      { x: clip.x - 10, y: clip.y + clip.height + 10 },
+      { x: clip.x - 10, y: clip.y - 6 },
+    ];
+    await page.mouse.move(loop[0]?.x ?? 0, loop[0]?.y ?? 0);
+    await page.mouse.down();
+    for (const p of loop.slice(1)) await page.mouse.move(p.x, p.y, { steps: 8 });
+    await page.mouse.up();
+    const lassoBar = page.locator('[data-lasso-bar]');
+    await expect(lassoBar).toContainText('2 strokes');
+    const sent = (await sentInkWidths(page)).length;
+    const lassoWidth = lassoBar.getByRole('slider', { name: /^Stroke width/ });
+    await lassoWidth.fill('4.5');
+    await expect(lassoWidth).toHaveValue('4.5');
+    await page.keyboard.press('Escape');
+    await expect
+      .poll(async () => (await sentInkWidths(page)).length, { timeout: 10_000 })
+      .toBeGreaterThan(sent);
+    await page.waitForTimeout(800);
+    expectSamePoints(await inkPoints(page), before);
+  });
+
+  test('a zoom in the middle of a pen stroke keeps the committed line straight', async ({
+    browserName,
+    page,
+  }) => {
+    test.skip(browserName !== 'chromium', 'Pen input through CDP (Chromium)');
+    await openSimple(page);
+    await page.locator('body').press('p');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    const box = await layer(page).boundingBox();
+    if (!box) throw new Error('page not rendered');
+    const cdp = await page.context().newCDPSession(page);
+    const pen = { pointerType: 'pen' as const, button: 'left' as const };
+    const y = box.y + Math.min(box.height, 800) * 0.55;
+    const x0 = box.x + box.width * 0.2;
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: x0,
+      y,
+      ...pen,
+      buttons: 1,
+      clickCount: 1,
+      force: 0.5,
+    });
+    for (let i = 1; i <= 10; i++) {
+      await cdp.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: x0 + i * 10,
+        y,
+        ...pen,
+        buttons: 1,
+        force: 0.5,
+      });
+    }
+    // The page zooms in under the pen; the pen goes on along the same line of the page,
+    // which is now somewhere else on the screen.
+    await page.keyboard.press('Control+Equal');
+    await expect
+      .poll(async () => (await layer(page).boundingBox())?.width ?? 0)
+      .toBeGreaterThan(box.width * 1.05);
+    const zoomed = await layer(page).boundingBox();
+    if (!zoomed) throw new Error('page not rendered');
+    const k = zoomed.width / box.width;
+    const onPage = (sx: number, sy: number) => ({
+      x: zoomed.x + (sx - box.x) * k,
+      y: zoomed.y + (sy - box.y) * k,
+    });
+    for (let i = 11; i <= 20; i++) {
+      await cdp.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        ...onPage(x0 + i * 10, y),
+        ...pen,
+        buttons: 1,
+        force: 0.5,
+      });
+    }
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      ...onPage(x0 + 200, y),
+      ...pen,
+      buttons: 0,
+      clickCount: 1,
+      force: 0,
+    });
+    const ink = layer(page).locator('[data-annotation-kind="ink"]');
+    await expect(ink).toHaveCount(1, { timeout: 10_000 });
+    const [path = []] = await inkPoints(page);
+    expect(path.length).toBeGreaterThan(2);
+    const ys = path.map(([, py = 0]) => py);
+    // One straight segment per zoom: every point lies on the line through the ends.
+    const [ax = 0, ay = 0] = path[0] ?? [];
+    const [bx = 0, by = 0] = path.at(-1) ?? [];
+    for (const [px = 0, py = 0] of path) {
+      const t = (px - ax) / (bx - ax || 1);
+      expect(Math.abs(py - (ay + (by - ay) * t)), `y at x ${px}`).toBeLessThan(2);
+    }
+    // Horizontal on the page: no step where the zoom changed.
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(2);
+  });
+
+  test('picking Draw arms the pen: the first stroke draws', async ({ page }) => {
+    await openSimple(page);
+    const bar = page.getByRole('toolbar', { name: 'Tools' });
+    await bar.getByRole('button', { name: 'Draw', exact: true }).click();
+    await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    const black = bar.getByRole('radio', { name: 'Black pen, 1.5 pt' });
+    await expect(black).toHaveAttribute('data-armed', '');
+    await mouseStroke(page, [0.2, 0.3], [0.5, 0.31]);
+    await expect(layer(page).locator('[data-annotation-kind="ink"]')).toHaveCount(1, {
+      timeout: 10_000,
+    });
+    // Another Draw tool: no preset ring.
+    await page.locator('body').press('q');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'lasso');
+    await expect(bar.locator('[data-pen-preset][data-armed]')).toHaveCount(0);
+  });
+
+  test('the next line is a new burst; Ctrl+Z inside a burst removes its last stroke only', async ({
+    page,
+  }) => {
+    await openSimple(page);
+    await page.locator('body').press('p');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    const ink = layer(page).locator('[data-annotation-kind="ink"]');
+    // Line one: two strokes. Line two, about 20 pt lower: two more, a burst of its own.
+    await mouseStroke(page, [0.2, 0.5], [0.3, 0.503]);
+    await mouseStroke(page, [0.32, 0.5], [0.42, 0.503]);
+    await mouseStroke(page, [0.2, 0.53], [0.3, 0.533]);
+    await mouseStroke(page, [0.32, 0.53], [0.42, 0.533]);
+    await expect(ink.locator('polyline')).toHaveCount(4, { timeout: 10_000 });
+    await expect(ink).toHaveCount(2);
+
+    // The second line's burst is open: Ctrl+Z takes its last stroke only.
+    await page.keyboard.press('ControlOrMeta+z');
+    await expect(ink.locator('polyline')).toHaveCount(3, { timeout: 10_000 });
+    await expect(ink).toHaveCount(2);
+    // One stroke left in it: the ordinary undo removes that annotation.
+    await page.keyboard.press('ControlOrMeta+z');
+    await expect(ink).toHaveCount(1, { timeout: 10_000 });
+    await expect(ink.locator('polyline')).toHaveCount(2);
+  });
+});

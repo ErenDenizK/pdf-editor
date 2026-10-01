@@ -468,7 +468,7 @@ function CompareResults() {
         </button>
       </div>
       {stale ? (
-        <div className={styles.stale} role="status" data-testid="compare-stale">
+        <div className={styles.stale} data-testid="compare-stale">
           <span>{m.compare_stale()}</span>
           <button
             type="button"

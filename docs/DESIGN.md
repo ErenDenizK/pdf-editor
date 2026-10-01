@@ -127,11 +127,11 @@ measurements in [`design/audit-2026-10/V1-RESULTS.md`](design/audit-2026-10/V1-R
 
   /* glass: floating chrome over the document (the global .glass rule) */
   --glass: rgb(48 51 58 / 0.66);
-  --glass-filter: blur(28px) saturate(1.8) brightness(0.36);
+  --glass-filter: blur(28px) saturate(1.8) brightness(0.45);
   --glass-solid: var(--surface-2);      /* opaque fallback */
-  --glass-text-secondary: #b4b8bf;      /* secondary and tertiary text on glass */
-  --glass-text-disabled: #6f737b;
-  --glass-danger: #ff8a8a;
+  --glass-text-secondary: #bcc0c6;      /* secondary and tertiary text on glass */
+  --glass-text-disabled: #787c84;
+  --glass-danger: #ffa0a0;
   /* the one elevation, floating chrome only: inner top highlight, hairline ring, one soft shadow */
   --elevation-float: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.5),
                      0 8px 24px -8px rgb(0 0 0 / 0.55);
@@ -205,13 +205,14 @@ Rules:
   border. *Amended 2026-10-01 (M6, A1).*
 - **Translucency only for floating chrome** (§2): tool bars, contextual bars, the palette,
   menus and popovers. Each surface composes one global `.glass` rule: a 66% tint over a
-  backdrop that is blurred (28 px), colour-boosted and darkened (0.36), so a white page
-  shows through as #3f4145 at worst, and over the canvas the bar is #212328, 1.27:1
+  backdrop that is blurred (28 px), colour-boosted and darkened (0.45), so a white page
+  shows through as #47494d at worst (a lighter layer, not a slab; 0.45 is the brightest that
+  keeps the armed tool's fill at 3:1 on it), and over the canvas the bar is #212328, 1.27:1
   against it (1.03:1 before M6): it reads as an object instead of sinking into the field.
   On glass, secondary and tertiary text use `--glass-text-secondary`, danger uses
   `--glass-danger`, and accent is never text; every text colour stays AA over every
-  measured backdrop, the worst case being a white page (primary 8.27:1, secondary 5.14:1,
-  danger 4.51:1, warning 6.28:1). The glass is opaque (`--glass-solid`, normal text
+  measured backdrop, the worst case being a white page (primary 7.30:1, secondary 4.94:1,
+  danger 4.63:1, warning 5.54:1; amended 2026-10-01 after the M6 review, A4). The glass is opaque (`--glass-solid`, normal text
   ladder) without `backdrop-filter`, under `prefers-reduced-transparency` or
   `prefers-contrast: more`, and `Canvas` under forced colours; the ring and shadow stay
   under reduced transparency and go under more contrast. Docked panels, dialogs and

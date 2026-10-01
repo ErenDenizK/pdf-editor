@@ -1,8 +1,11 @@
 /*
  * The pen presets (experience-redesign spec §7.4): ink dots of their real colour with the
  * --border-swatch ring, 8, 11 or 14 px for widths <= 1, <= 3 and > 3 pt in a 28 px target; a
- * preset below full opacity is a short capsule (a highlighter mark). The armed preset gets a
- * 2 px accent ring, not a fill, so its colour shows.
+ * preset below full opacity is a short capsule (a highlighter mark). A dot whose ink is below
+ * 3:1 against the bar over a page or the canvas (`needsDotRing`: black, blue, red, the 40 %
+ * yellow) gets a light inner ring instead, --glass-text-secondary (AA on the glass, so well
+ * above 3:1). The armed preset gets a 2 px accent ring, not a fill, so its colour shows; it is
+ * armed only while the pen itself is (another Draw tool shows no preset ring).
  */
 .presets {
   display: inline-flex;
@@ -48,6 +51,10 @@
   border: 1px solid var(--border-swatch);
   border-radius: var(--radius-round);
   background: var(--ink);
+}
+
+.mark[data-ring] {
+  border-color: var(--glass-text-secondary);
 }
 
 .mark[data-shape='capsule'] {

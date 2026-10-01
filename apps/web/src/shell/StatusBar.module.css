@@ -54,8 +54,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.zoom,
-.modes {
+.zoom {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -98,11 +97,4 @@
 .zoomValue[data-popup-open] {
   background: var(--surface-active);
   color: var(--text-primary);
-}
-
-.divider {
-  width: 1px;
-  height: 14px;
-  margin: 0 var(--space-1);
-  background: var(--border-hairline);
 }

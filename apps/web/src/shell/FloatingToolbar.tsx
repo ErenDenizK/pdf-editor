@@ -79,6 +79,7 @@ import { IconButton } from '../ui/IconButton';
 import iconButtonStyles from '../ui/IconButton.module.css';
 import menuStyles from '../ui/Menu.module.css';
 import { Tooltip } from '../ui/Tooltip';
+import { useFocusRescue } from '../ui/use-focus-rescue';
 import { useSearchStore } from '../viewer/search';
 import { type BarGroup, type ToolMode, useToolStore } from '../viewer/tool-store';
 import { layoutTitle, setReadLayout } from '../viewer/viewer-commands';
@@ -122,9 +123,11 @@ export function FloatingToolbar() {
 
 function Dock() {
   return (
+    // The bar first, so Tab goes from the bar to its options (spec §10); the dock stacks
+    // them bottom-up, so the tier still sits on top of the bar.
     <div className={styles.dock}>
-      <OptionsTier />
       <Bar />
+      <OptionsTier />
     </div>
   );
 }
@@ -143,7 +146,8 @@ function Bar() {
     ref,
     group === null
       ? `[data-bar-group="${lastGroup ?? 'read'}"]`
-      : '[data-tool][aria-pressed="true"], [data-bar-chip]',
+      : // The armed tool (or pen preset); else the first control, the group's chip.
+        '[data-tool][aria-pressed="true"], [data-pen-preset][data-armed]',
   );
   const refocus = useRef<BarGroup | null>(null);
   useBarMorph(ref, group);
@@ -196,6 +200,7 @@ function Bar() {
       aria-orientation="horizontal"
       className={styles.toolbar}
       data-annotation-keep=""
+      data-region="toolbar"
       data-bar-view={group ?? 'groups'}
       onKeyDownCapture={onKeyDownCapture}
       onKeyDown={roving.onKeyDown}
@@ -650,10 +655,25 @@ function PageActionButton({ action }: { readonly action: 'rotate' | 'delete' }) 
 function OptionsTier() {
   const mode = useToolStore((s) => s.mode);
   const group = toolStyleGroup(mode);
+  if (group === undefined) return null;
+  return <Tier mode={mode} group={group} />;
+}
+
+/** Esc disarms the tool and the tier goes: focus moves to the bar's Tab stop. */
+const barTabStop = (tier: HTMLElement) =>
+  tier.parentElement?.querySelector<HTMLElement>('[data-region="toolbar"] [tabindex="0"]');
+
+function Tier({
+  mode,
+  group,
+}: {
+  readonly mode: ToolMode;
+  readonly group: NonNullable<ReturnType<typeof toolStyleGroup>>;
+}) {
   const { Tier: PenTier } = usePenSlots();
   const ref = useRef<HTMLDivElement>(null);
   const roving = useRovingTabindex(ref, '[aria-checked="true"]');
-  if (group === undefined) return null;
+  useFocusRescue(ref, barTabStop);
   const tool = toolDefinition(mode);
   return (
     <div

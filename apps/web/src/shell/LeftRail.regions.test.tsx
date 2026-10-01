@@ -34,8 +34,19 @@ function Shell({ inspector = true }: { readonly inspector?: boolean }) {
       <main>
         <div data-read-viewport="" tabIndex={-1}>
           page
+          {/* A contextual bar on the page: a toolbar, but not the tool bar region. */}
+          <div role="toolbar">
+            <button type="button" tabIndex={0}>
+              Colour
+            </button>
+          </div>
         </div>
         <div role="toolbar">
+          <button type="button" tabIndex={0}>
+            Option
+          </button>
+        </div>
+        <div role="toolbar" data-region="toolbar">
           <button type="button" tabIndex={-1}>
             Select
           </button>

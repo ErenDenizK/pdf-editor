@@ -143,12 +143,13 @@ describe('redaction marks through the engine', () => {
     expect(again.map((a) => a.id).sort()).toEqual(listed.map((a) => a.id).sort());
   });
 
-  it('a single mark is labelled by page and selected; the store lists it with its snippet', async () => {
+  it('a single mark is labelled by page and not selected; the store lists it with its snippet', async () => {
     const { source, target } = await open();
     const { runs, occurrences } = await tokenQuads(source);
     const [mark] = (await createMarks([{ target, marks: [occurrences[1] ?? []] }])) ?? [];
     expect(labels()).toContain('Redaction mark on page 1');
-    expect(useAnnotationStore.getState().selection?.ids).toEqual([mark?.id]);
+    // A new mark never selects itself (experience-redesign §5.2): no contextual bar opens.
+    expect(useAnnotationStore.getState().selection).toBeNull();
 
     await useAnnotationStore.getState().reloadPage(source, 0);
     const { entries, loading } = collectMarks(
@@ -166,6 +167,14 @@ describe('redaction marks through the engine', () => {
     expect(useRedactionStore.getState().excluded.size).toBe(0);
     useRedactionStore.getState().setIncluded([entry?.markKey ?? ''], false);
     expect(useRedactionStore.getState().excluded.has(entry?.markKey ?? '')).toBe(true);
+  });
+
+  it('selects a single new mark only when asked (an explicit select)', async () => {
+    const { source, target } = await open();
+    const { occurrences } = await tokenQuads(source);
+    const [mark] =
+      (await createMarks([{ target, marks: [occurrences[0] ?? []] }], { select: true })) ?? [];
+    expect(useAnnotationStore.getState().selection?.ids).toEqual([mark?.id]);
   });
 
   it('J / K step through the marks in page order and select them', async () => {

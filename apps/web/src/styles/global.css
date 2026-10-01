@@ -130,7 +130,7 @@ textarea,
  * Docked panels, dialogs and tooltips stay opaque and flat.
  *
  * The backdrop is blurred, colour-boosted and darkened before the 66% tint is laid on it, so a
- * white page shows through as #3f4145 at worst and every text colour used on the glass stays
+ * white page shows through as #47494d at worst and every text colour used on the glass stays
  * AA (docs/design/audit/translucency.md §6, docs/specs/experience-redesign.md §7.2). Every glass
  * surface floats with the one elevation token, --elevation-float: inner top highlight, dark
  * hairline ring and one soft shadow (no other shadow anywhere in the chrome). The backdrop filter sits on the surface itself,
@@ -147,8 +147,8 @@ textarea,
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
   .glass {
     /* Text on glass has two steps, both AA over a white page. Tertiary maps to secondary
-       (--text-tertiary is 3.4:1 on glass over a white page); accent text must stay off the
-       glass (3.4:1), the accent is used here for non-text only (focus ring, armed tool). */
+       (--text-tertiary is 3.0:1 on glass over a white page); accent text must stay off the
+       glass (3.0:1), the accent is used here for non-text only (focus ring, armed tool). */
     --text-secondary: var(--glass-text-secondary);
     --text-tertiary: var(--glass-text-secondary);
     --text-disabled: var(--glass-text-disabled);

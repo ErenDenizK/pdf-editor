@@ -1260,7 +1260,8 @@ async function commitInkStroke(
     const generation = getEngineService().pageRevision(target.source, target.pageIndex);
     await whenPainted(target.source, target.pageIndex, generation);
   } else {
-    announce(m.annot_stroke_not_saved());
+    // A loss the person did not see happen: said at once.
+    announce(m.annot_stroke_not_saved(), { politeness: 'assertive' });
   }
   release();
 }

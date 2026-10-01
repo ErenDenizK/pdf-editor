@@ -4,11 +4,14 @@
  * and form fields in one list) and Files, plus Compare's Changes, shown only in the Compare
  * view and last so the other four never move. A collapsible, resizable panel shows the
  * chosen tab; choosing the open tab again collapses it (as in VS Code). State persists via
- * the UI store (`ui:v2`).
+ * the UI store (`ui:v2`). With no file open the panel stays collapsed, since every tab would
+ * only say "No document open" (M6 review A1); the stored state is kept, so it reopens as it
+ * was when a file opens, and a tab picked meanwhile opens it.
  *
  * Keyboard: a vertical tablist with roving tabindex; Up / Down (Home / End) move between
  * tabs, Enter / Space open; Tab moves into the panel. The accessible name carries the
- * count ("Review, 3 items"). F6 / Shift+F6 cycle the app's regions (`LeftRail.regions.ts`).
+ * count ("Review, 3 items"). F6 / Shift+F6 cycle the app's regions (`LeftRail.regions.ts`,
+ * installed by the app shell).
  */
 import { FileDiff, FileStack, Files, Keyboard, MessageSquareText, Search } from 'lucide-react';
 import { type KeyboardEvent, lazy, Suspense, useRef, useState } from 'react';
@@ -17,13 +20,12 @@ import { commandRegistry } from '../commands/registry';
 import { currentPlatform, toAriaKeyShortcut } from '../commands/shortcuts';
 import { formatNumber, m } from '../i18n';
 import { LEFT_PANEL_WIDTH, type LeftPanelView, useUiStore } from '../state/ui-store';
-import { useActiveDocument, useWorkspaceStore } from '../state/workspace-store';
+import { useActiveDocument, useHasDocuments, useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
 import { ResizeHandle } from '../ui/ResizeHandle';
 import { useSearchStore } from '../viewer/search';
 import { FilesList } from './files/FilesList';
 import styles from './LeftRail.module.css';
-import { useRegionCycling } from './LeftRail.regions';
 import { PagesTab } from './panels/PagesTab';
 import { ReviewPanel } from './review/ReviewPanel';
 import { countItems, useReadReviewData, useReviewData } from './review/review-items';
@@ -51,6 +53,16 @@ const ChangesPanel = lazy(() => import('../compare/ChangesPanel'));
 
 const PANEL_ID = 'left-panel';
 
+const TABBABLE =
+  'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], summary, [tabindex]';
+
+/** The panel's first control in the Tab order, if any. */
+function firstTabbable(panel: HTMLElement | null): HTMLElement | undefined {
+  return Array.from(panel?.querySelectorAll<HTMLElement>(TABBABLE) ?? []).find(
+    (el) => el.tabIndex >= 0 && el.getClientRects().length > 0,
+  );
+}
+
 /** Badge text: hidden at 0, "99+" above 99. */
 export function badgeText(count: number): string {
   if (count <= 0) return '';
@@ -68,24 +80,35 @@ function useTabCounts(): Readonly<Partial<Record<LeftPanelView, number>>> {
 }
 
 export function LeftRail() {
-  const open = useUiStore((s) => s.leftPanelOpen);
+  const stored = useUiStore((s) => s.leftPanelOpen);
   const view = useUiStore((s) => s.leftPanelView);
+  const hasDocuments = useHasDocuments();
+  // Collapsed while no file is open, unless a tab was picked since (`peek`).
+  const [peek, setPeek] = useState(false);
+  if (hasDocuments && peek) setPeek(false);
+  const open = stored && (hasDocuments || peek);
   const width = useUiStore((s) => s.leftPanelWidth);
   const showView = useUiStore((s) => s.showLeftPanelView);
   const setWidth = useUiStore((s) => s.setLeftPanelWidth);
   const toggleShortcut = useCommandShortcut('view.toggleLeftPanel');
   const shortcutsShortcut = useCommandShortcut('help.shortcuts');
-  const asideRef = useRef<HTMLElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const comparing = useUiStore((s) => s.viewMode === 'compare');
   const tabs = comparing ? [...TABS, CHANGES_TAB] : TABS;
   const counts = useTabCounts();
-  useRegionCycling(asideRef);
 
   // Roving tabindex: the tab last moved to with the arrows, else the shown view's tab.
   const [roving, setRoving] = useState<LeftPanelView | null>(null);
   const stop = [roving, view].find((id) => tabs.some((t) => t.id === id)) ?? 'pages';
   const onRailKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    // Tab from a tab goes into the open panel (APG tabs), past the rail's footer button.
+    if (event.key === 'Tab' && !event.shiftKey && !event.altKey && !event.ctrlKey) {
+      const first = firstTabbable(document.getElementById(PANEL_ID));
+      if (!first) return;
+      event.preventDefault();
+      first.focus();
+      return;
+    }
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
     const index = tabs.findIndex((t) => `rail-${t.id}` === event.currentTarget.id);
     if (index < 0) return;
@@ -105,12 +128,7 @@ export function LeftRail() {
   const keys = toggleShortcut ? toAriaKeyShortcut(toggleShortcut, currentPlatform) : undefined;
 
   return (
-    <aside
-      ref={asideRef}
-      className={styles.left}
-      aria-label={m.nav_label()}
-      data-region="navigator"
-    >
+    <aside className={styles.left} aria-label={m.nav_label()} data-region="navigator">
       <div className={styles.rail}>
         <div
           ref={railRef}
@@ -139,6 +157,11 @@ export function LeftRail() {
                 onKeyDown={onRailKeyDown}
                 onClick={() => {
                   setRoving(null);
+                  if (!open && !hasDocuments) {
+                    // Collapsed only because no file is open: the picked tab opens it.
+                    setPeek(true);
+                    if (stored && view === id) return;
+                  }
                   showView(id);
                 }}
               >

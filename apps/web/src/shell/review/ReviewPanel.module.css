@@ -14,9 +14,13 @@
   padding-top: var(--space-2);
 }
 
+/* The list scrolls on its own (it is virtualized), under the chips and the filter's tools;
+   with tall tools it keeps a usable height and the navigator panel scrolls instead. */
 .scroll {
   flex: 1;
-  min-height: 0;
+  min-height: 160px;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .group + .group {

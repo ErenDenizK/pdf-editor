@@ -209,7 +209,7 @@ export function TabBar() {
             icon={<PanelRight />}
             shortcut={rightShortcut}
             aria-pressed={rightPanelOpen}
-            aria-controls="right-panel"
+            aria-controls={rightPanelOpen ? 'right-panel' : undefined}
             onClick={toggleRightPanel}
           />
         ) : null}

@@ -20,6 +20,12 @@
  *   0.36), so the bar reads over the canvas (1.03:1 -> 1.27:1) while a white page still blends to
  *   #3f4145 at worst: primary 8.3:1, --glass-text-secondary 5.1:1, --glass-danger 4.5:1, warning
  *   6.3:1, the accent (non-text only) 3.4:1. Floating chrome carries one elevation token.
+ * - M6 review (2026-10-01, A4): over a white page that glass still read as a grey slab, so the
+ *   backdrop is darkened less (0.36 -> 0.45): the bar blends to #47494d there (9.0:1 to the page,
+ *   was 10.2:1). 0.45 is the brightest that keeps the armed tool's accent fill at 3:1 against
+ *   the bar (3.03:1; 0.5 would give 2.84:1). Glass text steps up to stay AA: primary 7.3:1,
+ *   --glass-text-secondary #b4b8bf -> #bcc0c6 (4.94:1), --glass-danger #ff8a8a -> #ffa0a0
+ *   (4.63:1), warning 5.5:1. Over the canvas nothing changes (#212328, 1.27:1).
  *   tokens.test.ts asserts every ratio against this file.
  */
 :root,
@@ -38,7 +44,7 @@
   /* Floating chrome over the document (.glass in global.css). --glass-solid is the opaque
      fallback. */
   --glass: rgb(48 51 58 / 0.66);
-  --glass-filter: blur(28px) saturate(1.8) brightness(0.36);
+  --glass-filter: blur(28px) saturate(1.8) brightness(0.45);
   --glass-solid: var(--surface-2);
   /* The one elevation token, for floating chrome only (every .glass surface): a 1px inner top
      highlight, a dark hairline ring that holds the edge over a white page, and one soft
@@ -61,9 +67,9 @@
   --text-tertiary: #8f949c;
   --text-disabled: #4a4e55;
   /* Text on glass: two steps, both AA over a white page. Tertiary maps to secondary. */
-  --glass-text-secondary: #b4b8bf;
-  --glass-text-disabled: #6f737b; /* disabled icons stay visible (2.1:1) over a white page */
-  --glass-danger: #ff8a8a; /* #ff6b6b would be 3.7:1 there */
+  --glass-text-secondary: #bcc0c6;
+  --glass-text-disabled: #787c84; /* disabled icons stay visible (2.15:1) over a white page */
+  --glass-danger: #ffa0a0; /* #ff8a8a would be 4.0:1 there */
 
   /* One accent: focus, selection, primary action. Nothing else. */
   --accent: #7c8cff;

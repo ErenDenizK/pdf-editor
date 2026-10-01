@@ -18,6 +18,23 @@
   --text-tertiary: var(--text-secondary);
 }
 
+.check {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0 0 0 var(--space-2);
+  accent-color: var(--accent);
+  opacity: 0;
+}
+
+/* As on Home: the checkbox shows on hover or focus and stays while anything is selected. */
+.row:hover .check,
+.row:focus-within .check,
+.row[data-selected] .check,
+[data-selecting] .check {
+  opacity: 1;
+}
+
 .open {
   display: flex;
   flex: 1;
@@ -73,6 +90,7 @@
 }
 
 @media (hover: none) {
+  .check,
   .close {
     opacity: 1;
   }

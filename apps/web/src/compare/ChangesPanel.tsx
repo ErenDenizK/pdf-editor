@@ -75,7 +75,7 @@ export default function ChangesPanel() {
           <p className={styles.summary}>{m.compare_changes_running()}</p>
         )}
         {stale ? (
-          <div className={styles.stale} role="status" data-testid="changes-stale">
+          <div className={styles.stale} data-testid="changes-stale">
             <span>{m.compare_stale()}</span>
             <button type="button" className={styles.action} onClick={() => void startCompare()}>
               {m.compare_run_again()}

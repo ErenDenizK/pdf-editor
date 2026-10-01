@@ -248,10 +248,10 @@ test.describe('annotations', () => {
     const ink = layer(page).locator('[data-annotation-kind="ink"]');
     await page.locator('body').press('p');
     await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
-    // Three lines in one go are one burst (experience-redesign spec §6.4): one Ink, one path
-    // per stroke.
-    for (const [i, y] of [0.3, 0.34, 0.38].entries()) {
-      await drag(page, 0, [0.2, y], [0.55, y + 0.01]);
+    // Three strokes along one line in one go are one burst (experience-redesign spec §6.4):
+    // one Ink, one path per stroke.
+    for (const [i, x] of [0.2, 0.35, 0.5].entries()) {
+      await drag(page, 0, [x, 0.3], [x + 0.12, 0.31]);
       await expect(ink.locator('polyline')).toHaveCount(i + 1, { timeout: 10_000 });
     }
     await expect(ink).toHaveCount(1);

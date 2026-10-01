@@ -182,6 +182,57 @@ export function isHighlighter(p: PenPreset): boolean {
 }
 
 /**
+ * The tool bar's fill behind the dots (tokens.css: the `--glass` tint rgb(48 51 58 / 0.66)
+ * over a backdrop at `brightness(0.45)`): over the canvas (`--surface-0`) and over a white
+ * page (`--page-background`). PenBar.test.tsx derives them from the tokens again.
+ */
+export const PEN_BAR_FILLS: readonly string[] = ['#212328', '#47494d'];
+/** Least contrast of a dot against the bar (WCAG 1.4.11, non-text). */
+export const DOT_CONTRAST_MIN = 3;
+
+export type Rgb = readonly [number, number, number];
+
+export function hexRgb(hex: string): Rgb {
+  const n = Number.parseInt(hex.slice(1, 7), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** `ink` at `alpha` over `under`. */
+export function overRgb(ink: Rgb, alpha: number, under: Rgb): Rgb {
+  const mix = (a: number, b: number) => a * alpha + b * (1 - alpha);
+  return [mix(ink[0], under[0]), mix(ink[1], under[1]), mix(ink[2], under[2])];
+}
+
+function luminance([r, g, b]: Rgb): number {
+  const linear = (c: number) => {
+    const v = c / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+}
+
+/** WCAG contrast ratio of two opaque colours. */
+export function contrastRatio(a: Rgb, b: Rgb): number {
+  const la = luminance(a);
+  const lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+/**
+ * Whether the preset's dot gets the light ring (spec §7.4): its ink, at its opacity, is
+ * below `DOT_CONTRAST_MIN` against the bar over the canvas or over a page (the default black,
+ * blue, red and 40 % yellow; of the swatches only orange and full yellow go without), so the
+ * dot's edge shows wherever the bar floats.
+ */
+export function needsDotRing(p: PenPreset, fills: readonly string[] = PEN_BAR_FILLS): boolean {
+  const ink = hexRgb(p.color);
+  return fills.some((fill) => {
+    const under = hexRgb(fill);
+    return contrastRatio(overRgb(ink, p.opacity, under), under) < DOT_CONTRAST_MIN;
+  });
+}
+
+/**
  * The preset's name: its colour when that is one of the swatches ("Blue pen", "Yellow
  * highlighter"), else its place ("Pen 3"), so a name never claims a colour it does not have.
  */

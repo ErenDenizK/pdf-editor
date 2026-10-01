@@ -34,13 +34,13 @@ export function selectOnHome(ids: readonly DocumentId[], anchor?: DocumentId | n
 }
 
 /**
- * After files were opened: Home with the new cards selected when they were dropped on an
- * empty workspace (two or more) or opened while Home is showing; one file opened from an
- * empty Home goes to Read.
+ * After files were opened, dropped or picked alike ("Open files", the palette, the menu):
+ * Home with the new cards selected when two or more arrive on an empty workspace or any
+ * arrive while Home is showing; one file opened on an empty workspace goes to Read.
  */
 export function showOpened(
   ids: readonly DocumentId[],
-  context: { readonly wasEmpty: boolean; readonly dropped: boolean },
+  context: { readonly wasEmpty: boolean },
 ): void {
   if (ids.length === 0) return;
   const onHome = ui().viewMode === 'home';
@@ -48,7 +48,7 @@ export function showOpened(
     if (onHome) ui().setViewMode('read');
     return;
   }
-  if (onHome || (context.wasEmpty && context.dropped)) {
+  if (onHome || context.wasEmpty) {
     ui().setViewMode('home');
     selectOnHome(ids);
   }

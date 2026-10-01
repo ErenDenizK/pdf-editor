@@ -126,7 +126,8 @@ function HomeCards({
     event.stopPropagation();
     const mod = currentPlatform === 'mac' ? event.metaKey : event.ctrlKey;
     const next = clickSelection(order, { selection, anchor }, id, { shift: event.shiftKey, mod });
-    useUiStore.getState().setHomeSelection(next.selection, next.anchor);
+    // Said as from the keyboard ("2 files selected", spec §10).
+    selectOnHome(next.selection, next.anchor);
     setFocused(id);
   };
 
@@ -212,7 +213,7 @@ function HomeCards({
   const [a, b] = selection;
   const combineLabel =
     scope === null
-      ? m.home_combine_none()
+      ? ''
       : scope.all
         ? m.home_combine_all({ count: scope.ids.length })
         : m.home_combine_count({ count: scope.ids.length });
@@ -250,33 +251,31 @@ function HomeCards({
           >
             {m.mode_arrange_long()}
           </button>
-          <button
-            type="button"
-            className={styles.secondary}
-            disabled={selection.length !== 2}
-            onClick={() => {
-              if (a !== undefined && b !== undefined) void compareOnHome(a, b);
-            }}
-          >
-            {m.compare_mode()}
-          </button>
-          <button
-            type="button"
-            className={styles.secondary}
-            disabled={selection.length === 0}
-            onClick={() => closeOnHome(selection)}
-          >
-            {m.common_close()}
-          </button>
-          {cards.length >= 2 ? (
+          {/* Shown only when they apply, never disabled (§3); the palette reaches them too. */}
+          {a !== undefined && b !== undefined && selection.length === 2 ? (
+            <button
+              type="button"
+              className={styles.secondary}
+              onClick={() => void compareOnHome(a, b)}
+            >
+              {m.compare_mode()}
+            </button>
+          ) : null}
+          {selection.length > 0 ? (
+            <button
+              type="button"
+              className={styles.secondary}
+              onClick={() => closeOnHome(selection)}
+            >
+              {m.common_close()}
+            </button>
+          ) : null}
+          {scope !== null ? (
             <button
               type="button"
               className={styles.primary}
-              disabled={scope === null}
               data-testid="home-combine"
-              onClick={() => {
-                if (scope !== null) combine(scope.ids);
-              }}
+              onClick={() => combine(scope.ids)}
             >
               {combineLabel}
             </button>

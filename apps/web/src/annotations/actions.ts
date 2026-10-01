@@ -198,6 +198,53 @@ export function appendInkPath(
   });
 }
 
+/**
+ * Removes the last path of an Ink annotation and its widths (undo of one stroke inside an
+ * open pen burst, spec §6.4) through `annotation.update`, joining the burst's history entry
+ * (`coalesceKey`), which then holds one path fewer. Resolves to the updated ink, or undefined
+ * when there was nothing to remove (the ink is gone, locked, or down to one path).
+ */
+export function removeLastInkPath(
+  target: PageTarget,
+  id: () => Promise<string | undefined>,
+  options: Omit<AppendInkOptions, 'knownWidths'>,
+): Promise<InkAnnotation | undefined> {
+  return runAction(async (ctx): Promise<ActionResult<InkAnnotation> | undefined> => {
+    const annotationId = await id();
+    if (annotationId === undefined) return undefined;
+    const list = await readAnnotations(target.source, target.pageIndex, ctx);
+    const current = list.find((a) => a.id === annotationId);
+    if (current?.kind !== 'ink' || current.flags?.locked || current.paths.length < 2) {
+      return undefined;
+    }
+    const paths = current.paths.slice(0, -1);
+    const widths =
+      current.widths?.length === current.paths.length ? current.widths.slice(0, -1) : undefined;
+    const widest = Math.max(current.strokeWidth, ...(widths?.flat() ?? []));
+    const { widths: _old, ...base } = current;
+    const next: InkAnnotation = {
+      ...base,
+      paths,
+      ...(widths ? { widths } : {}),
+      rect: roundRect(boundsOf(paths, widest / 2 + 1)),
+    };
+    const annotation = await serializeAnnotation(stamped(next));
+    const done = await executeEdit(
+      ctx,
+      edit('annotation.update', target.source, current.pageIndex, { annotation }),
+    );
+    return {
+      edits: [done.recorded],
+      label: options.label(paths.length),
+      value: done.annotation?.kind === 'ink' ? done.annotation : next,
+      coalesceKey: options.coalesceKey,
+      ...(options.coalesceWindowMs === undefined
+        ? {}
+        : { coalesceWindowMs: options.coalesceWindowMs }),
+    };
+  });
+}
+
 /** JSON of an annotation without the fields the engine fills itself. */
 function comparable(a: Annotation): string {
   const { modified: _modified, ...rest } = a as Annotation & { imageBlob?: Blob };

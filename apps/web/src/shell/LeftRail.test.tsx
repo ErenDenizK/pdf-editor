@@ -14,6 +14,7 @@ import { resetAnnotationStore } from '../annotations/annotation-store';
 import { resetEditRunner, whenIdle } from '../annotations/edit-runner';
 import { resetFormStore } from '../forms/form-store';
 import { DEFAULT_LAYOUT, LAYOUT_STORAGE_KEY, useUiStore } from '../state/ui-store';
+import { closeOperationDialog, useOperationDialogStore } from '../stage/operation-dialogs-store';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { badgeText, LeftRail } from './LeftRail';
 
@@ -98,6 +99,25 @@ describe('Navigator', () => {
     expect(useUiStore.getState().leftPanelOpen).toBe(false);
   });
 
+  it('stays collapsed while no file is open and reopens as it was when one opens', async () => {
+    useUiStore.setState({ leftPanelOpen: true, leftPanelView: 'review' });
+    render(<LeftRail />);
+    expect(screen.queryByRole('tabpanel')).toBeNull();
+    expect(within(rail()).queryByRole('tab', { selected: true })).toBeNull();
+    // The stored state is untouched.
+    expect(useUiStore.getState().leftPanelOpen).toBe(true);
+
+    await open(formsAUrl, 'forms-a.pdf');
+    expect(await screen.findByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'rail-review');
+
+    // A tab picked while no file is open opens the panel anyway.
+    act(() => resetWorkspace());
+    expect(screen.queryByRole('tabpanel')).toBeNull();
+    await userEvent.click(within(rail()).getByRole('tab', { name: 'Files' }));
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'rail-files');
+    expect(screen.getByText('No files open')).toBeVisible();
+  });
+
   it('switches Pages to Bookmarks and remembers it', async () => {
     await open(outlineUrl, 'outline-named-dests.pdf');
     render(<LeftRail />);
@@ -123,6 +143,31 @@ describe('Navigator', () => {
     expect(screen.queryByRole('tree')).toBeNull();
     expect(screen.queryByRole('button', { name: /Add bookmark/ })).toBeNull();
     expect(useUiStore.getState().pagesView).toBe('thumbnails');
+  });
+
+  it('selects files as Home does, combines them and shows Home', async () => {
+    await open(formsAUrl, 'forms-a.pdf');
+    await open(outlineUrl, 'outline-named-dests.pdf');
+    useUiStore.setState({ leftPanelView: 'files', homeSelection: [], homeAnchor: null });
+    render(<LeftRail />);
+    // Nothing selected: Combine all.
+    expect(screen.getByTestId('files-combine')).toHaveTextContent('Combine all 2 files');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Select outline-named-dests' }));
+    expect(useUiStore.getState().homeSelection).toHaveLength(1);
+    // One selected: nothing to combine, no button.
+    expect(screen.queryByTestId('files-combine')).toBeNull();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Select forms-a' }));
+    const ws = useWorkspaceStore.getState().workspace;
+    expect(useUiStore.getState().homeSelection).toEqual([ws.documentOrder[1], ws.documentOrder[0]]);
+    expect(screen.getByTestId('files-combine')).toHaveTextContent('Combine 2 files');
+    await userEvent.click(screen.getByTestId('files-combine'));
+    await expect
+      .poll(() => (useOperationDialogStore.getState().dialog as { order?: unknown } | null)?.order)
+      .toEqual([ws.documentOrder[1], ws.documentOrder[0]]);
+    closeOperationDialog();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show Home' }));
+    expect(useUiStore.getState().viewMode).toBe('home');
   });
 
   it('lists the open files with pages, size and the active one; × closes', async () => {

@@ -671,6 +671,9 @@ function withMatchingInkWidths<T extends InkAnnotation>(a: T): T {
  * For kinds whose geometry is not the rect (quads, ink paths, vertices): when an update
  * changes only `rect`, maps the geometry from the old rect onto the new one (a move, or a
  * resize that scales the geometry). An update that changes the geometry is taken as is.
+ * For ink a change of the nominal width is not a resize: the rect grows or shrinks with the
+ * stroke (a lasso or bar width change scales the per-point widths with it), so the points
+ * stay where they are.
  */
 export function followRect(before: Annotation, after: Annotation): Annotation {
   if (before.kind !== after.kind || sameRect(before.rect, after.rect)) return after;
@@ -702,7 +705,8 @@ export function followRect(before: Annotation, after: Annotation): Annotation {
       const old = (before as InkAnnotation).paths;
       const unchanged =
         old.length === after.paths.length &&
-        old.every((p, i) => samePoints(p, after.paths[i] ?? []));
+        old.every((p, i) => samePoints(p, after.paths[i] ?? [])) &&
+        Math.abs((before as InkAnnotation).strokeWidth - after.strokeWidth) <= 0.01;
       const next = withMatchingInkWidths(after);
       return unchanged ? { ...next, paths: next.paths.map((path) => path.map(map)) } : next;
     }

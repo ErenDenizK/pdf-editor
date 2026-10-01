@@ -3,6 +3,7 @@
  * each holds, and the rules that keep the bar in step with the armed tool.
  *
  * - Arming a tool (its button, its shortcut or the palette) shows the tool's group.
+ * - Picking Draw arms the pen with its active preset (`pickBarGroup`).
  * - One-shot tools (stamp, signature image) return to the previous tool once their object
  *   is placed, and the placed object is not selected.
  *
@@ -166,9 +167,19 @@ export function barGroupLabelOfCommand(id: string): string | undefined {
   return group === undefined ? undefined : barGroupDefinition(group).label();
 }
 
-/** Picks a group (its button, or Enter on it) and says so ("Draw tools", spec §10). */
+/**
+ * Picks a group (its button, or Enter on it) and says so ("Draw tools", spec §10). Draw
+ * arms the pen with its active preset unless one of its tools is armed already, so the first
+ * stroke after picking it draws (spec §6.2); Esc then disarms as for any tool.
+ */
 export function pickBarGroup(group: BarGroup): void {
-  useToolStore.getState().showGroup(group);
+  const tools = useToolStore.getState();
+  tools.showGroup(group);
+  if (group === 'draw' && barGroupOfMode(tools.mode) !== 'draw') {
+    const annotations = useAnnotationStore.getState();
+    annotations.armPreset(annotations.pen.active);
+    useToolStore.getState().setMode('ink');
+  }
   announce(m.bar_group_tools({ group: barGroupDefinition(group).label() }));
 }
 
