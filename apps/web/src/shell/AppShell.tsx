@@ -16,6 +16,7 @@ import { showOpened } from '../home/home-actions';
 import { m } from '../i18n';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { TooltipProvider } from '../ui/Tooltip';
+import { AboutDialog } from './about/AboutDialog';
 import { announce } from './announcer';
 import styles from './AppShell.module.css';
 import { CommandPalette } from './CommandPalette';
@@ -93,6 +94,7 @@ export function AppShell() {
       </div>
       <CommandPalette />
       <ShortcutOverlay />
+      <AboutDialog />
       <PasswordDialog />
       <LiveRegion />
     </TooltipProvider>

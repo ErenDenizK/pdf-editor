@@ -3490,5 +3490,20 @@
   "docinfo_open": "Document info…",
   "docinfo_file": "File",
   "bar_in_group": "Tool bar: {group}",
-  "a11y_pages_viewport": "Pages of {title}"
+  "a11y_pages_viewport": "Pages of {title}",
+  "about_command": "About {name}",
+  "about_public_beta": "Public beta",
+  "about_version": "Version",
+  "about_commit": "Build commit",
+  "about_build_date": "Build date",
+  "about_release_notes": "Release notes",
+  "about_license": "Licence",
+  "about_source": "Source",
+  "about_new_tab": "(opens in a new tab)",
+  "about_files_local": "Files never leave your device.",
+  "about_storage": "Storage in use",
+  "about_storage_measuring": "Measuring…",
+  "about_storage_unavailable": "Not available in this browser.",
+  "about_offline": "Offline",
+  "about_version_line": "Version {version}"
 }

@@ -2248,5 +2248,20 @@
   "docinfo_open": "Belge bilgisi…",
   "docinfo_file": "Dosya",
   "bar_in_group": "Araç çubuğu: {group}",
-  "a11y_pages_viewport": "{title} belgesinin sayfaları"
+  "a11y_pages_viewport": "{title} belgesinin sayfaları",
+  "about_command": "{name} hakkında",
+  "about_public_beta": "Açık beta",
+  "about_version": "Sürüm",
+  "about_commit": "Derleme commit’i",
+  "about_build_date": "Derleme tarihi",
+  "about_release_notes": "Sürüm notları",
+  "about_license": "Lisans",
+  "about_source": "Kaynak kodu",
+  "about_new_tab": "(yeni sekmede açılır)",
+  "about_files_local": "Dosyalar cihazınızdan asla çıkmaz.",
+  "about_storage": "Kullanılan depolama alanı",
+  "about_storage_measuring": "Ölçülüyor…",
+  "about_storage_unavailable": "Bu tarayıcıda kullanılamıyor.",
+  "about_offline": "Çevrimdışı",
+  "about_version_line": "Sürüm {version}"
 }

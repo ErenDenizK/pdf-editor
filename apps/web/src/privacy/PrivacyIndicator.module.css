@@ -121,6 +121,28 @@
   background: var(--warning);
 }
 
+/* The version line: a quiet text button that opens the About dialog. */
+.version {
+  justify-self: start;
+  margin-left: calc(var(--space-1) * -1);
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .version:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
 /* Inset: the status bar clips its overflow, so an outside ring would be cut off. */
 .trigger:focus-visible {
   outline: var(--focus-ring);

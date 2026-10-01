@@ -32,6 +32,8 @@ import { showHome, showOpened } from '../home/home-actions';
 import { m } from '../i18n';
 import { registerLanguageCommands } from '../i18n/language-commands';
 import { registerOcrCommands } from '../ocr';
+import { openAbout } from '../shell/about/about-store';
+import { PRODUCT_NAME } from '../shell/about/build-info';
 import { announce } from '../shell/announcer';
 import { useAuthorPrompt } from '../shell/comment-author';
 import { openImagesAsDocument } from '../stage/section-operations';
@@ -248,6 +250,14 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
       shortcut: '?',
       keywords: ['help', 'keys', 'keymap', 'hotkeys'],
       run: () => ui().setShortcutsOpen(!ui().shortcutsOpen),
+    }),
+    // Version, build, licence, storage and offline status (ADR-0017 §6).
+    registry.register({
+      id: 'help.about',
+      title: m.about_command({ name: PRODUCT_NAME }),
+      group: m.group_general(),
+      keywords: ['version', 'build', 'release notes', 'licence', 'license', 'source', 'storage'],
+      run: () => openAbout(),
     }),
     registry.register({
       id: 'selection.clear',

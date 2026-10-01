@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
@@ -27,11 +29,53 @@ const DAY_SECONDS = 24 * 60 * 60;
  */
 const EMBEDPDF_ENGINES_PURE = [{ test: /[\\/]@embedpdf[\\/]engines[\\/]/, sideEffects: false }];
 
+/**
+ * Build identity for the About dialog (ADR-0017 §6), injected as `define` constants and
+ * read through `src/shell/about/build-info.ts`. The version is the web package's, which the
+ * release workflow tags.
+ */
+const appVersion = (
+  JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
+    version: string;
+  }
+).version;
+
+/** Short SHA of the built commit: CI's `GITHUB_SHA`, else the checkout's HEAD, else "unknown". */
+function appCommit(): string {
+  const fromCi = process.env.GITHUB_SHA?.trim();
+  if (fromCi) return fromCi.slice(0, 7);
+  try {
+    const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: fileURLToPath(new URL('.', import.meta.url)),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return sha === '' ? 'unknown' : sha;
+  } catch {
+    // Not a git checkout (e.g. a source tarball) or git is not installed.
+    return 'unknown';
+  }
+}
+
+/** ISO 8601 build time. `SOURCE_DATE_EPOCH` (seconds) pins it for reproducible builds. */
+function buildDate(): string {
+  const epoch = Number(process.env.SOURCE_DATE_EPOCH);
+  const date =
+    process.env.SOURCE_DATE_EPOCH && Number.isFinite(epoch) ? new Date(epoch * 1000) : new Date();
+  return date.toISOString();
+}
+
 /** Escapes a string for use inside a RegExp. */
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export default defineConfig({
   base,
+  // Declared in src/pwa/env.d.ts; values are JSON so they replace as string literals.
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+    __APP_COMMIT__: JSON.stringify(appCommit()),
+    __BUILD_DATE__: JSON.stringify(buildDate()),
+  },
   plugins: [
     react(),
     // React Compiler (ADR-0003), applied through Babel. Rolldown's filter in the preset

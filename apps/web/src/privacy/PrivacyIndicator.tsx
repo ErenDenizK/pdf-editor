@@ -1,31 +1,21 @@
 /**
  * Status-bar privacy indicator (ARCHITECTURE.md §7): the live external-request count, and a
  * popover with the observed external URLs (expected: none), the CSP in one sentence plus
- * the enforced `connect-src`, and the service worker's offline status.
+ * the enforced `connect-src`, the service worker's offline status, and the app version,
+ * which opens the About dialog (ADR-0017 §6).
  */
 import { Popover } from '@base-ui/react/popover';
+import { useRef } from 'react';
 
 import { m } from '../i18n';
-import { type ServiceWorkerStatus, usePwaStore } from '../pwa/register';
+import { usePwaStore } from '../pwa/register';
+import { serviceWorkerLabel } from '../pwa/service-worker-label';
+import { openAbout } from '../shell/about/about-store';
+import { BUILD_INFO } from '../shell/about/build-info';
 import popoverStyles from '../ui/Popover.module.css';
 import { documentCsp, parseCsp } from './csp';
 import { useExternalRequests } from './external-requests';
 import styles from './PrivacyIndicator.module.css';
-
-function serviceWorkerLabel(status: ServiceWorkerStatus, updateAvailable: boolean): string {
-  switch (status) {
-    case 'unsupported':
-      return m.sw_status_unsupported();
-    case 'development':
-      return m.sw_status_development();
-    case 'installing':
-      return m.sw_status_installing();
-    case 'ready':
-      return updateAvailable ? m.sw_status_update() : m.sw_status_ready();
-    case 'error':
-      return m.sw_status_error();
-  }
-}
 
 /** The enforced `connect-src`, read from the page itself rather than restated. */
 function connectSrc(): string | undefined {
@@ -40,9 +30,12 @@ export function PrivacyIndicator({ className }: { readonly className?: string })
   const updateAvailable = usePwaStore((s) => s.updateAvailable);
   const clean = count === 0;
   const directive = connectSrc();
+  // The About dialog returns focus here: the version button closes with the popover.
+  const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <Popover.Root>
       <Popover.Trigger
+        ref={triggerRef}
         className={[styles.trigger, className].filter(Boolean).join(' ')}
         data-state={clean ? 'clean' : 'external'}
         data-testid="privacy-indicator"
@@ -91,6 +84,17 @@ export function PrivacyIndicator({ className }: { readonly className?: string })
                 <span className={styles.swMark} data-status={swStatus} aria-hidden="true" />
                 {serviceWorkerLabel(swStatus, updateAvailable)}
               </p>
+            </section>
+
+            <section className={styles.section}>
+              <Popover.Close
+                className={styles.version}
+                aria-haspopup="dialog"
+                data-testid="privacy-version"
+                onClick={() => openAbout(triggerRef.current)}
+              >
+                {m.about_version_line({ version: BUILD_INFO.version })}
+              </Popover.Close>
             </section>
           </Popover.Popup>
         </Popover.Positioner>
