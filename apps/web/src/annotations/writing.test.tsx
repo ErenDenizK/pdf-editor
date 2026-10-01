@@ -34,6 +34,7 @@ import {
   TOOL_STYLES_STORAGE_KEY,
   useAnnotationStore,
 } from './annotation-store';
+import { PEN_PRESETS_STORAGE_KEY } from './pen/presets';
 import { readAnnotations, resetEditRunner, whenIdle } from './edit-runner';
 
 const store = () => useAnnotationStore.getState();
@@ -131,6 +132,7 @@ describe('writing is never interrupted', () => {
   beforeEach(async () => {
     await page.viewport(1280, 900);
     localStorage.removeItem(TOOL_STYLES_STORAGE_KEY);
+    localStorage.removeItem(PEN_PRESETS_STORAGE_KEY);
     resetWorkspace();
     resetEditRunner();
     resetAnnotationStore();
@@ -142,6 +144,7 @@ describe('writing is never interrupted', () => {
     cleanup();
     useToolStore.getState().setMode('select');
     localStorage.removeItem(TOOL_STYLES_STORAGE_KEY);
+    localStorage.removeItem(PEN_PRESETS_STORAGE_KEY);
     resetAnnotationStore();
     resetWorkspace();
   });
@@ -155,12 +158,15 @@ describe('writing is never interrupted', () => {
       if (store().selection !== null) bars.push('selection');
     });
     observer.observe(container, { childList: true, subtree: true, attributes: true });
+    // Three lines written in one go: one Ink of three strokes (a burst, spec §6.4).
+    const strokes = async () =>
+      (await inkOnPage(target)).reduce((n, a) => n + (a.kind === 'ink' ? a.paths.length : 0), 0);
     for (const [i, y] of [0.3, 0.35, 0.4].entries()) {
       stroke(layer, [0.2, y], [0.5, y + 0.01]);
-      await waitFor(async () => expect(await inkOnPage(target)).toHaveLength(i + 1));
+      await waitFor(async () => expect(await strokes()).toBe(i + 1));
     }
     await waitFor(() =>
-      expect(container.querySelectorAll('[data-annotation-kind="ink"]')).toHaveLength(3),
+      expect(container.querySelectorAll('[data-annotation-kind="ink"] polyline')).toHaveLength(3),
     );
     observer.disconnect();
     expect(bars).toEqual([]);
@@ -271,11 +277,13 @@ describe('tool style controls', () => {
   afterEach(() => {
     useToolStore.getState().setMode('select');
     localStorage.removeItem(TOOL_STYLES_STORAGE_KEY);
+    localStorage.removeItem(PEN_PRESETS_STORAGE_KEY);
     resetAnnotationStore();
   });
 
   it('show the armed tool style with nothing selected; a swatch changes and keeps it', async () => {
     localStorage.removeItem(TOOL_STYLES_STORAGE_KEY);
+    localStorage.removeItem(PEN_PRESETS_STORAGE_KEY);
     resetAnnotationStore();
     render(<AnnotationProperties fallback={<p>Nothing selected</p>} />);
     expect(screen.getByText('Nothing selected')).toBeVisible();

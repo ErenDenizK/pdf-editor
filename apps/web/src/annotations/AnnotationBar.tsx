@@ -1,6 +1,10 @@
 /**
  * Contextual bar above the selected annotations (spec §2): replaces property dialogs.
  * One Tab stop per control group; Escape (the global command) deselects.
+ *
+ * For a lasso selection (`paths`, experience-redesign spec §6.5) it sits above the taken
+ * paths rather than the whole annotations, names the stroke count and shows the lasso's
+ * controls (`lasso/LassoSelection.tsx`): colour, opacity, width, a move grip and Delete.
  */
 import type { Annotation } from '@pdf-editor/engine';
 import { Lock } from 'lucide-react';
@@ -10,6 +14,8 @@ import { m } from '../i18n';
 import type { PageTarget } from './annotation-store';
 import { displayRect, type PageFrame, rectToCss } from './geometry';
 import { annotationName, capitalize } from './labels';
+import { type PathPicks, pickCount, pickedCssBounds } from './lasso/geometry';
+import { LassoBarControls } from './lasso/LassoSelection';
 import styles from './AnnotationLayer.module.css';
 import { StyleControls } from './StyleControls';
 
@@ -21,10 +27,13 @@ export function AnnotationBar({
   target,
   annotations,
   frame,
+  paths,
 }: {
   readonly target: PageTarget;
   readonly annotations: readonly Annotation[];
   readonly frame: PageFrame;
+  /** The lasso's taken paths: the bar is about them (spec §6.5). */
+  readonly paths?: PathPicks;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(INITIAL_WIDTH);
@@ -39,11 +48,19 @@ export function AnnotationBar({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+  // The lasso's taken paths.
+  const pathBox = paths ? pickedCssBounds(frame, annotations, paths) : null;
   let top = Number.POSITIVE_INFINITY;
   let bottom = Number.NEGATIVE_INFINITY;
   let left = Number.POSITIVE_INFINITY;
   let right = Number.NEGATIVE_INFINITY;
-  for (const a of annotations) {
+  if (pathBox) {
+    top = pathBox.top;
+    bottom = pathBox.top + pathBox.height;
+    left = pathBox.left;
+    right = pathBox.left + pathBox.width;
+  }
+  for (const a of pathBox ? [] : annotations) {
     const box = rectToCss(frame, displayRect(frame, a));
     top = Math.min(top, box.top);
     bottom = Math.max(bottom, box.top + box.height);
@@ -61,9 +78,10 @@ export function AnnotationBar({
       ? (pageWidth - width) / 2
       : Math.min(Math.max((left + right) / 2 - width / 2, 0), pageWidth - width);
   const first = annotations[0];
-  const locked = annotations.every((a) => a.flags?.locked);
-  const name =
-    annotations.length === 1 && first
+  const locked = !paths && annotations.every((a) => a.flags?.locked);
+  const name = paths
+    ? m.lasso_strokes({ count: pickCount(paths) })
+    : annotations.length === 1 && first
       ? capitalize(annotationName(first))
       : m.annot_count({ count: annotations.length });
   return (
@@ -73,6 +91,7 @@ export function AnnotationBar({
       aria-label={m.annot_bar_label({ name })}
       className={styles.bar}
       data-testid="annotation-bar"
+      data-lasso-bar={paths ? '' : undefined}
       data-annotation-keep=""
       style={{ left: x, top: y }}
       onPointerDown={(e) => e.stopPropagation()}
@@ -86,7 +105,11 @@ export function AnnotationBar({
       ) : (
         <>
           <span className={styles.barDivider} aria-hidden="true" />
-          <StyleControls target={target} annotations={annotations} variant="bar" />
+          {paths ? (
+            <LassoBarControls pageId={target.pageId} />
+          ) : (
+            <StyleControls target={target} annotations={annotations} variant="bar" />
+          )}
         </>
       )}
     </div>

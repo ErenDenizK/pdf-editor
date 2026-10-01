@@ -674,6 +674,8 @@ export interface ActionResult<T> {
   readonly edits: readonly EngineEdit[];
   readonly label: string;
   readonly coalesceKey?: string;
+  /** Replaces the history's 800 ms coalescing window (a pen burst decides on joining itself). */
+  readonly coalesceWindowMs?: number;
   readonly value: T;
 }
 
@@ -771,6 +773,9 @@ export function runAction<T>(
     try {
       ok = useWorkspaceStore.getState().applyEngineEdit(result.edits, result.label, {
         ...(result.coalesceKey === undefined ? {} : { coalesceKey: result.coalesceKey }),
+        ...(result.coalesceWindowMs === undefined
+          ? {}
+          : { coalesceWindowMs: result.coalesceWindowMs }),
         merge: (previous, next) => {
           const merged = mergeUpdates(previous, next);
           if (merged) mergedFrom = previous;

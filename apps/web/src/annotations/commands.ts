@@ -20,7 +20,8 @@ import { useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useToolStore } from '../viewer/tool-store';
 import { deleteAnnotations } from './actions';
-import { useAnnotationStore } from './annotation-store';
+import { deleteLassoSelection } from './lasso/edits';
+import { activePathSelection, useAnnotationStore } from './annotation-store';
 import { markupFromSelection } from './selection-markup';
 import { BUILTIN_STAMPS, builtinPendingStamp, imageStamp } from './stamps';
 import { ANNOTATION_TOOLS, isMarkupMode, type ToolDefinition } from './tools';
@@ -114,8 +115,10 @@ export function registerAnnotationCommands(registry: CommandRegistry): () => voi
       keywords: ['remove', 'annotation', 'comment'],
       when: () => readMode() && useAnnotationStore.getState().selection !== null,
       run: async () => {
-        const selection = useAnnotationStore.getState().selection;
-        if (selection) await deleteAnnotations(selection, selection.ids);
+        const state = useAnnotationStore.getState();
+        // A lasso selection deletes the taken strokes only (lasso/edits.ts).
+        if (activePathSelection(state)) await deleteLassoSelection();
+        else if (state.selection) await deleteAnnotations(state.selection, state.selection.ids);
       },
     }),
     registry.register({

@@ -9,6 +9,7 @@ import {
   EyeOff,
   Highlighter,
   Image,
+  LassoSelect,
   type LucideIcon,
   Minus,
   MousePointer2,
@@ -64,10 +65,20 @@ export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
   { mode: 'squiggly', title: m.tool_squiggly, Icon: Waves, group: 'markup' },
   { mode: 'note', title: m.tool_note, shortcut: 'N', Icon: StickyNote, group: 'markup' },
   { mode: 'text-box', title: m.tool_text_box, shortcut: 'T', Icon: Type, group: 'markup' },
-  // Draw: the pen (its presets plug in, FloatingToolbar.slots.ts), eraser, shapes.
+  // Draw: the pen (its presets plug in, FloatingToolbar.slots.ts), eraser, lasso, shapes.
   { mode: 'ink', title: m.tool_ink, shortcut: 'P', Icon: PenLine, group: 'draw' },
   // Shift+E: E is Edit text (spec §2.2).
   { mode: 'eraser', title: m.tool_eraser, shortcut: 'Shift+E', Icon: Eraser, group: 'draw' },
+  // The lasso selects pen strokes to recolour, resize, move or delete (spec §6.5).
+  {
+    mode: 'lasso',
+    title: m.lasso_tool,
+    tooltip: m.lasso_tool_tooltip,
+    shortcut: 'Q',
+    Icon: LassoSelect,
+    group: 'draw',
+    keywords: ['lasso', 'select', 'strokes'],
+  },
   {
     mode: 'rectangle',
     title: m.tool_rectangle,

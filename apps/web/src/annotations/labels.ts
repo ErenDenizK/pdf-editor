@@ -29,7 +29,14 @@ export function kindName(kind: DisplayKind): string {
   return KIND_NAMES[kind]();
 }
 
+/**
+ * The name of one annotation in lists and bars. A pen burst (one Ink of several strokes,
+ * spec §6.4) says how many: "pen · 12 strokes", so its Review row reads "Pen · 12 strokes".
+ */
 export function annotationName(a: Annotation): string {
+  if (a.kind === 'ink' && a.paths.length > 1) {
+    return m.pen_name_strokes({ kind: kindName('ink'), count: a.paths.length });
+  }
   return kindName(displayKind(a));
 }
 
@@ -70,8 +77,22 @@ export function updateLabel(action: UpdateAction, kind: DisplayKind): string {
   return capitalize(label);
 }
 
+/** History label of a pen burst: "Pen on page 1 · 5 strokes" (one stroke: "Pen on page 1"). */
+export function burstLabel(position: number, strokes: number): string {
+  if (strokes <= 1) return createLabel('ink', position);
+  return capitalize(m.pen_history_burst({ kind: kindName('ink'), page: position, count: strokes }));
+}
+
+/** Said once when a burst of several strokes closes: "Pen: 5 strokes on page 1" (spec §10). */
+export function burstClosedLabel(position: number, strokes: number): string {
+  return capitalize(m.pen_burst_closed({ kind: kindName('ink'), page: position, count: strokes }));
+}
+
 export function deleteLabel(annotations: readonly Annotation[]): string {
   const only = annotations[0];
+  if (annotations.length === 1 && only?.kind === 'ink' && only.paths.length > 1) {
+    return m.pen_history_delete_strokes({ count: only.paths.length });
+  }
   if (annotations.length === 1 && only) {
     return capitalize(m.history_annot_delete_one({ kind: annotationName(only) }));
   }

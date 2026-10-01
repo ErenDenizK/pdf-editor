@@ -34,6 +34,7 @@ import {
 } from '../annotation-store';
 import { readAnnotations, resetEditRunner, whenIdle } from '../edit-runner';
 import { resetPenSession, widthFromPressure } from './ink-input';
+import { PEN_PRESETS_STORAGE_KEY } from './presets';
 
 const model = () => useWorkspaceStore.getState();
 
@@ -115,6 +116,7 @@ describe('pen on the annotation layer', () => {
   beforeEach(async () => {
     await page.viewport(1280, 900);
     localStorage.removeItem(TOOL_STYLES_STORAGE_KEY);
+    localStorage.removeItem(PEN_PRESETS_STORAGE_KEY);
     resetWorkspace();
     resetEditRunner();
     resetAnnotationStore();
@@ -125,6 +127,7 @@ describe('pen on the annotation layer', () => {
     cleanup();
     useToolStore.getState().setMode('select');
     localStorage.removeItem(TOOL_STYLES_STORAGE_KEY);
+    localStorage.removeItem(PEN_PRESETS_STORAGE_KEY);
     resetAnnotationStore();
     resetWorkspace();
     resetPenSession();

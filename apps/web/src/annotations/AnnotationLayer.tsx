@@ -20,7 +20,13 @@
  * The pen (ink tool) has its own input pipeline (spec §6.6, `pen/ink-input.ts`): native
  * pointer handlers attached while it is armed, coalesced points, a canvas preview drawn by
  * the engine's outline function (`pen/ink-preview.ts`) and width from pressure or speed,
- * with no React state per move. The other tools keep the React gesture below.
+ * with no React state per move. The other tools keep the React gesture below. Strokes
+ * written in one go join one Ink annotation (a burst, spec §6.4, `pen/bursts.ts`); the
+ * eraser removes whole paths from it and the annotation with its last path.
+ *
+ * The lasso (spec §6.5, `lasso/`) also has native handlers: it draws a free path, takes the
+ * pen paths it touches as a path selection, highlights only those paths and shows the
+ * contextual bar for them; its edits split an Ink when they take only some of its paths.
  */
 import type { Rect } from '@pdf-editor/document-model';
 import type { Annotation, NewAnnotation } from '@pdf-editor/engine';
@@ -36,7 +42,12 @@ import { whenPainted } from '../viewer/read-controller';
 import { type ToolMode, useToolStore } from '../viewer/tool-store';
 import { createAnnotations, deleteAnnotations, updateAnnotations } from './actions';
 import { AnnotationBar } from './AnnotationBar';
-import { type PageTarget, useAnnotationStore, usePageAnnotations } from './annotation-store';
+import {
+  activePathSelection,
+  type PageTarget,
+  useAnnotationStore,
+  usePageAnnotations,
+} from './annotation-store';
 import { markupDraft, styleGroupOf } from './drafts';
 import {
   type Box,
@@ -64,7 +75,10 @@ import {
   snapAngle,
   snapSquare,
 } from './ink';
+import { attachLassoInput } from './lasso/lasso-input';
+import { LassoHighlight } from './lasso/LassoSelection';
 import { mountedLayers } from './layer-registry';
+import { commitPenStroke, noteBurstPress } from './pen/bursts';
 import { attachInkInput, type InkStrokeInput, type SettleInk } from './pen/ink-input';
 import { InkPreview, previewPath } from './pen/ink-preview';
 import { pageText } from './page-text';
@@ -127,6 +141,7 @@ const DRAWING_TOOLS = new Set<ToolMode>([
   'squiggly',
   'ink',
   'eraser',
+  'lasso',
   'rectangle',
   'ellipse',
   'line',
@@ -178,6 +193,8 @@ export function AnnotationLayer(props: PageOverlayProps) {
     const host = inkHostRef.current;
     if (!penArmed || !element || !host) return;
     const preview = new InkPreview(host);
+    // The press of the stroke in progress (`performance.now()` clock, as event time stamps).
+    let downAt = 0;
     const detach = attachInkInput({
       element,
       preview,
@@ -192,13 +209,18 @@ export function AnnotationLayer(props: PageOverlayProps) {
           scale: layer.frame.scale,
         };
       },
-      onBegin: () => {
+      onBegin: (event) => {
+        downAt = event.timeStamp;
+        noteBurstPress();
         beginDrawingPress();
       },
       onStroke: (stroke, settle) => {
         const layer = mountedLayers.get(pageId);
         if (!layer) return;
-        void commitInkStroke(stroke, settle, layer.frame, layer.target);
+        void commitInkStroke(stroke, settle, layer.frame, layer.target, {
+          downAt,
+          upAt: performance.now(),
+        });
       },
     });
     return () => {
@@ -206,6 +228,18 @@ export function AnnotationLayer(props: PageOverlayProps) {
       preview.destroy();
     };
   }, [penArmed, pageId]);
+
+  // The lasso: native input while armed, like the pen (spec §6.5, lasso/lasso-input.ts).
+  const lassoArmed = mode === 'lasso' && sourceId !== undefined;
+  useEffect(() => {
+    const element = rootRef.current;
+    if (!lassoArmed || !element) return;
+    return attachLassoInput({ element, pageId });
+  }, [lassoArmed, pageId]);
+  const lassoPaths = useAnnotationStore((s) => {
+    const paths = activePathSelection(s);
+    return paths?.pageId === pageId ? paths.paths : null;
+  });
 
   if (sourceId === undefined) return null;
   const frame = pageFrame(props);
@@ -256,7 +290,8 @@ export function AnnotationLayer(props: PageOverlayProps) {
 
   const onRootPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     // The pen has its own native handlers (see above).
-    if (!drawing || mode === 'ink' || event.button !== 0) return;
+    // The pen and the lasso have their own native handlers (see above).
+    if (!drawing || mode === 'ink' || mode === 'lasso' || event.button !== 0) return;
     // Presses in the layer's own chrome (bar, editors) are theirs.
     if (event.target instanceof Element && event.target.closest('[data-annotation-keep]')) return;
     event.preventDefault();
@@ -480,7 +515,10 @@ export function AnnotationLayer(props: PageOverlayProps) {
             onDoubleClick={() => onAnnotationDoubleClick(a)}
           />
         ))}
-        {selected.map((a) => (
+        {lassoPaths ? (
+          <LassoHighlight annotations={selected} picks={lassoPaths} frame={frame} />
+        ) : null}
+        {(lassoPaths ? [] : selected).map((a) => (
           <SelectionOutline
             key={`sel-${a.id}`}
             annotation={a}
@@ -499,7 +537,12 @@ export function AnnotationLayer(props: PageOverlayProps) {
       {/* The pen's canvases (pen/ink-preview.ts); React never renders into it. */}
       <div ref={inkHostRef} className={styles.inkPreview} aria-hidden="true" />
       {selected.length > 0 && gesture === null && editor === null ? (
-        <AnnotationBar target={target} annotations={selected} frame={frame} />
+        <AnnotationBar
+          target={target}
+          annotations={selected}
+          frame={frame}
+          {...(lassoPaths ? { paths: lassoPaths } : {})}
+        />
       ) : null}
       {editor ? <InlineEditorView editor={editor} frame={frame} /> : null}
     </div>
@@ -954,7 +997,11 @@ function eraseHits(
   return next ?? hits;
 }
 
-/** Removes erased strokes: whole annotations when every stroke goes, else the strokes. */
+/**
+ * Removes erased strokes (spec §6.4): whole paths, never parts of one. An Ink whose every
+ * path goes is deleted; otherwise the paths that remain stay one annotation, their widths
+ * kept parallel (ADR-0018), even when the erased path was between them.
+ */
 async function commitErase(
   target: PageTarget,
   annotations: readonly Annotation[],
@@ -979,11 +1026,14 @@ async function commitErase(
         const paths = a.paths.filter((_, i) => !gone.has(i));
         // Per-point widths stay parallel to the paths that remain (ADR-0018).
         const widths = a.widths?.filter((_, i) => !gone.has(i));
+        const widest = Math.max(a.strokeWidth, ...(widths?.flat() ?? []));
+        // Paths left on both sides of an erased one stay one annotation: the burst was
+        // written as one item, and splitting it would change its Review row and comment.
         return {
           ...a,
           paths,
           ...(widths ? { widths } : {}),
-          rect: roundRect(boundsOf(paths, a.strokeWidth / 2 + 1)),
+          rect: roundRect(boundsOf(paths, widest / 2 + 1)),
         };
       },
       { action: 'erase' },
@@ -1171,17 +1221,19 @@ export function inkCommit(
 }
 
 /**
- * Commits a finished pen stroke as one Ink annotation (not selected, spec §6.1) with its
- * per-point widths (ADR-0018). `/BS /W` is the preset's width, the stroke's nominal width:
- * a pressure of 0.5 or a moderate speed draws exactly it. Until the engine writes the
- * variable-width appearance (P4) PDFium draws the stroke at that width. The preview settles
- * to the committed outline and stays until the page has painted the stroke.
+ * Commits a finished pen stroke (not selected, spec §6.1) with its per-point widths
+ * (ADR-0018): a new Ink annotation, or one more path of the open burst's Ink when the stroke
+ * joins it (spec §6.4, `pen/bursts.ts`). `/BS /W` is the armed preset's width, the stroke's
+ * nominal width: a pressure of 0.5 or a moderate speed draws exactly it. Until the engine
+ * writes the variable-width appearance (P4) PDFium draws the stroke at that width. The
+ * preview settles to the committed outline and stays until the page has painted the stroke.
  */
 async function commitInkStroke(
   stroke: InkStrokeInput,
   settle: SettleInk,
   frame: PageFrame,
   target: PageTarget,
+  times: { readonly downAt: number; readonly upAt: number },
 ): Promise<void> {
   const style = useAnnotationStore.getState().styles.ink;
   const ink = inkCommit(stroke, frame, style.strokeWidth);
@@ -1192,23 +1244,17 @@ async function commitInkStroke(
       ink.widths.map((w) => w * frame.scale),
     ),
   );
-  const widest = Math.max(style.strokeWidth, ...ink.widths);
-  const draft: NewAnnotation = {
-    kind: 'ink',
-    pageIndex: target.pageIndex,
-    opacity: style.opacity,
-    paths: [ink.path],
-    widths: [ink.widths],
-    rect: roundRect(boundsOf([ink.path], widest / 2 + 1)),
-    color: style.color,
-    strokeWidth: style.strokeWidth,
-  };
   let committed = false;
   try {
-    const created = await createAnnotations(target, [draft], { select: false });
-    committed = created !== undefined && created.length > 0;
+    committed = await commitPenStroke({
+      target,
+      path: ink.path,
+      widths: ink.widths,
+      style,
+      ...times,
+    });
   } catch (error) {
-    console.warn('Creating the annotation failed', error);
+    console.warn('Saving the stroke failed', error);
   }
   if (committed) {
     const generation = getEngineService().pageRevision(target.source, target.pageIndex);

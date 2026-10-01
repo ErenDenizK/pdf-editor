@@ -18,6 +18,8 @@ export type ToolMode =
   | 'squiggly'
   | 'ink'
   | 'eraser'
+  /** Lasso (experience-redesign spec §6.5): selects pen strokes by drawing around them. */
+  | 'lasso'
   | 'rectangle'
   | 'ellipse'
   | 'line'

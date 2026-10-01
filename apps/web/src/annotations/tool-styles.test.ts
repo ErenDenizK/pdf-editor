@@ -19,6 +19,7 @@ import {
   TOOL_STYLES_STORAGE_KEY,
   useAnnotationStore,
 } from './annotation-store';
+import { PEN_PRESETS_STORAGE_KEY } from './pen/presets';
 import { readAnnotations, resetEditRunner, whenIdle } from './edit-runner';
 
 const store = () => useAnnotationStore.getState();
@@ -63,6 +64,7 @@ const stroke = (color: string) =>
 describe('tool styles', () => {
   beforeEach(() => {
     localStorage.removeItem(TOOL_STYLES_STORAGE_KEY);
+    localStorage.removeItem(PEN_PRESETS_STORAGE_KEY);
     resetWorkspace();
     resetEditRunner();
     resetAnnotationStore();
@@ -71,6 +73,7 @@ describe('tool styles', () => {
   afterEach(async () => {
     await whenIdle();
     localStorage.removeItem(TOOL_STYLES_STORAGE_KEY);
+    localStorage.removeItem(PEN_PRESETS_STORAGE_KEY);
     useToolStore.getState().setMode('select');
     resetAnnotationStore();
     resetWorkspace();

@@ -120,7 +120,7 @@ test('the tool bar walks its groups by mouse and keyboard', async ({ page }) => 
   const sample: Readonly<Record<string, string | RegExp>> = {
     Read: 'Find',
     'Mark up': 'Highlight',
-    Draw: 'Pen',
+    Draw: 'Eraser',
     'Fill & sign': 'Signature image',
     Pages: 'Edit text',
     Redact: 'Mark for redaction',
@@ -150,20 +150,24 @@ test('the tool bar walks its groups by mouse and keyboard', async ({ page }) => 
   await expect(bar.getByRole('button', { name: 'Draw', exact: true })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(bar.getByRole('button', { name: 'Draw: back to all groups' })).toBeFocused();
+  // The pen is its presets (experience-redesign spec §6.2): a radiogroup of ink dots.
   await page.keyboard.press('ArrowRight');
-  const pen = bar.getByRole('button', { name: 'Pen', exact: true });
-  await expect(pen).toBeFocused();
+  const presets = bar.getByRole('radiogroup', { name: 'Pen presets' });
+  await expect(presets.getByRole('radio', { name: 'Black pen, 1.5 pt' })).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  const blue = presets.getByRole('radio', { name: 'Blue pen, 1.5 pt' });
+  await expect(blue).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(pen).toHaveAttribute('aria-pressed', 'true');
-  // The pen's options sit in the tier on top of the bar.
+  await expect(blue).toHaveAttribute('aria-checked', 'true');
+  await expect(blue).toHaveAttribute('data-armed', '');
+  await expect(page.locator('[data-annotation-layer="0"]')).toHaveAttribute('data-tool', 'ink');
+  // Arming opens nothing; the pen's tier stays hidden until a pen with pressure is seen.
+  await expect(page.getByTestId('pen-preset-editor')).toHaveCount(0);
   const tier = page.getByRole('toolbar', { name: 'Pen options' });
-  await expect(tier).toBeVisible();
-  const tierBox = await tier.boundingBox();
-  const barBox = await bar.boundingBox();
-  expect(tierBox && barBox && tierBox.y + tierBox.height <= barBox.y).toBe(true);
-  await page.keyboard.press('Escape');
-  await expect(pen).toHaveAttribute('aria-pressed', 'false');
   await expect(tier).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(blue).not.toHaveAttribute('data-armed', '');
+  await expect(page.locator('[data-annotation-layer="0"]')).toHaveAttribute('data-tool', 'select');
   await page.keyboard.press('Escape');
   await expect(bar.getByRole('button')).toHaveText(groups);
   await expect(bar.getByRole('button', { name: 'Draw', exact: true })).toBeFocused();

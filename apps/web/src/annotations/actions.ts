@@ -5,7 +5,7 @@
  * the recorded edits with their inverses.
  */
 import type { EngineEdit, SourceId } from '@pdf-editor/document-model';
-import type { Annotation, NewAnnotation } from '@pdf-editor/engine';
+import type { Annotation, InkAnnotation, NewAnnotation } from '@pdf-editor/engine';
 
 import { announce } from '../shell/announcer';
 import { type PageTarget, useAnnotationStore } from './annotation-store';
@@ -17,8 +17,10 @@ import {
   readAnnotations,
   runAction,
 } from './edit-runner';
-import { type DisplayKind, displayKind } from './geometry';
+import { type DisplayKind, displayKind, roundRect } from './geometry';
+import { boundsOf, type Point } from './ink';
 import { createLabel, deleteLabel, type UpdateAction, updateLabel } from './labels';
+import { type PathEdit, splitInk } from './lasso/split';
 import { builtinStampImage } from './stamps';
 
 /** The engine's JSON form of an annotation (engine chunk, loaded on first use). */
@@ -82,6 +84,12 @@ export interface CreateOptions {
    * pass true (a placed stamp or signature, AnnotationLayer `finishDraw`).
    */
   readonly select?: boolean;
+  /** Label of the history entry instead of "Highlight on page 3". */
+  readonly label?: string;
+  /** Later updates with the same key join this entry (a pen burst, spec §6.4). */
+  readonly coalesceKey?: string;
+  /** The window for `coalesceKey` (default 800 ms). */
+  readonly coalesceWindowMs?: number;
 }
 
 /** Creates annotations on one page as one history entry. Resolves to what was created. */
@@ -100,12 +108,93 @@ export function createAnnotations(
     }
     const first = created[0];
     if (!first) return undefined;
-    const label = createLabel(options.labelKind ?? displayKind(first), target.position);
+    const label =
+      options.label ?? createLabel(options.labelKind ?? displayKind(first), target.position);
     announce(label);
     if (options.select === true) {
       useAnnotationStore.getState().select({ ...target, ids: created.map((a) => a.id) });
     }
-    return { edits, label, value: created };
+    return {
+      edits,
+      label,
+      value: created,
+      ...(options.coalesceKey === undefined ? {} : { coalesceKey: options.coalesceKey }),
+      ...(options.coalesceWindowMs === undefined
+        ? {}
+        : { coalesceWindowMs: options.coalesceWindowMs }),
+    };
+  });
+}
+
+/** A pen stroke as committed: user-space centre line and the full width at each point. */
+export interface InkPathInput {
+  readonly path: readonly Point[];
+  readonly widths: readonly number[];
+}
+
+export interface AppendInkOptions {
+  /** The history label for the ink once it holds `paths` paths. */
+  readonly label: (paths: number) => string;
+  readonly coalesceKey: string;
+  readonly coalesceWindowMs?: number;
+  /**
+   * Widths of the ink's paths as they were sent, used when the engine does not give them
+   * back (an engine without per-point widths); else the old paths keep a constant width.
+   */
+  readonly knownWidths?: readonly (readonly number[])[];
+}
+
+/**
+ * Appends a path to an Ink annotation (a pen burst, spec §6.4) through `annotation.update`,
+ * with its per-point widths kept parallel to the paths (ADR-0018). The id is resolved when
+ * the queued action runs, so a burst can append to an ink whose create is still queued.
+ * Resolves to the updated ink, or undefined when there was nothing to append to (the ink was
+ * deleted, locked or never created): the caller then creates a new one.
+ */
+export function appendInkPath(
+  target: PageTarget,
+  id: () => Promise<string | undefined>,
+  input: InkPathInput,
+  options: AppendInkOptions,
+): Promise<InkAnnotation | undefined> {
+  return runAction(async (ctx): Promise<ActionResult<InkAnnotation> | undefined> => {
+    const annotationId = await id();
+    if (annotationId === undefined) return undefined;
+    const list = await readAnnotations(target.source, target.pageIndex, ctx);
+    const current = list.find((a) => a.id === annotationId);
+    if (current?.kind !== 'ink' || current.flags?.locked || current.flags?.hidden) return undefined;
+    const aligned = (w: readonly (readonly number[])[] | undefined) =>
+      w?.length === current.paths.length &&
+      w.every((pathWidths, i) => pathWidths.length === current.paths[i]?.length);
+    const oldWidths = aligned(current.widths)
+      ? (current.widths ?? [])
+      : aligned(options.knownWidths)
+        ? (options.knownWidths ?? [])
+        : current.paths.map((path) => path.map(() => current.strokeWidth));
+    const paths = [...current.paths, input.path];
+    const widths = [...oldWidths, input.widths];
+    const widest = Math.max(current.strokeWidth, ...widths.flat());
+    const next: InkAnnotation = {
+      ...current,
+      paths: paths.map((path) => path.map((p) => ({ x: p.x, y: p.y }))),
+      widths: widths.map((w) => [...w]),
+      rect: roundRect(boundsOf(paths, widest / 2 + 1)),
+    };
+    const annotation = await serializeAnnotation(stamped(next));
+    const done = await executeEdit(
+      ctx,
+      edit('annotation.update', target.source, current.pageIndex, { annotation }),
+    );
+    const updated = done.annotation?.kind === 'ink' ? done.annotation : next;
+    return {
+      edits: [done.recorded],
+      label: options.label(paths.length),
+      value: updated,
+      coalesceKey: options.coalesceKey,
+      ...(options.coalesceWindowMs === undefined
+        ? {}
+        : { coalesceWindowMs: options.coalesceWindowMs }),
+    };
   });
 }
 
@@ -201,4 +290,79 @@ export function deleteAnnotations(
     if (store.selection?.source === target.source) store.select(null);
     return { edits, label, value: removed.length };
   });
+}
+
+export interface InkPathEditOptions {
+  /** The history label for an edit of `count` paths ("Recolour 3 strokes"). */
+  readonly label: (count: number) => string;
+  /** Later edits with the same key within 800 ms join this entry (slider drags, nudges). */
+  readonly coalesceKey?: string;
+  /**
+   * Called inside the queued action, once the engine has the edit and before the next
+   * queued action runs, with where the taken paths are now (annotation id → path indices).
+   */
+  readonly onEdited?: (picks: Readonly<Record<string, readonly number[]>>) => void;
+}
+
+/**
+ * Edits some paths of Ink annotations on one page (the lasso, experience-redesign spec §6.5)
+ * as one history entry: `picks` maps ids to path indices; it and `change` are read when the
+ * queued action runs (so a later value can replace a queued one).
+ * An Ink whose paths are all taken is edited in place (or deleted); one with only some taken
+ * is split by the rule of `lasso/split.ts`: the rest keeps the id, the taken paths become a
+ * new Ink with the edit, both in this entry. Locked and missing annotations are skipped.
+ * Resolves to where the taken paths are afterwards, or undefined when nothing changed.
+ */
+export function editInkPaths(
+  target: PageTarget,
+  picks: () => Readonly<Record<string, readonly number[]>>,
+  change: () => PathEdit,
+  options: InkPathEditOptions,
+): Promise<Readonly<Record<string, readonly number[]>> | undefined> {
+  return runAction(
+    async (ctx): Promise<ActionResult<Readonly<Record<string, readonly number[]>>> | undefined> => {
+      const list = await readAnnotations(target.source, target.pageIndex, ctx);
+      const edits: EngineEdit[] = [];
+      const after: Record<string, readonly number[]> = {};
+      let count = 0;
+      const pathEdit = change();
+      for (const [id, indices] of Object.entries(picks())) {
+        const current = list.find((a) => a.id === id);
+        if (current?.kind !== 'ink' || current.flags?.locked || current.flags?.hidden) continue;
+        const outcome = splitInk(current, indices, pathEdit, newId());
+        if (outcome.count === 0) continue;
+        if (outcome.remove) {
+          const done = await executeEdit(
+            ctx,
+            edit('annotation.delete', target.source, current.pageIndex, { annotationId: id }),
+          );
+          edits.push(done.recorded);
+        }
+        if (outcome.update && comparable(outcome.update) !== comparable(current)) {
+          const annotation = await serializeAnnotation(stamped(outcome.update));
+          const done = await executeEdit(
+            ctx,
+            edit('annotation.update', target.source, current.pageIndex, { annotation }),
+          );
+          edits.push(done.recorded);
+        }
+        if (outcome.create) {
+          const done = await create(ctx, target.source, stamped(outcome.create));
+          edits.push(done.recorded);
+        }
+        Object.assign(after, outcome.picks);
+        count += outcome.count;
+      }
+      if (edits.length === 0) return undefined;
+      const label = options.label(count);
+      if (pathEdit.kind === 'delete') announce(label);
+      options.onEdited?.(after);
+      return {
+        edits,
+        label,
+        value: after,
+        ...(options.coalesceKey === undefined ? {} : { coalesceKey: options.coalesceKey }),
+      };
+    },
+  );
 }

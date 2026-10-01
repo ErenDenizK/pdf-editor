@@ -248,11 +248,14 @@ test.describe('annotations', () => {
     const ink = layer(page).locator('[data-annotation-kind="ink"]');
     await page.locator('body').press('p');
     await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    // Three lines in one go are one burst (experience-redesign spec §6.4): one Ink, one path
+    // per stroke.
     for (const [i, y] of [0.3, 0.34, 0.38].entries()) {
       await drag(page, 0, [0.2, y], [0.55, y + 0.01]);
-      await expect(ink).toHaveCount(i + 1, { timeout: 10_000 });
+      await expect(ink.locator('polyline')).toHaveCount(i + 1, { timeout: 10_000 });
     }
-    await expect(historyRow(page, /(Ink|Pen) on page 1/).first()).toBeVisible();
+    await expect(ink).toHaveCount(1);
+    await expect(historyRow(page, /Pen on page 1 · 3 strokes/)).toBeVisible();
     await page.waitForTimeout(300);
     expect(
       await page.evaluate(

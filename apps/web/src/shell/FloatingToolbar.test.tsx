@@ -72,7 +72,7 @@ describe('tool bar groups (model)', () => {
     expect(table).toEqual({
       read: ['select', 'search.open', 'layout', 'fit'],
       markup: ['highlight', 'underline', 'strikeout', 'squiggly', 'note', 'text-box'],
-      draw: ['ink', 'eraser', 'shapes(rectangle,ellipse,line,arrow)'],
+      draw: ['ink', 'eraser', 'lasso', 'shapes(rectangle,ellipse,line,arrow)'],
       fill: ['forms.highlight', 'fields', 'signature', 'stamp', 'document.sign'],
       pages: ['edit-text', 'image', 'pages.crop', 'page:rotate', 'page:delete', 'mode.arrange'],
       redact: ['redact', 'redaction.find', 'redaction.markMatches', 'apply-redactions'],

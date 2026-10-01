@@ -9,6 +9,11 @@
  * Tool styles follow one rule (experience-redesign spec §6.3): `applyStyle` edits the
  * selection when there is one, else the armed tool's style (`setStyle`), which persists
  * per device (`TOOL_STYLES_STORAGE_KEY`). Recolouring a selection never changes a tool.
+ *
+ * The pen draws with its armed preset (spec §6.2, `pen/presets.ts`): `styles.ink` is always
+ * the armed preset's style. Arming a preset sets it; editing the armed preset, or changing the
+ * pen's style through `applyStyle`, changes both, and the presets persist per device
+ * (`PEN_PRESETS_STORAGE_KEY`).
  */
 import type { PageId, Rect, SourceId } from '@pdf-editor/document-model';
 import type { Annotation } from '@pdf-editor/engine';
@@ -22,6 +27,20 @@ import { updateAnnotations } from './actions';
 import { hasStrokeWidth, normalizeHex, withColor } from './colors';
 import { toolStyleGroup } from './drafts';
 import { onPagesChanged, readAnnotations } from './edit-runner';
+import { styleLassoSelection } from './lasso/edits';
+import {
+  DEFAULT_PRESETS,
+  parsePenSettings,
+  PEN_PRESETS_STORAGE_KEY,
+  type PenPreset,
+  type PenSettings,
+  presetPatch,
+  presetStyle,
+  type PresetIndex,
+  samePreset,
+  validPreset,
+  withPreset,
+} from './pen/presets';
 
 export const AUTHOR_STORAGE_KEY = 'pdf-editor:annotations:author:v1';
 /**
@@ -66,7 +85,8 @@ export const DEFAULT_STYLES: Readonly<Record<StyleGroup, ToolStyle>> = {
   underline: { ...base, color: '#1E88E5' },
   strikeout: { ...base, color: '#E53935' },
   squiggly: { ...base, color: '#43A047' },
-  ink: { ...base, color: '#E53935' },
+  // The first pen preset (spec §6.2); the pen draws with its armed preset (`pen`).
+  ink: { ...base, color: '#1F1F1F', strokeWidth: 1.5 },
   shape: { ...base, color: '#E53935' },
   text: { ...base, color: '#000000' },
   note: { ...base, color: '#FFEB3B' },
@@ -114,8 +134,16 @@ export function parseToolStyles(value: unknown): Readonly<Record<StyleGroup, Too
   ) as Record<StyleGroup, ToolStyle>;
 }
 
-function readToolStyles(): Readonly<Record<StyleGroup, ToolStyle>> {
-  return parseToolStyles(readJson(TOOL_STYLES_STORAGE_KEY));
+function readPenSettings(): PenSettings {
+  return parsePenSettings(readJson(PEN_PRESETS_STORAGE_KEY));
+}
+
+/** Stored tool styles, the pen's being its armed preset's. */
+function readToolStyles(
+  pen: PenSettings = readPenSettings(),
+): Readonly<Record<StyleGroup, ToolStyle>> {
+  const styles = parseToolStyles(readJson(TOOL_STYLES_STORAGE_KEY));
+  return { ...styles, ink: validStyle(styles.ink, presetStyle(pen.presets[pen.active])) };
 }
 
 /** Where an annotation lives: the source page, and the document page showing it. */
@@ -129,6 +157,26 @@ export interface PageTarget {
 
 export interface AnnotationSelection extends PageTarget {
   readonly ids: readonly string[];
+}
+
+/**
+ * Pen paths taken by the lasso (experience-redesign spec §6.5): the selection's Ink ids, each
+ * with the indices of its taken paths. Edits through the contextual bar and `applyStyle` act
+ * on those paths only (`lasso/edits.ts`), splitting an Ink when only some of its paths are
+ * taken (`lasso/split.ts`). It lives beside `selection`, which holds the same ids, and only
+ * counts while the two agree (`activePathSelection`).
+ */
+export interface PathSelection {
+  readonly pageId: PageId;
+  /** One lasso selection: its edits coalesce under it, across the split that renames ids. */
+  readonly key: string;
+  readonly paths: Readonly<Record<string, readonly number[]>>;
+  /**
+   * Where an edit put the taken paths (a split moves them to a new Ink): the selection
+   * follows when the page next loads with those ids, so it never points at an Ink the page
+   * cache does not hold yet. Queued edits already act on it.
+   */
+  readonly next?: Readonly<Record<string, readonly number[]>>;
 }
 
 /** A stamp chosen in the picker, placed by the next click or drag. */
@@ -171,17 +219,35 @@ interface PageEntry {
 interface AnnotationState {
   readonly pages: Readonly<Record<string, PageEntry>>;
   readonly selection: AnnotationSelection | null;
+  /** Paths taken by the lasso within `selection` (spec §6.5); null for whole annotations. */
+  readonly pathSelection: PathSelection | null;
   readonly editor: InlineEditor | null;
   readonly styles: Readonly<Record<StyleGroup, ToolStyle>>;
   readonly author: string;
   readonly pendingStamp: PendingStamp | null;
   readonly signatureDialogOpen: boolean;
+  /** The pen presets and the armed one (spec §6.2). */
+  readonly pen: PenSettings;
 
   ensurePage: (source: SourceId, pageIndex: number) => void;
   reloadPage: (source: SourceId, pageIndex: number) => Promise<void>;
   select: (selection: AnnotationSelection | null) => void;
+  /**
+   * Selects Ink paths (the lasso, spec §6.5): `paths` maps ids to path indices. `key` keeps
+   * the identity of a selection whose ids changed by an edit (a split); else a new one.
+   */
+  selectPaths: (
+    target: PageTarget,
+    paths: Readonly<Record<string, readonly number[]>>,
+    key?: string,
+  ) => void;
+  /** The lasso selection `key` follows its paths to `next` at the page's next load. */
+  followPaths: (key: string, next: Readonly<Record<string, readonly number[]>> | undefined) => void;
   setEditor: (editor: InlineEditor | null) => void;
-  /** Changes the style new annotations of `group` get, and remembers it on this device. */
+  /**
+   * Changes the style new annotations of `group` get, and remembers it on this device. The
+   * pen's style is its armed preset, which changes with it.
+   */
   setStyle: (group: StyleGroup, patch: Partial<ToolStyle>) => void;
   /**
    * The one entry point of the style controls (spec §6.3): with a selection it edits the
@@ -192,6 +258,12 @@ interface AnnotationState {
   setAuthor: (author: string) => void;
   setPendingStamp: (stamp: PendingStamp | null) => void;
   setSignatureDialogOpen: (open: boolean) => void;
+  /** Arms preset `index`: the pen draws with it from the next stroke (through `setStyle`). */
+  armPreset: (index: PresetIndex) => void;
+  /** Changes preset `index` and remembers it on this device; the armed one restyles the pen. */
+  editPreset: (index: PresetIndex, patch: Partial<PenPreset>) => void;
+  /** Puts preset `index` back to its default. */
+  resetPreset: (index: PresetIndex) => void;
 }
 
 export function pageKey(source: SourceId, pageIndex: number): string {
@@ -206,14 +278,18 @@ function readAuthor(): string {
 /** Load tokens: a slower, older load never overwrites a newer one. */
 const loads = new Map<string, number>();
 
+const initialPen = readPenSettings();
+
 export const useAnnotationStore = create<AnnotationState>()((set, get) => ({
   pages: {},
   selection: null,
+  pathSelection: null,
   editor: null,
-  styles: readToolStyles(),
+  styles: readToolStyles(initialPen),
   author: readAuthor(),
   pendingStamp: null,
   signatureDialogOpen: false,
+  pen: initialPen,
 
   ensurePage: (source, pageIndex) => {
     const key = pageKey(source, pageIndex);
@@ -241,29 +317,90 @@ export const useAnnotationStore = create<AnnotationState>()((set, get) => ({
         const ids = sel.ids.filter((id) =>
           annotations.some((a) => a.id === id && !a.flags?.hidden),
         );
-        return { pages, selection: ids.length === 0 ? null : { ...sel, ids } };
+        // A lasso edit's result takes over once the page shows it (a split's new Ink).
+        const next = s.pathSelection?.next;
+        if (
+          s.pathSelection &&
+          next &&
+          Object.keys(next).every((id) => annotations.some((a) => a.id === id))
+        ) {
+          const nextIds = Object.keys(next);
+          const { next: _done, ...current } = s.pathSelection;
+          const followed = livePaths({ ...current, paths: next }, nextIds, annotations);
+          return {
+            pages,
+            selection: followed ? { ...sel, ids: nextIds } : null,
+            pathSelection: followed,
+          };
+        }
+        // Lasso paths keep only the ids and path indices that still exist.
+        const pathSelection = s.pathSelection && livePaths(s.pathSelection, ids, annotations);
+        return {
+          pages,
+          selection: ids.length === 0 ? null : { ...sel, ids },
+          pathSelection: ids.length === 0 ? null : pathSelection,
+        };
       }
       return { pages };
     });
   },
 
   select: (selection) =>
-    set({ selection: selection && selection.ids.length > 0 ? selection : null }),
+    set({
+      selection: selection && selection.ids.length > 0 ? selection : null,
+      pathSelection: null,
+    }),
+  selectPaths: (target, paths, key) => {
+    const entries = Object.entries(paths).filter(([, indices]) => indices.length > 0);
+    if (entries.length === 0) {
+      set({ selection: null, pathSelection: null });
+      return;
+    }
+    set({
+      selection: { ...target, ids: entries.map(([id]) => id) },
+      pathSelection: {
+        pageId: target.pageId,
+        key: key ?? globalThis.crypto.randomUUID(),
+        paths: Object.fromEntries(entries),
+      },
+    });
+  },
+  followPaths: (key, next) =>
+    set((s) => {
+      if (s.pathSelection?.key !== key) return s;
+      const { next: _old, ...current } = s.pathSelection;
+      return { pathSelection: next ? { ...current, next } : current };
+    }),
   setEditor: (editor) => set({ editor }),
   setStyle: (group, patch) => {
     const current = get().styles;
-    const next = validStyle(current[group], { ...current[group], ...patch });
+    let next = validStyle(current[group], { ...current[group], ...patch });
+    let pen: PenSettings | undefined;
+    if (group === 'ink') {
+      // The pen's style is its armed preset (spec §6.3): the preset follows, and the style
+      // takes the preset's rounding.
+      const { active, presets } = get().pen;
+      const preset = validPreset(presets[active], presetPatch(next));
+      if (!samePreset(preset, presets[active])) pen = withPreset(get().pen, active, preset);
+      next = { ...next, ...presetStyle(preset) };
+    }
     const styles = { ...current, [group]: next };
     writeJson(TOOL_STYLES_STORAGE_KEY, { v: 1, styles });
-    set({ styles });
+    if (pen) writeJson(PEN_PRESETS_STORAGE_KEY, pen);
+    set(pen ? { styles, pen } : { styles });
   },
   applyStyle: (patch) => {
     const { selection } = get();
+    if (selection && activePathSelection(get())) {
+      styleLassoSelection(patch);
+      return;
+    }
     if (selection) {
       styleSelection(selection, patch);
       return;
     }
     const group = toolStyleGroup(useToolStore.getState().mode);
+    // For the pen this edits the armed preset too (`setStyle`).
     if (group) get().setStyle(group, patch);
   },
   setAuthor: (author) => {
@@ -273,6 +410,27 @@ export const useAnnotationStore = create<AnnotationState>()((set, get) => ({
   },
   setPendingStamp: (pendingStamp) => set({ pendingStamp }),
   setSignatureDialogOpen: (signatureDialogOpen) => set({ signatureDialogOpen }),
+  armPreset: (index) => {
+    const pen = get().pen;
+    if (pen.active !== index) {
+      const next = { ...pen, active: index };
+      writeJson(PEN_PRESETS_STORAGE_KEY, next);
+      set({ pen: next });
+    }
+    get().setStyle('ink', presetStyle(get().pen.presets[index]));
+  },
+  editPreset: (index, patch) => {
+    const pen = get().pen;
+    const current = pen.presets[index];
+    const preset = validPreset(current, { ...current, ...patch });
+    if (!samePreset(preset, current)) {
+      const next = withPreset(pen, index, preset);
+      writeJson(PEN_PRESETS_STORAGE_KEY, next);
+      set({ pen: next });
+    }
+    if (get().pen.active === index) get().setStyle('ink', presetStyle(preset));
+  },
+  resetPreset: (index) => get().editPreset(index, DEFAULT_PRESETS[index]),
 }));
 
 /** Latest-value slots per coalescing key: a burst of slider events sends one update. */
@@ -339,6 +497,38 @@ function styleSelection(selection: AnnotationSelection, patch: Partial<ToolStyle
   }
 }
 
+/**
+ * The lasso's paths when they describe the current selection (same page, same ids), else
+ * null: a selection set any other way is of whole annotations.
+ */
+export function activePathSelection(
+  state: Pick<AnnotationState, 'selection' | 'pathSelection'>,
+): PathSelection | null {
+  const { selection, pathSelection } = state;
+  if (!selection || selection.pageId !== pathSelection?.pageId) return null;
+  const ids = Object.keys(pathSelection.paths);
+  if (ids.length !== selection.ids.length) return null;
+  return selection.ids.every((id) => (pathSelection.paths[id]?.length ?? 0) > 0)
+    ? pathSelection
+    : null;
+}
+
+/** The lasso's paths that still exist among `ids` and `annotations`, or null for none. */
+function livePaths(
+  current: PathSelection,
+  ids: readonly string[],
+  annotations: readonly Annotation[],
+): PathSelection | null {
+  const paths: Record<string, readonly number[]> = {};
+  for (const id of ids) {
+    const a = annotations.find((x) => x.id === id);
+    const count = a?.kind === 'ink' ? a.paths.length : 0;
+    const indices = (current.paths[id] ?? []).filter((i) => i < count);
+    if (indices.length > 0) paths[id] = indices;
+  }
+  return Object.keys(paths).length === ids.length ? { ...current, paths } : null;
+}
+
 /** Visible annotations of a page (hidden ones are not shown or listed). */
 export function visibleAnnotations(entry: PageEntry | undefined): readonly Annotation[] {
   return (entry?.annotations ?? []).filter((a) => !a.flags?.hidden && a.kind !== 'link');
@@ -375,17 +565,21 @@ export function selectedAnnotations(
 }
 
 /**
- * Tests: forget cached pages and UI state. Tool styles are read again from storage, as a
- * reload would; tests that change them remove `TOOL_STYLES_STORAGE_KEY` afterwards.
+ * Tests: forget cached pages and UI state. Tool styles and pen presets are read again from
+ * storage, as a reload would; tests that change them remove `TOOL_STYLES_STORAGE_KEY` and
+ * `PEN_PRESETS_STORAGE_KEY` afterwards.
  */
 export function resetAnnotationStore(): void {
   loads.clear();
   pendingStyle.clear();
+  const pen = readPenSettings();
   useAnnotationStore.setState({
     pages: {},
     selection: null,
+    pathSelection: null,
     editor: null,
-    styles: readToolStyles(),
+    pen,
+    styles: readToolStyles(pen),
     pendingStamp: null,
     signatureDialogOpen: false,
   });

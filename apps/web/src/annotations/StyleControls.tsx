@@ -16,7 +16,9 @@ import { type CSSProperties, useRef, useState } from 'react';
 import { formatPercent, m } from '../i18n';
 import { IconButton } from '../ui/IconButton';
 import { deleteAnnotations } from './actions';
+import { deleteLassoSelection } from './lasso/edits';
 import {
+  activePathSelection,
   type PageTarget,
   selectedAnnotations,
   type StyleGroup,
@@ -233,7 +235,11 @@ export function StyleControls(props: StyleControlsProps) {
           label={m.annot_delete()}
           icon={<Trash2 />}
           disabled={disabled}
-          onClick={() => void deleteAnnotations(props.target, ids)}
+          onClick={() => {
+            // A lasso selection deletes the taken strokes only, never the whole annotation.
+            if (activePathSelection(useAnnotationStore.getState())) void deleteLassoSelection();
+            else void deleteAnnotations(props.target, ids);
+          }}
         />
       )}
     </div>

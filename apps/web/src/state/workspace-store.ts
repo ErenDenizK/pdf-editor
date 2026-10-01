@@ -190,14 +190,16 @@ interface WorkspaceState {
    * snapshot's edits for that source, which is why every entry keeps the whole list.
    * With `coalesceKey`, a push that coalesces with the present entry (same key within the
    * 800 ms window) may replace the present entry's last edit by `merge(last, next)` (e.g.
-   * one update from the first slider value to the last). Returns false when nothing was
-   * committed.
+   * one update from the first slider value to the last). `coalesceWindowMs` replaces the
+   * 800 ms window for callers that decide on joining themselves (a pen burst, whose strokes
+   * may be seconds apart). Returns false when nothing was committed.
    */
   applyEngineEdit: (
     edits: EngineEdit | readonly EngineEdit[],
     label: string,
     options?: {
       readonly coalesceKey?: string;
+      readonly coalesceWindowMs?: number;
       readonly merge?: (previous: EngineEdit, next: EngineEdit) => EngineEdit | undefined;
     },
   ) => boolean;
@@ -329,6 +331,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
     operation: (ws: Workspace) => Workspace,
     label: string,
     coalesceKey?: string,
+    coalesceWindowMs?: number,
   ): boolean => {
     const { history, workspace } = get();
     let next: Workspace;
@@ -339,12 +342,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
       return false;
     }
     if (next === workspace) return false;
-    const pushed = pushHistory(
-      history,
-      next,
-      label,
-      coalesceKey === undefined ? {} : { coalesceKey },
-    );
+    const pushed = pushHistory(history, next, label, {
+      ...(coalesceKey === undefined ? {} : { coalesceKey }),
+      ...(coalesceWindowMs === undefined ? {} : { coalesceWindowMs }),
+    });
     set({
       history: pushed,
       workspace: pushed.present.workspace,
@@ -660,7 +661,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
       const edits: readonly EngineEdit[] = Array.isArray(input) ? input : [input as EngineEdit];
       if (edits.length === 0) return false;
       const { history } = get();
-      const { coalesceKey, merge } = options;
+      const { coalesceKey, coalesceWindowMs, merge } = options;
       const now = Date.now();
       const present = history.present;
       const coalesces =
@@ -668,7 +669,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
         present.coalesceKey === coalesceKey &&
         history.future.length === 0 &&
         now - present.at >= 0 &&
-        now - present.at <= DEFAULT_COALESCE_WINDOW_MS;
+        now - present.at <= (coalesceWindowMs ?? DEFAULT_COALESCE_WINDOW_MS);
       const committed = commit(
         (ws) => {
           const previous = ws.engineEdits[ws.engineEdits.length - 1];
@@ -681,6 +682,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => {
         },
         label,
         coalesceKey,
+        coalesceWindowMs,
       );
       if (committed) {
         const dirty = get().dirtySources;

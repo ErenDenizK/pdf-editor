@@ -229,11 +229,21 @@ removes the path under it (`annotation.update`), and the annotation with its las
 ### 6.5 Lasso
 
 Lasso (Q) draws a closed freehand region with a 1 px accent line. On release it selects
-every ink path with at least half of its points inside, and every other annotation whose
-rect lies wholly inside. The contextual bar then offers colour, width, opacity and delete;
-dragging inside the selection bounds moves it; arrows nudge 1 pt (Shift: 10 pt). An edit
-to some paths of a grouped annotation splits it: those paths become a new Ink annotation
-(same author, new `/NM`) in the same history entry ("Recolour 3 strokes").
+every ink path it touches: a path with at least one point inside the region (even–odd
+rule), or with a segment that crosses the lasso line. Locked and hidden inks are skipped;
+other annotation kinds are left to the Select tool. (As built in P5: the draft rule, "at
+least half of its points inside, and every other annotation whose rect lies wholly
+inside", was replaced by this touch rule, so a lasso drawn across a stroke takes it.) Only
+the taken paths are highlighted, in the accent at the highlight alpha, and the contextual
+bar sits above them with colour, width, opacity, a move grip and delete; dragging inside
+the selection bounds moves it; arrows nudge 1 pt (Shift: 10 pt); Delete removes the taken
+paths; Esc clears the selection and keeps the Lasso armed; a press outside clears it. An
+edit to some paths of a grouped annotation splits it: those paths become a new Ink
+annotation (same author, new `/NM`, no comment) in the same history entry ("Recolour 3
+strokes"), and the original keeps its id, comment and other paths; a delete removes the
+taken paths from it. Per-point widths stay parallel to their paths on both sides; a width
+change scales them with the nominal width, and a move translates points only. The rule is
+in `annotations/lasso/split.ts`.
 
 ### 6.6 Input
 
@@ -431,7 +441,7 @@ axe reports no violations on the new surfaces (WP A11).
 | Navigator | `ui:v1` → v2 migration table; counts | Review list grouping, filters, folded settings visible only when relevant, author asked once | four tabs with counts; Compare's tab is last; inspector closed on first run |
 | Tool bar, menu | group of each tool; Document menu items by state | group swap, options tier, no disabled twins | each shortcut arms its tool and shows its group; Merge, Split, Compare, Rotate open from the Document menu |
 | Pen | `joinsBurst` (each condition and each closing event), `applyStyle`, preset parsing, palm and pointer rules, outline equality preview vs commit | pen bar, preset editor, React render count ≤ 2 for a 200-move stroke | see below |
-| Lasso | point-in-polygon, half-inside rule, split plan | contextual bar on lasso selection | lasso three strokes of a five-stroke burst, recolour: two annotations, one history entry |
+| Lasso | point-in-polygon, segment crossing, touch rule, split plan | contextual bar on lasso selection | lasso three strokes of a five-stroke burst, recolour: two annotations, one history entry |
 | Wording | diacritic and Turkish folding; keywords of both languages | — | "draw", "kalem", "çiz", "combine", "birleştir" each list the right command first |
 | Visual | `tokens.test.ts` parses `tokens.css` and asserts every ratio in §7.1–§7.3 | — | `visual.spec.ts`: `toHaveScreenshot` baselines in Chromium (SwiftShader, fixed fonts, reduced motion) for Home empty and with 3 files, Read with the navigator, each tool bar group, the Draw group with an armed preset, the Document menu; `maxDiffPixelRatio` 0.002; baselines change only in the PR that changes the look |
 

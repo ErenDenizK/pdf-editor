@@ -781,6 +781,7 @@
   "cmd_tool_redact_keywords": "black out, blackout, hide, censor, redaction",
   "cmd_tool_ink_keywords": "draw, pencil, pen, handwriting, scribble, sketch, freehand",
   "cmd_tool_eraser_keywords": "erase, rubber, remove drawing",
+  "cmd_tool_lasso_keywords": "lasso, select strokes, select drawing, pick",
   "cmd_tool_rectangle_keywords": "box, square, shape",
   "cmd_tool_ellipse_keywords": "circle, oval, shape",
   "cmd_tool_line_keywords": "line, rule, shape",
@@ -1489,6 +1490,134 @@
   "signature_use": "Use signature",
   "annot_action_failed": "The annotation change could not be applied; nothing was changed",
   "annot_stroke_not_saved": "Stroke not saved",
+  "lasso_tool": "Lasso",
+  "lasso_tool_tooltip": "Lasso: draw around pen strokes to select them",
+  "lasso_selected": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} stroke selected",
+        "countPlural=*": "{count} strokes selected"
+      }
+    }
+  ],
+  "lasso_strokes": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} stroke",
+        "countPlural=*": "{count} strokes"
+      }
+    }
+  ],
+  "lasso_none": "No pen strokes inside the lasso",
+  "lasso_move": "Move strokes",
+  "lasso_move_tooltip": "Drag to move the strokes; arrow keys nudge them",
+  "lasso_history_color": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Recolor {count} stroke",
+        "countPlural=*": "Recolor {count} strokes"
+      }
+    }
+  ],
+  "lasso_history_opacity": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Change opacity of {count} stroke",
+        "countPlural=*": "Change opacity of {count} strokes"
+      }
+    }
+  ],
+  "lasso_history_width": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Change width of {count} stroke",
+        "countPlural=*": "Change width of {count} strokes"
+      }
+    }
+  ],
+  "lasso_history_move": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Move {count} stroke",
+        "countPlural=*": "Move {count} strokes"
+      }
+    }
+  ],
+  "lasso_history_delete": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Delete {count} stroke",
+        "countPlural=*": "Delete {count} strokes"
+      }
+    }
+  ],
+  "pen_name_strokes": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{kind} · {count} stroke",
+        "countPlural=*": "{kind} · {count} strokes"
+      }
+    }
+  ],
+  "pen_history_burst": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{kind} on page {page} · {count} stroke",
+        "countPlural=*": "{kind} on page {page} · {count} strokes"
+      }
+    }
+  ],
+  "pen_burst_closed": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{kind}: {count} stroke on page {page}",
+        "countPlural=*": "{kind}: {count} strokes on page {page}"
+      }
+    }
+  ],
+  "pen_history_delete_strokes": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Delete {count} pen stroke",
+        "countPlural=*": "Delete {count} pen strokes"
+      }
+    }
+  ],
+  "pen_presets_label": "Pen presets",
+  "pen_preset_pen": "{color} pen",
+  "pen_preset_highlighter": "{color} highlighter",
+  "pen_preset_numbered": "Pen {number}",
+  "pen_preset_highlighter_numbered": "Highlighter {number}",
+  "pen_preset_label": "{name}, {width}",
+  "pen_preset_edit_hint": "Press again to edit",
+  "pen_editor_label": "Edit {name}",
+  "pen_editor_width": "Width",
+  "pen_editor_width_exact": "Exact width",
+  "pen_editor_reset": "Reset to default",
+  "pen_preset_reset_done": "{name} reset to default",
+  "pen_width_note": "Width changes are stored in the stroke's appearance. Viewers that redraw ink themselves show it at one width.",
   "annot_tool_style": "{tool} tool style",
   "annot_tool_style_hint": "Applies to what you draw next. To change an annotation, select it first.",
   "annot_replay_failed": "Some annotation changes could not be undone or redone in the document",
