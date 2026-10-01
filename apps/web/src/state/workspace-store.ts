@@ -10,8 +10,9 @@
  *
  * Engine lifetime: a source stays open in the PDFium worker while any history entry
  * references it (undo can bring it back); it is closed once history no longer does. Image
- * blobs (image pages) follow the same rule: the model references them by `BlobId`, the
- * bytes live here, and they are released once no history entry references them.
+ * blobs (image pages, image overlays and image furniture such as an image watermark) follow
+ * the same rule: the model references them by `BlobId`, the bytes live here, and they are
+ * released once no history entry references them.
  *
  * Composed operations (`applyComposed`) run an async prelude first (open files in the
  * engine, decode images, ask the user something) and then commit one model operation as a
@@ -77,7 +78,10 @@ export interface OpenFilesReport {
   readonly skipped: readonly { readonly name: string; readonly error: EngineFailure }[];
 }
 
-/** Image bytes referenced by image pages. PNG or JPEG only (what the assembler embeds). */
+/**
+ * Image bytes referenced by image pages and image overlays. PNG or JPEG only (what the
+ * assembler embeds).
+ */
 export interface StoredBlob {
   readonly bytes: ArrayBuffer;
   readonly type: 'image/png' | 'image/jpeg';
@@ -299,7 +303,11 @@ export function addLoadedSource(
 
 const blobCache = new WeakMap<VirtualDocument, readonly BlobId[]>();
 
-/** Blob ids referenced by a document's image pages and image overlays (memoized). */
+/**
+ * Blob ids referenced by a document: its image pages, the image overlays on its pages and
+ * the image overlays of its document-level furniture (an image watermark applied through
+ * the Watermark dialog lives in `doc.furniture`, not on the pages). Memoized per document.
+ */
 function documentBlobs(doc: VirtualDocument): readonly BlobId[] {
   let found = blobCache.get(doc);
   if (found === undefined) {
@@ -308,6 +316,7 @@ function documentBlobs(doc: VirtualDocument): readonly BlobId[] {
       if (page.ref.kind === 'image') set.add(page.ref.blob);
       for (const overlay of page.overlays) if (overlay.kind === 'image') set.add(overlay.blob);
     }
+    for (const overlay of doc.furniture ?? []) if (overlay.kind === 'image') set.add(overlay.blob);
     found = [...set];
     blobCache.set(doc, found);
   }

@@ -24,7 +24,8 @@
  *    (`appliedEdits`), not from the history: the export fails when the two differ (a replay
  *    the engine refused; the edit runner's `runExclusive` refuses first), and the summary's
  *    text-edit counts, per source and by font outcome, are those of the saved bytes.
- * 3. Assemble in the assembly worker, with progress. Image pages take their bytes from the
+ * 3. Assemble in the assembly worker, with progress. Image pages and image overlays (on
+ *    pages or in the document's furniture, e.g. an image watermark) take their bytes from the
  *    workspace store's blobs (PNG or JPEG; WebP was re-encoded to PNG when inserted). The
  *    assembler always writes a new file (pdf-lib `copyPages`): there is no incremental or
  *    byte-preserving path, which a redacted export must never take (spec §5.3).
@@ -254,7 +255,7 @@ export interface ExportDependencies {
     Partial<{ readonly editor: () => Promise<Pick<PdfEditor, 'listAnnotations'>> }>;
   readonly assembler: () => Promise<PdfAssembler>;
   readonly workspace: () => Workspace;
-  /** Image bytes by blob id (image pages); defaults to none. */
+  /** Image bytes by blob id (image pages, image overlays and furniture); defaults to none. */
   readonly blobs?: (id: BlobId) => ArrayBuffer | undefined;
   /**
    * Sources with engine edits not (or not yet) in `workspace.engineEdits`: the workspace

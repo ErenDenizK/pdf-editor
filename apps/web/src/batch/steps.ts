@@ -8,8 +8,7 @@
  * | rotate, delete-pages | `rotatePages`, `deletePages` |
  * | crop | `planCrops` / `withCrops` (crop/plan.ts) |
  * | page-size | `resizePages(recipeResizeRequest)` |
- * | page-numbers, header-footer, watermark (text) | furniture overlay builders + `applyFurniture` |
- * | watermark (image) | the image overlay on every page, its bytes in the run's private blobs |
+ * | page-numbers, header-footer, watermark | furniture overlay builders + `applyFurniture` |
  * | bates | `batesOverlay` + `setDocumentBates(nextBatesStart)` |
  * | flatten, compress | `ExportOptions.flattenAnnotations` / `flattenForms` / `compression` |
  * | metadata-strip, metadata-set | `setMetadataStrip`, `setMetadata` |
@@ -17,9 +16,9 @@
  * | export | `prepareExport` options, or images (`rasterizeWorkspaceDocument`) |
  * | ocr, export markdown/text | not runnable in this build (`recipeStepAvailability`) |
  *
- * An image watermark goes on the pages rather than into the document's furniture: the
- * export collects image bytes from page overlays only (`blobsOfDocument`), and a batch
- * file gains no pages later, so both draw the same.
+ * An image watermark's bytes go into the run's private blobs (`StepContext.addBlob`); the
+ * export collects them from the document's furniture like the app's own watermarks
+ * (`blobsOfDocument`).
  */
 import {
   type BlobId,
@@ -45,7 +44,6 @@ import {
   setMetadata,
   setMetadataStrip,
   setSecurity,
-  updateDocumentOverlays,
   type Workspace,
 } from '@pdf-editor/document-model';
 import { type CompressionSettings, presetSettings } from '@pdf-editor/engine';
@@ -253,11 +251,6 @@ export function applyRecipeStep(
       };
       const overlay = watermarkOverlay(settings);
       if (overlay === undefined) return state;
-      if (overlay.kind === 'image') {
-        return withWorkspace(
-          updateDocumentOverlays(ws, documentId, (current) => [overlay, ...current]),
-        );
-      }
       return withWorkspace(applyFurniture(ws, documentId, 'watermark', [overlay]));
     }
     case 'flatten':
