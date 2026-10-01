@@ -176,7 +176,7 @@ describe('assemble: interleave, rotation, blank page, overlays, outline, labels'
       out.catalog.lookup(PDFName.of('Outlines'), PDFDict).get(PDFName.of('Count'))?.toString(),
     ).toBe('4');
     expect(out.getTitle()).toBe('Source A');
-    expect(out.getProducer()).toBe('pdf-editor');
+    expect(out.getProducer()).toBe('Recto');
     // The rewritten link targets output page 5 (A2); the one to A3 was dropped.
     const annots = out.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
     expect(annots.size()).toBe(1);
@@ -323,7 +323,7 @@ describe('assemble: forms, security, errors', () => {
     });
     expect(opened.flags.encrypted).toBe(true);
     expect(opened.metadata.title).toBe('Top Secret Title');
-    expect(opened.metadata.producer).toBe('pdf-editor');
+    expect(opened.metadata.producer).toBe('Recto');
     const fields = await adapter.listFormFields(sid('secure'));
     expect(fields[0]?.value).toBe('Confidential value');
     await adapter.close(sid('secure'));

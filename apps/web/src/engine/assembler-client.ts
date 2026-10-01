@@ -15,7 +15,7 @@ let shared: Promise<AssemblerProxy> | undefined;
 export function getAssembler(): Promise<AssemblerProxy> {
   if (shared === undefined) {
     const created = import('@pdf-editor/engine').then(({ createAssemblerProxy }) =>
-      createAssemblerProxy(new AssemblerWorker({ name: 'pdf-editor assembler' })),
+      createAssemblerProxy(new AssemblerWorker({ name: 'recto assembler' })),
     );
     created.catch(() => {
       if (shared === created) shared = undefined;

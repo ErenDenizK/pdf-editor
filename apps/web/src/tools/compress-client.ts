@@ -14,7 +14,7 @@ let shared: Promise<CompressProxy> | undefined;
 export function getCompressor(): Promise<CompressProxy> {
   if (shared === undefined) {
     const created = import('@pdf-editor/engine').then(({ createCompressProxy }) =>
-      createCompressProxy(new CompressWorker({ name: 'pdf-editor compress' }), {
+      createCompressProxy(new CompressWorker({ name: 'recto compress' }), {
         qpdfWasmUrl,
         pdfiumWasmUrl,
       }),

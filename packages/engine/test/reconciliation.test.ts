@@ -267,7 +267,7 @@ describe('metadata', () => {
     const stream = out.catalog.lookup(PDFName.of('Metadata'));
     expect(stream).toBeInstanceOf(PDFRawStream);
     const xmp = new TextDecoder().decode(decodePDFRawStream(stream as PDFRawStream).decode());
-    expect(xmp).toContain('<pdf:Producer>pdf-editor</pdf:Producer>');
+    expect(xmp).toContain('<pdf:Producer>Recto</pdf:Producer>');
     expect(xmp).toContain('<rdf:li>en-GB</rdf:li>');
     expect(xmp).toContain('xmpMM:DocumentID');
     // Policy inherit-first-source: the first source here is the language one (no title).

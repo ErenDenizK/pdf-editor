@@ -4,9 +4,9 @@
 
 ## One sentence
 
-A free, open-source PDF editor that runs entirely in the browser, never uploads a file,
-and treats PDF editing as a single coherent document workspace rather than a grid of
-disconnected "tools".
+Recto (ADR-0015) is a free, open-source PDF editor that runs entirely in the browser,
+never uploads a file, and treats PDF editing as a single coherent document workspace
+rather than a grid of disconnected "tools".
 
 ## The thesis
 

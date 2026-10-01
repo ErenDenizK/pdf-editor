@@ -748,7 +748,7 @@ const ERROR_CASES: readonly ErrorCase[] = [
       d.format = 'pdf-editor.recipe';
     },
     problem: 'not-recipe',
-    message: 'Recipe: not a PDF Editor recipe (expected "format": "pdf-editor-recipe")',
+    message: 'Recipe: not a Recto recipe (expected "format": "pdf-editor-recipe")',
   },
   {
     name: 'a version that is not a whole number',
@@ -809,7 +809,7 @@ describe('versions and migrations', () => {
     expect(error.version).toBe(2);
     expect(error.neededAppVersion).toBe(RECIPE_NEWER_APP_PLACEHOLDER);
     expect(error.message).toBe(
-      `Recipe: format version 2 is newer than this app reads (up to 1); open it with PDF Editor ${RECIPE_NEWER_APP_PLACEHOLDER} or later`,
+      `Recipe: format version 2 is newer than this app reads (up to 1); open it with Recto ${RECIPE_NEWER_APP_PLACEHOLDER} or later`,
     );
   });
 

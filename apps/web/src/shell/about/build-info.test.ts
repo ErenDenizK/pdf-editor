@@ -17,12 +17,12 @@ describe('build info', () => {
   });
 
   it('links the release notes of exactly this version', () => {
-    expect(REPOSITORY_URL).toBe('https://github.com/ErenDenizK/pdf-editor');
+    expect(REPOSITORY_URL).toBe('https://github.com/ErenDenizK/recto');
     expect(releaseNotesUrl('1.0.0-beta.0')).toBe(
-      'https://github.com/ErenDenizK/pdf-editor/releases/tag/v1.0.0-beta.0',
+      'https://github.com/ErenDenizK/recto/releases/tag/v1.0.0-beta.0',
     );
     expect(releaseNotesUrl('1.2.3')).toBe(
-      'https://github.com/ErenDenizK/pdf-editor/releases/tag/v1.2.3',
+      'https://github.com/ErenDenizK/recto/releases/tag/v1.2.3',
     );
   });
 
@@ -32,7 +32,7 @@ describe('build info', () => {
       commit: 'abc1234',
       buildDate: '2026-10-01T00:00:00.000Z',
       isPreRelease: true,
-      releaseNotesUrl: 'https://github.com/ErenDenizK/pdf-editor/releases/tag/v1.0.0-beta.0',
+      releaseNotesUrl: 'https://github.com/ErenDenizK/recto/releases/tag/v1.0.0-beta.0',
     });
     expect(makeBuildInfo('1.0.0', 'unknown', '2026-10-01T00:00:00.000Z').isPreRelease).toBe(false);
   });

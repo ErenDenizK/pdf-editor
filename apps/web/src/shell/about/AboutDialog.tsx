@@ -1,6 +1,6 @@
 /**
  * The in-app About dialog (ADR-0017 §6, presentation spec §5): what this build is and how
- * it treats the person's files. Opened from the palette ("About PDF Editor") and from the
+ * it treats the person's files. Opened from the palette ("About Recto") and from the
  * version line in the privacy popover; Esc closes it and focus returns to the opener.
  *
  * Fields, in order: name with the glyph, "Public beta" for a pre-release, version, build

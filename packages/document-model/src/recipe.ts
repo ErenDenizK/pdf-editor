@@ -1564,7 +1564,7 @@ export function readRecipe(
   if (value.format !== RECIPE_FORMAT) {
     throw new RecipeError(
       'not-recipe',
-      `Recipe: not a PDF Editor recipe (expected "format": "${RECIPE_FORMAT}")`,
+      `Recipe: not a Recto recipe (expected "format": "${RECIPE_FORMAT}")`,
       { path: '$.format', key: 'format' },
     );
   }
@@ -1578,7 +1578,7 @@ export function readRecipe(
     throw new RecipeError(
       'newer-version',
       `Recipe: format version ${String(version)} is newer than this app reads (up to ${RECIPE_VERSION}); ` +
-        `open it with PDF Editor ${needed} or later`,
+        `open it with Recto ${needed} or later`,
       {
         path: '$.version',
         key: 'version',

@@ -41,7 +41,7 @@ export const CONVERT_NOTES: readonly string[] = [
 ];
 
 const HEADER_COMMENT =
-  '<!-- Converted from PDF by pdf-editor. Reading order and headings are reconstructed from positions and font sizes; tables are not detected (their text follows in reading order). -->';
+  '<!-- Converted from PDF by Recto. Reading order and headings are reconstructed from positions and font sizes; tables are not detected (their text follows in reading order). -->';
 
 /** Images smaller than this (points) are rules and decorations, not pictures. */
 const MIN_IMAGE = 4;

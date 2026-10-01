@@ -42,7 +42,7 @@ import {
   pageAnnotations,
 } from './metadata-walk';
 
-export const PRODUCER = 'pdf-editor';
+export const PRODUCER = 'Recto';
 
 const PDFX_NS = 'http://ns.adobe.com/pdfx/1.3/';
 /** Custom keys mirrored in XMP must be XML names (`customKeyProblem` enforces this). */

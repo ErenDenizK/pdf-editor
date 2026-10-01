@@ -1,13 +1,13 @@
 # Security policy
 
-pdf-editor runs entirely in the browser. There is no server, no account system and no
+Recto runs entirely in the browser. There is no server, no account system and no
 upload: documents are processed locally in Web Workers and never leave the device. That
 shapes what a vulnerability looks like here.
 
 ## Reporting a vulnerability
 
 Report vulnerabilities **privately** through
-[GitHub Security Advisories](https://github.com/ErenDenizK/pdf-editor/security/advisories/new)
+[GitHub Security Advisories](https://github.com/ErenDenizK/recto/security/advisories/new)
 ("Report a vulnerability" on the repository's Security tab). Please do not open a public
 issue, discussion or pull request for a suspected vulnerability.
 

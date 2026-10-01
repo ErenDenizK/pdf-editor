@@ -10,7 +10,7 @@ test('the application shell loads', async ({ page }) => {
   // Relative to baseURL, which already carries the deployment base path.
   await page.goto('./');
 
-  await expect(page).toHaveTitle(/pdf-editor/);
+  await expect(page).toHaveTitle(/Recto/);
   await expect(page.getByTestId('app-shell')).toBeVisible();
 });
 

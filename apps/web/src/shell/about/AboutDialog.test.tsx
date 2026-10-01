@@ -43,7 +43,7 @@ describe('About dialog', () => {
     act(() => openAbout());
     const popup = await screen.findByTestId('about-dialog');
 
-    expect(within(popup).getByRole('heading', { name: 'PDF Editor' })).toBeInTheDocument();
+    expect(within(popup).getByRole('heading', { name: 'Recto' })).toBeInTheDocument();
     expect(within(popup).getByTestId('about-prerelease')).toHaveTextContent('Public beta');
     expect(within(popup).getByTestId('about-version')).toHaveTextContent('1.0.0-beta.0');
     expect(within(popup).getByTestId('about-commit')).toHaveTextContent('abc1234');
@@ -52,10 +52,10 @@ describe('About dialog', () => {
     const notes = within(popup).getByRole('link', { name: /Release notes/ });
     expect(notes).toHaveAttribute(
       'href',
-      'https://github.com/ErenDenizK/pdf-editor/releases/tag/v1.0.0-beta.0',
+      'https://github.com/ErenDenizK/recto/releases/tag/v1.0.0-beta.0',
     );
     const source = within(popup).getByRole('link', { name: /Source/ });
-    expect(source).toHaveAttribute('href', 'https://github.com/ErenDenizK/pdf-editor');
+    expect(source).toHaveAttribute('href', 'https://github.com/ErenDenizK/recto');
     for (const link of [notes, source]) {
       expect(link).toHaveAttribute('target', '_blank');
       expect(link).toHaveAttribute('rel', 'noreferrer');
@@ -74,7 +74,7 @@ describe('About dialog', () => {
     // Reading order: name, label, version, build, notes, licence, statement, storage, offline.
     const text = popup.textContent ?? '';
     const order = [
-      'PDF Editor',
+      'Recto',
       'Public beta',
       '1.0.0-beta.0',
       'abc1234',
@@ -99,7 +99,7 @@ describe('About dialog', () => {
     expect(screen.getByTestId('about-version')).toHaveTextContent('1.0.0');
     expect(screen.getByRole('link', { name: /Release notes/ })).toHaveAttribute(
       'href',
-      'https://github.com/ErenDenizK/pdf-editor/releases/tag/v1.0.0',
+      'https://github.com/ErenDenizK/recto/releases/tag/v1.0.0',
     );
   });
 
@@ -131,7 +131,7 @@ describe('About dialog', () => {
     const dispose = registerAppCommands(registry);
     try {
       const command = registry.get('help.about');
-      expect(command?.title).toBe('About PDF Editor');
+      expect(command?.title).toBe('About Recto');
       render(
         <>
           <button type="button">Opener</button>

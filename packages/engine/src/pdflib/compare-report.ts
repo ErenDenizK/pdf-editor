@@ -129,7 +129,7 @@ class Annotator {
       Rect: [x1, y1, x2, y2],
       F: ANNOT_FLAG.Print,
       C: [...c],
-      T: PDFHexString.fromText('pdf-editor compare'),
+      T: PDFHexString.fromText('Recto compare'),
       ...extra,
     });
     dict.set(PDFName.of('Contents'), PDFHexString.fromText(contents));

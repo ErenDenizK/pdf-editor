@@ -111,8 +111,8 @@ export default defineConfig({
       // /<repo>/ and a custom domain at / both install correctly.
       manifest: {
         id: base,
-        name: 'pdf-editor',
-        short_name: 'pdf-editor',
+        name: 'Recto',
+        short_name: 'Recto',
         description:
           'A PDF editor that runs entirely in your browser. Files never leave your device.',
         start_url: base,

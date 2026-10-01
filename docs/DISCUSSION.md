@@ -46,9 +46,9 @@ The owner delegated all open items to the project lead. Resolutions, recorded in
 
 ### 9. Product name
 
-Needed before M1 exit for the manifest, wordmark and tab title. Constraints: short,
-pronounceable in English and Turkish, not "PDF-something-tools", trademark searchable. A
-shortlist will be proposed as a separate note in `docs/design/`.
+Settled: **Recto** (ADR-0015, confirmed by the owner on 2026-10-01; this also closes #18).
+The shortlist and the study are in `docs/design/naming.md`; the addresses are in ADR-0016.
+The owner's trademark check before announcing remains (ADR-0015 decision 5).
 
 ### 10. Headless primitive library
 

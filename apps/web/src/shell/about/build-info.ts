@@ -5,10 +5,10 @@
  */
 
 /** The product name shown in the About dialog and its palette command. */
-export const PRODUCT_NAME = 'PDF Editor';
+export const PRODUCT_NAME = 'Recto';
 
 /** The source repository; the release-notes URL derives from it. */
-export const REPOSITORY_URL = 'https://github.com/ErenDenizK/pdf-editor';
+export const REPOSITORY_URL = 'https://github.com/ErenDenizK/recto';
 
 /** The licence of the app's own code (SPDX identifier). */
 export const LICENSE_ID = 'Apache-2.0';

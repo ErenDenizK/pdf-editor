@@ -116,7 +116,7 @@ describe('markdown-source.pdf', () => {
       'images/p1-1.png',
     ]);
     expect(perPage.text).toContain('\n\n<!-- page 2 -->\n\n## Two columns');
-    expect(perPage.text.startsWith('<!-- Converted from PDF by pdf-editor.')).toBe(true);
+    expect(perPage.text.startsWith('<!-- Converted from PDF by Recto.')).toBe(true);
     expect(perPage.text).toContain('tables are not detected');
   });
 });

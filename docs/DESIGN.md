@@ -337,9 +337,11 @@ does not blink.
 
 ## 6. Naming and brand
 
-Working name: **pdf-editor** (repository name). A product name, wordmark and icon are
-open items (see `DISCUSSION.md`). Brand should be a single glyph at small size, no
-gradient, works in the tab bar at 16px.
+Product name: **Recto** (ADR-0015); "Recto PDF" is the descriptor where a search or a link
+preview needs context. The repository is `recto` and the app lives at
+`https://erendenizk.github.io/recto/` (ADR-0016). A wordmark and a final icon are open
+items. Brand should be a single glyph at small size, no gradient, works in the tab bar at
+16px.
 
 ## 7. Refinement pass (after M4)
 

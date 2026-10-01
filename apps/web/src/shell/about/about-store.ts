@@ -1,5 +1,5 @@
 /**
- * Open state of the About dialog. Opened from the palette ("About PDF Editor") and from the
+ * Open state of the About dialog. Opened from the palette ("About Recto") and from the
  * version line in the privacy popover.
  */
 import { create } from 'zustand';

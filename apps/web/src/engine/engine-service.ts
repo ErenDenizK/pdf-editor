@@ -1013,7 +1013,7 @@ export function getEngineService(): EngineService {
     createRenderer: async () => {
       // ADR-0011: our own PDFium worker; `destroy()` terminates it. Constructed first so its
       // script (and then the wasm) loads while the engine chunk and the assembler do.
-      const worker = new PdfiumWorker({ name: 'pdf-editor pdfium' });
+      const worker = new PdfiumWorker({ name: 'recto pdfium' });
       try {
         const [{ createPdfiumProxy }, inspector] = await Promise.all([
           import('@pdf-editor/engine'),
@@ -1039,7 +1039,7 @@ export const SIGNATURE_IDLE_MS = 5 * 60_000;
 /** A new signature worker (`@pdf-editor/engine/signature.worker`) behind its proxy. */
 export async function createSignatureWorker(): Promise<SignatureProxy> {
   // Constructed first so the worker script loads while the engine chunk does.
-  const worker = new SignatureWorker({ name: 'pdf-editor signature' });
+  const worker = new SignatureWorker({ name: 'recto signature' });
   try {
     const { createSignatureProxy } = await import('@pdf-editor/engine');
     // The self-hosted PDFium lets the worker compare the signed revision's pages with the
@@ -1149,7 +1149,7 @@ export class AnalysisWorkerHost {
 
   constructor(
     private readonly create: () => Promise<AnalysisProxy> = async () => {
-      const worker = new AnalysisWorker({ name: 'pdf-editor analysis' });
+      const worker = new AnalysisWorker({ name: 'recto analysis' });
       try {
         const { createAnalysisProxy } = await import('@pdf-editor/engine');
         return createAnalysisProxy(worker);
