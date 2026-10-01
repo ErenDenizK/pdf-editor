@@ -384,4 +384,115 @@ test.describe('annotations', () => {
       path: fileURLToPath(new URL('m2-comments-1440.png', screenshots)),
     });
   });
+
+  test('screenshots of the pen, the Review tab and the lasso (design review)', async ({
+    browserName,
+    page,
+  }) => {
+    test.skip(!capture || browserName !== 'chromium', 'Set CAPTURE_SCREENSHOTS=1 (Chromium).');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('./?lang=en');
+    await openFixtures(page, ['simple-text.pdf']);
+    await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
+      timeout: 20_000,
+    });
+    const box = await layer(page).boundingBox();
+    if (!box) throw new Error('page not rendered');
+    const at = (fx: number, fy: number) => ({
+      x: box.x + box.width * fx,
+      y: box.y + box.width * fy,
+    });
+    /** One mouse stroke through page fractions (y as a share of the page width). */
+    const stroke = async (points: readonly [number, number][]) => {
+      const [first, ...rest] = points;
+      if (!first) return;
+      await page.mouse.move(at(...first).x, at(...first).y);
+      await page.mouse.down();
+      for (const p of rest) await page.mouse.move(at(...p).x, at(...p).y, { steps: 2 });
+      await page.mouse.up();
+    };
+    /** Handwriting-like loops (a prolate cycloid) from x0, `loops` of them. */
+    const loops = (x0: number, y: number, count: number) =>
+      Array.from({ length: count * 16 + 1 }, (_, i): [number, number] => {
+        const t = (i / 16) * 2 * Math.PI;
+        return [x0 + 0.0045 * (t - 1.7 * Math.sin(t)), y - 0.011 * Math.cos(t)];
+      });
+    const ink = layer(page).locator('[data-annotation-kind="ink"]');
+
+    // The Draw group: four presets as ink dots, then Eraser, Lasso and Shapes.
+    const bar = page.getByRole('toolbar', { name: 'Tools' });
+    await bar.getByRole('button', { name: 'Draw', exact: true }).click();
+    const presets = bar.getByRole('radiogroup', { name: 'Pen presets' });
+    // Yellow highlighter over "quick brown".
+    await presets.getByRole('radio', { name: /^Yellow highlighter/ }).click();
+    await stroke([
+      [0.165, 0.243],
+      [0.29, 0.243],
+    ]);
+    await expect(ink).toHaveCount(1, { timeout: 10_000 });
+    // Red: a ring around "lazy dog".
+    await page.waitForTimeout(1700);
+    await presets.getByRole('radio', { name: /^Red pen/ }).click();
+    await stroke(
+      Array.from({ length: 48 }, (_, i): [number, number] => {
+        const a = (i / 44) * 2 * Math.PI - 2.6;
+        return [0.468 + 0.072 * Math.cos(a), 0.243 + 0.026 * Math.sin(a)];
+      }),
+    );
+    await expect(ink).toHaveCount(2, { timeout: 10_000 });
+    // Blue: a handwritten line in three strokes, one burst.
+    await page.waitForTimeout(1700);
+    await presets.getByRole('radio', { name: /^Blue pen/ }).click();
+    await stroke(loops(0.12, 0.36, 6));
+    await stroke(loops(0.32, 0.36, 4));
+    await stroke([
+      [0.12, 0.39],
+      [0.3, 0.392],
+      [0.47, 0.388],
+    ]);
+    await expect(ink).toHaveCount(3, { timeout: 10_000 });
+    await expect(ink.last().locator('polyline')).toHaveCount(3);
+    await page.mouse.move(720, 600);
+    await page.waitForTimeout(400);
+    await page.screenshot({
+      path: fileURLToPath(new URL('m6-draw-presets-1440.png', screenshots)),
+    });
+
+    // A note, then the Review tab: one row per burst.
+    await page.waitForTimeout(1700);
+    await page.locator('body').press('n');
+    await drag(page, 0, [0.86, 0.36], [0.86, 0.36]);
+    await page
+      .getByRole('dialog', { name: 'New note' })
+      .getByRole('textbox')
+      .fill('Check these figures against the Q3 report.');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.locator('body').press('Escape');
+    await page.getByRole('tab', { name: /^Review/ }).click();
+    await expect(page.locator('[data-review-panel] [data-annotation-row]')).toHaveCount(4);
+    await page.mouse.move(720, 600);
+    await page.waitForTimeout(400);
+    await page.screenshot({
+      path: fileURLToPath(new URL('m6-navigator-review-1440.png', screenshots)),
+    });
+
+    // The lasso around the last two strokes of the handwritten line.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.locator('body').press('q');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'lasso');
+    await stroke([
+      [0.312, 0.325],
+      [0.5, 0.325],
+      [0.5, 0.41],
+      [0.312, 0.41],
+      [0.312, 0.33],
+    ]);
+    const lasso = page.locator('[data-lasso-bar]');
+    await expect(lasso).toBeVisible();
+    await page.mouse.move(720, 700);
+    await page.waitForTimeout(400);
+    await page.screenshot({
+      path: fileURLToPath(new URL('m6-lasso-1440.png', screenshots)),
+    });
+  });
 });

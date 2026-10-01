@@ -90,11 +90,11 @@ Before and after, same scene, both builds (SwiftShader, so the blur is correct):
 
 | Scene | Before | After |
 | --- | --- | --- |
-| Tool bar over the page (2×) | [before](../screenshots/m6-v1-before-toolbar-crop.png) | [after](../screenshots/m6-v1-after-toolbar-crop.png) |
-| Shapes menu over the page (2×) | [before](../screenshots/m6-v1-before-menu-crop.png) | [after](../screenshots/m6-v1-after-menu-crop.png) |
-| Read, full frame | [before](../screenshots/m6-v1-before-read.png) | [after](../screenshots/m6-v1-after-read.png) |
-| Command palette | [before](../screenshots/m6-v1-before-palette.png) | [after](../screenshots/m6-v1-after-palette.png) |
-| Empty app | [before](../screenshots/m6-v1-before-empty.png) | [after](../screenshots/m6-v1-after-empty.png) |
+| Tool bar over the page (2×) | [before](m6-v1-before-toolbar-crop.png) | [after](m6-v1-after-toolbar-crop.png) |
+| Shapes menu over the page (2×) | [before](m6-v1-before-menu-crop.png) | [after](m6-v1-after-menu-crop.png) |
+| Read, full frame | [before](m6-v1-before-read.png) | [after](m6-v1-after-read.png) |
+| Command palette | [before](m6-v1-before-palette.png) | [after](m6-v1-after-palette.png) |
+| Empty app | [before](m6-v1-before-empty.png) | [after](m6-v1-after-empty.png) |
 
 The milestone screenshots under `docs/design/screenshots/` (`m1-*` to `m4-*`) were re-captured
 with `CAPTURE_SCREENSHOTS=1`; `git diff` on them shows the before and after of each.

@@ -43,6 +43,12 @@ A **contextual bar above the selection** replaces property dialogs: color swatch
 fixed palette of 8 plus custom), opacity, stroke width, font size (text box), delete,
 comment. Right panel "Properties" shows the same plus author, dates and the note text.
 
+Creating does not select. A tool's options live with the tool, in a tier attached to the
+tool bar while it is armed, and set the next object; the pen's presets sit in the Draw
+group. A selection's options live with the selection, which exists only after an explicit
+select (Select tool, a Review row, Tab) or a lasso; only then does the contextual bar
+appear. The inspector (formerly the right panel) is closed by default. (M6 amendment A2)
+
 ## 3. Annotation behaviors
 
 | Kind | Creation | Geometry | Notes |

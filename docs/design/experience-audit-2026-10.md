@@ -118,3 +118,31 @@ options; lasso to edit), Apple Preview (style menus act on the selection, otherw
 the default for the next object; selection never opens on its own), Figma UI3 (bottom pill
 with about seven tools, the active tool as a solid accent fill, one soft shadow), Linear and
 Arc (stepped near-black surfaces, a 1 px top highlight and a hairline ring on menus).
+
+## 6. After M6
+
+Build `develop` @ `c18dea5`, same setup (Chromium with SwiftShader, 1440×900, reduced
+motion, English). The frames are in [`screenshots/`](screenshots/) and are rewritten by the
+end-to-end specs with `CAPTURE_SCREENSHOTS=1`; V1's before/after pairs of the visual
+refresh are in [`audit-2026-10/`](audit-2026-10/V1-RESULTS.md). The accessibility pass
+(A11) and the independent review (R) were still running when this was written.
+
+| # | Friction | What changed | Frames |
+|---|---|---|---|
+| 1 | A stroke selects itself and opens a style bar | Creating never selects (ink, markup, shapes, stamps); the preview stays until the committed stroke is painted. An end-to-end test watches the page from the first stroke on and sees no bar and no selection | `m6-draw-presets-1440` |
+| 2 | Colour and width cannot be set before drawing | A tool's options live in a tier attached to the bar; the pen has four presets as ink dots with an editor on the armed one. Styles and presets persist (`applyStyle` sets the tool when nothing is selected) | `m6-draw-presets-1440`, `m2-annotations-1440` |
+| 3 | Merge is invisible | Home shows every open file as a card with "Combine all N files"; merging two dropped files takes 3 actions in the e2e count (drop, Combine, Merge). The Document menu's first section is Combine and split; Arrange shows every open document | `m6-home-three-files-1440`, `m6-document-menu-1440`, `m0-shell-arrange-1440` |
+| 4 | One stroke = one annotation, row and undo | Strokes within 1.5 s and 36 pt form a burst: one Ink annotation, one Review row ("Pen · 3 strokes"), one history entry, one undo. The lasso takes paths across bursts and splits them out when edited | `m6-navigator-review-1440`, `m6-lasso-1440` |
+| 5 | 18 unlabelled equal icons; armed state 1.24:1 | Six labelled task groups; a group morphs the capsule in place to show its 3–6 tools. The armed tool is a solid accent fill, 3.43:1 against the bar over a white page (worst case) and 5.28:1 over the canvas. Extract pages ("coming soon") left the bar; Rotate and Delete page act on the selected pages, else the current one | `m0-shell-read-1440`, `m0-shell-tooltip-1440` |
+| 6 | Too much at once | Four labelled navigator tabs with counts (Pages, Find, Review, Files); the inspector is closed by default; metadata, password and diagnostics moved to the Document info sheet; Review leads with content, with the author asked once inline | `m6-navigator-review-1440`, `m6-document-info-1440`, `m3-forms-1440` |
+| 7 | Everything behind an icon, a right-click or the palette | The Document menu is a labelled button with five sections and no disabled twins; Combine, Arrange pages and Compare are buttons on Home | `m6-document-menu-1440`, `m6-home-three-files-1440` |
+| 8 | Vocabulary | Ink is "Pen", the image tool is "Signature image", the certificate flow "Sign with certificate…"; the palette matches keywords of both languages without diacritics ("draw", "kalem", "ciz", "birlestir") | `m0-shell-palette-query-1440` |
+| 9 | Duplicate controls | The inspector no longer opens on its own, so the contextual bar is the one place a selection is edited; opened, its Properties section still carries the style controls. Arrange shows only its own bar | `m2-annotations-1440` |
+| 10 | Flat chrome | Canvas → panel 1.05:1 → 1.14:1; the glass over the canvas 1.03:1 → 1.27:1 with one elevation token; text on glass stays AA (glass-danger 4.51:1 over a white page, the minimum) | `m0-shell-read-1440`, `audit-2026-10/m6-v1-after-*` |
+| 11 | Pen engineering | Native pointer input with coalesced and predicted points, one outline function for preview and commit (no shift, no blink), width from pressure or speed written into the appearance (ADR-0018), fingers pan once a pen has been seen, a press while an editor is open commits it and starts the stroke | `m6-draw-presets-1440` |
+| 12 | Smaller items | The Compare segment still appears only while a comparison is open (by design); the light theme moved to M8; image selection in the inspector and saved signatures were not part of M6 | — |
+
+First run now: from an empty app to two merged files in Read, 3 actions with no dead end
+(`apps/web/e2e/home.spec.ts`). Still open after M6: Home has no per-card menu, no
+reordering by drag and no recent files; burst limits N and D are to be tried on a real
+tablet with the owner (`docs/ROADMAP.md`, M6 known behaviours).

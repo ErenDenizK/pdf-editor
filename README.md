@@ -27,6 +27,9 @@ happens on the integration branch; `main` receives milestones.
   compare two documents visually and by words, check and add digital signatures without
   ever calling anything "valid", export pages as Markdown or text, and run saved recipes
   over many files at once.
+- Keep it simple to work in: a Home view where the open files combine from one button, a
+  navigator with four labelled tabs, tools grouped by task with their options beside them,
+  and a pen that writes without interruption, keeps four presets and edits with a lasso.
 - Always: offline-capable, no telemetry, no accounts, no quotas, no upload. Served as
   static files from GitHub Pages.
 

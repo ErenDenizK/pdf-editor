@@ -200,22 +200,45 @@ unpublished; the first public release follows M7).
 
 Owner review after M5 (`DISCUSSION.md` item 23): the features are right, the experience is
 not. Too much is visible at once, nobody can find Merge, and the pen interrupts writing.
-Spec: `docs/specs/experience-redesign.md`; evidence: `docs/design/experience-audit-2026-10.md`.
+Spec: `docs/specs/experience-redesign.md`; evidence: `docs/design/experience-audit-2026-10.md`
+(with an "After M6" section); decisions in ADR-0018 (variable-width ink) and research 09
+(the ink appearance spike); design rules in `docs/DESIGN.md` §2–§4 (amendments A1–A6) and
+`docs/specs/viewer-annotations.md` (A7).
 
 | Feature | Notes | Status |
 |---|---|---|
-| Home view | open files as cards, multi-select, Combine N files, drag a card onto another to merge; the empty state is the same view with honest text | planned |
-| Navigator with four labelled tabs | Pages (with Bookmarks), Find, Review (comments, redaction marks, form fields in one list), Files; content first, settings folded; inspector closed by default, metadata in a Document info sheet | planned |
-| Task-grouped toolbar | about six labelled groups (Read, Mark up, Draw, Fill & sign, Pages, Redact); a group shows its 3–6 tools; options live with the armed tool; Document menu with sections and Merge, Split, Compare, Rotate | planned |
-| Natural pen | creating a stroke never selects it; a compact pen bar with four presets that persist; strokes in a burst become one Ink annotation (one comment row, one undo step); lasso to recolour, resize, move or delete; coalesced pointer events, live smoothed preview, width from pressure or speed, fingers scroll when a pen is present | planned (spike S1 first: variable-width appearance across viewers; constant width stays in the Ink dictionary) |
-| Merge discoverability and wording | Home actions, Document menu, Arrange shows every open document, palette synonyms in English and Turkish, "Ink" becomes "Pen", the two "Sign" features get distinct names | planned |
-| Visual refresh | surface ladder with measured contrast, livelier glass with one elevation shadow for floating chrome, capsule toolbar with a solid accent for the active tool, pen presets as ink dots, rise-in motion honouring reduced motion | planned (DESIGN.md amendments listed in the spec) |
+| Home view | open files as cards, multi-select, Combine N files, drag a card onto another to merge; the empty state is the same view with honest text | done (from an empty app, drop two files, "Combine 2 files", "Merge": one document with every page in Read in 3 counted actions, e2e; a card dropped on another opens the merge dialog as [target, dragged]; nothing merges without the dialog) |
+| Navigator with four labelled tabs | Pages (with Bookmarks), Find, Review (comments, redaction marks, form fields in one list), Files; content first, settings folded; inspector closed by default, metadata in a Document info sheet | done (four tabs with counts in their names, e.g. "Pages, 6 items"; Compare's Changes tab only in Compare, last; the inspector closed on first run and remembered once opened, e2e; the comment author asked once, inline) |
+| Task-grouped toolbar | about six labelled groups (Read, Mark up, Draw, Fill & sign, Pages, Redact); a group shows its 3–6 tools; options live with the armed tool; Document menu with sections and Merge, Split, Compare, Rotate | done (six groups; the capsule morphs in place in one 160 ms movement, none under reduced motion; options in a tier attached to the bar; each shortcut arms its tool and shows its group, e2e; Document menu in five sections with no disabled twins) |
+| Natural pen | creating a stroke never selects it; a compact pen bar with four presets that persist; strokes in a burst become one Ink annotation (one comment row, one undo step); lasso to recolour, resize, move or delete; coalesced pointer events, live smoothed preview, width from pressure or speed, fingers scroll when a pen is present | done (no bar and no selection at any time while writing, e2e with a MutationObserver from the first stroke; the preview stays until the committed stroke is painted; presets survive a reload; bursts of N = 1.5 s and D = 36 pt, at most 64 paths: three strokes are one Ink, one Review row "Pen · 3 strokes", one undo; the lasso takes every path it touches and splits edited paths into a new Ink in the same history entry; a pen stroke with force 0.2 → 1.0 is thinner at its start, written into our appearance with a constant `/BS /W` after S1 passed, both matrix rows ok in PDFium and pdf.js; after a pen, a finger drag scrolls and draws nothing) |
+| Merge discoverability and wording | Home actions, Document menu, Arrange shows every open document, palette synonyms in English and Turkish, "Ink" becomes "Pen", the two "Sign" features get distinct names | done (Merge from Home, the Document menu, the tab menus and the palette; "draw", "kalem", "ciz", "birlestir" and "sertifika" list the right command first, e2e; Pen, Signature image, Sign with certificate…) |
+| Visual refresh | surface ladder with measured contrast, livelier glass with one elevation shadow for floating chrome, capsule toolbar with a solid accent for the active tool, pen presets as ink dots, rise-in motion honouring reduced motion | done (canvas → panel 1.05:1 → 1.14:1; glass over the canvas 1.03:1 → 1.27:1; the armed tool 1.24:1 → 3.43:1 against the bar over a white page, 5.28:1 over the canvas; text on glass stays AA over every measured backdrop, minimum 4.51:1; `tokens.test.ts` asserts each ratio; measurements in `docs/design/audit-2026-10/V1-RESULTS.md`) |
 
-Exit: a new user merges two dropped files in under five actions (e2e); writing with the
-pen never opens a bar or selects the stroke (e2e with synthetic pointer events and
-pressure); the navigator has four tabs with counts; every surface in the visual refresh
-passes the contrast checks recorded in the spec; screenshots and `docs/DESIGN.md` updated;
-an independent experience review on the live build.
+Known behaviours and follow-ups from the workstreams:
+
+- Home has no per-card ⋯ menu (Combine with…, Document info…), no reordering of cards by
+  drag and no recent files; the card's size is the file's size as opened. The Files tab
+  lists the open files without the spec's "Combine N files" button and "Show Home" link
+  (Home is `0`, the app glyph or the palette).
+- Compare still has no "the file as opened" side (as in M5).
+- Bursts' N (1.5 s) and D (36 pt) are reasoned defaults; they are still to be tried on a
+  real tablet with the owner. Both are overridable in the stored pen settings, with no UI.
+- Variable width lives in our appearance stream; `/InkList` keeps the centre lines and
+  `/BS /W` the nominal width, so a viewer that redraws ink itself (an editor rebuilding
+  the appearance) shows one width. The pen's options tier says so in one honesty line,
+  and the tier stays hidden until a pen has reported pressure in the session.
+- A page resize scales ink paths but not their widths.
+- The bytes of a plain `save()` keep the replaced ink appearance streams until export,
+  which rewrites the file.
+- Read: after the window narrows and widens again (1440 → 1024 → 1440 px), page 1 can
+  show blank while its canvas reports "rendered" (seen while capturing the screenshots).
+- The §11 visual baselines (`visual.spec.ts`) are not in the suite, and the no-blink
+  check is a component test (`annotations/writing.test.tsx`), not the frame-sampling e2e
+  the spec describes.
+
+Exit: pending A11 (accessibility: F6 regions, roving tabindex, announcements, axe) and the
+independent experience review R on the live build; the merge, pen, navigator and contrast
+criteria pass as recorded above, and `docs/DESIGN.md` and the screenshots are updated.
 
 ## M7 — Presentation and public beta  (→ 1.0.0-beta.0)
 

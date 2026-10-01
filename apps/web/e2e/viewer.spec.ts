@@ -4,9 +4,13 @@
  * The navigator's four tabs and the closed inspector on first run, with Document info in the
  * Document menu (experience-redesign §4).
  */
+import { fileURLToPath } from 'node:url';
+
 import { expect, type Page, test } from '@playwright/test';
 
 import { openFixtures, useFileInputPicker } from './helpers';
+
+const screenshots = new URL('../../../docs/design/screenshots/', import.meta.url);
 
 test.beforeEach(async ({ page, context, browserName }) => {
   await useFileInputPicker(page);
@@ -224,4 +228,35 @@ test('a document opened in Read mode renders its pages, and so does the tab left
   await page.getByRole('tab', { name: 'outline-named-dests' }).click();
   await expect(page.getByTestId('status-pages')).toHaveText('Page 1 of 6');
   await expect(readBitmap(page)).toBeVisible({ timeout: 5_000 });
+});
+
+test('screenshots of find and the two-up layout (design review)', async ({ browserName, page }) => {
+  test.skip(
+    !process.env.CAPTURE_SCREENSHOTS || browserName !== 'chromium',
+    'Set CAPTURE_SCREENSHOTS=1 (Chromium) to write docs/design/screenshots/.',
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.keyboard.press(`${await mod(page)}+f`);
+  const field = page.getByRole('searchbox', { name: 'Find in document' });
+  await field.fill('page');
+  await expect(page.getByTestId('status-search')).toContainText('1 of 7');
+  await field.press('Enter');
+  await field.press('Enter');
+  await expect(page.getByTestId('status-search')).toContainText('3 of 7');
+  await expect(
+    page.locator('[data-read-viewport] canvas[data-state="rendered"]').first(),
+  ).toBeVisible();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: fileURLToPath(new URL('m2-search-1440.png', screenshots)) });
+
+  await field.press('Escape');
+  await page.getByRole('tab', { name: /^Pages/ }).click();
+  await page.getByRole('radio', { name: 'Two pages' }).click();
+  await page.keyboard.press('Home');
+  await expect(page.getByTestId('status-pages')).toHaveText('Page 1 of 6');
+  await expect(page.locator('[data-page-index="1"] canvas[data-state="rendered"]')).toBeVisible();
+  await page.mouse.move(720, 450);
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: fileURLToPath(new URL('m2-two-up-1440.png', screenshots)) });
 });

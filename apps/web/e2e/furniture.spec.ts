@@ -5,11 +5,14 @@
  * then open the exported file in the app and find the numbers through PDFium text.
  */
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 import { PDFDict, PDFDocument, PDFName, PDFStream } from '@cantoo/pdf-lib';
 import { expect, type Page, test } from '@playwright/test';
 
 import { openFixtures, useFileInputPicker } from './helpers';
+
+const screenshots = new URL('../../../docs/design/screenshots/', import.meta.url);
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'Download flow is verified on Chromium');
 
@@ -86,4 +89,49 @@ test('adds page numbers to rotated pages, exports them and reads them back', asy
   await expect(page.getByTestId('search-hit')).toHaveCount(4);
   await field.fill('Page 3 of 4');
   await expect(page.getByTestId('search-hit')).toHaveCount(1);
+});
+
+test('screenshots of the page numbers and watermark dialogs (design review)', async ({ page }) => {
+  test.skip(
+    !process.env.CAPTURE_SCREENSHOTS,
+    'Set CAPTURE_SCREENSHOTS=1 to write docs/design/screenshots/.',
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await useFileInputPicker(page);
+  await page.goto('./?lang=en');
+  await openFixtures(page, ['outline-named-dests.pdf']);
+  await expect(
+    page.locator('[data-read-viewport] canvas[data-state="rendered"]').first(),
+  ).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.getByTestId('document-menu').click();
+  await page.getByRole('menuitem', { name: 'Page numbers…' }).click();
+  const numbers = page.getByTestId('furniture-dialog-page-numbers');
+  await numbers.locator('label', { has: page.getByTestId('preset-page-of') }).click();
+  await expect(page.locator('[data-page-index="0"] [data-furniture-text]')).toHaveAttribute(
+    'data-furniture-text',
+    'Page 1 of 6',
+  );
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: fileURLToPath(new URL('m3-page-numbers-1440.png', screenshots)) });
+  await page.keyboard.press('Escape');
+  await expect(numbers).toBeHidden();
+
+  await page.goto('./?lang=en');
+  await openFixtures(page, ['simple-text.pdf']);
+  await expect(
+    page.locator('[data-read-viewport] canvas[data-state="rendered"]').first(),
+  ).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.getByTestId('document-menu').click();
+  await page.getByRole('menuitem', { name: 'Watermark…' }).click();
+  const watermark = page.getByTestId('furniture-dialog-watermark');
+  await watermark.getByTestId('watermark-text').fill('CONFIDENTIAL');
+  await watermark.getByText('Tile across the page').click();
+  await expect(page.locator('[data-page-index="0"] [data-furniture-text]').first()).toBeAttached();
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: fileURLToPath(new URL('m3-watermark-1440.png', screenshots)) });
 });

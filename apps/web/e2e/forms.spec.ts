@@ -8,11 +8,14 @@
  * and returns the focus to the control that armed it.
  */
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 import { PDFDict, PDFDocument, PDFName } from '@cantoo/pdf-lib';
 import { expect, type Page, test } from '@playwright/test';
 
 import { openFixtures, useFileInputPicker } from './helpers';
+
+const screenshots = new URL('../../../docs/design/screenshots/', import.meta.url);
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'Download flow is verified on Chromium');
 
@@ -228,4 +231,17 @@ test('keyboard: place a field from the palette, cancel from the Forms panel', as
   await expect(layer).toBeFocused();
   await page.keyboard.press(' ');
   await expect(page.locator('[data-created-design="CheckBox1"]')).toBeFocused();
+});
+
+test('screenshot of a filled form with the Fields filter (design review)', async ({ page }) => {
+  test.skip(
+    !process.env.CAPTURE_SCREENSHOTS,
+    'Set CAPTURE_SCREENSHOTS=1 to write docs/design/screenshots/.',
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await fillName(page, 'Grace Hopper');
+  await page.mouse.move(720, 600);
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: fileURLToPath(new URL('m3-forms-1440.png', screenshots)) });
 });
