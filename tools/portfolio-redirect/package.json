@@ -1,0 +1,12 @@
+{
+  "name": "@pdf-editor/portfolio-redirect",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The /pdf-editor/ redirect folder and service-worker kill switch for the portfolio repository ErenDenizK.github.io (ADR-0016), with an end-to-end test.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.page.json && tsc --noEmit -p tsconfig.sw.json"
+  }
+}

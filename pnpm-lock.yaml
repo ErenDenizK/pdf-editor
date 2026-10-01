@@ -246,6 +246,8 @@ importers:
         specifier: 7.0.0
         version: 7.0.0
 
+  tools/portfolio-redirect: {}
+
   tools/qa:
     dependencies:
       '@cantoo/pdf-lib':
