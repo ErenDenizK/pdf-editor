@@ -160,7 +160,9 @@ jobs:
       - name: Copy check
         run: node --experimental-strip-types --no-warnings=ExperimentalWarning tools/copy-check/check.ts
 
-      # lychee's configuration (lychee.toml) is written for this version.
+      # lychee's configuration (lychee.toml) is written for this version. The research
+      # snapshots are dated and cite hundreds of third-party pages that rot by design, so
+      # they are checked offline (local files and anchors); the public documents online.
       - name: Links in the documentation
         uses: lycheeverse/lychee-action@v2
         with:
@@ -168,7 +170,17 @@ jobs:
           fail: true
           args: >-
             --config lychee.toml --no-progress
-            README.md 'docs/**/*.md' CONTRIBUTING.md SECURITY.md
+            README.md CONTRIBUTING.md SECURITY.md
+            'docs/*.md' 'docs/adr/*.md' 'docs/specs/*.md' 'docs/design/*.md' 'docs/qa/*.md'
+
+      - name: Local links in the research snapshots
+        uses: lycheeverse/lychee-action@v2
+        with:
+          lycheeVersion: v0.24.2
+          fail: true
+          args: >-
+            --config lychee.toml --no-progress --offline
+            'docs/research/*.md'
 
       - name: Download build
         uses: actions/download-artifact@v8
