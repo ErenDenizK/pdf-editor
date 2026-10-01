@@ -1,6 +1,6 @@
 # ADR-0015: Product name: Recto
 
-**Status:** proposed · **Date:** 2026-10-01 · **Deciders:** project lead; the owner confirms
+**Status:** accepted · **Date:** 2026-10-01 · **Deciders:** project lead; confirmed by the owner on 2026-10-01
 
 ## Context
 

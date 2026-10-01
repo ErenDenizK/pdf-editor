@@ -154,6 +154,14 @@ also shows its tool's group; the palette stays (§8 adds keywords).
   attached to the top of the bar (never floating over the page): colour swatches and
   opacity for text markup, colour, fill and width for shapes, font size and colour for the
   text box, presets for the pen (§6.2). Changing them changes the tool (§6.3).
+- **Shape of the menu.** Picking a group does not open a radial menu, a drawer or a sheet:
+  the capsule bar morphs in place. The chosen group's chip slides to the left end and the
+  group's tools slide in beside it (one 160 ms movement, none under reduced motion); the
+  bar keeps its height, its anchor and its glass. Options are a second tier that rises from
+  the top edge of the bar and stays attached to it; popovers for pickers (shapes, stamps,
+  the pen preset editor) rise from their button. Reasons: a radial menu hides labels and
+  is slow with a mouse; a drawer covers the page; an in-place morph keeps the user's eye
+  and pointer where they were and reads the same on a tablet.
 - **Editing near a selection** happens only after an explicit select (Select tool click,
   a Review row, Tab to an annotation) or a lasso. Then the existing contextual bar appears
   above the selection and edits it.
@@ -329,7 +337,9 @@ the bar's width follows a group change over `--duration-base`. Reduced motion se
 ### 7.6 Light theme
 
 WP L1: `[data-theme='light']` on the same tokens, a System · Dark · Light toggle, the same
-contrast test plus white page vs light canvas ≥ 1.3:1. Last; may slip (§14 Q2).
+contrast test plus white page vs light canvas ≥ 1.3:1. Moved to M8 by the owner on
+2026-10-01 (§14 Q2); the tokens of §7.1 are written so that a light ladder can be added
+without renaming anything.
 
 ## 8. Wording and discoverability
 
@@ -460,7 +470,7 @@ unless they start with a top-level directory or are root files (`NOTICE`, `.chan
 | A11 | Accessibility: F6 regions, roving tabindex, announcements, axe | `shell/AppShell.tsx`, `shell/announcer.ts`; fixes by each owner | S | H1, N1, T1, P2, P5 | no |
 | QA | e2e and visual suites (§11) | `apps/web/e2e/home.spec.ts`, `pen.spec.ts`, `visual.spec.ts`, `helpers.ts` | M | each feature | partly |
 | D1 | DESIGN.md A1–A7, screenshots, ROADMAP, changeset | `docs/DESIGN.md`, `docs/specs/viewer-annotations.md`, `docs/design/screenshots/**`, `docs/ROADMAP.md`, `.changeset/*` | S | all | no |
-| L1 | Light theme (§7.6) | `styles/tokens.css`, `shell/TabBar.tsx` (toggle), `styles/tokens.test.ts` | M | V1; owner §14 Q2 | yes, may slip |
+| L1 | Light theme (§7.6) | `styles/tokens.css`, `shell/TabBar.tsx` (toggle), `styles/tokens.test.ts` | M | moved to M8 | — |
 | R | Independent experience review on the live build; correctness review of P4 | read-only, findings as issues | — | all | no |
 
 Rules as in M4 and M5: one agent per package, no edits outside owned paths (shared stores
@@ -488,13 +498,12 @@ to M8 without blocking the exit).
 | 10 | Darker canvas, lighter panels, lighter glass | Keeps the page the brightest thing and lets the bar float over the canvas |
 | 11 | The palette matches keywords of both languages, diacritic-insensitive | Bilingual users type either; "ciz" should find "çiz" |
 | 12 | Arrange shows all open documents by default | The light table is the headline feature and hid two of three documents |
+| 13 | Group menu: the capsule morphs in place, options rise as a second tier; no radial menu, drawer or sheet | Labels stay readable, nothing covers the page, the pointer stays put, same on a tablet |
 
-## 14. Open questions for the owner
+## 14. Open questions for the owner (answered 2026-10-01)
 
-1. **Structural layout change.** The navigator goes from seven icon tabs to four labelled
-   ones, the inspector starts closed, and the tool bar is grouped by task (§4, §5,
-   amendment A4). DESIGN §7 promised no structural change for the last pass, so this needs
-   your approval. If no: Home, the pen, merge discoverability, wording and the visual
-   refresh ship inside today's layout, with only the folded panel settings from §4.1.
-2. **Light theme timing.** Last package of M6 (1–2 weeks), or M8 after the beta. Proposed:
-   start it in M6 and let it slip to M8 if it would hold up the M7 release.
+1. **Structural layout change.** Approved by the owner: four labelled navigator tabs, the
+   inspector closed by default, the tool bar grouped by task. The owner left the shape of
+   the group menu to the project lead: an in-place morph of the capsule bar (§5.2), not a
+   radial menu, drawer or sheet.
+2. **Light theme timing.** The owner's answer: much later, not needed now. L1 moves to M8.

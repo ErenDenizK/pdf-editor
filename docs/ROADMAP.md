@@ -210,7 +210,6 @@ Spec: `docs/specs/experience-redesign.md`; evidence: `docs/design/experience-aud
 | Natural pen | creating a stroke never selects it; a compact pen bar with four presets that persist; strokes in a burst become one Ink annotation (one comment row, one undo step); lasso to recolour, resize, move or delete; coalesced pointer events, live smoothed preview, width from pressure or speed, fingers scroll when a pen is present | planned (spike S1 first: variable-width appearance across viewers; constant width stays in the Ink dictionary) |
 | Merge discoverability and wording | Home actions, Document menu, Arrange shows every open document, palette synonyms in English and Turkish, "Ink" becomes "Pen", the two "Sign" features get distinct names | planned |
 | Visual refresh | surface ladder with measured contrast, livelier glass with one elevation shadow for floating chrome, capsule toolbar with a solid accent for the active tool, pen presets as ink dots, rise-in motion honouring reduced motion | planned (DESIGN.md amendments listed in the spec) |
-| Light theme | a real light theme on the same tokens | planned, may slip to M8 |
 
 Exit: a new user merges two dropped files in under five actions (e2e); writing with the
 pen never opens a bar or selects the stroke (e2e with synthetic pointer events and
@@ -225,7 +224,7 @@ and migration), ADR-0017 (versioning and releases).
 
 | Item | Notes | Status |
 |---|---|---|
-| Name and addresses | display name Recto, descriptor "Recto PDF"; repository `recto` on its own domain in one step with redirect pages and a kill-switch worker at the old path; storage names unchanged | planned (owner: domain purchase, trademark check) |
+| Name and addresses | display name Recto, descriptor "Recto PDF"; repository `recto`, app at `erendenizk.github.io/recto/` (GitHub Pages only for now, owner decision 2026-10-01), redirect pages and a kill-switch worker at `/pdf-editor/` in the portfolio repository; storage names unchanged; a custom domain later follows ADR-0016 | planned (owner: trademark check) |
 | README and media | thesis, hero, four GIFs (Arrange, Redact, OCR, Compare), feature table, "Check it yourself", worker diagram, limits; media produced by Playwright screencasts and ffmpeg in a deploy job, served from the site, zipped onto releases; fictional demo documents | planned |
 | About page and metadata | `/about/` as a second entry with no app bundle; "About this app" in the menu; repository description, topics, social preview | planned |
 | Release mechanics | Changesets pre-release mode, `v1.0.0-beta.0` tag, GitHub pre-release with notes and a dist zip with SHA-256 | planned |
@@ -248,6 +247,7 @@ renders with every image under budget; the About page passes its size budget; th
 
 ## M8 — Ecosystem  (→ 2.0)
 
+- Light theme on the same tokens (moved from M6 on 2026-10-01).
 - Plugin API for tools.
 - Optional Tauri desktop shell with file associations.
 - Browser extension "open with".

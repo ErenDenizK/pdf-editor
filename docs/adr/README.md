@@ -21,6 +21,6 @@ only after discussion with the project owner; the discussion summary is appended
 | 0012 | OCR engine hosting and language packs | accepted |
 | 0013 | Signature validation semantics and PAdES-B signing | accepted |
 | 0014 | Batch recipe file format | accepted |
-| 0015 | Product name: Recto | proposed |
-| 0016 | Addresses: portfolio root, project paths, custom domain and migration | proposed |
-| 0017 | Versioning and public releases: `1.0.0-beta.N` first | proposed |
+| 0015 | Product name: Recto | accepted |
+| 0016 | Addresses: portfolio root, project paths, custom domain and migration | accepted (GitHub Pages only for now) |
+| 0017 | Versioning and public releases: `1.0.0-beta.N` first | accepted |

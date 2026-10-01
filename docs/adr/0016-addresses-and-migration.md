@@ -1,6 +1,6 @@
 # ADR-0016: Addresses: portfolio root, project paths, custom domain and migration
 
-**Status:** proposed · **Date:** 2026-10-01 · **Deciders:** project lead; the owner confirms
+**Status:** accepted · **Date:** 2026-10-01 · **Deciders:** project lead; confirmed by the owner on 2026-10-01
 · **Amends:** ADR-0004
 
 ## Context
@@ -113,3 +113,26 @@ derives from that base.
 - **App under `/app/` with a landing page at the root.** Rejected in the presentation
   research: it changes the PWA scope, adds a page between users and the tool, and needs
   two builds in one artifact.
+
+## Discussion summary
+
+Confirmed by the owner on 2026-10-01 with one change: **no custom domain for now; GitHub
+Pages only.** Decision 6 (the fallback) is therefore the plan for M7: the repository is
+renamed `pdf-editor` → `recto`, the app is served at `erendenizk.github.io/recto/`, and the
+portfolio repository `ErenDenizK.github.io` holds the `/pdf-editor/` redirect folder with
+its kill-switch worker (cheap, and it protects the owner's own installed copies even though
+the site has no other users yet). Decisions 1, 2, 4 and 7 stand. Decision 3 and steps 1, 3,
+5 and 6 are deferred until a domain is wanted; the second rename they then require is
+accepted as the price of starting on github.io.
+
+Answers to the owner's questions about the address structure:
+
+- The repository name `ErenDenizK.github.io` is mandatory for the user site: GitHub serves
+  that one repository at the root `erendenizk.github.io/`. Every other repository with
+  Pages enabled is served at `erendenizk.github.io/<repository>/`; the path is the
+  repository name and cannot be chosen separately without a custom domain. The username
+  is fixed by the GitHub account: renaming the account would move every Pages address.
+- What lives at `/<repository>/` is whatever that repository deploys. For Recto that is the
+  app itself (decision 4), with the presentation page beside it at `/recto/about/`. The
+  portfolio at the root links to the app and may carry its own case-study page for the
+  project; it is a presentation of the author, not a second home for the app.

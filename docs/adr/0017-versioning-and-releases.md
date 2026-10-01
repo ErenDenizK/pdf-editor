@@ -1,6 +1,6 @@
 # ADR-0017: Versioning and public releases: `1.0.0-beta.N` first
 
-**Status:** proposed · **Date:** 2026-10-01 · **Deciders:** project lead; the owner confirms
+**Status:** accepted · **Date:** 2026-10-01 · **Deciders:** project lead; confirmed by the owner on 2026-10-01
 · **Amends:** ADR-0006
 
 ## Context

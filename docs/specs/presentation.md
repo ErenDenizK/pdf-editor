@@ -339,9 +339,9 @@ about page, a hosted tour video, any analytics, a custom domain for the user sit
 
 ## 11. Open questions for the owner
 
-1. **Domain**: buy `rectopdf.app` (recommended) or use a subdomain of a personal domain?
-   Which registrar? DNS showed `rectopdf.*` unregistered on 2026-10-01; confirm at the
-   registrar. Without a domain, ADR-0016's fallback (`/recto/` on github.io) applies.
+1. **Domain**: answered 2026-10-01: none for now, GitHub Pages only. ADR-0016's fallback
+   applies: the app moves to `erendenizk.github.io/recto/` with the `/pdf-editor/` redirect
+   folder. `rectopdf.*` looked unregistered on 2026-10-01 if the owner wants it later.
 2. **Social preview**: GitHub has no API for it; the owner uploads the PNG in Settings →
    Social preview after WP8.
 3. **Trademark**: search RECTO at the USPTO (classes 9 and 42), EUIPO and TÜRKPATENT before
