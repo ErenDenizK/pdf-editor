@@ -216,22 +216,54 @@ repaired copy rather than an incremental save onto a broken xref.
 
 ## 7. Deployment and offline
 
-- GitHub Actions: `ci.yml` (lint, typecheck, unit, build, Playwright on Chromium /
-  Firefox / WebKit) and `deploy.yml` (`actions/upload-pages-artifact@v3` +
-  `actions/deploy-pages@v4`, `environment: github-pages`, `concurrency: pages`).
-- Vite `base` set to the project path; the same base propagated to the manifest, service
-  worker scope, worker URLs and WASM URLs. A custom domain avoids shared-origin storage
-  clashes between project sites and is recommended before v1.0.
+- **Address** (ADR-0016): GitHub Pages only for now. The app is the project site of the
+  repository `recto` at `https://erendenizk.github.io/recto/`, with the about page beside it
+  at `/recto/about/` (a second Vite entry that loads no app code). The old address
+  `/pdf-editor/` is a redirect folder with a kill-switch service worker in the portfolio
+  repository `ErenDenizK.github.io` (source: `tools/portfolio-redirect/`). A custom domain
+  later sets the repository variable `CUSTOM_DOMAIN`, which builds for `/`.
+- Vite `base` comes from `VITE_BASE_PATH` (`/<repository>/` in CI, `/` with a custom
+  domain); the manifest `id`, `scope` and `start_url`, the service worker scope, the
+  navigation fallback, worker URLs and WASM URLs all derive from it.
+- **GitHub Actions**:
+  - `ci.yml` on every push and pull request: format, lint, typecheck, unit and browser-mode
+    tests, the annotation cross-viewer matrix, the OCR lock check and the build (in the
+    Playwright container), then end-to-end tests on Chromium, Firefox and WebKit, and a
+    `docs` job on a plain runner: the copy check (`tools/copy-check`, the banned words of
+    the presentation spec §1.3) and lychee (`lychee.toml`) over the README, `docs/`,
+    `CONTRIBUTING.md`, `SECURITY.md` and the built about page.
+  - `deploy.yml` on pushes to `main` and by hand: `build` (the Pages build) → `media` (a
+    plain `ubuntu-24.04` runner with Playwright's Chromium and ffmpeg: a build for `/`
+    served by `vite preview`, the scripted scenes of `tools/media/`, budgets from
+    `tools/media/budgets.json`, a request log that fails on any other origin) → `pages`
+    (the site with the media under `media/`, uploaded with
+    `actions/upload-pages-artifact@v3`) → `deploy` (`actions/deploy-pages@v4`,
+    `environment: github-pages`, `concurrency: pages`). Until the first release creates
+    `main` it is dispatched from `develop`; afterwards it deploys `main` only (ADR-0017 §7).
+  - `release.yml` when `apps/web/package.json` changes on `main` (ADR-0017 §3): reads the
+    version, builds the app for `/` and the media, creates the tag `v<version>` on that
+    commit if it is missing, and publishes one GitHub Release with
+    `recto-<version>-dist.zip` (for self-hosting), `recto-<version>-media.zip` and
+    `SHA256SUMS`. Notes come from `.github/release-notes.md` (Highlights and Known
+    limitations by hand) and the CHANGELOG sections (Added, Changed, Fixed); versions with
+    a pre-release part are marked pre-release.
+  - `qpdf-wasm.yml` rebuilds `qpdf.wasm` from pinned sources and fails when the committed
+    artifact differs (ADR-0008).
+- **Media** (presentation spec §2.6) are never committed: they are built by the deploy
+  workflow, served from the site (`https://erendenizk.github.io/recto/media/<id>.gif` for
+  the README), excluded from the precache (`media/**` in Workbox `globIgnores`) and zipped
+  onto each release as its archive.
 - PWA via `vite-plugin-pwa` (migrate to `@vite-pwa/core` when stable):
   `registerType: 'prompt'`; multi-megabyte WASM excluded from precache and cached at
   runtime (CacheFirst) so first paint never waits on an engine download. The OCR files
   (`ocr/**`: tesseract's worker, cores and ~22 MB of language packs) are never precached
   and live in their own `pdf-editor-ocr` CacheFirst cache, filled on first use or by
   "Keep available offline" (ADR-0012).
-- Strict CSP in a `<meta>` tag: `default-src 'self'`, `connect-src 'none'` (or `'self'`
-  only for our own assets), `worker-src 'self'`, `wasm-unsafe-eval` for WASM. The privacy
-  indicator in the UI reads the live `PerformanceObserver` resource list to display
-  "0 external requests".
+- Strict CSP in a `<meta>` tag, the same on the app and the about page: `default-src
+  'self'`, `connect-src 'self'`, `worker-src 'self'`, `script-src 'self'
+  'wasm-unsafe-eval'`, `object-src 'none'`, `form-action 'none'`. The privacy indicator in
+  the status bar reads the live `PerformanceObserver` resource list to display "No external
+  requests" (it cannot see WebSocket frames or requests the CSP blocked).
 - Cross-origin isolation (`coi-serviceworker`) is **not** used in v1; it is a documented
   progressive enhancement if a threaded component is ever added (ADR-0004).
 

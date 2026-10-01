@@ -248,17 +248,17 @@ regression tests; the merge, pen, navigator and contrast criteria pass as record
 `docs/DESIGN.md` and the screenshots are current. **Done 2026-10-01**, pending the owner's
 tablet try-out of the burst defaults.
 
-## M7 — Presentation and public beta  (→ 1.0.0-beta.0)
+## M7 — Presentation and public beta  (→ 1.0.0-beta.0) — **in progress**
 
 Spec: `docs/specs/presentation.md`; decisions: ADR-0015 (name: Recto), ADR-0016 (addresses
 and migration), ADR-0017 (versioning and releases).
 
 | Item | Notes | Status |
 |---|---|---|
-| Name and addresses | display name Recto, descriptor "Recto PDF"; repository `recto`, app at `erendenizk.github.io/recto/` (GitHub Pages only for now, owner decision 2026-10-01), redirect pages and a kill-switch worker at `/pdf-editor/` in the portfolio repository; storage names unchanged; a custom domain later follows ADR-0016 | planned (owner: trademark check) |
-| README and media | thesis, hero, four GIFs (Arrange, Redact, OCR, Compare), feature table, "Check it yourself", worker diagram, limits; media produced by Playwright screencasts and ffmpeg in a deploy job, served from the site, zipped onto releases; fictional demo documents | planned |
-| About page and metadata | `/about/` as a second entry with no app bundle; "About this app" in the menu; repository description, topics, social preview | planned |
-| Release mechanics | Changesets pre-release mode, `v1.0.0-beta.0` tag, GitHub pre-release with notes and a dist zip with SHA-256 | planned |
+| Name and addresses | display name Recto, descriptor "Recto PDF"; repository `recto`, app at `erendenizk.github.io/recto/` (GitHub Pages only for now, owner decision 2026-10-01), redirect pages and a kill-switch worker at `/pdf-editor/` in the portfolio repository; storage names unchanged; a custom domain later follows ADR-0016 | in progress (the redirect folder and kill-switch worker are in `tools/portfolio-redirect/` with an end-to-end hand-over test; the rename pass, the repository rename and the owner's trademark check remain) |
+| README and media | thesis, hero, four GIFs (Arrange, Redact, OCR, Compare), feature table, "Check it yourself", worker diagram, limits; media produced by Playwright screencasts and ffmpeg in a deploy job, served from the site, zipped onto releases; fictional demo documents | in progress (fictional demo documents in `test/fixtures/demo/` with a `--check` mode; the media tool in `tools/media/` with budgets, a request log and the spike in research 10; the README rewritten with evidence links; the copy check and lychee in CI's `docs` job; the deploy workflow's `media` job; the remaining scenes and the social image remain) |
+| About page and metadata | `/about/` as a second entry with no app bundle; "About this app" in the menu; repository description, topics, social preview | in progress (the `/about/` page and the menu item are under way; the repository metadata remains) |
+| Release mechanics | Changesets pre-release mode, `v1.0.0-beta.0` tag, GitHub pre-release with notes and a dist zip with SHA-256 | in progress (the in-app About dialog with version, commit, build date and "Public beta"; `release.yml` with the notes template `.github/release-notes.md`; pre mode and the beta freeze in `CONTRIBUTING.md`; entering pre mode and the `v1.0.0-beta.0` release remain) |
 
 Exit: the live site answers at the new address with the old one redirecting; README
 renders with every image under budget; the About page passes its size budget; the

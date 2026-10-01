@@ -28,6 +28,14 @@ and are reproduced in the application's "About and licenses" view.
   Copyright Google LLC.
   License: Apache-2.0.
 
+- qpdf (v12.4.2), compiled to WebAssembly by packages/engine/qpdf/build.sh
+  Copyright (c) 2005-2024 Jay Berkenbilt and the qpdf contributors.
+  License: Apache-2.0 (also offered under the Artistic License 2.0).
+  Statically linked with zlib (zlib License; Copyright (c) 1995-2024 Jean-loup Gailly and
+  Mark Adler) and libjpeg-turbo (IJG License, Modified BSD and zlib License;
+  Copyright (c) 2009-2024 D. R. Commander and contributors; portions Copyright (c)
+  1991-2020 Thomas G. Lane, Guido Vollbeding).
+
 - React and React DOM
   Copyright (c) Meta Platforms, Inc. and affiliates.
   License: MIT.
