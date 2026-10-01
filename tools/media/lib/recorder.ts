@@ -10,6 +10,10 @@
  * `out/<id>/frames/`, an ffconcat list that gives every frame its real duration (ffmpeg then
  * resamples to a constant rate, lib/encode.ts), and `recording.json` with the measurements
  * the spike reports: frame size, frame rate and frame-time jitter.
+ *
+ * Long work is cut, not sped up (spec §2.3): between `cutStart` and `cutEnd` frames are
+ * dropped, and every later frame moves back by the length of the cut, so the clip jumps
+ * from the moment before the wait to the moment after it, at real speed on both sides.
  */
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -100,6 +104,10 @@ const round = (value: number, digits = 1) => Number(value.toFixed(digits));
 export class Recorder {
   private readonly frames: CapturedFrame[] = [];
   private stopper: (() => Promise<void>) | undefined;
+  /** Wall-clock spans (ms since the epoch, like frame timestamps) cut from the clip. */
+  private readonly cuts: { from: number; to: number }[] = [];
+  private cutFrom: number | undefined;
+  private readonly startedAt = Date.now();
 
   // Plain fields, not parameter properties: Node's type stripping (encode, check) rejects those.
   private readonly options: RecorderOptions;
@@ -158,14 +166,56 @@ export class Recorder {
     };
   }
 
+  /** Seconds of clip so far: wall time since the start, less the cuts. */
+  clipTime(): number {
+    const cut = this.cuts.reduce((sum, c) => sum + (c.to - c.from), 0);
+    return (Date.now() - this.startedAt - cut) / 1000;
+  }
+
+  /** Starts a cut: from now until `cutEnd`, nothing that happens is in the clip. */
+  cutStart(): void {
+    if (this.cutFrom !== undefined) throw new Error('a cut is already open');
+    this.cutFrom = Date.now();
+  }
+
+  /** Ends the cut; the next frame follows the last one before the cut directly. */
+  cutEnd(): void {
+    if (this.cutFrom === undefined) throw new Error('no cut is open');
+    this.cuts.push({ from: this.cutFrom, to: Date.now() });
+    this.cutFrom = undefined;
+  }
+
+  /**
+   * The frames that stay, on the clip's own time line: frames inside a cut are dropped and
+   * later ones move back by the length of every cut before them.
+   */
+  private splice(frames: readonly CapturedFrame[], stoppedAt: number) {
+    const kept: CapturedFrame[] = [];
+    for (const frame of frames) {
+      if (this.cuts.some((cut) => frame.timestamp >= cut.from && frame.timestamp < cut.to)) {
+        continue;
+      }
+      const shift = this.cuts
+        .filter((cut) => cut.to <= frame.timestamp)
+        .reduce((sum, cut) => sum + (cut.to - cut.from), 0);
+      kept.push({ data: frame.data, timestamp: frame.timestamp - shift });
+    }
+    const removed = this.cuts.reduce((sum, cut) => sum + (cut.to - cut.from), 0);
+    return { kept, end: stoppedAt - removed };
+  }
+
   /**
    * Stops capturing and writes frames, the ffconcat list and the measurements. The last
    * frame lasts until the moment of the stop, so a final hold is kept at its real length.
    */
   async stop(): Promise<RecordingStats> {
-    const stoppedAt = Date.now();
+    if (this.cutFrom !== undefined) this.cutEnd();
+    const now = Date.now();
     await this.stopper?.();
-    const frames = [...this.frames].sort((a, b) => a.timestamp - b.timestamp);
+    const { kept: frames, end: stoppedAt } = this.splice(
+      [...this.frames].sort((a, b) => a.timestamp - b.timestamp),
+      now,
+    );
     if (frames.length === 0) throw new Error('the screencast delivered no frames');
 
     const dir = this.options.dir;

@@ -7,14 +7,21 @@ import { expect } from '@playwright/test';
 import { scene } from '../lib/scene.ts';
 
 /**
- * The dropped files, in drop order (the order of the cards and sections). Corpus fixtures
- * for now; the demo fixtures (`test/fixtures/demo/`, spec §2.2) replace them here.
+ * The dropped files, in drop order (the order of the cards and sections): the demo
+ * documents of spec §2.2, from `test/fixtures/demo/`.
  */
-const FIXTURES = ['forms-a.pdf', 'images.pdf', 'many-pages.pdf'] as const;
+const FIXTURES = ['demo-report-v1.pdf', 'demo-agreement.pdf', 'demo-letter-scan.pdf'] as const;
 
 scene({
   id: '01-open-many',
   kind: 'clip',
+  async prepare(stage) {
+    // As in the hero still: smaller cells and no navigator, so Arrange shows all three
+    // sections at once.
+    await stage.command('Smaller thumbnails');
+    await stage.command('Toggle left panel');
+    await stage.page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  },
   async run(stage) {
     const { page, cursor } = stage;
     await expect(page.getByRole('heading', { name: 'Drop PDFs to start' })).toBeVisible();

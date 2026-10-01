@@ -50,11 +50,13 @@ function injectCursor(eventName: string): void {
     zIndex: '2147483647',
     transformOrigin: '2px 2px',
     transition: 'scale 60ms cubic-bezier(0.2, 0, 0, 1)',
-    // Off screen until the first move places it.
-    transform: 'translate(-100px, -100px)',
+    // Placed with `translate`, which applies before `scale`: with `transform` the press
+    // (scale 0.88) would also scale the position and draw the arrow off the pointer while
+    // the button is held. Off screen until the first move places it.
+    translate: '-100px -100px',
   });
   const set = (x: number, y: number) => {
-    cursor.style.transform = `translate(${x - 2}px, ${y - 2}px)`;
+    cursor.style.translate = `${x - 2}px ${y - 2}px`;
     window.dispatchEvent(new CustomEvent(eventName, { detail: { x, y } }));
   };
   win.__media = {

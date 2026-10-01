@@ -47,7 +47,7 @@ form fields go with their pages or are reconciled on export
 An export always writes a new file, so signatures in a source are removed, and the export
 dialog says so.
 
-<img src="https://erendenizk.github.io/recto/media/02-move-pages.gif" width="100%" alt="Pages 3 and 4 are dragged from one document into another; the export summary follows">
+<img src="https://erendenizk.github.io/recto/media/02-move-pages.gif" width="100%" alt="Pages 3 and 4 are dragged from one document into another, which then holds six pages">
 
 ## Redact, and the text is gone
 

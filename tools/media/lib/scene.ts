@@ -24,8 +24,14 @@ export interface Scene {
   /** The region that matters, in CSS pixels of the 1440 × 900 viewport. */
   readonly crop?: Crop;
   /**
-   * Plays the scene. A clip is recorded from the first frame after `Stage.open` until
-   * `run` returns plus the final hold; a still is taken when `run` returns.
+   * Sets the scene off camera (open the documents, go to the page): a clip starts on what
+   * `prepare` leaves on screen. Optional; everything in `run` is recorded.
+   */
+  prepare?(stage: Stage): Promise<void>;
+  /**
+   * Plays the scene. A clip is recorded from the end of `prepare` (or the first frame
+   * after `Stage.open`) until `run` returns plus the final hold; a still is taken when
+   * `run` returns.
    */
   run(stage: Stage): Promise<void>;
 }
@@ -42,10 +48,41 @@ export interface SceneRecord {
   readonly recording?: RecordingStats;
 }
 
-/** Recorder settings, overridable for the spike's comparisons. */
+/** The longest a clip may run (spec §6: "each under 8 s"). */
+export const MAX_CLIP_MS = 8000;
+
+/**
+ * Recorder settings. PNG frames (CDP screencast) by default: JPEG frames differ a little
+ * in every static region from one frame to the next, so the GIF's changed rectangles grew
+ * to most of the frame. On clip 3 (dialogs, a scrolling page) PNG frames made the GIF
+ * 1.83 MB instead of 3.05 MB, over its 3 MB budget, and the MP4 0.87 MB instead of
+ * 1.14 MB, at the same frame rate. MEDIA_FRAME_FORMAT=jpeg restores Playwright's
+ * `page.screencast` (JPEG only) for comparisons.
+ */
 function recorderFormat(): { format: 'jpeg' | 'png'; quality: number } {
-  const format = process.env.MEDIA_FRAME_FORMAT === 'png' ? 'png' : 'jpeg';
+  const format = process.env.MEDIA_FRAME_FORMAT === 'jpeg' ? 'jpeg' : 'png';
   return { format, quality: Number(process.env.MEDIA_JPEG_QUALITY ?? 90) };
+}
+
+/**
+ * MEDIA_BEATS=1: prints when each pointer action and hold of a clip ends, in clip seconds
+ * (cuts left out), to see where a clip spends its time when it runs long.
+ */
+function logBeats(id: string, stage: Stage, recorder: Recorder): void {
+  const wrap = <T extends object>(target: T, names: readonly (keyof T & string)[]) => {
+    for (const name of names) {
+      const original = target[name] as unknown as (...args: unknown[]) => Promise<unknown>;
+      Object.assign(target, {
+        [name]: async (...args: unknown[]) => {
+          const result = await original.apply(target, args);
+          console.log(`${id} ${recorder.clipTime().toFixed(2)} s  ${name}`);
+          return result;
+        },
+      });
+    }
+  };
+  wrap(stage, ['hold', 'cut', 'rendered']);
+  wrap(stage.cursor, ['click', 'move', 'down', 'up']);
 }
 
 export function scene(definition: Scene): void {
@@ -59,6 +96,7 @@ export function scene(definition: Scene): void {
     const viewport = { ...VIEWPORT };
     const scale = SCALE;
     let recording: RecordingStats | undefined;
+    await definition.prepare?.(stage);
     if (definition.kind === 'clip') {
       const engine = process.env.MEDIA_SCREENCAST;
       const recorder = await Recorder.start(page, {
@@ -67,10 +105,18 @@ export function scene(definition: Scene): void {
         ...recorderFormat(),
         ...(engine === 'cdp' || engine === 'playwright' ? { engine } : {}),
       });
+      stage.recorder = recorder;
+      if (process.env.MEDIA_BEATS) logBeats(definition.id, stage, recorder);
       await definition.run(stage);
       await stage.hold(FINAL_HOLD_MS);
       recording = await recorder.stop();
+      stage.recorder = undefined;
       console.log(`${definition.id}: ${JSON.stringify(recording)}`);
+      // Clips stay under 8 s (spec §6). A warning, not a failure: app work runs slower on
+      // a busy runner, and a long clip is a pacing problem, not a broken feature.
+      if (recording.durationMs >= MAX_CLIP_MS) {
+        console.warn(`${definition.id}: ${recording.durationMs} ms, over ${MAX_CLIP_MS} ms`);
+      }
     } else {
       await definition.run(stage);
       // A still is a lossless screenshot at the device scale (spec §2.3).

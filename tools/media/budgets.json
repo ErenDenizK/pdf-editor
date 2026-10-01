@@ -1,15 +1,50 @@
 {
-  "$comment": "Size limits per published file in out/media/ (docs/specs/presentation.md §2.4), in bytes, decimal (1 KB = 1000 B). `check` fails on a file over its limit, on a listed file that is missing, and on a file with no entry. `readme` lists the files the README shows on first view; their total has its own limit.",
+  "$comment": "Size limits per published file in out/media/ (docs/specs/presentation.md §2.4), in bytes, decimal (1 KB = 1000 B). `check` fails on a file over its limit, on a listed file that is missing, and on a file with no entry. `readme` lists the files the README shows on first view; their total has its own limit. `social.png` is the social preview and og:image (spec §4: under 1 MB).",
   "files": {
     "00-hero.png": 600000,
     "00-hero.webp": 600000,
     "01-open-many.gif": 3000000,
     "01-open-many.mp4": 1500000,
     "01-open-many.webm": 1500000,
-    "01-open-many.poster.webp": 1500000
+    "01-open-many.poster.webp": 1500000,
+    "02-move-pages.gif": 3000000,
+    "02-move-pages.mp4": 1500000,
+    "02-move-pages.webm": 1500000,
+    "02-move-pages.poster.webp": 1500000,
+    "03-redact.gif": 3000000,
+    "03-redact.mp4": 1500000,
+    "03-redact.webm": 1500000,
+    "03-redact.poster.webp": 1500000,
+    "04-recognise-scan.gif": 3000000,
+    "04-recognise-scan.mp4": 1500000,
+    "04-recognise-scan.webm": 1500000,
+    "04-recognise-scan.poster.webp": 1500000,
+    "05-compare.gif": 3000000,
+    "05-compare.mp4": 1500000,
+    "05-compare.webm": 1500000,
+    "05-compare.poster.webp": 1500000,
+    "06-edit-text.gif": 3000000,
+    "06-edit-text.mp4": 1500000,
+    "06-edit-text.webm": 1500000,
+    "06-edit-text.poster.webp": 1500000,
+    "07-sign.gif": 3000000,
+    "07-sign.mp4": 1500000,
+    "07-sign.webm": 1500000,
+    "07-sign.poster.webp": 1500000,
+    "08-markdown.gif": 3000000,
+    "08-markdown.mp4": 1500000,
+    "08-markdown.webm": 1500000,
+    "08-markdown.poster.webp": 1500000,
+    "social.png": 999999
   },
   "readme": {
     "limit": 12000000,
-    "files": ["00-hero.png"]
+    "files": [
+      "00-hero.png",
+      "02-move-pages.gif",
+      "03-redact.gif",
+      "04-recognise-scan.gif",
+      "05-compare.gif"
+    ]
   }
 }
