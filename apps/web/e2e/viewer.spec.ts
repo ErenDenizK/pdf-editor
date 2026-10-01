@@ -350,8 +350,10 @@ test('page 1 keeps its text in view through 1440 → 1024 → 1440 px', async ({
     await expect
       .poll(() =>
         first.evaluate(
+          // The bitmap follows the sheet at device scale once the re-render has landed;
+          // a one-pixel tolerance covers the snapped sheet size on every engine.
           (canvas: HTMLCanvasElement) =>
-            canvas.width === Math.round(canvas.getBoundingClientRect().width),
+            Math.abs(canvas.width - canvas.getBoundingClientRect().width * devicePixelRatio) <= 1,
         ),
       )
       .toBe(true);

@@ -561,11 +561,14 @@ test.describe('pen: width changes, zoom, Draw, lines and undo', () => {
     const ink = layer(page).locator('[data-annotation-kind="ink"]');
     await expect(ink).toHaveCount(1, { timeout: 10_000 });
     const [path = []] = await inkPoints(page);
-    expect(path.length).toBeGreaterThan(2);
+    // A straight stroke simplifies to its two ends; a bent one keeps the corner. The stroke
+    // must still span both halves: 200 CSS px of a 612 pt page at the first zoom.
+    expect(path.length).toBeGreaterThanOrEqual(2);
     const ys = path.map(([, py = 0]) => py);
-    // One straight segment per zoom: every point lies on the line through the ends.
     const [ax = 0, ay = 0] = path[0] ?? [];
     const [bx = 0, by = 0] = path.at(-1) ?? [];
+    expect(Math.abs(bx - ax)).toBeGreaterThan(0.8 * ((200 * 612) / box.width));
+    // One straight segment per zoom: every point lies on the line through the ends.
     for (const [px = 0, py = 0] of path) {
       const t = (px - ax) / (bx - ax || 1);
       expect(Math.abs(py - (ay + (by - ay) * t)), `y at x ${px}`).toBeLessThan(2);
