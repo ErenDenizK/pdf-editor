@@ -1,6 +1,8 @@
 /**
  * Keyboard map on `?` (DESIGN.md §4.6): every registered command, grouped, with keycaps.
- * Also documents the in-widget keys that are not commands (tabs, tool bar, splitters).
+ * A tool, and every other command the tool bar holds, also names its tool bar group
+ * ("Tool bar: Draw", experience-redesign spec §5.1). Also documents the in-widget keys that
+ * are not commands (tabs, tool bar, splitters).
  */
 import { Dialog } from '@base-ui/react/dialog';
 import { X } from 'lucide-react';
@@ -12,6 +14,7 @@ import { useCommands } from '../commands/use-commands';
 import { m } from '../i18n';
 import { useUiStore } from '../state/ui-store';
 import { Keycaps } from '../ui/Keycaps';
+import { barGroupLabelOfCommand } from './FloatingToolbar.groups';
 import styles from './ShortcutOverlay.module.css';
 
 /** In-widget keys; `title` is a message function so it follows the active language. */
@@ -19,6 +22,7 @@ const WIDGET_KEYS: readonly { title: () => string; keys: readonly ParsedShortcut
   { title: m.shortcuts_move_tabs, keys: [parseShortcut('Left'), parseShortcut('Right')] },
   { title: m.shortcuts_close_tab, keys: [parseShortcut('Delete')] },
   { title: m.shortcuts_move_tools, keys: [parseShortcut('Left'), parseShortcut('Right')] },
+  { title: m.bar_shortcut_back, keys: [parseShortcut('Escape')] },
   { title: m.shortcuts_resize_panel, keys: [parseShortcut('Left'), parseShortcut('Right')] },
   { title: m.shortcuts_move_focus_pages, keys: [parseShortcut('Left'), parseShortcut('Down')] },
   {
@@ -67,19 +71,29 @@ export function ShortcutOverlay() {
                   {group}
                 </h3>
                 <dl className={styles.rows}>
-                  {items.map((command) => (
-                    <div key={command.id} className={styles.row}>
-                      <dt className={styles.rowTitle}>
-                        {command.title.replace(/…$/, '')}
-                        {command.note ? <span className={styles.note}>{command.note}</span> : null}
-                      </dt>
-                      <dd className={styles.keys}>
-                        {command.shortcuts.map((shortcut, index) => (
-                          <Keycaps key={index} shortcut={shortcut} />
-                        ))}
-                      </dd>
-                    </div>
-                  ))}
+                  {items.map((command) => {
+                    const barGroup = barGroupLabelOfCommand(command.id);
+                    return (
+                      <div key={command.id} className={styles.row}>
+                        <dt className={styles.rowTitle}>
+                          {command.title.replace(/…$/, '')}
+                          {barGroup ? (
+                            <span className={styles.note} data-bar-group-note="">
+                              {m.bar_in_group({ group: barGroup })}
+                            </span>
+                          ) : null}
+                          {command.note ? (
+                            <span className={styles.note}>{command.note}</span>
+                          ) : null}
+                        </dt>
+                        <dd className={styles.keys}>
+                          {command.shortcuts.map((shortcut, index) => (
+                            <Keycaps key={index} shortcut={shortcut} />
+                          ))}
+                        </dd>
+                      </div>
+                    );
+                  })}
                 </dl>
               </section>
             ))}

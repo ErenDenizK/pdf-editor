@@ -3,6 +3,10 @@
  * password and Strip metadata. Each result is one history entry on the document model
  * (`setSecurity`, `removePassword`, `setMetadataStrip`) and takes effect at export.
  *
+ * And the Document info sheet (experience-redesign §4.2): the file facts and honesty
+ * badges, editable metadata, the password and the diagnostics, moved out of the inspector.
+ * A password dialog opened from the sheet returns to it when it closes.
+ *
  * Mounted twice: once at the app root (`origin="app"`) and once inside the export dialog
  * (`origin="export"`), so a dialog opened from the export dialog nests in its modal stack.
  */
@@ -21,12 +25,22 @@ import { type Ref, type SyntheticEvent, useEffect, useId, useRef, useState } fro
 
 import { formatNumber, m } from '../i18n';
 import { announce } from '../shell/announcer';
+import { DocumentFacts } from '../shell/RightPanel';
 import overlay from '../shell/ShortcutOverlay.module.css';
 import { documentSources, useWorkspaceStore } from '../state/workspace-store';
 import { useRetained } from '../ui/use-retained';
+import { DiagnosticsDetails } from './Diagnostics';
 import { useSourceDiagnostics } from './diagnostics';
-import { closeDocumentDialog, type DocumentDialog, useDocumentDialogStore } from './document-store';
+import {
+  closeDocumentDialog,
+  type DocumentDialog,
+  openDocumentDialog,
+  useDocumentDialogStore,
+} from './document-store';
+import infoStyles from './DocumentInfo.module.css';
 import styles from './DocumentTools.module.css';
+import { MetadataEditor } from './MetadataEditor';
+import { SecurityInfo } from './SecurityInfo';
 import {
   initialValues,
   normalizePermissions,
@@ -43,6 +57,25 @@ import {
   restrictionList,
 } from './security-text';
 import { findingFor, initialStrip, mergeFindings, STRIP_ITEMS, stripSummary } from './strip-items';
+
+/**
+ * A dialog opened from the Document info sheet (its "Set password…" and "Remove password…"
+ * buttons) replaces the sheet; when it closes, the sheet comes back.
+ */
+let returnToInfo: DocumentDialog | null = null;
+useDocumentDialogStore.subscribe((state, previous) => {
+  const was = previous.dialog;
+  const now = state.dialog;
+  if (was?.kind === 'info' && now !== null && now.kind !== 'info') {
+    returnToInfo = now.documentId === was.documentId ? was : null;
+  } else if (now === null && was !== null && was.kind !== 'info' && returnToInfo !== null) {
+    const info = returnToInfo;
+    returnToInfo = null;
+    openDocumentDialog('info', info.documentId, info.origin);
+  } else if (now?.kind === 'info' || now === null) {
+    returnToInfo = null;
+  }
+});
 
 export function DocumentDialogs({
   origin = 'app',
@@ -79,7 +112,46 @@ function DialogBody({ dialog }: { readonly dialog: DocumentDialog }) {
       return <RemovePasswordFlow doc={doc} />;
     case 'strip-metadata':
       return <StripMetadataFlow doc={doc} />;
+    case 'info':
+      return <DocumentInfoSheet doc={doc} />;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Document info
+// ---------------------------------------------------------------------------
+
+/** The side sheet: facts and badges, metadata (focused on Title), password, diagnostics. */
+function DocumentInfoSheet({ doc }: { readonly doc: VirtualDocument }) {
+  const ws = useWorkspaceStore((s) => s.workspace);
+  const sources = documentSources(doc).flatMap((id) => {
+    const source = ws.sources[id];
+    return source ? [source] : [];
+  });
+  return (
+    <Dialog.Popup
+      className={infoStyles.sheet}
+      initialFocus={() =>
+        document.querySelector<HTMLElement>(
+          '[data-document-info] [data-testid="metadata-editor"] input',
+        )
+      }
+      data-testid="document-info"
+      data-document-info=""
+    >
+      <Header title={m.docinfo_title()} />
+      <div className={infoStyles.body}>
+        <Dialog.Description className="visually-hidden">{doc.title}</Dialog.Description>
+        <h3 className={infoStyles.subTitle}>{m.docinfo_file()}</h3>
+        <DocumentFacts doc={doc} />
+        <h3 className={infoStyles.subTitle}>{m.info_metadata()}</h3>
+        <MetadataEditor doc={doc} />
+        <h3 className={infoStyles.subTitle}>{m.info_security()}</h3>
+        <SecurityInfo doc={doc} />
+        {sources.length > 0 ? <DiagnosticsDetails sources={sources} /> : null}
+      </div>
+    </Dialog.Popup>
+  );
 }
 
 function Header({ title }: { readonly title: string }) {

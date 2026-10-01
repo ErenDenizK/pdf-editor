@@ -10,18 +10,25 @@ import { create } from 'zustand';
 
 import { readJson, writeJson } from './safe-storage';
 
-/** `compare`: the Compare view (spec recognize-and-compare §2.2), a third stage view. */
-export type ViewMode = 'read' | 'arrange' | 'compare';
-export type LeftPanelView =
-  | 'pages'
-  | 'outline'
-  | 'search'
-  | 'comments'
-  | 'redactions'
-  | 'forms'
-  | 'files'
-  /** The Compare view's Changes list; not persisted (a comparison lives for the session). */
-  | 'changes';
+/**
+ * `compare`: the Compare view (spec recognize-and-compare §2.2), a third stage view.
+ * `home`: the open files as cards (experience-redesign §3), also the empty state.
+ */
+export type ViewMode = 'home' | 'read' | 'arrange' | 'compare';
+/**
+ * The navigator's tabs (experience-redesign §4.1). `changes` is the Compare view's Changes
+ * list, shown only in Compare; not persisted (a comparison lives for the session).
+ */
+export type LeftPanelView = 'pages' | 'find' | 'review' | 'files' | 'changes';
+/**
+ * Views of the seven-tab rail (`ui:v1`). Still accepted when the state is set (commands
+ * written against them keep working) and mapped by `navigatorTarget`; never stored.
+ */
+export type LegacyLeftPanelView = 'outline' | 'search' | 'comments' | 'redactions' | 'forms';
+/** What the Pages tab shows: thumbnails, or the outline ("Bookmarks"). Remembered. */
+export type PagesView = 'thumbnails' | 'bookmarks';
+/** The Review tab's filter chips (experience-redesign §4.1). Remembered. */
+export type ReviewFilter = 'all' | 'comments' | 'redactions' | 'fields';
 /** Placeholder tool ids; the tool state machine (ARCHITECTURE.md §6) will own these. */
 export type ToolId = 'select' | 'highlight' | 'ink' | 'text' | 'shapes' | 'note';
 
@@ -46,7 +53,9 @@ const DEFAULT_ARRANGE_SIZE = 1;
 export type FitMode = 'width' | 'page';
 export const MAX_ZOOM = ZOOM_LEVELS[ZOOM_LEVELS.length - 1] ?? 5;
 const MAX_RECENTS = 5;
-const STORAGE_KEY = 'pdf-editor:ui:v1';
+/** Panel layout (experience-redesign §9); `ui:v1` is migrated into it once. */
+export const LAYOUT_STORAGE_KEY = 'pdf-editor:ui:v2';
+export const LEGACY_LAYOUT_STORAGE_KEY = 'pdf-editor:ui:v1';
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -57,47 +66,135 @@ export function nextZoomLevel(current: number, direction: 1 | -1): number {
   return [...ZOOM_LEVELS].reverse().find((z) => z < current - 1e-3) ?? MIN_ZOOM;
 }
 
-interface PersistedLayout {
+export interface PersistedLayout {
   leftPanelOpen: boolean;
   leftPanelView: LeftPanelView;
+  pagesView: PagesView;
+  reviewFilter: ReviewFilter;
   leftPanelWidth: number;
+  /** The inspector: closed until the person opens it; the app never opens it by itself. */
   rightPanelOpen: boolean;
   rightPanelWidth: number;
 }
 
-const DEFAULT_LAYOUT: PersistedLayout = {
+export const DEFAULT_LAYOUT: PersistedLayout = {
   leftPanelOpen: true,
   leftPanelView: 'pages',
+  pagesView: 'thumbnails',
+  reviewFilter: 'all',
   leftPanelWidth: LEFT_PANEL_WIDTH.default,
-  rightPanelOpen: true,
+  rightPanelOpen: false,
   rightPanelWidth: RIGHT_PANEL_WIDTH.default,
 };
 
-/** Validates persisted data field by field; anything unexpected falls back to defaults. */
+const STORED_VIEWS: readonly LeftPanelView[] = ['pages', 'find', 'review', 'files'];
+const LEGACY_VIEWS: readonly LegacyLeftPanelView[] = [
+  'outline',
+  'search',
+  'comments',
+  'redactions',
+  'forms',
+];
+const REVIEW_FILTERS: readonly ReviewFilter[] = ['all', 'comments', 'redactions', 'fields'];
+
+export function isLegacyView(view: unknown): view is LegacyLeftPanelView {
+  return LEGACY_VIEWS.includes(view as LegacyLeftPanelView);
+}
+
+/** Where a view lives in the navigator: its tab, and the Pages view or Review filter. */
+export function navigatorTarget(
+  view: LeftPanelView | LegacyLeftPanelView,
+): Pick<PersistedLayout, 'leftPanelView'> &
+  Partial<Pick<PersistedLayout, 'pagesView' | 'reviewFilter'>> {
+  switch (view) {
+    case 'outline':
+      return { leftPanelView: 'pages', pagesView: 'bookmarks' };
+    case 'search':
+      return { leftPanelView: 'find' };
+    case 'comments':
+      return { leftPanelView: 'review', reviewFilter: 'comments' };
+    case 'redactions':
+      return { leftPanelView: 'review', reviewFilter: 'redactions' };
+    case 'forms':
+      return { leftPanelView: 'review', reviewFilter: 'fields' };
+    default:
+      return { leftPanelView: view };
+  }
+}
+
+/**
+ * Whether the navigator shows `view` now. A Review filter counts as shown under "All"
+ * too, where its rows are listed; Bookmarks only in the Pages tab's Bookmarks view.
+ */
+export function isNavigatorShowing(
+  state: Pick<UiState, 'leftPanelOpen' | 'leftPanelView' | 'pagesView' | 'reviewFilter'>,
+  view: LeftPanelView | LegacyLeftPanelView,
+): boolean {
+  if (!state.leftPanelOpen) return false;
+  const target = navigatorTarget(view);
+  if (state.leftPanelView !== target.leftPanelView) return false;
+  if (target.pagesView !== undefined && state.pagesView !== target.pagesView) return false;
+  if (target.reviewFilter !== undefined) {
+    return state.reviewFilter === 'all' || state.reviewFilter === target.reviewFilter;
+  }
+  return true;
+}
+
+const bool = (x: unknown, d: boolean) => (typeof x === 'boolean' ? x : d);
+const width = (x: unknown, range: { min: number; max: number; default: number }) =>
+  typeof x === 'number' && Number.isFinite(x) ? clamp(x, range.min, range.max) : range.default;
+
+/** Validates `ui:v2` field by field; anything unexpected falls back to defaults. */
 export function parseLayout(value: unknown): PersistedLayout {
   if (typeof value !== 'object' || value === null) return DEFAULT_LAYOUT;
   const v = value as Record<string, unknown>;
-  const bool = (x: unknown, d: boolean) => (typeof x === 'boolean' ? x : d);
-  const width = (x: unknown, range: { min: number; max: number; default: number }) =>
-    typeof x === 'number' && Number.isFinite(x) ? clamp(x, range.min, range.max) : range.default;
-  const views: readonly LeftPanelView[] = [
-    'pages',
-    'outline',
-    'search',
-    'comments',
-    'redactions',
-    'forms',
-    'files',
-  ];
   return {
     leftPanelOpen: bool(v.leftPanelOpen, DEFAULT_LAYOUT.leftPanelOpen),
-    leftPanelView: views.includes(v.leftPanelView as LeftPanelView)
+    leftPanelView: STORED_VIEWS.includes(v.leftPanelView as LeftPanelView)
       ? (v.leftPanelView as LeftPanelView)
       : DEFAULT_LAYOUT.leftPanelView,
+    pagesView: v.pagesView === 'bookmarks' ? 'bookmarks' : 'thumbnails',
+    reviewFilter: REVIEW_FILTERS.includes(v.reviewFilter as ReviewFilter)
+      ? (v.reviewFilter as ReviewFilter)
+      : DEFAULT_LAYOUT.reviewFilter,
     leftPanelWidth: width(v.leftPanelWidth, LEFT_PANEL_WIDTH),
     rightPanelOpen: bool(v.rightPanelOpen, DEFAULT_LAYOUT.rightPanelOpen),
     rightPanelWidth: width(v.rightPanelWidth, RIGHT_PANEL_WIDTH),
   };
+}
+
+/**
+ * `ui:v1` → `ui:v2`: the old view maps to its tab (outline → Pages with Bookmarks on;
+ * search → Find; comments, redactions, forms → Review with that filter); widths and the
+ * navigator's open state carry over. The inspector starts closed (decision 4): v1 stored
+ * it open for everyone who never touched it, so its value says nothing about a choice.
+ */
+export function migrateLayout(v1: unknown): PersistedLayout {
+  if (typeof v1 !== 'object' || v1 === null) return DEFAULT_LAYOUT;
+  const v = v1 as Record<string, unknown>;
+  const view = v.leftPanelView;
+  const target =
+    isLegacyView(view) || view === 'pages' || view === 'files'
+      ? navigatorTarget(view)
+      : { leftPanelView: DEFAULT_LAYOUT.leftPanelView };
+  return {
+    ...DEFAULT_LAYOUT,
+    ...target,
+    leftPanelOpen: bool(v.leftPanelOpen, DEFAULT_LAYOUT.leftPanelOpen),
+    leftPanelWidth: width(v.leftPanelWidth, LEFT_PANEL_WIDTH),
+    rightPanelWidth: width(v.rightPanelWidth, RIGHT_PANEL_WIDTH),
+  };
+}
+
+/** Reads `ui:v2`, or migrates `ui:v1` once (the result is written, so v1 is not read again). */
+export function loadLayout(): PersistedLayout {
+  const stored = readJson(LAYOUT_STORAGE_KEY);
+  if (stored !== undefined) return parseLayout(stored);
+  const legacy = readJson(LEGACY_LAYOUT_STORAGE_KEY);
+  if (legacy === undefined) return DEFAULT_LAYOUT;
+  const layout = migrateLayout(legacy);
+  writeJson(LAYOUT_STORAGE_KEY, layout);
+  return layout;
 }
 
 export interface UiState extends PersistedLayout {
@@ -127,10 +224,21 @@ export interface UiState extends PersistedLayout {
   arrangeCollapsed: readonly DocumentId[];
   /** A document title being edited in place: in its tab or its light-table section. */
   renaming: { readonly documentId: DocumentId; readonly surface: 'tab' | 'section' } | null;
+  /**
+   * The selected cards on Home, in the order they were selected (experience-redesign §3).
+   * Session only; ids of closed documents are ignored by readers (`home/home-model.ts`).
+   */
+  homeSelection: readonly DocumentId[];
+  /** Where a Shift range on Home starts: the last card clicked or toggled. */
+  homeAnchor: DocumentId | null;
 
   toggleLeftPanel: () => void;
   /** Opens the left panel on a view; selecting the open view again collapses it. */
   showLeftPanelView: (view: LeftPanelView) => void;
+  /** Opens the navigator on a view (a legacy view opens its tab, Pages view or filter). */
+  showNavigator: (view: LeftPanelView | LegacyLeftPanelView) => void;
+  setPagesView: (view: PagesView) => void;
+  setReviewFilter: (filter: ReviewFilter) => void;
   setLeftPanelWidth: (width: number) => void;
   toggleRightPanel: () => void;
   setRightPanelWidth: (width: number) => void;
@@ -161,6 +269,8 @@ export interface UiState extends PersistedLayout {
   hideFromArrange: (id: DocumentId) => void;
   setArrangeCollapsed: (id: DocumentId, collapsed: boolean) => void;
   setRenaming: (renaming: UiState['renaming']) => void;
+  /** Replaces the Home selection; `anchor` defaults to the last selected card. */
+  setHomeSelection: (selection: readonly DocumentId[], anchor?: DocumentId | null) => void;
 }
 
 function withIds(
@@ -171,8 +281,8 @@ function withIds(
   return added.length === 0 ? list : [...list, ...new Set(added)];
 }
 
-export const useUiStore = create<UiState>()((set, get) => ({
-  ...parseLayout(readJson(STORAGE_KEY)),
+const store = create<UiState>()((set, get) => ({
+  ...loadLayout(),
   viewMode: 'read',
   zoom: 1,
   fitMode: 'width',
@@ -185,6 +295,8 @@ export const useUiStore = create<UiState>()((set, get) => ({
   arrangeHidden: [],
   arrangeCollapsed: [],
   renaming: null,
+  homeSelection: [],
+  homeAnchor: null,
 
   toggleLeftPanel: () => set((s) => ({ leftPanelOpen: !s.leftPanelOpen })),
   showLeftPanelView: (view) =>
@@ -193,6 +305,9 @@ export const useUiStore = create<UiState>()((set, get) => ({
         ? { leftPanelOpen: false }
         : { leftPanelOpen: true, leftPanelView: view },
     ),
+  showNavigator: (view) => set({ leftPanelOpen: true, ...navigatorTarget(view) }),
+  setPagesView: (pagesView) => set({ pagesView }),
+  setReviewFilter: (reviewFilter) => set({ reviewFilter }),
   setLeftPanelWidth: (width) =>
     set({ leftPanelWidth: clamp(Math.round(width), LEFT_PANEL_WIDTH.min, LEFT_PANEL_WIDTH.max) }),
   toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
@@ -250,6 +365,11 @@ export const useUiStore = create<UiState>()((set, get) => ({
           },
     ),
   setRenaming: (renaming) => set({ renaming }),
+  setHomeSelection: (selection, anchor) =>
+    set({
+      homeSelection: [...new Set(selection)],
+      homeAnchor: anchor === undefined ? (selection[selection.length - 1] ?? null) : anchor,
+    }),
   setArrangeCollapsed: (id, collapsed) =>
     set((s) => {
       if (s.arrangeCollapsed.includes(id) === collapsed) return s;
@@ -261,11 +381,39 @@ export const useUiStore = create<UiState>()((set, get) => ({
     }),
 }));
 
+/** A state patch that may name a view of the seven-tab rail (`LegacyLeftPanelView`). */
+export type UiStatePatch = Partial<Omit<UiState, 'leftPanelView'>> & {
+  leftPanelView?: LeftPanelView | LegacyLeftPanelView;
+};
+
+function withNavigatorTarget<T extends UiStatePatch>(patch: T): Partial<UiState> {
+  const view = patch.leftPanelView;
+  return isLegacyView(view) ? { ...patch, ...navigatorTarget(view) } : (patch as Partial<UiState>);
+}
+
+// Callers written for the seven-tab rail set `leftPanelView: 'comments'` and the like;
+// the patch is mapped to the navigator's tab and filter before it reaches the state.
+const setState = store.setState;
+store.setState = (partial: UiStatePatch | ((state: UiState) => UiStatePatch), replace?: boolean) =>
+  replace === true
+    ? setState(partial as UiState, true)
+    : setState(
+        typeof partial === 'function'
+          ? (state) => withNavigatorTarget(partial(state))
+          : withNavigatorTarget(partial),
+      );
+
+export const useUiStore = store as typeof store & {
+  setState: (partial: UiStatePatch | ((state: UiState) => UiStatePatch)) => void;
+};
+
 // Persist layout changes only; the comparison avoids a write on every zoom or keystroke.
 useUiStore.subscribe((state, previous) => {
   if (
     state.leftPanelOpen !== previous.leftPanelOpen ||
     state.leftPanelView !== previous.leftPanelView ||
+    state.pagesView !== previous.pagesView ||
+    state.reviewFilter !== previous.reviewFilter ||
     state.leftPanelWidth !== previous.leftPanelWidth ||
     state.rightPanelOpen !== previous.rightPanelOpen ||
     state.rightPanelWidth !== previous.rightPanelWidth
@@ -273,10 +421,12 @@ useUiStore.subscribe((state, previous) => {
     const layout: PersistedLayout = {
       leftPanelOpen: state.leftPanelOpen,
       leftPanelView: state.leftPanelView,
+      pagesView: state.pagesView,
+      reviewFilter: state.reviewFilter,
       leftPanelWidth: state.leftPanelWidth,
       rightPanelOpen: state.rightPanelOpen,
       rightPanelWidth: state.rightPanelWidth,
     };
-    writeJson(STORAGE_KEY, layout);
+    writeJson(LAYOUT_STORAGE_KEY, layout);
   }
 });

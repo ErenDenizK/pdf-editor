@@ -1,12 +1,12 @@
 /**
  * Which document-tools dialog is open (spec document-tools.md §3, §4): Set password,
- * Remove password, Strip metadata. `origin` says where it was opened from: the export
+ * Remove password, Strip metadata, or the Document info sheet (experience-redesign §4.2). `origin` says where it was opened from: the export
  * dialog renders its own (nested) instance so focus stays inside the modal stack.
  */
 import type { DocumentId } from '@pdf-editor/document-model';
 import { create } from 'zustand';
 
-export type DocumentDialogKind = 'set-password' | 'remove-password' | 'strip-metadata';
+export type DocumentDialogKind = 'set-password' | 'remove-password' | 'strip-metadata' | 'info';
 
 export interface DocumentDialog {
   readonly kind: DocumentDialogKind;

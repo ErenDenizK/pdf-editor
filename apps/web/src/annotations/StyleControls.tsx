@@ -6,7 +6,8 @@
  * selection it edits the selection (slider changes coalesce into one history entry, and
  * only the latest value of a burst is sent to the engine); without one it changes the armed
  * tool's style, which persists per device. The `tool` variant shows the armed tool's style
- * (Properties panel with nothing selected), so a colour or width can be set before drawing.
+ * (the tool bar's options tier, and the Properties panel with nothing selected), so a colour
+ * or width can be set before drawing; with a selection it shows (and edits) the selection.
  */
 import type { Annotation } from '@pdf-editor/engine';
 import { MessageSquare, Trash2 } from 'lucide-react';
@@ -17,6 +18,7 @@ import { IconButton } from '../ui/IconButton';
 import { deleteAnnotations } from './actions';
 import {
   type PageTarget,
+  selectedAnnotations,
   type StyleGroup,
   SWATCHES,
   type ToolStyle,
@@ -52,6 +54,8 @@ export type StyleControlsProps =
       /** The armed tool's style (nothing selected): what the next annotation gets. */
       readonly variant: 'tool';
       readonly group: StyleGroup;
+      /** Where the controls sit: the inspector (default) or the tool bar's options tier. */
+      readonly placement?: 'panel' | 'tier';
     };
 
 /** What the controls show, from the selection or from a tool style. */
@@ -95,13 +99,22 @@ export function StyleControls(props: StyleControlsProps) {
   const toolStyle = useAnnotationStore((s) =>
     props.variant === 'tool' ? s.styles[props.group] : undefined,
   );
+  // A tool's controls edit the selection when there is one (applyStyle), so they show it.
+  const selection = useAnnotationStore((s) => (props.variant === 'tool' ? s.selection : null));
+  const pages = useAnnotationStore((s) => (props.variant === 'tool' ? s.pages : undefined));
+  const toolSelection =
+    selection && pages
+      ? selectedAnnotations({ selection, pages }).filter((a) => !a.flags?.locked)
+      : [];
   const editable =
     props.variant === 'tool' ? [] : props.annotations.filter((a) => !a.flags?.locked);
   const ids = editable.map((a) => a.id);
   const first = editable[0];
   const shown =
     props.variant === 'tool' && toolStyle
-      ? shownForTool(props.group, toolStyle)
+      ? toolSelection.length > 0
+        ? shownForSelection(toolSelection)
+        : shownForTool(props.group, toolStyle)
       : shownForSelection(editable);
   const { disabled, color, opacity } = shown;
 
@@ -119,7 +132,11 @@ export function StyleControls(props: StyleControlsProps) {
   };
 
   return (
-    <div className={styles.controls} data-variant={variant}>
+    <div
+      className={styles.controls}
+      data-variant={variant}
+      data-placement={props.variant === 'tool' ? (props.placement ?? 'panel') : undefined}
+    >
       {shown.colorable ? (
         <div role="radiogroup" aria-label={m.annot_color()} className={styles.swatches}>
           {SWATCHES.map((swatch, i) => (

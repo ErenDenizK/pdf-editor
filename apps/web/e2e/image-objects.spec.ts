@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 
 import { expect, type Locator, type Page, test } from '@playwright/test';
 
-import { openFixtures, useFileInputPicker } from './helpers';
+import { openFixtures, showInspector, useFileInputPicker } from './helpers';
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'Covered in Chromium');
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -59,6 +59,7 @@ test('move an image 50 px, extract it as PNG, export and re-open: the image move
   page,
 }) => {
   await openFixtures(page, ['images.pdf']);
+  await showInspector(page);
   await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
     timeout: 20_000,
   });
@@ -137,6 +138,7 @@ test('keyboard: arrows nudge the selected image, Delete removes it, undo brings 
   page,
 }) => {
   await openFixtures(page, ['images.pdf']);
+  await showInspector(page);
   await armImageTool(page);
   const target = firstImage(page);
   await expect(target).toBeVisible({ timeout: 20_000 });
@@ -166,6 +168,7 @@ test('keyboard: the bar is one Tab stop with arrow keys; Mod+Arrow resizes keepi
   page,
 }) => {
   await openFixtures(page, ['images.pdf']);
+  await showInspector(page);
   await armImageTool(page);
   const target = firstImage(page);
   await expect(target).toBeVisible({ timeout: 20_000 });

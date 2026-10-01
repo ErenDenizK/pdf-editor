@@ -1,157 +1,192 @@
 /**
- * The floating tool bar: the one translucent surface (DESIGN.md §2–3). Roving tabindex:
- * one Tab stop, Left/Right/Home/End move between buttons (DESIGN.md §5).
+ * The floating tool bar (experience-redesign spec §5): a glass capsule over the document.
  *
- * Read mode shows the annotation tools (spec §2): Select, text markup, ink and eraser,
- * shapes (one button with a menu), text box, note, stamp (menu: image or a built-in
- * stamp) and signature. Page actions follow in both modes; they run the page commands on
- * the selection and stay disabled (but focusable) while nothing is selected.
+ * At rest it shows six labelled task groups: Read, Mark up, Draw, Fill & sign, Pages and
+ * Redact (FloatingToolbar.groups.ts). Picking one morphs the capsule in place: the group's
+ * button becomes a chip with a chevron at the left end and the group's tools slide in
+ * beside it (one 160 ms movement, none under reduced motion); the chip returns to the row.
+ * The bar keeps its height, anchor and glass; arming a tool by its shortcut or the palette
+ * shows its group.
+ *
+ * While a tool with a style is armed, its options sit in a second tier attached to the top
+ * of the bar (never over the page): the controls of the inspector's tool style, through
+ * `applyStyle` (a selection wins, else the tool). The pen plugs its presets in through
+ * FloatingToolbar.slots.ts.
+ *
+ * Both are toolbars with a roving tabindex. Esc disarms the tool and clears the selection
+ * (the global Escape command); with nothing armed, Esc on the bar returns to the row.
+ * Arrange shows only its own selection bar, so this bar is Read-only.
  */
 import { Menu } from '@base-ui/react/menu';
-import { ChevronUp, FileOutput, ImagePlus, RotateCw, Trash2 } from 'lucide-react';
-import { type KeyboardEvent, useRef, useState } from 'react';
+import type { CreatedFieldKind } from '@pdf-editor/document-model';
+import {
+  BadgeCheck,
+  Check,
+  ChevronLeft,
+  ChevronUp,
+  Columns2,
+  Crop,
+  File,
+  GalleryVertical,
+  ImagePlus,
+  LayoutGrid,
+  type LucideIcon,
+  Maximize2,
+  RectangleEllipsis,
+  RotateCw,
+  ScanSearch,
+  Search,
+  ShieldCheck,
+  SquarePlus,
+  TextSearch,
+  Trash2,
+} from 'lucide-react';
+import {
+  type KeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+  type RefObject,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import {
   activateTool,
-  ANNOTATION_TOOLS,
+  clearAnnotationTools,
+  hasAnnotationToolState,
   pickImageStamp,
   type ToolDefinition,
 } from '../annotations';
 import { useAnnotationStore } from '../annotations/annotation-store';
+import { toolStyleGroup } from '../annotations/drafts';
 import { SignatureDialog } from '../annotations/SignatureDialog';
 import { BUILTIN_STAMPS, builtinPendingStamp } from '../annotations/stamps';
+import { StyleControls } from '../annotations/StyleControls';
+import { toolDefinition } from '../annotations/tools';
 import { commandRegistry } from '../commands/registry';
 import { useCommands } from '../commands/use-commands';
+import { FIELD_KINDS, kindName } from '../forms/create';
+import { useFormStore } from '../forms/form-store';
 import { m } from '../i18n';
+import { useApplyDialogStore } from '../redaction/apply-store';
+import { showRedactionsPanel } from '../redaction/commands';
 import { useSelectionStore } from '../state/selection-store';
+import { READ_LAYOUTS, type ReadLayout, useViewStore } from '../state/view-store';
 import { useUiStore } from '../state/ui-store';
+import { useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
 import iconButtonStyles from '../ui/IconButton.module.css';
 import menuStyles from '../ui/Menu.module.css';
 import { Tooltip } from '../ui/Tooltip';
-import { useToolStore } from '../viewer/tool-store';
+import { useSearchStore } from '../viewer/search';
+import { type BarGroup, type ToolMode, useToolStore } from '../viewer/tool-store';
+import { layoutTitle, setReadLayout } from '../viewer/viewer-commands';
+import {
+  barPageTargets,
+  deleteBarPages,
+  deleteLabel,
+  rotateBarPages,
+  rotateLabel,
+} from './FloatingToolbar.actions';
+import {
+  BAR_GROUPS,
+  type BarGroupDefinition,
+  type BarItem,
+  barGroupDefinition,
+  barItems,
+  pickBarGroup,
+  showBarGroups,
+} from './FloatingToolbar.groups';
 import styles from './FloatingToolbar.module.css';
+import { useRovingTabindex } from './FloatingToolbar.roving';
+import { usePenSlots } from './FloatingToolbar.slots';
 
-/** Page actions; `command: null` marks one that is not built yet. */
-const PAGE_ACTIONS = [
-  { key: 'rotate', label: m.action_rotate_pages, Icon: RotateCw, command: 'pages.rotateRight' },
-  { key: 'delete', label: m.action_delete_pages, Icon: Trash2, command: 'pages.delete' },
-  { key: 'extract', label: m.action_extract_pages, Icon: FileOutput, command: null },
-] as const;
+/** The morph (spec §5.2): one movement. */
+const MORPH_MS = 160;
+const MORPH_EASING = 'cubic-bezier(0.2, 0, 0, 1)';
 
-const SHAPES = ANNOTATION_TOOLS.filter((t) => t.group === 'shape');
+const reducedMotion = () =>
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function FloatingToolbar() {
-  const mode = useToolStore((s) => s.mode);
-  const commands = useCommands();
-  // Re-render on selection changes so enablement follows it.
-  const selectionSize = useSelectionStore((s) => s.selected.size);
-  const focused = useSelectionStore((s) => s.focused);
   const viewMode = useUiStore((s) => s.viewMode);
-  const hasTargets = selectionSize > 0 || (viewMode === 'arrange' && focused !== null);
-  const ref = useRef<HTMLDivElement>(null);
-  const [focusIndex, setFocusIndex] = useState(0);
-  const [lastShape, setLastShape] = useState<ToolDefinition>(SHAPES[0] as ToolDefinition);
-  const shownShape = SHAPES.find((t) => t.mode === mode) ?? lastShape;
-  const reading = viewMode === 'read';
+  return (
+    <>
+      {viewMode === 'read' ? <Dock /> : null}
+      <SignatureDialog />
+    </>
+  );
+}
 
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const buttons = Array.from(ref.current?.querySelectorAll<HTMLElement>('button') ?? []);
-    const index = buttons.indexOf(document.activeElement as HTMLElement);
-    if (index < 0) return;
-    let next: number | null = null;
-    if (event.key === 'ArrowRight') next = (index + 1) % buttons.length;
-    else if (event.key === 'ArrowLeft') next = (index - 1 + buttons.length) % buttons.length;
-    else if (event.key === 'Home') next = 0;
-    else if (event.key === 'End') next = buttons.length - 1;
-    if (next === null) return;
-    event.preventDefault();
-    setFocusIndex(next);
-    buttons[next]?.focus();
+function Dock() {
+  return (
+    <div className={styles.dock}>
+      <OptionsTier />
+      <Bar />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The bar
+// ---------------------------------------------------------------------------
+
+function Bar() {
+  const group = useToolStore((s) => s.barGroup);
+  const lastGroup = useToolStore((s) => s.lastGroup);
+  // Re-render when commands register or their availability may change.
+  useCommands();
+  const ref = useRef<HTMLDivElement>(null);
+  const roving = useRovingTabindex(
+    ref,
+    group === null
+      ? `[data-bar-group="${lastGroup ?? 'read'}"]`
+      : '[data-tool][aria-pressed="true"], [data-bar-chip]',
+  );
+  const refocus = useRef<BarGroup | null>(null);
+  useBarMorph(ref, group);
+
+  // Esc back to the row: the focus stays on that group's button.
+  useLayoutEffect(() => {
+    const target = refocus.current;
+    if (target === null || group !== null) return;
+    refocus.current = null;
+    ref.current?.querySelector<HTMLElement>(`[data-bar-group="${target}"]`)?.focus();
+  }, [group]);
+
+  // Esc on the bar (spec §5.2): disarm the tool and clear the selection, as the global Escape
+  // does; with nothing armed, back to the row. In the capture phase, so the focused button's
+  // tooltip (which claims Esc) cannot take it; keys from the bar's menus (portals) are theirs.
+  const onKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    if (!(event.target instanceof Node) || !ref.current?.contains(event.target)) return;
+    if (hasAnnotationToolState()) {
+      event.preventDefault();
+      clearAnnotationTools();
+    } else if (group !== null) {
+      event.preventDefault();
+      refocus.current = group;
+      showBarGroups();
+    }
   };
 
-  // Roving tabindex over the buttons in DOM order.
-  const order: string[] = [];
-  if (reading) {
-    for (const t of ANNOTATION_TOOLS) {
-      if (t.group === 'shape') {
-        if (!order.includes('shapes')) order.push('shapes');
-      } else {
-        order.push(t.mode);
-      }
-    }
-  }
-  for (const action of PAGE_ACTIONS) order.push(action.key);
-  const tabFor = (key: string) => (order.indexOf(key) === focusIndex ? 0 : -1);
-  const shortcutOf = (tool: ToolDefinition) =>
-    commands.find((c) => c.id === `tool.${tool.mode}`)?.shortcuts[0];
-
-  const toolButton = (tool: ToolDefinition) => (
-    <IconButton
-      key={tool.mode}
-      size="toolbar"
-      tooltipSide="top"
-      label={tool.title()}
-      tooltip={tool.tooltip?.()}
-      icon={<tool.Icon />}
-      shortcut={shortcutOf(tool)}
-      aria-pressed={mode === tool.mode}
-      data-tool={tool.mode}
-      tabIndex={tabFor(tool.mode)}
-      onClick={() => void activateTool(tool)}
-    />
-  );
-
-  const tools = reading ? (
-    <>
-      {ANNOTATION_TOOLS.filter((t) => t.group === 'select' || t.group === 'markup').map(toolButton)}
-      <div role="separator" aria-orientation="vertical" className={styles.divider} />
-      {ANNOTATION_TOOLS.filter((t) => t.group === 'draw').map(toolButton)}
-      <Menu.Root>
-        <Tooltip label={m.tool_shapes_menu({ shape: shownShape.title() })} side="top">
-          <Menu.Trigger
-            className={`${iconButtonStyles.button} ${styles.menuTrigger}`}
-            data-size="toolbar"
-            aria-label={m.tool_shapes_menu({ shape: shownShape.title() })}
-            aria-pressed={SHAPES.some((t) => t.mode === mode)}
-            data-tool="shapes"
-            tabIndex={tabFor('shapes')}
-          >
-            <shownShape.Icon />
-            <ChevronUp className={styles.chevron} aria-hidden="true" />
-          </Menu.Trigger>
-        </Tooltip>
-        <Menu.Portal>
-          <Menu.Positioner side="top" align="center" sideOffset={8} collisionPadding={8}>
-            <Menu.Popup className={menuStyles.popup}>
-              {SHAPES.map((tool) => (
-                <Menu.Item
-                  key={tool.mode}
-                  className={menuStyles.item}
-                  data-tool={tool.mode}
-                  onClick={() => {
-                    setLastShape(tool);
-                    void activateTool(tool);
-                  }}
-                >
-                  <tool.Icon aria-hidden="true" className={styles.menuIcon} />
-                  <span className={menuStyles.label}>{tool.title()}</span>
-                  {tool.shortcut ? <kbd className={styles.menuKey}>{tool.shortcut}</kbd> : null}
-                </Menu.Item>
-              ))}
-            </Menu.Popup>
-          </Menu.Positioner>
-        </Menu.Portal>
-      </Menu.Root>
-      <div role="separator" aria-orientation="vertical" className={styles.divider} />
-      {ANNOTATION_TOOLS.filter(
-        (t) => t.group === 'insert' && t.mode !== 'stamp' && t.mode !== 'signature',
-      ).map(toolButton)}
-      <StampMenu active={mode === 'stamp'} tabIndex={tabFor('stamp')} />
-      {ANNOTATION_TOOLS.filter((t) => t.mode === 'signature').map(toolButton)}
-      <div role="separator" aria-orientation="vertical" className={styles.divider} />
-    </>
-  ) : null;
+  const children: ReactElement[] =
+    group === null
+      ? BAR_GROUPS.map((g) => <GroupButton key={`group:${g.id}`} group={g} chip={false} />)
+      : [
+          <GroupButton key={`group:${group}`} group={barGroupDefinition(group)} chip />,
+          <div
+            key="divider"
+            role="separator"
+            aria-orientation="vertical"
+            className={styles.divider}
+          />,
+          ...barItems(group).map((item, index) => (
+            <BarItemView key={itemKey(item, index)} item={item} />
+          )),
+        ];
 
   return (
     <div
@@ -161,45 +196,268 @@ export function FloatingToolbar() {
       aria-orientation="horizontal"
       className={styles.toolbar}
       data-annotation-keep=""
-      onKeyDown={onKeyDown}
+      data-bar-view={group ?? 'groups'}
+      onKeyDownCapture={onKeyDownCapture}
+      onKeyDown={roving.onKeyDown}
+      onFocus={roving.onFocus}
     >
-      {tools}
-      {PAGE_ACTIONS.map(({ key, label, Icon, command }) => {
-        const registered = command === null ? undefined : commands.find((c) => c.id === command);
-        const enabled = registered !== undefined && hasTargets;
-        return (
-          <IconButton
-            key={key}
-            size="toolbar"
-            tooltipSide="top"
-            label={label()}
-            tooltip={
-              command === null ? m.action_coming_soon_tooltip({ label: label() }) : undefined
-            }
-            icon={<Icon />}
-            shortcut={registered?.shortcuts[0]}
-            aria-disabled={enabled ? undefined : 'true'}
-            aria-description={
-              command === null
-                ? m.action_coming_soon()
-                : enabled
-                  ? undefined
-                  : m.action_select_pages_first()
-            }
-            tabIndex={tabFor(key)}
-            onClick={() => {
-              if (enabled && command !== null) void commandRegistry.execute(command);
-            }}
-          />
-        );
-      })}
-      <SignatureDialog />
+      {children}
     </div>
   );
 }
 
-function StampMenu({ active, tabIndex }: { readonly active: boolean; readonly tabIndex: number }) {
-  const stamp = ANNOTATION_TOOLS.find((t) => t.mode === 'stamp') as ToolDefinition;
+function itemKey(item: BarItem, index: number): string {
+  switch (item.kind) {
+    case 'tool':
+    case 'pen':
+    case 'stamp':
+      return item.tool.mode;
+    case 'command':
+      return item.command;
+    case 'page':
+      return `page:${item.action}`;
+    default:
+      return `${item.kind}:${index}`;
+  }
+}
+
+/**
+ * The morph (spec §5.2, §7.5): the picked group's button and the chip are one element, so it
+ * keeps the focus; it slides between its place in the row and the left end while the other
+ * items fade in beside it and the capsule's width follows. Layout is measured after every
+ * render, so the movement starts from where things were drawn last.
+ */
+function useBarMorph(ref: RefObject<HTMLDivElement | null>, group: BarGroup | null) {
+  const last = useRef<{
+    group: BarGroup | null;
+    width: number;
+    lefts: Map<string, number>;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const bar = ref.current;
+    if (!bar) return;
+    const lefts = new Map<string, number>();
+    for (const el of bar.querySelectorAll<HTMLElement>('[data-bar-group]')) {
+      lefts.set(el.dataset.barGroup ?? '', el.getBoundingClientRect().left);
+    }
+    const now = { group, width: bar.getBoundingClientRect().width, lefts };
+    const before = last.current;
+    last.current = now;
+    if (!before || before.group === group || reducedMotion() || !('animate' in bar)) return;
+    const timing = { duration: MORPH_MS, easing: MORPH_EASING };
+    // The capsule's width follows, clipped while it moves.
+    if (Math.abs(before.width - now.width) > 0.5) {
+      bar.dataset.morphing = '';
+      const resize = bar.animate(
+        [{ width: `${before.width}px` }, { width: `${now.width}px` }],
+        timing,
+      );
+      const done = () => {
+        delete bar.dataset.morphing;
+      };
+      resize.onfinish = done;
+      resize.oncancel = done;
+    }
+    // The shared element slides from where it was.
+    const key = group ?? before.group;
+    if (key === null) return;
+    const moving = bar.querySelector<HTMLElement>(`[data-bar-group="${key}"]`);
+    const from = before.lefts.get(key);
+    const to = now.lefts.get(key);
+    if (moving && from !== undefined && to !== undefined && Math.abs(from - to) > 0.5) {
+      moving.animate(
+        [{ transform: `translateX(${from - to}px)` }, { transform: 'translateX(0)' }],
+        timing,
+      );
+    }
+    // Everything else slides in beside it.
+    for (const el of bar.children) {
+      if (el === moving || !(el instanceof HTMLElement)) continue;
+      el.animate(
+        [
+          { opacity: 0, transform: `translateX(${group === null ? 0 : -8}px)` },
+          { opacity: 1, transform: 'translateX(0)' },
+        ],
+        timing,
+      );
+    }
+  }, [ref, group]);
+}
+
+function GroupButton({
+  group,
+  chip,
+}: {
+  readonly group: BarGroupDefinition;
+  readonly chip: boolean;
+}) {
+  const lastGroup = useToolStore((s) => s.lastGroup);
+  const label = group.label();
+  const { Icon } = group;
+  return (
+    <Tooltip label={chip ? m.bar_back_tooltip() : m.bar_group_tools({ group: label })} side="top">
+      <button
+        type="button"
+        className={styles.group}
+        data-bar-group={group.id}
+        data-bar-chip={chip ? '' : undefined}
+        data-last={!chip && lastGroup === group.id ? '' : undefined}
+        aria-label={chip ? m.bar_group_back({ group: label }) : undefined}
+        onClick={() => {
+          if (chip) showBarGroups();
+          else pickBarGroup(group.id);
+        }}
+      >
+        {chip ? <ChevronLeft className={styles.chipChevron} aria-hidden="true" /> : null}
+        <Icon aria-hidden="true" className={styles.groupIcon} />
+        <span className={styles.groupLabel}>{label}</span>
+      </button>
+    </Tooltip>
+  );
+}
+
+function BarItemView({ item }: { readonly item: BarItem }): ReactNode {
+  switch (item.kind) {
+    case 'tool':
+      return <ToolButton tool={item.tool} />;
+    case 'pen':
+      return <PenEntry tool={item.tool} />;
+    case 'shapes':
+      return <ShapesMenu shapes={item.tools} />;
+    case 'stamp':
+      return <StampMenu />;
+    case 'command':
+      return <CommandButton id={item.command} />;
+    case 'layout':
+      return <LayoutMenu />;
+    case 'fit':
+      return <FitMenu />;
+    case 'fields':
+      return <FieldsMenu />;
+    case 'page':
+      return <PageActionButton action={item.action} />;
+    case 'apply-redactions':
+      return (
+        <IconButton
+          size="toolbar"
+          tooltipSide="top"
+          label={m.bar_apply_redactions()}
+          icon={<ShieldCheck />}
+          aria-haspopup="dialog"
+          onClick={() => {
+            showRedactionsPanel();
+            useApplyDialogStore.getState().setOpen(true);
+          }}
+        />
+      );
+  }
+}
+
+const shortcutOf = (id: string) => commandRegistry.get(id)?.shortcuts[0];
+
+function ToolButton({ tool }: { readonly tool: ToolDefinition }) {
+  const armed = useToolStore((s) => s.mode === tool.mode);
+  return (
+    <IconButton
+      size="toolbar"
+      tooltipSide="top"
+      label={tool.barTitle?.() ?? tool.title()}
+      tooltip={tool.tooltip?.()}
+      icon={<tool.Icon />}
+      shortcut={shortcutOf(`tool.${tool.mode}`)}
+      aria-pressed={armed}
+      data-tool={tool.mode}
+      onClick={() => void activateTool(tool)}
+    />
+  );
+}
+
+/** The pen: the presets when they are plugged in (spec §6.2), else one Pen button. */
+function PenEntry({ tool }: { readonly tool: ToolDefinition }) {
+  const { Bar: PenBar } = usePenSlots();
+  const armed = useToolStore((s) => s.mode === tool.mode);
+  if (PenBar) return <PenBar armed={armed} arm={() => void activateTool(tool)} />;
+  return <ToolButton tool={tool} />;
+}
+
+/** A bar menu button: icon, a small chevron, and a menu rising from it. */
+function MenuButton({
+  label,
+  icon,
+  pressed,
+  tool,
+  children,
+}: {
+  readonly label: string;
+  readonly icon: ReactNode;
+  readonly pressed?: boolean;
+  /** `data-tool` when the menu arms a tool (the armed look). */
+  readonly tool?: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <Menu.Root>
+      <Tooltip label={label} side="top">
+        <Menu.Trigger
+          className={`${iconButtonStyles.button} ${styles.menuTrigger}`}
+          data-size="toolbar"
+          aria-label={label}
+          aria-pressed={pressed}
+          data-tool={tool}
+        >
+          {icon}
+          <ChevronUp className={styles.chevron} aria-hidden="true" />
+        </Menu.Trigger>
+      </Tooltip>
+      <Menu.Portal>
+        <Menu.Positioner side="top" align="center" sideOffset={8} collisionPadding={8}>
+          <Menu.Popup className={menuStyles.popup}>{children}</Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
+}
+
+/** The shape last picked this session, shown on the Shapes button. */
+let lastShape: ToolMode | null = null;
+
+function ShapesMenu({ shapes }: { readonly shapes: readonly ToolDefinition[] }) {
+  const mode = useToolStore((s) => s.mode);
+  const [, setShown] = useState(lastShape);
+  const shown =
+    shapes.find((t) => t.mode === mode) ?? shapes.find((t) => t.mode === lastShape) ?? shapes[0];
+  if (!shown) return null;
+  const label = m.tool_shapes_menu({ shape: shown.title() });
+  return (
+    <MenuButton
+      label={label}
+      icon={<shown.Icon />}
+      pressed={shapes.some((t) => t.mode === mode)}
+      tool="shapes"
+    >
+      {shapes.map((tool) => (
+        <Menu.Item
+          key={tool.mode}
+          className={menuStyles.item}
+          data-tool={tool.mode}
+          onClick={() => {
+            lastShape = tool.mode;
+            setShown(tool.mode);
+            void activateTool(tool);
+          }}
+        >
+          <tool.Icon aria-hidden="true" className={styles.menuIcon} />
+          <span className={menuStyles.label}>{tool.title()}</span>
+          {tool.shortcut ? <kbd className={styles.menuKey}>{tool.shortcut}</kbd> : null}
+        </Menu.Item>
+      ))}
+    </MenuButton>
+  );
+}
+
+function StampMenu() {
+  const stamp = toolDefinition('stamp');
+  const active = useToolStore((s) => s.mode === 'stamp');
   const pending = useAnnotationStore((s) => s.pendingStamp);
   const arm = (name: (typeof BUILTIN_STAMPS)[number]['name']) => {
     useAnnotationStore.getState().setPendingStamp(builtinPendingStamp(name));
@@ -207,44 +465,214 @@ function StampMenu({ active, tabIndex }: { readonly active: boolean; readonly ta
     useToolStore.getState().setMode('stamp');
   };
   return (
-    <Menu.Root>
-      <Tooltip label={stamp.title()} side="top">
-        <Menu.Trigger
-          className={`${iconButtonStyles.button} ${styles.menuTrigger}`}
-          data-size="toolbar"
-          aria-label={stamp.title()}
-          aria-pressed={active}
-          data-tool="stamp"
-          tabIndex={tabIndex}
+    <MenuButton label={stamp.title()} icon={<stamp.Icon />} pressed={active} tool="stamp">
+      <Menu.Item className={menuStyles.item} onClick={() => void pickImageStamp('image')}>
+        <ImagePlus aria-hidden="true" className={styles.menuIcon} />
+        <span className={menuStyles.label}>{m.stamp_image()}</span>
+      </Menu.Item>
+      {BUILTIN_STAMPS.map((s) => (
+        <Menu.Item
+          key={s.name}
+          className={menuStyles.item}
+          data-checked={
+            active && pending?.kind === 'builtin' && pending.name === s.name ? '' : undefined
+          }
+          onClick={() => arm(s.name)}
         >
-          <stamp.Icon />
-          <ChevronUp className={styles.chevron} aria-hidden="true" />
-        </Menu.Trigger>
-      </Tooltip>
-      <Menu.Portal>
-        <Menu.Positioner side="top" align="center" sideOffset={8} collisionPadding={8}>
-          <Menu.Popup className={menuStyles.popup}>
-            <Menu.Item className={menuStyles.item} onClick={() => void pickImageStamp('image')}>
-              <ImagePlus aria-hidden="true" className={styles.menuIcon} />
-              <span className={menuStyles.label}>{m.stamp_image()}</span>
-            </Menu.Item>
-            {BUILTIN_STAMPS.map((s) => (
-              <Menu.Item
-                key={s.name}
-                className={menuStyles.item}
-                data-checked={
-                  active && pending?.kind === 'builtin' && pending.name === s.name ? '' : undefined
-                }
-                onClick={() => arm(s.name)}
-              >
-                <span className={styles.stampChip} style={{ color: s.color }}>
-                  {s.label()}
-                </span>
-              </Menu.Item>
-            ))}
-          </Menu.Popup>
-        </Menu.Positioner>
-      </Menu.Portal>
-    </Menu.Root>
+          <span className={styles.stampChip} style={{ color: s.color }}>
+            {s.label()}
+          </span>
+        </Menu.Item>
+      ))}
+    </MenuButton>
+  );
+}
+
+const LAYOUT_ICONS: Record<ReadLayout, LucideIcon> = {
+  continuous: GalleryVertical,
+  single: File,
+  'two-up': Columns2,
+};
+
+function LayoutMenu() {
+  const layout = useViewStore((s) => s.layout);
+  const Icon = LAYOUT_ICONS[layout];
+  return (
+    <MenuButton label={m.layout_label()} icon={<Icon />}>
+      {READ_LAYOUTS.map((id) => {
+        const ItemIcon = LAYOUT_ICONS[id];
+        return (
+          <Menu.Item
+            key={id}
+            className={menuStyles.item}
+            data-checked={layout === id ? '' : undefined}
+            onClick={() => setReadLayout(id)}
+          >
+            <ItemIcon aria-hidden="true" className={styles.menuIcon} />
+            <span className={menuStyles.label}>{layoutTitle(id)}</span>
+            {layout === id ? <Check aria-hidden="true" className={styles.menuIcon} /> : null}
+          </Menu.Item>
+        );
+      })}
+    </MenuButton>
+  );
+}
+
+const FIT_COMMANDS = ['zoom.fit', 'zoom.fitPage', 'zoom.actual'] as const;
+
+function FitMenu() {
+  const fitMode = useUiStore((s) => s.fitMode);
+  return (
+    <MenuButton label={m.bar_fit()} icon={<Maximize2 />}>
+      {FIT_COMMANDS.map((id) => {
+        const command = commandRegistry.get(id);
+        if (!command) return null;
+        const checked =
+          (id === 'zoom.fit' && fitMode === 'width') ||
+          (id === 'zoom.fitPage' && fitMode === 'page');
+        return (
+          <Menu.Item
+            key={id}
+            className={menuStyles.item}
+            data-checked={checked ? '' : undefined}
+            onClick={() => void commandRegistry.execute(id)}
+          >
+            <span className={menuStyles.label}>{command.title}</span>
+            {checked ? <Check aria-hidden="true" className={styles.menuIcon} /> : null}
+          </Menu.Item>
+        );
+      })}
+    </MenuButton>
+  );
+}
+
+function FieldsMenu() {
+  return (
+    <MenuButton label={m.forms_add_field()} icon={<SquarePlus />}>
+      {FIELD_KINDS.map((kind: CreatedFieldKind) => (
+        <Menu.Item
+          key={kind}
+          className={menuStyles.item}
+          onClick={() => void commandRegistry.execute(`forms.add.${kind}`)}
+        >
+          <span className={menuStyles.label}>{kindName(kind)}</span>
+        </Menu.Item>
+      ))}
+    </MenuButton>
+  );
+}
+
+/** Command buttons: icon and the bar's name for them. */
+const COMMAND_BUTTONS: Readonly<
+  Record<string, { readonly Icon: LucideIcon; readonly label?: () => string }>
+> = {
+  'search.open': { Icon: Search, label: m.bar_find },
+  'forms.highlight': { Icon: RectangleEllipsis },
+  'document.sign': { Icon: BadgeCheck },
+  'pages.crop': { Icon: Crop, label: m.bar_crop },
+  'mode.arrange': { Icon: LayoutGrid, label: m.mode_arrange },
+  'redaction.find': { Icon: ScanSearch },
+  'redaction.markMatches': { Icon: TextSearch, label: m.bar_mark_matches },
+};
+
+function CommandButton({ id }: { readonly id: string }) {
+  const command = commandRegistry.get(id);
+  const highlightOn = useFormStore((s) => s.highlight);
+  // Availability follows the document, the search and the dialogs.
+  useWorkspaceStore((s) => s.workspace);
+  useSearchStore((s) => s.hits.length);
+  const spec = COMMAND_BUTTONS[id];
+  if (!command || !spec) return null;
+  const enabled = commandRegistry.isEnabled(command);
+  const label = spec.label?.() ?? command.title;
+  return (
+    <IconButton
+      size="toolbar"
+      tooltipSide="top"
+      label={label}
+      icon={<spec.Icon />}
+      shortcut={command.shortcuts[0]}
+      aria-pressed={id === 'forms.highlight' ? highlightOn : undefined}
+      aria-disabled={enabled ? undefined : 'true'}
+      aria-description={
+        enabled ? undefined : id === 'redaction.markMatches' ? m.bar_mark_matches_none() : undefined
+      }
+      data-command={id}
+      onClick={() => {
+        if (enabled) void commandRegistry.execute(id);
+      }}
+    />
+  );
+}
+
+/** Rotate and Delete page: the selected pages, else the current page, named ("Rotate page 3"). */
+function PageActionButton({ action }: { readonly action: 'rotate' | 'delete' }) {
+  // Re-render when the targets change.
+  useSelectionStore((s) => s.selected);
+  useViewStore((s) => s.currentPage);
+  useWorkspaceStore((s) => s.workspace);
+  const targets = barPageTargets();
+  const label =
+    targets === null
+      ? action === 'rotate'
+        ? m.action_rotate_pages()
+        : m.action_delete_pages()
+      : action === 'rotate'
+        ? rotateLabel(targets)
+        : deleteLabel(targets);
+  // The page commands' keys apply to selected pages (R in Read is the rectangle).
+  const shortcut =
+    targets?.selected === true
+      ? shortcutOf(action === 'rotate' ? 'pages.rotateRight' : 'pages.delete')
+      : undefined;
+  return (
+    <IconButton
+      size="toolbar"
+      tooltipSide="top"
+      label={label}
+      icon={action === 'rotate' ? <RotateCw /> : <Trash2 />}
+      shortcut={shortcut}
+      aria-disabled={targets === null ? 'true' : undefined}
+      data-page-action={action}
+      onClick={() => {
+        if (action === 'rotate') rotateBarPages();
+        else deleteBarPages();
+      }}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The options tier
+// ---------------------------------------------------------------------------
+
+/** The armed tool's options, attached to the top of the bar (spec §5.2). */
+function OptionsTier() {
+  const mode = useToolStore((s) => s.mode);
+  const group = toolStyleGroup(mode);
+  const { Tier: PenTier } = usePenSlots();
+  const ref = useRef<HTMLDivElement>(null);
+  const roving = useRovingTabindex(ref, '[aria-checked="true"]');
+  if (group === undefined) return null;
+  const tool = toolDefinition(mode);
+  return (
+    <div
+      ref={ref}
+      role="toolbar"
+      aria-label={m.bar_options({ tool: tool.title() })}
+      aria-orientation="horizontal"
+      className={styles.tier}
+      data-annotation-keep=""
+      data-testid="options-tier"
+      data-tier-tool={mode}
+      onKeyDown={roving.onKeyDown}
+      onFocus={roving.onFocus}
+    >
+      {mode === 'ink' && PenTier ? (
+        <PenTier />
+      ) : (
+        <StyleControls variant="tool" group={group} placement="tier" />
+      )}
+    </div>
   );
 }

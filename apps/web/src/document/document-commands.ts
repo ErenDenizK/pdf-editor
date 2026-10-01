@@ -8,7 +8,6 @@ import { getActiveDocument } from '@pdf-editor/document-model';
 import type { CommandRegistry } from '../commands/registry';
 import { useExportDialogStore } from '../export/export-store';
 import { m } from '../i18n';
-import { useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import {
   type DocumentDialogKind,
@@ -23,14 +22,10 @@ const idle = () =>
   useDocumentDialogStore.getState().dialog === null &&
   useExportDialogStore.getState().documentId === null;
 
-/** Opens the right panel and focuses the Info section's Title field. */
+/** Opens the Document info sheet of the active document, focused on its Title field. */
 export function showDocumentInfo(): void {
-  if (!useUiStore.getState().rightPanelOpen) useUiStore.getState().toggleRightPanel();
-  requestAnimationFrame(() => {
-    const section = document.getElementById('inspector-info');
-    section?.scrollIntoView?.({ block: 'start' });
-    document.querySelector<HTMLInputElement>('[data-testid="metadata-editor"] input')?.focus();
-  });
+  const doc = activeDocument();
+  if (doc) openDocumentDialog('info', doc.id);
 }
 
 export function registerDocumentCommands(registry: CommandRegistry): () => void {

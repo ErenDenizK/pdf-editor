@@ -9,7 +9,13 @@
  * - Mod+=/-/0 override the browser's page zoom; `preventDefault` is honoured by Chromium,
  *   Firefox and Safari for keydown, so the document zooms instead of the UI.
  */
-import { canRedo, canUndo, getActiveDocument, type PageId } from '@pdf-editor/document-model';
+import {
+  canRedo,
+  canUndo,
+  type DocumentId,
+  getActiveDocument,
+  type PageId,
+} from '@pdf-editor/document-model';
 
 import {
   clearAnnotationTools,
@@ -22,6 +28,7 @@ import type { EngineFailure } from '../engine/engine-service';
 import { partitionFiles, pickFiles } from '../files/open-files';
 import { registerFurnitureCommands } from '../furniture';
 import { registerFormCommands } from '../forms';
+import { showHome, showOpened } from '../home/home-actions';
 import { m } from '../i18n';
 import { registerLanguageCommands } from '../i18n/language-commands';
 import { registerOcrCommands } from '../ocr';
@@ -66,13 +73,14 @@ function failureReason(error: EngineFailure): string {
 
 /**
  * Opens files as tabs (in the given order) and announces the outcome. PDFs open one tab
- * each; images (PNG, JPEG, WebP) become the pages of one new document.
+ * each; images (PNG, JPEG, WebP) become the pages of one new document. Resolves to the
+ * documents opened from PDFs, in order.
  */
-export async function openDocuments(files: readonly File[]): Promise<void> {
-  if (files.length === 0) return;
+export async function openDocuments(files: readonly File[]): Promise<readonly DocumentId[]> {
+  if (files.length === 0) return [];
   const { pdfs, images } = partitionFiles(files);
   if (images.length > 0) await openImagesAsDocument(images);
-  if (pdfs.length === 0) return;
+  if (pdfs.length === 0) return [];
   const { opened, skipped } = await model().openFiles(pdfs);
   const parts: string[] = [];
   if (opened.length === 1) parts.push(m.announce_opened({ name: opened[0]?.name ?? '' }));
@@ -81,12 +89,17 @@ export async function openDocuments(files: readonly File[]): Promise<void> {
     parts.push(m.announce_skipped({ name: skip.name, reason: failureReason(skip.error) }));
   }
   if (parts.length > 0) announce(parts.join('. '));
+  return opened.map((o) => o.documentId);
 }
 
-/** "Open files…" and the tab bar's "+": PDFs and images (images become one document). */
+/**
+ * "Open files…" and the tab bar's "+": PDFs and images (images become one document). On
+ * Home the new cards come selected (experience-redesign §3).
+ */
 export async function openFilesFromPicker(): Promise<void> {
   const files = await pickFiles('openable');
-  await openDocuments(files);
+  const wasEmpty = model().workspace.documentOrder.length === 0;
+  showOpened(await openDocuments(files), { wasEmpty, dropped: false });
 }
 
 /**
@@ -388,6 +401,16 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
         run: () => useUiStore.setState({ leftPanelOpen: true, leftPanelView: view }),
       }),
     ),
+    registry.register({
+      id: 'view.home',
+      title: m.cmd_view_home(),
+      group: m.group_view(),
+      shortcut: '0',
+      run: () => {
+        showHome();
+        announce(m.home_long());
+      },
+    }),
     registry.register({
       id: 'mode.read',
       title: m.cmd_mode_read(),

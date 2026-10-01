@@ -152,7 +152,7 @@
   /* Shell metrics. */
   --titlebar-height: 40px;
   --statusbar-height: 28px;
-  --rail-width: 44px;
+  --rail-width: 64px; /* the navigator: icon, 11 px label and count (experience-redesign §4.1) */
   --control-height: 28px;
   --icon-chrome: 16px;
   --icon-toolbar: 20px;

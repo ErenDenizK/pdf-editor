@@ -1,7 +1,7 @@
 /**
  * Redaction marks end to end (redaction spec §1.1): on `redact-text-runs.pdf`
  * (test/fixtures/README.md: SECRET-7731 on lines 1–3, innocuous line 4), select the token
- * and press X, drag an area with the Redact tool, check the Redactions panel lists both
+ * and press X, drag an area with the Redact tool, check the Review tab's Marks lists both
  * with the text under them, export, and re-open the export: the /Redact annotations are
  * still there (marks survive save and are not applied). A second test marks every search
  * match and reviews them with J / K.
@@ -19,9 +19,9 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { type PDFArray, type PDFDict, PDFDocument, PDFName, type PDFNumber } from '@cantoo/pdf-lib';
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 
-import { openFixtures, useFileInputPicker } from './helpers';
+import { openFixtures, showInspector, useFileInputPicker } from './helpers';
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'Covered in Chromium');
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -36,6 +36,16 @@ function layer(page: Page, index = 0) {
 
 function historyRow(page: Page, label: string | RegExp) {
   return page.getByRole('list', { name: /history/i }).getByRole('button', { name: label });
+}
+
+/** The navigator's Review tab on its Marks filter (experience-redesign §4.1). */
+async function showMarks(page: Page): Promise<Locator> {
+  const review = page.getByRole('tab', { name: /^Review/ });
+  if ((await review.getAttribute('aria-selected')) !== 'true') await review.click();
+  await page.getByRole('radio', { name: /^Marks/ }).click();
+  const panel = page.locator('[data-review-panel]');
+  await expect(panel).toHaveAttribute('data-filter', 'redactions');
+  return panel;
 }
 
 /** Selects the first occurrence of `text` in the page's text layer with a DOM range. */
@@ -82,6 +92,7 @@ test('mark by selection and by area, list them, export and re-open with the mark
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['redact-text-runs.pdf']);
+  await showInspector(page);
   await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
     timeout: 20_000,
   });
@@ -101,16 +112,16 @@ test('mark by selection and by area, list them, export and re-open with the mark
   await expect(redactLayer).toHaveAttribute('data-active', 'true');
   const box = await redactLayer.boundingBox();
   if (!box) throw new Error('page not rendered');
-  await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.75);
+  // Clear of the floating tool bar at the bottom of the stage.
+  await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.55);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.85, { steps: 8 });
+  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.65, { steps: 8 });
   await page.mouse.up();
   await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(2);
   await page.keyboard.press('Escape');
 
-  // 3. The Redactions panel lists both, with the text under each.
-  await page.getByRole('tab', { name: 'Redactions' }).click();
-  const panel = page.locator('[data-redactions-panel]');
+  // 3. The Review tab's Marks filter lists both, with the text under each.
+  const panel = await showMarks(page);
   await expect(panel.getByRole('note')).toContainText('Marks are only marks');
   await expect(panel.getByTestId('redaction-summary')).toHaveText('2 marks · 2 selected');
   await expect(panel.getByTestId('redaction-snippet')).toHaveText([TOKEN, 'Area without text']);
@@ -170,6 +181,7 @@ test('mark every search match, then review the marks with J and K', async ({ pag
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['redact-text-runs.pdf']);
+  await showInspector(page);
   await expect(
     page
       .getByTestId('text-layer')
@@ -186,8 +198,7 @@ test('mark every search match, then review the marks with J and K', async ({ pag
   await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(3);
   await expect(historyRow(page, 'Mark 3 search matches for redaction')).toBeVisible();
 
-  await page.getByRole('tab', { name: 'Redactions' }).click();
-  const panel = page.locator('[data-redactions-panel]');
+  const panel = await showMarks(page);
   await expect(panel.getByTestId('redaction-snippet')).toHaveText([TOKEN, TOKEN, TOKEN]);
   // Three marks with the same text: each checkbox still has its own name.
   for (const n of [1, 2, 3]) {
@@ -245,6 +256,7 @@ test('apply marks made by selection, search and area; export; the re-opened expo
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['redact-text-runs.pdf']);
+  await showInspector(page);
   await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
     timeout: 20_000,
   });
@@ -269,16 +281,16 @@ test('apply marks made by selection, search and area; export; the re-opened expo
   await expect(redactLayer).toHaveAttribute('data-active', 'true');
   const box = await redactLayer.boundingBox();
   if (!box) throw new Error('page not rendered');
-  await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.75);
+  // Clear of the floating tool bar at the bottom of the stage.
+  await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.55);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.85, { steps: 8 });
+  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.65, { steps: 8 });
   await page.mouse.up();
   await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(4);
   await page.keyboard.press('Escape');
 
-  // 4. Apply from the Redactions panel: the dialog says what happens, then the result.
-  await page.getByRole('tab', { name: 'Redactions' }).click();
-  const panel = page.locator('[data-redactions-panel]');
+  // 4. Apply from the Marks filter: the dialog says what happens, then the result.
+  const panel = await showMarks(page);
   await expect(panel.getByTestId('redaction-summary')).toHaveText('4 marks · 4 selected');
   await panel.getByTestId('redaction-apply').click();
   const dialog = page.getByTestId('redaction-apply-dialog');
@@ -346,13 +358,13 @@ test('keeping attachments: the self-check sees the token in the attachment and n
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['redact-metadata.pdf']);
+  await showInspector(page);
   await selectText(page, TOKEN);
   await page.keyboard.press('x');
   await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(1);
   await page.keyboard.press('Escape');
 
-  await page.getByRole('tab', { name: 'Redactions' }).click();
-  const panel = page.locator('[data-redactions-panel]');
+  const panel = await showMarks(page);
   await panel.getByTestId('redaction-apply').click();
   const dialog = page.getByTestId('redaction-apply-dialog');
   await dialog.getByRole('checkbox', { name: /Keep attachments/ }).check();
@@ -397,12 +409,12 @@ test('Esc and the backdrop while applying: the dialog stays and the blocked outc
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['redact-metadata.pdf']);
+  await showInspector(page);
   await selectText(page, TOKEN);
   await page.keyboard.press('x');
   await expect(layer(page).locator('[data-annotation-kind="redact"]')).toHaveCount(1);
   await page.keyboard.press('Escape');
-  await page.getByRole('tab', { name: 'Redactions' }).click();
-  const panel = page.locator('[data-redactions-panel]');
+  const panel = await showMarks(page);
   // The mark's checkbox names the mark (its number on the page and the text under it).
   await expect(panel.getByRole('checkbox', { name: /Include mark 1 on page 1/ })).toBeVisible();
   await expect(panel.getByRole('checkbox', { name: new RegExp(TOKEN) })).toBeVisible();

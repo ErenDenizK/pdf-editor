@@ -406,9 +406,9 @@ let restoreView: { readonly open: boolean; readonly view: LeftPanelView } | null
 /** Shows the Search panel in the left rail and focuses its field. */
 export function openSearchPanel(): void {
   const ui = useUiStore.getState();
-  if (!(ui.leftPanelOpen && ui.leftPanelView === 'search')) {
+  if (!(ui.leftPanelOpen && ui.leftPanelView === 'find')) {
     restoreView = { open: ui.leftPanelOpen, view: ui.leftPanelView };
-    useUiStore.setState({ leftPanelOpen: true, leftPanelView: 'search' });
+    useUiStore.setState({ leftPanelOpen: true, leftPanelView: 'find' });
   }
   requestSearchFocus();
 }
@@ -417,10 +417,10 @@ export function openSearchPanel(): void {
 export function closeSearchPanel(): void {
   clearSearch();
   const ui = useUiStore.getState();
-  if (ui.leftPanelOpen && ui.leftPanelView === 'search') {
+  if (ui.leftPanelOpen && ui.leftPanelView === 'find') {
     const previous = restoreView;
     useUiStore.setState(
-      previous && previous.view !== 'search'
+      previous && previous.view !== 'find'
         ? { leftPanelOpen: previous.open, leftPanelView: previous.view }
         : { leftPanelOpen: false },
     );

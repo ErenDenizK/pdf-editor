@@ -13,7 +13,14 @@ export type OperationDialog =
   | { readonly kind: 'split'; readonly documentId: DocumentId }
   | { readonly kind: 'interleave'; readonly documentId: DocumentId }
   | { readonly kind: 'merge-into'; readonly documentId: DocumentId }
-  | { readonly kind: 'merge-all' }
+  | {
+      readonly kind: 'merge-all';
+      /**
+       * The documents to merge, pre-ordered (Home's selection or a card drop,
+       * experience-redesign §3); every open document in tab order when absent.
+       */
+      readonly order?: readonly DocumentId[];
+    }
   | {
       readonly kind: 'resize';
       /** The document the dialog was opened for (the section, else the first page's). */

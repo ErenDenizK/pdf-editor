@@ -1,7 +1,8 @@
 /**
  * Document tool commands (spec §5–§7), grouped under "Document" in the palette and listed
- * by the Document menu in the tab bar (`DocumentMenu.tsx`, which shows every command of
- * that group). Registered from `app-commands.ts`.
+ * by the Document menu in the tab bar (`DocumentMenu.tsx`: Compress… and Export pages as
+ * images… under "Convert and export", Save repaired copy under "Document" while there is a
+ * repaired source). Registered from `app-commands.ts`.
  */
 import { getActiveDocument } from '@pdf-editor/document-model';
 

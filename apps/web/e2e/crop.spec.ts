@@ -17,7 +17,7 @@ import { readFile } from 'node:fs/promises';
 import { PDFDocument } from '@cantoo/pdf-lib';
 import { expect, type Page, test } from '@playwright/test';
 
-import { openFixtures, useFileInputPicker } from './helpers';
+import { openFixtures, showInspector, useFileInputPicker } from './helpers';
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'Covered in Chromium');
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -54,6 +54,7 @@ test('crop every page with discard, export, re-open: cropped size, header gone, 
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['simple-text.pdf']);
+  await showInspector(page);
 
   // Read mode, "Crop pages…" from the command palette: no selection, so all pages.
   await expect(page.locator('[data-page-index="0"]').first()).toBeVisible({ timeout: 20_000 });
@@ -154,6 +155,7 @@ test('draw the crop area on the page in Read mode; Esc goes back unchanged', asy
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['simple-text.pdf']);
+  await showInspector(page);
 
   // Arrange: "Crop pages…" from the context menu of page 1.
   await page.keyboard.press('2');

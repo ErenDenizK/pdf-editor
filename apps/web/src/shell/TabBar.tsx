@@ -25,7 +25,7 @@ import { SignatureTabGlyph } from '../signatures/SignatureBadge';
 import { DocumentMenu } from '../tools/DocumentMenu';
 import { IconButton } from '../ui/IconButton';
 import { Keycaps } from '../ui/Keycaps';
-import { AppGlyph } from './AppGlyph';
+import { HomeButton } from './AppGlyph';
 import { announce } from './announcer';
 import styles from './TabBar.module.css';
 import { useCommandShortcut } from './use-command-shortcut';
@@ -100,9 +100,7 @@ export function TabBar() {
 
   return (
     <header className={styles.bar}>
-      <div className={styles.brand} title="pdf-editor">
-        <AppGlyph />
-      </div>
+      <HomeButton className={styles.brand} />
 
       <div className={styles.tabsRegion}>
         {documents.length > 0 ? (

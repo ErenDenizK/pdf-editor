@@ -1,6 +1,8 @@
 /**
  * Read-mode viewer (spec viewer-annotations §1): text selection and copy, find in document,
  * internal and external links, go to page, and the two-up layout, on outline-named-dests.pdf.
+ * The navigator's four tabs and the closed inspector on first run, with Document info in the
+ * Document menu (experience-redesign §4).
  */
 import { expect, type Page, test } from '@playwright/test';
 
@@ -74,6 +76,11 @@ test('finds text, steps through the hits and clears with Escape', async ({ page 
   const status = page.getByTestId('status-search');
   await expect(status).toContainText('1 of 6');
   await expect(page.getByTestId('search-hit')).toHaveCount(6);
+  // Mod+F shows the navigator's Find tab, its count in the name.
+  await expect(page.getByRole('tab', { name: 'Find, 6 items' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
   await expect(page.locator('[data-testid="search-highlights"]').first()).toBeVisible();
 
   await field.press('Enter');
@@ -98,6 +105,36 @@ test('finds text, steps through the hits and clears with Escape', async ({ page 
   await expect(status).toHaveCount(0);
   await expect(page.locator('[data-testid="search-highlights"]')).toHaveCount(0);
   await expect(page.getByRole('searchbox', { name: 'Find in document' })).toHaveCount(0);
+});
+
+test('the navigator has four tabs with counts; the inspector starts closed', async ({ page }) => {
+  const rail = page.getByRole('tablist', { name: 'Navigator views' });
+  // Labels under the icons; the badge shows the count (hidden at 0).
+  await expect(rail.getByRole('tab')).toHaveText([/^6Pages$/, 'Find', 'Review', /^1Files$/]);
+  await expect(rail.getByRole('tab', { name: 'Pages, 6 items' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await expect(rail.getByRole('tab', { name: 'Files, 1 item' })).toBeVisible();
+  await expect(page.locator('#right-panel')).toHaveCount(0);
+
+  // Document info is a sheet from the Document menu, not a form in the inspector.
+  await page.getByTestId('document-menu').click();
+  await page.getByRole('menuitem', { name: 'Document info…' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Document info' });
+  await expect(sheet.getByTestId('metadata-editor')).toBeVisible();
+  await expect(sheet.getByText('outline-named-dests.pdf')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  await expect(page.locator('#right-panel')).toHaveCount(0);
+
+  // The inspector opens only when asked (Mod+Alt+B) and is remembered across a reload.
+  await page.keyboard.press('ControlOrMeta+Alt+b');
+  await expect(page.locator('#right-panel')).toBeVisible();
+  await expect(page.locator('#right-panel').getByTestId('metadata-editor')).toHaveCount(0);
+  await page.reload();
+  await openFixtures(page, ['outline-named-dests.pdf']);
+  await expect(page.locator('#right-panel')).toBeVisible();
 });
 
 test('an internal link navigates; an external one asks first', async ({ page }) => {

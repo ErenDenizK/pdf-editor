@@ -1,4 +1,7 @@
-/** The Read-mode tools (spec §2): names, shortcuts and icons, in tool bar order. */
+/**
+ * The Read-mode tools (spec §2): names, shortcuts, icons and tool bar groups, in tool bar
+ * order (experience-redesign spec §5.1).
+ */
 import {
   ArrowUpRight,
   Circle,
@@ -22,43 +25,33 @@ import {
 } from 'lucide-react';
 
 import { m } from '../i18n';
-import type { ToolMode } from '../viewer/tool-store';
+import type { BarGroup, ToolMode } from '../viewer/tool-store';
 
 export interface ToolDefinition {
   readonly mode: ToolMode;
   readonly title: () => string;
   /** Tooltip when it must say more than the name. */
   readonly tooltip?: () => string;
+  /** Name on the tool bar when it differs from the tool's name ("Mark" in Redact). */
+  readonly barTitle?: () => string;
   readonly shortcut?: string;
   readonly Icon: LucideIcon;
   /** Extra command palette keywords. */
   readonly keywords?: readonly string[];
-  /** Tool bar group; shapes share one button with a menu. */
-  readonly group: 'select' | 'markup' | 'draw' | 'shape' | 'insert';
+  /**
+   * The tool bar group that holds the tool (experience-redesign spec §5.1): every tool has
+   * one home, shown in the bar, the shortcut overlay and the palette.
+   */
+  readonly group: BarGroup;
+  /** Shapes share one button with a menu in their group. */
+  readonly shape?: true;
 }
 
+/** Tool bar order within each group (spec §5.1); `select` stays first (the fallback). */
 export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
-  { mode: 'select', title: m.tool_select, shortcut: 'V', Icon: MousePointer2, group: 'select' },
-  // Edits the page's own text (redaction-and-text-editing spec §2.2), next to Select.
-  {
-    mode: 'edit-text',
-    title: m.tool_edit_text,
-    tooltip: m.tool_edit_text_tooltip,
-    shortcut: 'E',
-    Icon: TextCursorInput,
-    group: 'select',
-    keywords: ['edit', 'text', 'replace', 'change', 'typo', 'word', 'font'],
-  },
-  // The page's own images (M4 §3), next to Edit text.
-  {
-    mode: 'image',
-    title: m.tool_image,
-    tooltip: m.tool_image_tooltip,
-    shortcut: 'I',
-    Icon: Image,
-    group: 'select',
-    keywords: ['image', 'picture', 'photo', 'move', 'resize', 'replace', 'extract', 'logo'],
-  },
+  // Read
+  { mode: 'select', title: m.tool_select, shortcut: 'V', Icon: MousePointer2, group: 'read' },
+  // Mark up
   { mode: 'highlight', title: m.tool_highlight, shortcut: 'H', Icon: Highlighter, group: 'markup' },
   { mode: 'underline', title: m.tool_underline, shortcut: 'U', Icon: Underline, group: 'markup' },
   {
@@ -69,32 +62,76 @@ export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
     group: 'markup',
   },
   { mode: 'squiggly', title: m.tool_squiggly, Icon: Waves, group: 'markup' },
-  {
-    mode: 'redact',
-    title: m.tool_redact,
-    tooltip: m.tool_redact_tooltip,
-    shortcut: 'X',
-    Icon: EyeOff,
-    group: 'markup',
-  },
+  { mode: 'note', title: m.tool_note, shortcut: 'N', Icon: StickyNote, group: 'markup' },
+  { mode: 'text-box', title: m.tool_text_box, shortcut: 'T', Icon: Type, group: 'markup' },
+  // Draw: the pen (its presets plug in, FloatingToolbar.slots.ts), eraser, shapes.
   { mode: 'ink', title: m.tool_ink, shortcut: 'P', Icon: PenLine, group: 'draw' },
   // Shift+E: E is Edit text (spec §2.2).
   { mode: 'eraser', title: m.tool_eraser, shortcut: 'Shift+E', Icon: Eraser, group: 'draw' },
-  { mode: 'rectangle', title: m.tool_rectangle, shortcut: 'R', Icon: Square, group: 'shape' },
-  { mode: 'ellipse', title: m.tool_ellipse, shortcut: 'O', Icon: Circle, group: 'shape' },
-  { mode: 'line', title: m.tool_line, shortcut: 'L', Icon: Minus, group: 'shape' },
-  { mode: 'arrow', title: m.tool_arrow, shortcut: 'A', Icon: ArrowUpRight, group: 'shape' },
-  { mode: 'text-box', title: m.tool_text_box, shortcut: 'T', Icon: Type, group: 'insert' },
-  { mode: 'note', title: m.tool_note, shortcut: 'N', Icon: StickyNote, group: 'insert' },
-  // Shift+I: I is the Image tool (M4 §3).
-  { mode: 'stamp', title: m.tool_stamp, shortcut: 'Shift+I', Icon: Stamp, group: 'insert' },
+  {
+    mode: 'rectangle',
+    title: m.tool_rectangle,
+    shortcut: 'R',
+    Icon: Square,
+    group: 'draw',
+    shape: true,
+  },
+  {
+    mode: 'ellipse',
+    title: m.tool_ellipse,
+    shortcut: 'O',
+    Icon: Circle,
+    group: 'draw',
+    shape: true,
+  },
+  { mode: 'line', title: m.tool_line, shortcut: 'L', Icon: Minus, group: 'draw', shape: true },
+  {
+    mode: 'arrow',
+    title: m.tool_arrow,
+    shortcut: 'A',
+    Icon: ArrowUpRight,
+    group: 'draw',
+    shape: true,
+  },
+  // Fill & sign: one-shot tools (spec §5.2).
   {
     mode: 'signature',
     title: m.tool_signature,
     tooltip: m.tool_signature_tooltip,
     shortcut: 'G',
     Icon: Signature,
-    group: 'insert',
+    group: 'fill',
+  },
+  // Shift+I: I is the Image tool (M4 §3).
+  { mode: 'stamp', title: m.tool_stamp, shortcut: 'Shift+I', Icon: Stamp, group: 'fill' },
+  // Pages: tools that change the page itself (spec §13 decision 5).
+  {
+    mode: 'edit-text',
+    title: m.tool_edit_text,
+    tooltip: m.tool_edit_text_tooltip,
+    shortcut: 'E',
+    Icon: TextCursorInput,
+    group: 'pages',
+    keywords: ['edit', 'text', 'replace', 'change', 'typo', 'word', 'font'],
+  },
+  {
+    mode: 'image',
+    title: m.tool_image,
+    tooltip: m.tool_image_tooltip,
+    shortcut: 'I',
+    Icon: Image,
+    group: 'pages',
+    keywords: ['image', 'picture', 'photo', 'move', 'resize', 'replace', 'extract', 'logo'],
+  },
+  // Redact
+  {
+    mode: 'redact',
+    title: m.tool_redact,
+    tooltip: m.tool_redact_tooltip,
+    barTitle: m.bar_redact_mark,
+    shortcut: 'X',
+    Icon: EyeOff,
+    group: 'redact',
   },
 ];
 
@@ -107,4 +144,9 @@ export type MarkupMode = (typeof MARKUP_MODES)[number];
 
 export function isMarkupMode(mode: ToolMode): mode is MarkupMode {
   return (MARKUP_MODES as readonly string[]).includes(mode);
+}
+
+/** The tools of a tool bar group, in bar order. */
+export function toolsOfGroup(group: BarGroup): readonly ToolDefinition[] {
+  return ANNOTATION_TOOLS.filter((t) => t.group === group);
 }

@@ -9,7 +9,7 @@ import type { VirtualDocument, VirtualPage, Workspace } from '@pdf-editor/docume
 import { formatNumber, formatPercent, m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { useSelectionStore } from '../state/selection-store';
-import { useUiStore } from '../state/ui-store';
+import { isNavigatorShowing, useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useToolStore } from '../viewer/tool-store';
@@ -82,7 +82,7 @@ export function reviewingOcr(): boolean {
   const ui = useUiStore.getState();
   if (ui.viewMode !== 'read' || !ui.rightPanelOpen) return false;
   // The Redactions panel's review keeps J / K while it is open or the Redact tool is on.
-  if (ui.leftPanelOpen && ui.leftPanelView === 'redactions') return false;
+  if (isNavigatorShowing(ui, 'redactions')) return false;
   if (useToolStore.getState().mode === 'redact') return false;
   const t = ocrThresholdsNow();
   if (!t) return false;

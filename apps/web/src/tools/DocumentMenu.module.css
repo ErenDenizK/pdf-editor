@@ -1,0 +1,48 @@
+/* "Document": icon and name (experience-redesign spec §5.3), a chrome button of the tab bar. */
+.trigger {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.trigger svg {
+  width: var(--icon-chrome);
+  height: var(--icon-chrome);
+  stroke-width: 1.5;
+}
+
+@media (hover: hover) {
+  .trigger:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.trigger[data-popup-open] {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.popup {
+  min-width: 240px;
+}
+
+/* A section heading: small, quiet, not an item. */
+.sectionLabel {
+  padding: var(--space-1) var(--space-2) 2px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}

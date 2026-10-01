@@ -1,10 +1,10 @@
 /**
- * Left rail "Forms" (spec document-tools §1): every form field shown by the active
- * document, in document order and grouped by page, with a type icon, its name (the /TU
- * tooltip when it has one), its value and a required marker. Activating a row shows the
- * page in Read mode and opens the field's editor.
+ * Form fields in the Review tab (spec document-tools §1, experience-redesign §4.1): every
+ * form field shown by the active document is a row of the Review list, with a type icon,
+ * its name (the /TU tooltip when it has one), its value and a required marker. Activating
+ * a row shows the page in Read mode and opens the field's editor.
  *
- * Toolbar: "Highlight fields" (translucent fill over the widgets), "Clear all" (one
+ * The Fields filter's toolbar: "Highlight fields" (translucent fill over the widgets), "Clear all" (one
  * history entry) and "Flatten on export" (read by the export dialog). These, and "Edit
  * fields", show only when the document has fields (experience-redesign §4.1); otherwise
  * the panel says so and offers "Add field".
@@ -39,28 +39,22 @@ import {
   TextCursorInput,
   TriangleAlert,
 } from 'lucide-react';
-import { useEffect, useId } from 'react';
+import { useId } from 'react';
 
 import { clearActiveForm } from '../forms';
 import { fieldLabel } from '../forms/actions';
 import { FIELD_KINDS, kindName, setDesign, startPlacing, useCreateStore } from '../forms/create';
 import { stepTabOrder } from '../forms/create/field-actions';
-import {
-  documentSources,
-  type FieldStop,
-  fieldStops,
-  isFillable,
-  useFormStore,
-} from '../forms/form-store';
+import { documentSources, type FieldStop, isFillable, useFormStore } from '../forms/form-store';
 import { openField } from '../forms/navigation';
 import { m } from '../i18n';
 import { useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
-import { useActiveDocument, useWorkspaceStore } from '../state/workspace-store';
+import { useWorkspaceStore } from '../state/workspace-store';
 import { Tooltip } from '../ui/Tooltip';
 import menuStyles from '../ui/Menu.module.css';
-import { EmptyNote } from './EmptyNote';
 import styles from './FormsPanel.module.css';
+import { ReviewPanel } from './review/ReviewPanel';
 
 const ICONS: Record<FormFieldKind, LucideIcon> = {
   text: TextCursorInput,
@@ -83,19 +77,9 @@ const CREATE_ICONS: Record<CreatedFieldKind, LucideIcon> = {
   button: MousePointerClick,
 };
 
+/** The Review list on the Fields filter, without the filter chips. */
 export function FormsPanel() {
-  const doc = useActiveDocument();
-  return (
-    <div className={styles.panel} data-forms-panel="">
-      {doc ? (
-        <FormList key={doc.id} doc={doc} />
-      ) : (
-        <div className={styles.empty}>
-          <EmptyNote title={m.no_document_title()} body={m.forms_no_document_body()} />
-        </div>
-      )}
-    </div>
-  );
+  return <ReviewPanel filter="fields" />;
 }
 
 /** The value of a field as the list shows it. */
@@ -118,38 +102,32 @@ export function valueText(field: FormField): { text: string; empty: boolean } {
   }
 }
 
-function FormList({ doc }: { readonly doc: VirtualDocument }) {
+/** XFA facts of a document's sources: fill through the AcroForm, or nothing to fill. */
+export function useXfa(doc: VirtualDocument | undefined): {
+  readonly only: boolean;
+  readonly withFields: boolean;
+} {
   const sources = useFormStore((s) => s.sources);
-  const ensureSource = useFormStore((s) => s.ensureSource);
-  const active = useFormStore((s) => s.active);
   const flags = useWorkspaceStore((s) => s.workspace.sources);
-  const ids = documentSources(doc);
+  const xfa = (doc ? documentSources(doc) : []).filter((id) => flags[id]?.flags.hasXfa === true);
+  return {
+    only: xfa.some((id) => sources[id]?.loaded && sources[id]?.fields.length === 0),
+    withFields: xfa.some((id) => (sources[id]?.fields.length ?? 0) > 0),
+  };
+}
 
-  useEffect(() => {
-    for (const id of documentSources(doc)) ensureSource(id);
-  }, [doc, ensureSource]);
-
-  const loading = ids.some((id) => sources[id] === undefined);
-  const stops = fieldStops(doc, sources);
-  // One row per field and page (a field with several widgets on a page is one row).
-  const rows: FieldStop[] = [];
-  for (const stop of stops) {
-    if (
-      !rows.some(
-        (r) =>
-          r.source === stop.source &&
-          r.fieldId === stop.fieldId &&
-          r.name === stop.name &&
-          r.pageId === stop.pageId,
-      )
-    ) {
-      rows.push(stop);
-    }
-  }
-  const xfa = ids.filter((id) => flags[id]?.flags.hasXfa === true);
-  const xfaOnly = xfa.filter((id) => sources[id]?.loaded && sources[id]?.fields.length === 0);
-  const xfaWithFields = xfa.filter((id) => (sources[id]?.fields.length ?? 0) > 0);
-
+/**
+ * The Review tab's Fields filter header: "Add field", and with fields "Edit fields",
+ * "Highlight fields", "Clear all" and "Flatten on export"; the XFA notes.
+ */
+export function FormTools({
+  doc,
+  rows,
+}: {
+  readonly doc: VirtualDocument;
+  readonly rows: readonly FieldStop[];
+}) {
+  const xfa = useXfa(doc);
   return (
     <>
       <Toolbar
@@ -157,24 +135,13 @@ function FormList({ doc }: { readonly doc: VirtualDocument }) {
         hasFields={rows.length > 0}
         hasPages={doc.pages.length > 0}
       />
-      {xfaWithFields.length > 0 ? <XfaBadge /> : null}
-      {xfaOnly.length > 0 ? (
+      {xfa.withFields ? <XfaBadge /> : null}
+      {xfa.only ? (
         <p className={styles.warning} role="note">
           <TriangleAlert aria-hidden="true" />
           <span>{m.forms_xfa_only()}</span>
         </p>
       ) : null}
-      {rows.length === 0 ? (
-        <div className={styles.empty} aria-busy={loading}>
-          {loading ? (
-            <EmptyNote title={m.forms_loading()} />
-          ) : xfaOnly.length > 0 ? null : (
-            <EmptyNote title={m.forms_empty_title()} body={m.forms_empty_body()} />
-          )}
-        </div>
-      ) : (
-        <FieldRows rows={rows} activeName={active?.name} activePage={active?.pageId} />
-      )}
     </>
   );
 }
@@ -304,128 +271,112 @@ function XfaBadge() {
   );
 }
 
-function FieldRows({
-  rows,
-  activeName,
-  activePage,
-}: {
-  readonly rows: readonly FieldStop[];
-  readonly activeName: string | undefined;
-  readonly activePage: string | undefined;
-}) {
-  const pages: { position: number; pageId: string; rows: FieldStop[] }[] = [];
-  for (const row of rows) {
-    const last = pages[pages.length - 1];
-    if (last?.pageId === row.pageId) last.rows.push(row);
-    else pages.push({ position: row.position, pageId: row.pageId, rows: [row] });
+/** Shows a field: opens its editor, or in "Edit fields" selects a created field. */
+function openRow(row: FieldStop): void {
+  if (useCreateStore.getState().design && row.fieldId !== undefined) {
+    // Edit fields: a created field's row selects it on its page.
+    useCreateStore.getState().select({ fieldId: row.fieldId, widget: row.widget });
+    useViewStore.getState().scrollToPage(row.pageId);
+    return;
   }
+  if (isFillable(row.field)) {
+    openField(row);
+    return;
+  }
+  useUiStore.getState().setViewMode('read');
+  useViewStore.getState().scrollToPage(row.pageId);
+}
+
+/**
+ * One field: type icon, name (the /TU tooltip when it has one), required and tags, value;
+ * in "Edit fields" a created field's tab-order buttons. `createdOnPage` are the created
+ * fields' rows of the same page, in tab order.
+ */
+export function FieldRow({
+  row,
+  index,
+  createdOnPage,
+}: {
+  readonly row: FieldStop;
+  readonly index: number;
+  readonly createdOnPage: readonly FieldStop[];
+}) {
   const design = useCreateStore((s) => s.design);
   const selected = useCreateStore((s) => s.selected);
-  const open = (row: FieldStop) => {
-    if (design && row.fieldId !== undefined) {
-      // Edit fields: a created field's row selects it on its page.
-      useCreateStore.getState().select({ fieldId: row.fieldId, widget: row.widget });
-      useViewStore.getState().scrollToPage(row.pageId);
-      return;
-    }
-    if (isFillable(row.field)) {
-      openField(row);
-      return;
-    }
-    useUiStore.getState().setViewMode('read');
-    useViewStore.getState().scrollToPage(row.pageId);
-  };
+  const active = useFormStore((s) => s.active);
+  const Icon = ICONS[row.field.kind];
+  const value = valueText(row.field);
+  const label = fieldLabel(row.field);
+  const current =
+    row.fieldId !== undefined && design
+      ? selected?.fieldId === row.fieldId
+      : active?.name === row.name && active.pageId === row.pageId;
+  const createdIndex = createdOnPage.indexOf(row);
   return (
-    <div className={styles.scroll}>
-      {pages.map((page) => (
-        <section
-          key={`${page.pageId}:${page.position}`}
-          className={styles.group}
-          aria-label={m.comments_page({ page: page.position + 1 })}
-        >
-          <h3 className={styles.pageTitle}>{m.comments_page({ page: page.position + 1 })}</h3>
-          <ul className={styles.list}>
-            {page.rows.map((row, index) => {
-              const Icon = ICONS[row.field.kind];
-              const value = valueText(row.field);
-              const label = fieldLabel(row.field);
-              const current =
-                row.fieldId !== undefined && design
-                  ? selected?.fieldId === row.fieldId
-                  : activeName === row.name && activePage === row.pageId;
-              const createdOnPage = page.rows.filter((r) => r.fieldId !== undefined);
-              const createdIndex = createdOnPage.indexOf(row);
-              return (
-                <li
-                  key={`${row.source ?? row.fieldId}:${row.name}`}
-                  className={styles.row}
-                  data-created-row={row.fieldId === undefined ? undefined : row.name}
-                  data-index={index}
-                >
-                  <button
-                    type="button"
-                    className={styles.item}
-                    aria-current={current ? 'true' : undefined}
-                    data-field-row={row.name}
-                    title={label === row.name ? undefined : row.name}
-                    onClick={() => open(row)}
-                  >
-                    <span className={styles.icon} aria-hidden="true">
-                      <Icon />
-                    </span>
-                    <span className={styles.body}>
-                      <span className={styles.name}>
-                        {label}
-                        {row.field.required ? (
-                          <span className={styles.required} title={m.forms_required()}>
-                            <span aria-hidden="true">*</span>
-                            <span className={styles.srOnly}>{m.forms_required()}</span>
-                          </span>
-                        ) : null}
-                        {row.field.readOnly ? (
-                          <span className={styles.tag}>{m.forms_read_only_tag()}</span>
-                        ) : null}
-                        {row.fieldId !== undefined ? (
-                          <span className={styles.tag}>{m.forms_created_tag()}</span>
-                        ) : null}
-                      </span>
-                      <span className={styles.value} data-empty={value.empty || undefined}>
-                        {row.fieldId !== undefined && row.field.kind === 'signature'
-                          ? m.forms_signature_placeholder()
-                          : value.text}
-                      </span>
-                    </span>
-                  </button>
-                  {design && row.fieldId !== undefined ? (
-                    <span className={styles.order}>
-                      <button
-                        type="button"
-                        className={styles.orderButton}
-                        aria-label={m.forms_tab_earlier({ name: label })}
-                        title={m.forms_tab_earlier({ name: label })}
-                        disabled={createdIndex <= 0}
-                        onClick={() => row.fieldId && stepTabOrder(row.fieldId, -1)}
-                      >
-                        <ArrowUp aria-hidden="true" />
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.orderButton}
-                        aria-label={m.forms_tab_later({ name: label })}
-                        title={m.forms_tab_later({ name: label })}
-                        disabled={createdIndex < 0 || createdIndex >= createdOnPage.length - 1}
-                        onClick={() => row.fieldId && stepTabOrder(row.fieldId, 1)}
-                      >
-                        <ArrowDown aria-hidden="true" />
-                      </button>
-                    </span>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ))}
-    </div>
+    <li
+      className={styles.row}
+      data-review-kind="field"
+      data-created-row={row.fieldId === undefined ? undefined : row.name}
+      data-index={index}
+    >
+      <button
+        type="button"
+        className={styles.item}
+        aria-current={current ? 'true' : undefined}
+        data-field-row={row.name}
+        title={label === row.name ? undefined : row.name}
+        onClick={() => openRow(row)}
+      >
+        <span className={styles.icon} aria-hidden="true">
+          <Icon />
+        </span>
+        <span className={styles.body}>
+          <span className={styles.name}>
+            {label}
+            {row.field.required ? (
+              <span className={styles.required} title={m.forms_required()}>
+                <span aria-hidden="true">*</span>
+                <span className={styles.srOnly}>{m.forms_required()}</span>
+              </span>
+            ) : null}
+            {row.field.readOnly ? (
+              <span className={styles.tag}>{m.forms_read_only_tag()}</span>
+            ) : null}
+            {row.fieldId !== undefined ? (
+              <span className={styles.tag}>{m.forms_created_tag()}</span>
+            ) : null}
+          </span>
+          <span className={styles.value} data-empty={value.empty || undefined}>
+            {row.fieldId !== undefined && row.field.kind === 'signature'
+              ? m.forms_signature_placeholder()
+              : value.text}
+          </span>
+        </span>
+      </button>
+      {design && row.fieldId !== undefined ? (
+        <span className={styles.order}>
+          <button
+            type="button"
+            className={styles.orderButton}
+            aria-label={m.forms_tab_earlier({ name: label })}
+            title={m.forms_tab_earlier({ name: label })}
+            disabled={createdIndex <= 0}
+            onClick={() => row.fieldId && stepTabOrder(row.fieldId, -1)}
+          >
+            <ArrowUp aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={styles.orderButton}
+            aria-label={m.forms_tab_later({ name: label })}
+            title={m.forms_tab_later({ name: label })}
+            disabled={createdIndex < 0 || createdIndex >= createdOnPage.length - 1}
+            onClick={() => row.fieldId && stepTabOrder(row.fieldId, 1)}
+          >
+            <ArrowDown aria-hidden="true" />
+          </button>
+        </span>
+      ) : null}
+    </li>
   );
 }

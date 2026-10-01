@@ -1,7 +1,9 @@
 /**
  * Document tools end to end (spec document-tools.md §5, §6): compress images.pdf with the
  * Screen preset through the Compress dialog, apply it to the export and download a
- * smaller, complete PDF; export page 1 as a PNG and check its pixel size.
+ * smaller, complete PDF; export page 1 as a PNG and check its pixel size. The tool bar's
+ * groups by mouse and keyboard, and the Document menu's sections (experience-redesign
+ * spec §5).
  */
 import { readFile, stat, writeFile } from 'node:fs/promises';
 
@@ -105,6 +107,84 @@ test('export page 1 as a PNG with the expected pixel size', async ({ page }) => 
   expect(png.subarray(12, 16).toString('latin1')).toBe('IHDR');
   expect(png.readUInt32BE(16)).toBe(expectedWidth);
   expect(png.readUInt32BE(20)).toBe(expectedHeight);
+});
+
+test('the tool bar walks its groups by mouse and keyboard', async ({ page }) => {
+  await setUp(page);
+  const bar = page.getByRole('toolbar', { name: 'Tools' });
+  const groups = ['Read', 'Mark up', 'Draw', 'Fill & sign', 'Pages', 'Redact'];
+  // At rest: six labelled groups (experience-redesign spec §5.1).
+  await expect(bar.getByRole('button')).toHaveText(groups);
+
+  // Mouse: each group morphs the bar in place; its chip returns to the row.
+  const sample: Readonly<Record<string, string | RegExp>> = {
+    Read: 'Find',
+    'Mark up': 'Highlight',
+    Draw: 'Pen',
+    'Fill & sign': 'Signature image',
+    Pages: 'Edit text',
+    Redact: 'Mark for redaction',
+  };
+  for (const group of groups) {
+    await bar.getByRole('button', { name: group, exact: true }).click();
+    const chip = bar.getByRole('button', { name: `${group}: back to all groups` });
+    await expect(chip).toBeFocused();
+    await expect(
+      bar.getByRole('button', { name: sample[group] ?? group, exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: `${group} tools` })).toHaveCount(1);
+    await chip.click();
+    await expect(bar.getByRole('button')).toHaveText(groups);
+  }
+  // Pages names the page it acts on.
+  await bar.getByRole('button', { name: 'Pages', exact: true }).click();
+  await expect(bar.getByRole('button', { name: 'Rotate page 1' })).toBeVisible();
+  await expect(bar.getByRole('button', { name: 'Delete page 1' })).toBeVisible();
+  await bar.getByRole('button', { name: 'Pages: back to all groups' }).click();
+
+  // Keyboard: one Tab stop (the group used last), arrows, Enter opens, Esc disarms and returns.
+  await expect(bar.locator('button[tabindex="0"]')).toHaveCount(1);
+  await bar.getByRole('button', { name: 'Read', exact: true }).focus();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(bar.getByRole('button', { name: 'Draw', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(bar.getByRole('button', { name: 'Draw: back to all groups' })).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  const pen = bar.getByRole('button', { name: 'Pen', exact: true });
+  await expect(pen).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(pen).toHaveAttribute('aria-pressed', 'true');
+  // The pen's options sit in the tier on top of the bar.
+  const tier = page.getByRole('toolbar', { name: 'Pen options' });
+  await expect(tier).toBeVisible();
+  const tierBox = await tier.boundingBox();
+  const barBox = await bar.boundingBox();
+  expect(tierBox && barBox && tierBox.y + tierBox.height <= barBox.y).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(pen).toHaveAttribute('aria-pressed', 'false');
+  await expect(tier).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(bar.getByRole('button')).toHaveText(groups);
+  await expect(bar.getByRole('button', { name: 'Draw', exact: true })).toBeFocused();
+
+  // A shortcut arms its tool and shows its group.
+  await page.locator('body').press('x');
+  await expect(bar.getByRole('button', { name: 'Mark for redaction' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(bar.getByRole('button', { name: 'Redact: back to all groups' })).toBeVisible();
+
+  // The Document menu: Merge, Split, Compare and Rotate under "Combine and split".
+  await page.locator('body').press('Escape');
+  await page.getByTestId('document-menu').click();
+  const menu = page.getByRole('menu');
+  await expect(menu.getByText('Combine and split')).toBeVisible();
+  for (const name of ['Merge files…', 'Split…', 'Compare with…', 'Rotate pages']) {
+    await expect(menu.getByRole('menuitem', { name })).toBeVisible();
+  }
+  await page.keyboard.press('Escape');
 });
 
 /** A Letter page with a 1600 × 1200 Flate RGB "photo" placed 4 inches wide (400 dpi). */

@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, type Page, test } from '@playwright/test';
 
-import { openFixtures, useFileInputPicker } from './helpers';
+import { openFixtures, showInspector, useFileInputPicker } from './helpers';
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'Covered in Chromium');
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -61,6 +61,7 @@ test.beforeEach(async ({ page }) => {
 
 async function openFonts(page: Page): Promise<void> {
   await openFixtures(page, ['text-edit-fonts.pdf']);
+  await showInspector(page);
   await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
     timeout: 20_000,
   });
@@ -231,6 +232,7 @@ test('rotated page: the editor turns with the line; an upright line is edited in
   const upright = 'Page 1 rotate 90 line 2 reads upright';
   const sideways = 'Page 1 rotate 90 line 1: The quick brown fox jumps over the lazy dog';
   await openFixtures(page, ['text-edit-rotated.pdf']);
+  await showInspector(page);
   await page.locator('[data-read-viewport]').focus();
   await page.keyboard.press('e');
   const runs = page.locator('[data-text-edit-layer="0"]');

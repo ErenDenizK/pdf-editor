@@ -1,59 +1,71 @@
 /**
- * Left rail: an icon tab list (Pages / Outline / Search / Comments / Redactions / Forms /
- * Files) and a collapsible, resizable panel.
- * Selecting the open view again collapses the panel (as in VS Code). State persists via
- * the UI store. Keyboard: Up/Down move between rail tabs, Enter/Space toggle.
+ * The navigator (experience-redesign §4.1): four labelled tabs with live counts, Pages
+ * (thumbnails, or the outline under "Bookmarks"), Find, Review (comments, redaction marks
+ * and form fields in one list) and Files, plus Compare's Changes, shown only in the Compare
+ * view and last so the other four never move. A collapsible, resizable panel shows the
+ * chosen tab; choosing the open tab again collapses it (as in VS Code). State persists via
+ * the UI store (`ui:v2`).
+ *
+ * Keyboard: a vertical tablist with roving tabindex; Up / Down (Home / End) move between
+ * tabs, Enter / Space open; Tab moves into the panel. The accessible name carries the
+ * count ("Review, 3 items"). F6 / Shift+F6 cycle the app's regions (`LeftRail.regions.ts`).
  */
-import {
-  EyeOff,
-  FileDiff,
-  FileStack,
-  Files,
-  Keyboard,
-  ListTree,
-  MessageSquareText,
-  Search,
-  TextCursorInput,
-} from 'lucide-react';
-import { type KeyboardEvent, lazy, Suspense, useRef } from 'react';
-
-import { type SourceId, sourceReferences } from '@pdf-editor/document-model';
+import { FileDiff, FileStack, Files, Keyboard, MessageSquareText, Search } from 'lucide-react';
+import { type KeyboardEvent, lazy, Suspense, useRef, useState } from 'react';
 
 import { commandRegistry } from '../commands/registry';
-import { formatBytes } from '../files/file-filters';
-import { m } from '../i18n';
+import { currentPlatform, toAriaKeyShortcut } from '../commands/shortcuts';
+import { formatNumber, m } from '../i18n';
 import { LEFT_PANEL_WIDTH, type LeftPanelView, useUiStore } from '../state/ui-store';
 import { useActiveDocument, useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
 import { ResizeHandle } from '../ui/ResizeHandle';
-import { CommentsPanel } from './CommentsPanel';
-import { EmptyNote } from './EmptyNote';
-import { FormsPanel } from './FormsPanel';
+import { useSearchStore } from '../viewer/search';
+import { FilesList } from './files/FilesList';
 import styles from './LeftRail.module.css';
-import { OutlinePanel } from './OutlinePanel';
-import { PagesPanel } from './PagesPanel';
-import { RedactionsPanel } from './panels/RedactionsPanel';
+import { useRegionCycling } from './LeftRail.regions';
+import { PagesTab } from './panels/PagesTab';
+import { ReviewPanel } from './review/ReviewPanel';
+import { countItems, useReadReviewData, useReviewData } from './review/review-items';
 import { SearchPanel } from './SearchPanel';
 import { useCommandShortcut } from './use-command-shortcut';
 
-const VIEWS: readonly { id: LeftPanelView; label: () => string; Icon: typeof FileStack }[] = [
-  { id: 'pages', label: m.view_pages, Icon: FileStack },
-  { id: 'outline', label: m.view_outline, Icon: ListTree },
-  { id: 'search', label: m.view_search, Icon: Search },
-  { id: 'comments', label: m.view_comments, Icon: MessageSquareText },
-  { id: 'redactions', label: m.view_redactions, Icon: EyeOff },
-  { id: 'forms', label: m.view_forms, Icon: TextCursorInput },
-  { id: 'files', label: m.view_files, Icon: Files },
+interface Tab {
+  readonly id: LeftPanelView;
+  readonly label: () => string;
+  readonly Icon: typeof FileStack;
+}
+
+const TABS: readonly Tab[] = [
+  { id: 'pages', label: m.nav_tab_pages, Icon: FileStack },
+  { id: 'find', label: m.nav_tab_find, Icon: Search },
+  { id: 'review', label: m.nav_tab_review, Icon: MessageSquareText },
+  { id: 'files', label: m.nav_tab_files, Icon: Files },
 ];
 
-/** Shown only in the Compare view (spec recognize-and-compare §2.2). */
-const COMPARE_VIEWS: readonly { id: LeftPanelView; label: () => string; Icon: typeof FileStack }[] =
-  [{ id: 'changes', label: m.compare_changes, Icon: FileDiff }];
+/** Shown only in the Compare view, after the four (spec recognize-and-compare §2.2). */
+const CHANGES_TAB: Tab = { id: 'changes', label: m.compare_changes, Icon: FileDiff };
 
 // The Changes list loads with the Compare view.
 const ChangesPanel = lazy(() => import('../compare/ChangesPanel'));
 
 const PANEL_ID = 'left-panel';
+
+/** Badge text: hidden at 0, "99+" above 99. */
+export function badgeText(count: number): string {
+  if (count <= 0) return '';
+  return count > 99 ? `${formatNumber(99)}+` : formatNumber(count);
+}
+
+/** Live counts per tab: pages, matches of the current search, review items, open files. */
+function useTabCounts(): Readonly<Partial<Record<LeftPanelView, number>>> {
+  const doc = useActiveDocument();
+  const files = useWorkspaceStore((s) => s.workspace.documentOrder.length);
+  const matches = useSearchStore((s) => (s.documentId === doc?.id ? s.hits.length : 0));
+  useReadReviewData();
+  const review = countItems(useReviewData().items).all;
+  return { pages: doc?.pages.length ?? 0, find: matches, review, files };
+}
 
 export function LeftRail() {
   const open = useUiStore((s) => s.leftPanelOpen);
@@ -63,14 +75,19 @@ export function LeftRail() {
   const setWidth = useUiStore((s) => s.setLeftPanelWidth);
   const toggleShortcut = useCommandShortcut('view.toggleLeftPanel');
   const shortcutsShortcut = useCommandShortcut('help.shortcuts');
+  const asideRef = useRef<HTMLElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const comparing = useUiStore((s) => s.viewMode === 'compare');
-  const views = comparing ? [...COMPARE_VIEWS, ...VIEWS] : VIEWS;
+  const tabs = comparing ? [...TABS, CHANGES_TAB] : TABS;
+  const counts = useTabCounts();
+  useRegionCycling(asideRef);
 
+  // Roving tabindex: the tab last moved to with the arrows, else the shown view's tab.
+  const [roving, setRoving] = useState<LeftPanelView | null>(null);
+  const stop = [roving, view].find((id) => tabs.some((t) => t.id === id)) ?? 'pages';
   const onRailKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-    const tabs = Array.from(railRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []);
-    const index = tabs.indexOf(document.activeElement as HTMLElement);
+    const index = tabs.findIndex((t) => `rail-${t.id}` === event.currentTarget.id);
     if (index < 0) return;
     event.preventDefault();
     let next = index;
@@ -78,13 +95,22 @@ export function LeftRail() {
     if (event.key === 'ArrowUp') next = (index - 1 + tabs.length) % tabs.length;
     if (event.key === 'Home') next = 0;
     if (event.key === 'End') next = tabs.length - 1;
-    tabs[next]?.focus();
+    const id = tabs[next]?.id;
+    if (id === undefined) return;
+    setRoving(id);
+    railRef.current?.querySelector<HTMLElement>(`#rail-${id}`)?.focus();
   };
 
-  const activeLabel = views.find((v) => v.id === view)?.label() ?? '';
+  const activeLabel = tabs.find((t) => t.id === view)?.label() ?? '';
+  const keys = toggleShortcut ? toAriaKeyShortcut(toggleShortcut, currentPlatform) : undefined;
 
   return (
-    <aside className={styles.left} aria-label={m.nav_label()}>
+    <aside
+      ref={asideRef}
+      className={styles.left}
+      aria-label={m.nav_label()}
+      data-region="navigator"
+    >
       <div className={styles.rail}>
         <div
           ref={railRef}
@@ -93,24 +119,41 @@ export function LeftRail() {
           aria-label={m.nav_views_label()}
           className={styles.railTabs}
         >
-          {views.map(({ id, label, Icon }) => {
+          {tabs.map(({ id, label, Icon }) => {
             const selected = open && view === id;
+            const count = counts[id] ?? 0;
+            const badge = badgeText(count);
             return (
-              <IconButton
+              <button
                 key={id}
+                type="button"
                 id={`rail-${id}`}
                 role="tab"
-                label={label()}
-                icon={<Icon />}
-                tooltipSide="right"
-                shortcut={selected ? toggleShortcut : undefined}
+                aria-label={count > 0 ? m.nav_count_name({ label: label(), count }) : label()}
                 aria-selected={selected}
                 aria-controls={selected ? PANEL_ID : undefined}
-                tabIndex={view === id ? 0 : -1}
-                className={styles.railButton}
+                aria-keyshortcuts={selected ? keys : undefined}
+                tabIndex={stop === id ? 0 : -1}
+                className={styles.tab}
+                data-tab={id}
                 onKeyDown={onRailKeyDown}
-                onClick={() => showView(id)}
-              />
+                onClick={() => {
+                  setRoving(null);
+                  showView(id);
+                }}
+              >
+                <span className={styles.tabIcon} aria-hidden="true">
+                  <Icon />
+                  {badge !== '' ? (
+                    <span className={styles.badge} data-testid={`rail-count-${id}`}>
+                      {badge}
+                    </span>
+                  ) : null}
+                </span>
+                <span className={styles.tabLabel} aria-hidden="true">
+                  {label()}
+                </span>
+              </button>
             );
           })}
         </div>
@@ -136,13 +179,10 @@ export function LeftRail() {
         >
           <h2 className={styles.panelTitle}>{activeLabel}</h2>
           <div className={styles.panelBody} data-view={view}>
-            {view === 'pages' ? <PagesView /> : null}
-            {view === 'outline' ? <OutlinePanel /> : null}
-            {view === 'search' ? <SearchPanel /> : null}
-            {view === 'comments' ? <CommentsPanel /> : null}
-            {view === 'redactions' ? <RedactionsPanel /> : null}
-            {view === 'forms' ? <FormsPanel /> : null}
-            {view === 'files' ? <FilesView /> : null}
+            {view === 'pages' ? <PagesTab /> : null}
+            {view === 'find' ? <SearchPanel /> : null}
+            {view === 'review' ? <ReviewPanel /> : null}
+            {view === 'files' ? <FilesList /> : null}
             {view === 'changes' && comparing ? (
               <Suspense fallback={null}>
                 <ChangesPanel />
@@ -161,68 +201,5 @@ export function LeftRail() {
         </section>
       ) : null}
     </aside>
-  );
-}
-
-function PagesView() {
-  const doc = useActiveDocument();
-  if (!doc) {
-    return (
-      <div className={styles.pagesEmpty}>
-        <EmptyNote title={m.no_document_title()} body={m.pages_empty_body()} />
-      </div>
-    );
-  }
-  if (doc.pages.length === 0) {
-    return (
-      <div className={styles.pagesEmpty}>
-        <EmptyNote title={m.pages_none_title()} body={m.pages_none_body()} />
-      </div>
-    );
-  }
-  return <PagesPanel doc={doc} />;
-}
-
-/** Opened files (sources). Clicking one activates the first document showing its pages. */
-function FilesView() {
-  const workspace = useWorkspaceStore((s) => s.workspace);
-  const files = useWorkspaceStore((s) => s.files);
-  const setActive = useWorkspaceStore((s) => s.setActive);
-  const sources = Object.keys(workspace.sources) as SourceId[];
-  if (sources.length === 0) {
-    return <EmptyNote title={m.files_empty_title()} body={m.files_empty_body()} />;
-  }
-  return (
-    <ul className={styles.fileList}>
-      {sources.map((id) => {
-        const info = files[id];
-        const home = sourceReferences(workspace, id)[0]?.document;
-        return (
-          <li key={id}>
-            <button
-              type="button"
-              className={styles.fileRow}
-              aria-current={
-                home !== undefined && home === workspace.activeDocument ? 'true' : undefined
-              }
-              disabled={home === undefined}
-              onClick={() => {
-                if (home !== undefined) setActive(home);
-              }}
-            >
-              <span
-                className={styles.fileTag}
-                data-tag={info?.colorIndex ?? 0}
-                aria-hidden="true"
-              />
-              <span className={styles.fileName}>{info?.name ?? workspace.sources[id]?.name}</span>
-              <span className={styles.fileSize}>
-                {formatBytes(info?.size ?? workspace.sources[id]?.byteLength ?? 0)}
-              </span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
   );
 }

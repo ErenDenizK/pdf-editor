@@ -1,0 +1,237 @@
+/*
+ * Home (experience-redesign §3): a toolbar row over a wrapping grid of file cards on the
+ * canvas. Cards are a docked surface: --surface-1 with the hairline ring, no shadow
+ * (DESIGN.md §3). Selection is the accent ring; a card a drag would combine with takes the
+ * accent fill at the tokens' alpha; a file drag over Home is the dashed "drop here" outline.
+ */
+.home {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The empty variant is the same area: the drop target fills it (shell/EmptyState). */
+.home[data-variant='empty'] {
+  height: 100%;
+}
+
+.home[data-dragging]::after {
+  content: '';
+  position: absolute;
+  inset: var(--space-3);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-3);
+  background: var(--accent-subtle);
+  pointer-events: none;
+}
+
+.home[data-variant='empty'][data-dragging]::after {
+  content: none;
+}
+
+.toolbar {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding: 0 var(--space-6) var(--space-3);
+}
+
+.summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.selected {
+  color: var(--text-primary);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.primary,
+.secondary {
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-2);
+  font-size: var(--text-md);
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.primary {
+  composes: primary-button from global;
+}
+
+.secondary {
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+}
+
+.secondary:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .secondary:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.scroller {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2) var(--space-6) calc(var(--space-12) + var(--space-4));
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 192px);
+  align-content: start;
+  justify-content: center;
+  gap: var(--space-4);
+  min-height: 100%;
+  outline: none;
+}
+
+.card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-radius: var(--radius-3);
+  background: var(--surface-1);
+  box-shadow: 0 0 0 1px var(--border-hairline);
+  cursor: default;
+  user-select: none;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .card:hover {
+    background-image: linear-gradient(var(--surface-hover), var(--surface-hover));
+  }
+}
+
+.card:focus-visible {
+  outline-offset: 2px;
+}
+
+.card[aria-selected='true'] {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* A card dragged over this one would combine with it (the dialog opens on drop). */
+.card[data-drop-target] {
+  background: var(--accent-muted);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.thumbBox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+}
+
+.sheet {
+  position: relative;
+  flex: none;
+  background: var(--page-background);
+  box-shadow: var(--page-shadow);
+  border-radius: var(--radius-page);
+  overflow: hidden;
+}
+
+.meta {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  line-height: var(--leading-base);
+}
+
+.nameText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: var(--tag-color);
+}
+
+.details,
+.modified {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.details {
+  color: var(--text-secondary);
+}
+
+.modified {
+  color: var(--text-tertiary);
+}
+
+.card[aria-selected='true'] .modified,
+.card[data-drop-target] .modified {
+  color: var(--text-secondary);
+}
+
+.dropLabel {
+  position: absolute;
+  top: var(--space-2);
+  left: 50%;
+  max-width: calc(100% - var(--space-4));
+  overflow: hidden;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-1);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}

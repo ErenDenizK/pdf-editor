@@ -1,0 +1,79 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius-2);
+}
+
+@media (hover: hover) {
+  .row:not([aria-current='true']):hover {
+    background: var(--surface-hover);
+  }
+}
+
+/* The active document: accent-muted, as every current row (design audit D11, G6). */
+.row[aria-current='true'] {
+  background: var(--accent-muted);
+  /* Tertiary text is 4.3:1 on the accent-muted fill; it steps up to secondary (AA). */
+  --text-tertiary: var(--text-secondary);
+}
+
+.open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.open:focus-visible {
+  outline-offset: -2px;
+}
+
+.tag {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: var(--tag-color);
+}
+
+.text {
+  display: grid;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  font-size: var(--text-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.close {
+  flex: none;
+  margin-right: 2px;
+  opacity: 0;
+}
+
+.row:hover .close,
+.row:focus-within .close,
+.row[aria-current='true'] .close {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .close {
+    opacity: 1;
+  }
+}

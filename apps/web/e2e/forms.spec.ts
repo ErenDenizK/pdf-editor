@@ -16,6 +16,13 @@ import { openFixtures, useFileInputPicker } from './helpers';
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'Download flow is verified on Chromium');
 
+/** The navigator's Review tab on its Fields filter (experience-redesign §4.1). */
+async function showFields(page: Page): Promise<void> {
+  const review = page.getByRole('tab', { name: /^Review/ });
+  if ((await review.getAttribute('aria-selected')) !== 'true') await review.click();
+  await page.getByRole('radio', { name: /^Fields/ }).click();
+  await expect(page.locator('[data-review-panel]')).toHaveAttribute('data-filter', 'fields');
+}
 async function fillName(page: Page, value: string): Promise<void> {
   await page.addInitScript({
     content:
@@ -35,7 +42,7 @@ async function fillName(page: Page, value: string): Promise<void> {
   await editor.fill(value);
   await editor.press('Enter');
   await expect(editor).toBeHidden();
-  await page.getByRole('tab', { name: 'Forms', exact: true }).click();
+  await showFields(page);
   await expect(page.locator('[data-field-row="name"]')).toContainText(value);
 }
 
@@ -96,7 +103,7 @@ test('add a text field and a checkbox by drag, fill them, export: the fields exi
   await page.goto('./');
   await expect(page.getByTestId('app-shell')).toBeVisible();
   await openFixtures(page, ['simple-text.pdf']);
-  await page.getByRole('tab', { name: 'Forms', exact: true }).click();
+  await showFields(page);
 
   const layer = page.locator('[data-page-index="0"] [data-created-field-layer]');
   const pageBox = page.locator('[data-page-index="0"]');
@@ -196,8 +203,8 @@ test('keyboard: place a field from the palette, cancel from the Forms panel', as
   expect(placed?.x).toBeCloseTo(moved?.x ?? 0, 0);
   expect(placed?.y).toBeCloseTo(moved?.y ?? 0, 0);
 
-  // From the Forms panel's menu: Esc cancels and returns to "Add field".
-  await page.getByRole('tab', { name: 'Forms', exact: true }).click();
+  // From the Fields filter's menu: Esc cancels and returns to "Add field".
+  await showFields(page);
   await expect(page.locator('[data-edit-fields]')).toHaveAttribute('aria-pressed', 'true');
   const addField = page.locator('[data-add-field]');
   await addField.focus();

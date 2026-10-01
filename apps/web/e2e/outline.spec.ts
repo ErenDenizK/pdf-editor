@@ -8,7 +8,7 @@ import { copyFile, readFile } from 'node:fs/promises';
 
 import type { PDFNumber } from '@cantoo/pdf-lib';
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRef } from '@cantoo/pdf-lib';
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 
 import { openFixtures, useFileInputPicker } from './helpers';
 
@@ -33,6 +33,15 @@ function outlineOf(doc: PDFDocument): string[] {
   return out;
 }
 
+/** The navigator's Pages tab switched to Bookmarks (experience-redesign §4.1). */
+async function showBookmarks(page: Page): Promise<void> {
+  const pages = page.getByRole('tab', { name: /^Pages/ });
+  if ((await pages.getAttribute('aria-selected')) !== 'true') await pages.click();
+  await page
+    .getByRole('radiogroup', { name: 'Pages view' })
+    .getByRole('radio', { name: 'Bookmarks' })
+    .click();
+}
 test('edit the outline, export, and read the new tree back', async ({ page }, testInfo) => {
   // Force the <a download> path: Playwright cannot drive the native save picker.
   await page.addInitScript({
@@ -56,7 +65,7 @@ test('edit the outline, export, and read the new tree back', async ({ page }, te
   await expect.poll(async () => (await page2.boundingBox())?.y ?? 0).toBeLessThan(box.y - 100);
   await expect(status).toHaveText('Page 2 of 6');
 
-  await page.getByRole('tab', { name: 'Outline', exact: true }).click();
+  await showBookmarks(page);
   const tree = page.getByRole('tree', { name: /Outline of/ });
   await expect(tree.getByRole('treeitem')).toHaveCount(5);
 

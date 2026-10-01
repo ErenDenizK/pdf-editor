@@ -18,6 +18,8 @@ const MOD = currentPlatform === 'mac' ? 'Meta' : 'Control';
 describe('AppShell', () => {
   beforeEach(() => {
     useUiStore.setState({
+      // A test that runs "Arrange pages" must not leave the next one in Arrange.
+      viewMode: 'read',
       paletteOpen: false,
       shortcutsOpen: false,
       recents: [],

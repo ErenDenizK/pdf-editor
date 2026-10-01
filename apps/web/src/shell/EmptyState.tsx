@@ -1,6 +1,7 @@
 /**
- * Onboarding is an empty state with a drop target and three shortcuts (DESIGN.md §4.5).
- * No marketing, no tips. The whole stage accepts drops; this card is the visible target.
+ * Home's empty variant (experience-redesign §3): the same view with no cards, a drop
+ * target and three shortcuts (DESIGN.md §4.5). No marketing, no tips, no sample files. The
+ * whole stage accepts drops; this card is the visible target. `home/HomeView` renders it.
  */
 import { commandRegistry } from '../commands/registry';
 import { currentPlatform, toAriaKeyShortcut } from '../commands/shortcuts';

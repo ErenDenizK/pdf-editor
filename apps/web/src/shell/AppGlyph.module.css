@@ -1,0 +1,27 @@
+/* The title bar's Home button: the glyph, with the shared hover step. */
+.home {
+  display: grid;
+  place-items: center;
+  width: var(--control-height);
+  height: var(--control-height);
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .home:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.home:active {
+  background: var(--surface-active);
+}
+
+.home[aria-current='page'] {
+  color: var(--text-primary);
+}

@@ -1,5 +1,5 @@
 /**
- * Editable document metadata in the Info section (spec document-tools.md §3): Title,
+ * Editable document metadata in the Document info sheet (spec document-tools.md §3): Title,
  * Author, Subject, Keywords, Creator, Language (BCP 47, suggestions plus free text), the
  * creation date (read-only) and custom Info keys. A field commits on Enter or when it
  * loses focus; each change is one history entry and switches the export policy to

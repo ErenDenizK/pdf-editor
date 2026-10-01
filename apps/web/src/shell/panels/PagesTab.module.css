@@ -1,0 +1,22 @@
+.tab {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.switch {
+  flex: none;
+  padding: 0 var(--space-4) var(--space-2);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.empty {
+  padding: var(--space-1) var(--space-4) var(--space-4);
+}

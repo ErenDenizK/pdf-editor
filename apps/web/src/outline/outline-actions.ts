@@ -25,7 +25,7 @@ import {
 import { currentPlatform } from '../commands/shortcuts';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
-import { useUiStore } from '../state/ui-store';
+import { isNavigatorShowing, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { currentViewDestination } from './current-view';
 import {
@@ -306,7 +306,5 @@ export function removeDeadLinks(documentId: DocumentId): boolean {
 /** Opens the Outline panel (palette commands act where the user can see the result). */
 export function showOutlinePanel(): void {
   const ui = useUiStore.getState();
-  if (!ui.leftPanelOpen || ui.leftPanelView !== 'outline') {
-    useUiStore.setState({ leftPanelOpen: true, leftPanelView: 'outline' });
-  }
+  if (!isNavigatorShowing(ui, 'outline')) ui.showNavigator('outline');
 }

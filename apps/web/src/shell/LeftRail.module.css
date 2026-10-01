@@ -23,9 +23,77 @@
   gap: var(--space-1);
 }
 
-.railButton {
-  width: 32px;
-  height: 32px;
+/* A navigator tab: icon with its count badge, the label under it (experience-redesign §4.1). */
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 56px;
+  padding: 6px 0 4px;
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .tab:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.tab:active {
+  background: var(--surface-active);
+}
+
+/* Chrome tabs are neutral; the accent is for option choices and the armed tool. */
+.tab[aria-selected='true'] {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.tabIcon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 20px;
+}
+
+.tabIcon svg {
+  width: var(--icon-chrome);
+  height: var(--icon-chrome);
+  stroke-width: 1.5;
+}
+
+.badge {
+  position: absolute;
+  top: -5px;
+  left: 15px;
+  min-width: 16px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: var(--radius-round);
+  background: var(--surface-3);
+  box-shadow: 0 0 0 1px var(--surface-1);
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabLabel {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .panel {
@@ -56,17 +124,12 @@
 }
 
 .panelBody[data-view='pages'],
-.panelBody[data-view='outline'],
-.panelBody[data-view='search'],
+.panelBody[data-view='find'],
 .panelBody[data-view='changes'] {
   display: flex;
   flex-direction: column;
   overflow: hidden;
   padding: 0;
-}
-
-.pagesEmpty {
-  padding: var(--space-1) var(--space-4) var(--space-4);
 }
 
 .pagesScroll {
@@ -132,64 +195,4 @@
 .pageOption[aria-current='page'] .pageLabel,
 .pageOption[aria-selected='true'] .pageLabel {
   color: var(--text-primary);
-}
-
-.fileList {
-  display: grid;
-  gap: 1px;
-  margin: 0 calc(var(--space-2) * -1);
-}
-
-.fileRow {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  height: var(--control-height);
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-2);
-  color: var(--text-secondary);
-  text-align: left;
-}
-
-@media (hover: hover) {
-  .fileRow:hover {
-    background: var(--surface-hover);
-    color: var(--text-primary);
-  }
-}
-
-.fileRow:disabled {
-  color: var(--text-disabled);
-}
-
-/* Current row: accent-muted everywhere (design audit D11, G6). */
-.fileRow[aria-current='true'] {
-  background: var(--accent-muted);
-  color: var(--text-primary);
-  /* Tertiary text is 4.3:1 on the accent-muted fill; it steps up to secondary (AA). */
-  --text-tertiary: var(--text-secondary);
-}
-
-.fileTag {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-round);
-  background: var(--tag-color);
-}
-
-.fileName {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fileSize {
-  flex: none;
-  color: var(--text-tertiary);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
 }

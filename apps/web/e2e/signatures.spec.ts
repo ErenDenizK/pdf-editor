@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 
 import { expect, type Page, test } from '@playwright/test';
 
-import { fixturePath, openFixtures, useFileInputPicker } from './helpers';
+import { fixturePath, openFixtures, showInspector, useFileInputPicker } from './helpers';
 
 const HONESTY =
   'Checked on this device against the certificates in the file. Signer identity, trust and revocation are not verified.';
@@ -26,6 +26,8 @@ async function start(page: Page, fixtures: readonly string[]): Promise<void> {
   await page.goto('./');
   await expect(page.getByTestId('app-shell')).toBeVisible();
   await openFixtures(page, fixtures);
+  // The signatures section is in the inspector, closed by default.
+  await showInspector(page);
 }
 
 test('signed-then-modified: Intact, changed later with the honesty line', async ({ page }) => {

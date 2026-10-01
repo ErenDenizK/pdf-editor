@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, type Page, test } from '@playwright/test';
 
-import { openFixtures, useFileInputPicker } from './helpers';
+import { openFixtures, showInspector, useFileInputPicker } from './helpers';
 
 const screenshots = new URL('../../../docs/design/screenshots/', import.meta.url);
 const capture = Boolean(process.env.CAPTURE_SCREENSHOTS);
@@ -80,19 +80,29 @@ test.describe('annotations', () => {
       timeout: 20_000,
     });
 
-    await page.getByRole('button', { name: /^Shapes/ }).click();
-    await page.getByRole('menuitem', { name: 'Rectangle' }).click();
+    await page.locator('body').press('r');
     await expect(layer(page)).toHaveAttribute('data-tool', 'rectangle');
     await drag(page, 0, [0.2, 0.3], [0.5, 0.45]);
 
     const rectangle = layer(page).locator('[data-annotation-kind="square"]');
     await expect(rectangle).toHaveCount(1, { timeout: 10_000 });
-    await expect(historyRow(page, /Rectangle on page 1/)).toHaveAttribute('data-state', 'present');
     // Creating does not select: no contextual bar (experience-redesign §6.1).
     await expect(page.getByTestId('annotation-bar')).toHaveCount(0);
 
     await page.keyboard.press('Escape');
     await expect(layer(page)).toHaveAttribute('data-tool', 'select');
+
+    // Selecting it shows the contextual bar; the inspector stays closed (decision 4).
+    const square = await rectangle.boundingBox();
+    if (!square) throw new Error('rectangle hit target not rendered');
+    await page.mouse.click(square.x + 4, square.y + square.height / 2);
+    await expect(page.getByTestId('annotation-bar')).toBeVisible();
+    await expect(page.locator('#right-panel')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('annotation-bar')).toHaveCount(0);
+
+    await showInspector(page);
+    await expect(historyRow(page, /Rectangle on page 1/)).toHaveAttribute('data-state', 'present');
 
     await page.keyboard.press('ControlOrMeta+z');
     await expect(rectangle).toHaveCount(0);
@@ -107,6 +117,7 @@ test.describe('annotations', () => {
     test.skip(browserName !== 'chromium', 'Covered in Chromium');
     await page.goto('./');
     await openFixtures(page, ['simple-text.pdf']);
+    await showInspector(page);
     const line = page
       .getByTestId('text-layer')
       .first()
@@ -130,6 +141,7 @@ test.describe('annotations', () => {
     await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
       timeout: 20_000,
     });
+    await showInspector(page);
     // Text box: click, type, Escape commits.
     await page.locator('body').press('t');
     await drag(page, 0, [0.15, 0.6], [0.15, 0.6]);
@@ -150,14 +162,26 @@ test.describe('annotations', () => {
     await expect(layer(page).locator('[data-annotation-kind="ink"]')).toHaveCount(0);
     await expect(historyRow(page, /Delete (ink|pen)/)).toBeVisible();
 
-    // Built-in stamp from the tool bar menu.
-    await page.getByRole('button', { name: 'Stamp or image' }).click();
+    // Built-in stamp from the Fill & sign group's menu: a one-shot tool, so the eraser comes
+    // back and the stamp is not selected (experience-redesign spec §5.2).
+    const bar = page.getByRole('toolbar', { name: 'Tools' });
+    // The eraser's group (Draw) is shown: its chip returns to the row of groups.
+    await bar.getByRole('button', { name: 'Draw: back to all groups' }).click();
+    await bar.getByRole('button', { name: 'Fill & sign' }).click();
+    await bar.getByRole('button', { name: 'Stamp or image' }).click();
     await page.getByRole('menuitem', { name: 'Draft' }).click();
     await drag(page, 0, [0.7, 0.35], [0.7, 0.35]);
-    await expect(layer(page).locator('[data-annotation-kind="stamp"]')).toHaveCount(1);
+    const stamp = layer(page).locator('[data-annotation-kind="stamp"]');
+    await expect(stamp).toHaveCount(1);
     await expect(historyRow(page, /Stamp on page 1/)).toBeVisible();
+    await expect(layer(page)).toHaveAttribute('data-tool', 'eraser');
+    await expect(page.getByTestId('annotation-bar')).toHaveCount(0);
 
-    // Delete removes the selected stamp; undo brings it back.
+    // Selected explicitly, Delete removes it; undo brings it back.
+    await page.locator('body').press('Escape');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'select');
+    await stamp.click();
+    await expect(page.getByTestId('annotation-bar')).toBeVisible();
     await page.locator('body').press('Delete');
     await expect(layer(page).locator('[data-annotation-kind="stamp"]')).toHaveCount(0);
     await page.keyboard.press('ControlOrMeta+z');
@@ -211,6 +235,7 @@ test.describe('annotations', () => {
     await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
       timeout: 20_000,
     });
+    await showInspector(page);
     // Records any contextual bar or selection outline, however briefly it appears.
     await page.evaluate(() => {
       const seen: string[] = [];
@@ -281,6 +306,9 @@ test.describe('annotations', () => {
     await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
       timeout: 20_000,
     });
+    // With the inspector the page fits above the tool bar and its options tier, so the drags
+    // below land on the page.
+    await showInspector(page);
     const tool = async (key: string) => {
       await page.locator('body').press(key);
     };
@@ -324,6 +352,9 @@ test.describe('annotations', () => {
     await page.getByRole('textbox', { name: 'Text box text' }).fill('Numbers updated in v2');
     await page.getByRole('textbox', { name: 'Text box text' }).press('Escape');
     await tool('Escape');
+    // From the text box's group (Mark up) back to the row, then Fill & sign.
+    await page.getByRole('button', { name: /: back to all groups$/ }).click();
+    await page.getByRole('button', { name: 'Fill & sign' }).click();
     await page.getByRole('button', { name: 'Stamp or image' }).click();
     await page.getByRole('menuitem', { name: 'Approved' }).click();
     await drag(page, 0, [0.72, 0.68], [0.72, 0.68]);
@@ -343,7 +374,7 @@ test.describe('annotations', () => {
 
     await tool('Escape');
     await tool('Escape');
-    await page.getByRole('tab', { name: 'Comments' }).click();
+    await page.getByRole('tab', { name: /^Review/ }).click();
     await expect(page.getByText('Check these figures against the Q3 report.')).toBeVisible();
     await page.waitForTimeout(400);
     await page.screenshot({

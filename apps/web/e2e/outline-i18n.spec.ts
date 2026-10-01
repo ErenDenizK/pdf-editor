@@ -3,7 +3,7 @@
  * Outline panel on a real PDF (nested bookmarks, authored open/closed state, navigation to
  * pages) and the UI language: `?lang=` override, the Language command, persistence.
  */
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 
 import { openFixtures, useFileInputPicker } from './helpers';
 
@@ -11,12 +11,21 @@ test.beforeEach(async ({ page }) => {
   await useFileInputPicker(page);
 });
 
+/** The navigator's Pages tab switched to Bookmarks (experience-redesign §4.1). */
+async function showBookmarks(page: Page): Promise<void> {
+  const pages = page.getByRole('tab', { name: /^Pages/ });
+  if ((await pages.getAttribute('aria-selected')) !== 'true') await pages.click();
+  await page
+    .getByRole('radiogroup', { name: 'Pages view' })
+    .getByRole('radio', { name: 'Bookmarks' })
+    .click();
+}
 test('the outline panel shows the bookmarks and navigates Read mode', async ({ page }) => {
   await page.goto('./?lang=en');
   await openFixtures(page, ['outline-named-dests.pdf']);
   await expect(page.getByTestId('status-pages')).toHaveText('Page 1 of 6');
 
-  await page.getByRole('tab', { name: 'Outline', exact: true }).click();
+  await showBookmarks(page);
   const tree = page.getByRole('tree', { name: /Outline of/ });
   // The authored open state (/Count sign, read by the engine's inspector): "Chapter 2"
   // starts expanded, "2.2 Results" collapsed.

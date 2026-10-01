@@ -8,9 +8,9 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { PDFDocument, PDFName } from '@cantoo/pdf-lib';
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 
-import { openFixtures, useFileInputPicker } from './helpers';
+import { openFixtures, showInspector, useFileInputPicker } from './helpers';
 
 const screenshots = new URL('../../../docs/design/screenshots/', import.meta.url);
 const capture = Boolean(process.env.CAPTURE_SCREENSHOTS);
@@ -35,6 +35,20 @@ async function runDocumentCommand(page: Page, name: string): Promise<void> {
   await page.getByRole('menuitem', { name }).click();
 }
 
+/** Metadata, password and diagnostics live in the Document info sheet (experience-redesign §4.2). */
+async function openDocumentInfo(page: Page): Promise<Locator> {
+  await runDocumentCommand(page, 'Document info…');
+  const sheet = page.getByRole('dialog', { name: 'Document info' });
+  await expect(sheet).toBeVisible();
+  return sheet;
+}
+
+async function closeDocumentInfo(page: Page): Promise<void> {
+  const sheet = page.getByRole('dialog', { name: 'Document info' });
+  await sheet.getByRole('button', { name: 'Close', exact: true }).first().click();
+  await expect(sheet).toHaveCount(0);
+}
+
 async function exportAndDownload(page: Page): Promise<string> {
   await page.getByRole('button', { name: 'Export document' }).click();
   const dialog = page.getByTestId('export-dialog');
@@ -52,11 +66,14 @@ test('edit the title, set a password, export, and open the output with the passw
   page,
 }) => {
   await start(page, 'simple-text.pdf');
-  const editor = page.getByTestId('metadata-editor');
+  const sheet = await openDocumentInfo(page);
+  const editor = sheet.getByTestId('metadata-editor');
   const title = editor.getByLabel('Title');
   await title.fill('Quarterly figures');
   await title.press('Enter');
   await expect(page.getByTestId('metadata-policy')).toContainText('Edited');
+  await closeDocumentInfo(page);
+  await showInspector(page);
   await expect(
     page.getByRole('list', { name: /history/i }).getByRole('button', { name: 'Change Title' }),
   ).toBeVisible();
@@ -74,7 +91,9 @@ test('edit the title, set a password, export, and open the output with the passw
   }
   await dialog.getByRole('button', { name: 'Set password' }).click();
   await expect(dialog).toBeHidden();
+  await openDocumentInfo(page);
   await expect(page.getByTestId('security-outcome')).toContainText('AES-256');
+  await closeDocumentInfo(page);
 
   // The export dialog's Security section shows the outcome; the summary names the algorithm.
   await page.getByRole('button', { name: 'Export document' }).click();
@@ -101,6 +120,7 @@ test('edit the title, set a password, export, and open the output with the passw
 
 test('strip metadata, export: the output has no author', async ({ page }) => {
   await start(page, 'metadata-xmp.pdf');
+  await openDocumentInfo(page);
   await expect(page.getByTestId('metadata-editor').getByLabel('Author')).toHaveValue(
     'Jane Q. Fixture',
   );
@@ -122,12 +142,15 @@ test('strip metadata, export: the output has no author', async ({ page }) => {
     });
   }
 
+  await closeDocumentInfo(page);
   await runDocumentCommand(page, 'Strip metadata…');
   const dialog = page.getByTestId('strip-dialog');
   await expect(dialog.getByTestId('strip-count-attachments')).toHaveText('1 found');
   await dialog.getByRole('button', { name: 'Strip on export' }).click();
   await expect(dialog).toBeHidden();
+  await openDocumentInfo(page);
   await expect(page.getByTestId('metadata-editor').getByLabel('Author')).toHaveValue('');
+  await closeDocumentInfo(page);
 
   const path = await exportAndDownload(page);
   const pdf = await PDFDocument.load(await readFile(path), { updateMetadata: false });

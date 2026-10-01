@@ -3,19 +3,45 @@
  * --elevation-float), with its opaque fallbacks for browsers without backdrop-filter and for
  * reduced transparency, more contrast and forced colours. The bar is a capsule; the armed
  * tool's solid accent fill lives in ui/IconButton.module.css.
+ *
+ * The dock anchors the bar and its options tier. The tier is the bar's sibling, not its
+ * child: a glass surface is the backdrop root of its descendants, so a nested tier would
+ * blur nothing.
  */
-.toolbar {
-  composes: glass from global;
+.dock {
   position: absolute;
   bottom: var(--space-5);
   left: 50%;
   z-index: 3;
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: calc(100% - 2 * var(--space-4));
+  transform: translateX(-50%);
+  /* Only the surfaces take the pointer; the gap beside the tier is the page's. */
+  pointer-events: none;
+}
+
+.toolbar,
+.tier {
+  pointer-events: auto;
+}
+
+.toolbar {
+  composes: glass from global;
+  display: flex;
   align-items: center;
   gap: 2px;
+  height: 46px;
   padding: var(--space-1);
   border-radius: var(--radius-capsule);
-  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+/* While the capsule's width follows a group change, its content is clipped to it. */
+.toolbar[data-morphing] {
+  overflow: hidden;
 }
 
 /* Buttons in the capsule are round, concentric with its ends (23 - 1 border - 4 padding = 18,
@@ -24,12 +50,99 @@
   border-radius: var(--radius-round);
 }
 
+/* A group: icon and name (spec §5.1). */
+.group {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-round);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .group:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.group:active {
+  background: var(--surface-active);
+}
+
+/* The shown group: the view switch's "on" look (spec §7.3). */
+.group[data-bar-chip] {
+  padding-left: var(--space-2);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-hairline);
+}
+
+.groupIcon {
+  flex: none;
+  width: var(--icon-chrome);
+  height: var(--icon-chrome);
+  stroke-width: 1.5;
+}
+
+.chipChevron {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-right: -2px;
+  color: var(--text-secondary);
+}
+
+/* Narrow stages: the row keeps icons; the names stay as accessible names. */
+@media (max-width: 640px) {
+  .group:not([data-bar-chip]) .groupLabel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .group:not([data-bar-chip]) {
+    padding: 0 var(--space-2);
+  }
+}
+
 .divider {
   flex: none;
   width: 1px;
   height: 20px;
   margin: 0 var(--space-1);
   background: var(--border-hairline);
+}
+
+/* The options tier: a second glass row attached to the top of the bar (spec §5.2). It rises
+   in from the bar's top edge over --duration-fast (0 under reduced motion). */
+.tier {
+  composes: glass from global;
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  max-width: 100%;
+  padding: var(--space-1) var(--space-3);
+  overflow-x: auto;
+  border-radius: var(--radius-capsule);
+  animation: tier-rise var(--duration-fast) var(--ease-out);
+}
+
+@keyframes tier-rise {
+  from {
+    opacity: 0;
+    transform: var(--motion-rise);
+  }
 }
 
 .menuTrigger {

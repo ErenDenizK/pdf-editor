@@ -410,7 +410,7 @@
   "common_yes": "Yes",
   "common_no": "No",
   "document_menu": "Document",
-  "cmd_document_info": "Document info and metadata",
+  "cmd_document_info": "Document info…",
   "cmd_set_password": "Set password…",
   "cmd_change_password": "Change password…",
   "cmd_remove_password": "Remove password…",
@@ -3163,5 +3163,201 @@
         "countPlural=*": "Recognized text (OCR) on {countText} pages: {languages}. It is invisible text over the unchanged page images."
       }
     }
-  ]
+  ],
+  "cmd_view_home": "Home",
+  "cmd_view_home_keywords": "home, start, files, overview, cards, all files",
+  "home_label": "Home",
+  "home_long": "Home: every open file",
+  "home_grid_label": "Files",
+  "home_selected_summary": "{count} selected",
+  "home_announce_selected": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} file selected",
+        "countPlural=*": "{count} files selected"
+      }
+    }
+  ],
+  "home_combine_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Combine {count} file",
+        "countPlural=*": "Combine {count} files"
+      }
+    }
+  ],
+  "home_combine_all": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Combine all {count} file",
+        "countPlural=*": "Combine all {count} files"
+      }
+    }
+  ],
+  "home_combine_none": "Combine files",
+  "home_combine_title": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Combine {count} document",
+        "countPlural=*": "Combine {count} documents"
+      }
+    }
+  ],
+  "home_drop_combine": "Combine with {title}",
+  "home_modified": "Modified {date}",
+  "home_announce_closed": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Closed {count} file",
+        "countPlural=*": "Closed {count} files"
+      }
+    }
+  ],
+  "home_history_close": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Close {count} document",
+        "countPlural=*": "Close {count} documents"
+      }
+    }
+  ],
+  "bar_group_read": "Read",
+  "bar_group_markup": "Mark up",
+  "bar_group_draw": "Draw",
+  "bar_group_fill": "Fill & sign",
+  "bar_group_pages": "Pages",
+  "bar_group_redact": "Redact",
+  "bar_group_tools": "{group} tools",
+  "bar_group_back": "{group}: back to all groups",
+  "bar_back_tooltip": "Back to all groups",
+  "bar_options": "{tool} options",
+  "bar_find": "Find",
+  "bar_fit": "Fit",
+  "bar_crop": "Crop…",
+  "bar_rotate_page": "Rotate page {number}",
+  "bar_rotate_selected": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Rotate {count} selected page",
+        "countPlural=*": "Rotate {count} selected pages"
+      }
+    }
+  ],
+  "bar_delete_page": "Delete page {number}",
+  "bar_delete_selected": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Delete {count} selected page",
+        "countPlural=*": "Delete {count} selected pages"
+      }
+    }
+  ],
+  "bar_rotated_page": "Rotated page {number}",
+  "bar_deleted_page": "Deleted page {number}. Undo with {shortcut}",
+  "bar_redact_mark": "Mark for redaction",
+  "bar_mark_matches": "Mark search matches",
+  "bar_mark_matches_none": "Find text first: there are no search matches to mark",
+  "bar_apply_redactions": "Apply redactions…",
+  "bar_shortcut_back": "Tool bar: back to the groups",
+  "menu_section_combine": "Combine and split",
+  "menu_section_add": "Add to pages",
+  "menu_section_protect": "Protect and sign",
+  "menu_section_convert": "Convert and export",
+  "menu_section_document": "Document",
+  "menu_merge": "Merge files…",
+  "menu_split": "Split…",
+  "menu_compare": "Compare with…",
+  "menu_rotate": "Rotate pages",
+  "menu_rotate_right": "Right 90°",
+  "menu_rotate_left": "Left 90°",
+  "menu_rotate_half": "180°",
+  "menu_rotate_scope_all": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "The page",
+        "countPlural=*": "All {count} pages"
+      }
+    }
+  ],
+  "menu_rotate_scope_selected": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} selected page",
+        "countPlural=*": "{count} selected pages"
+      }
+    }
+  ],
+  "menu_rotated_half": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Rotated {count} page 180°",
+        "countPlural=*": "Rotated {count} pages 180°"
+      }
+    }
+  ],
+  "nav_tab_pages": "Pages",
+  "nav_tab_find": "Find",
+  "nav_tab_review": "Review",
+  "nav_tab_files": "Files",
+  "nav_count_name": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{label}, {count} item",
+        "countPlural=*": "{label}, {count} items"
+      }
+    }
+  ],
+  "nav_pages_view_label": "Pages view",
+  "nav_pages_thumbnails": "Pages",
+  "nav_pages_bookmarks": "Bookmarks",
+  "nav_files_list": "Open documents",
+  "nav_files_meta": "{pages} · {size}",
+  "nav_files_close": "Close {name}",
+  "review_filter_label": "Show",
+  "review_filter_all": "All",
+  "review_filter_comments": "Comments",
+  "review_filter_marks": "Marks",
+  "review_filter_fields": "Fields",
+  "review_announce_filter": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{label}: {count} item",
+        "countPlural=*": "{label}: {count} items"
+      }
+    }
+  ],
+  "review_no_document_body": "Open a PDF to review its comments, redaction marks and form fields.",
+  "review_loading": "Reading the document…",
+  "review_empty_title": "Nothing to review",
+  "review_empty_body": "Comments, redaction marks and form fields of this document appear here.",
+  "docinfo_title": "Document info",
+  "docinfo_open": "Document info…",
+  "docinfo_file": "File",
+  "bar_in_group": "Tool bar: {group}"
 }

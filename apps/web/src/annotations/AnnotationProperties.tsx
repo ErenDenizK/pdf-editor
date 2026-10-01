@@ -2,8 +2,9 @@
  * Right panel "Properties" for selected annotations (spec §2): the contextual bar's
  * controls plus kind, author, dates and the comment text. With nothing selected and a
  * drawing tool armed it shows that tool's style, so colour and width can be chosen before
- * drawing (experience-redesign spec §6.3; the tool bar's options tier takes this over in
- * T1). Renders `fallback` otherwise.
+ * drawing (experience-redesign spec §6.3). The tool bar's options tier is the primary place
+ * for these controls (§5.2, the same `StyleControls`); this panel repeats them. Renders
+ * `fallback` otherwise.
  */
 import type { ReactNode } from 'react';
 import { useId, useState } from 'react';

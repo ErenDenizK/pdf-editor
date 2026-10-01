@@ -121,3 +121,13 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* The tool bar's options tier: one row like the contextual bar, labels for screen readers. */
+.controls[data-placement='tier'] .sliderLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

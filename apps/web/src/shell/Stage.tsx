@@ -1,14 +1,17 @@
 /**
- * The centre pane. Empty: the onboarding drop target. With a document: the Read / Arrange
- * mode switch over the active document (`stage/ReadView`, `stage/ArrangeView`), plus the
- * floating tool bar. Both views are keyed by document so switching tabs starts fresh. The
- * third view, Compare (`compare/CompareView`, loaded on first use), brings its own bar; its
- * segment in the mode switch shows only while a comparison is open (being set up, running
- * or kept after leaving the view; spec recognize-and-compare §2.2).
+ * The centre pane. Empty: Home's empty variant, the onboarding drop target. With a
+ * document: the Read / Arrange mode switch over the active document (`stage/ReadView`,
+ * `stage/ArrangeView`), plus the floating tool bar. Both views are keyed by document so
+ * switching tabs starts fresh. The third view, Compare (`compare/CompareView`, loaded on
+ * first use), brings its own bar; its segment in the mode switch shows only while a
+ * comparison is open (being set up, running or kept after leaving the view; spec
+ * recognize-and-compare §2.2). Home (`home/HomeView`, experience-redesign §3) shows the
+ * open files as cards; its segment shows only while Home is showing.
  */
 import { type KeyboardEvent, lazy, Suspense, useRef } from 'react';
 
 import { comparisonOpen, useCompareStore } from '../compare/compare-store';
+import { HomeView } from '../home/HomeView';
 import { m } from '../i18n';
 import { ArrangeView } from '../stage/ArrangeView';
 import { ReadView } from '../stage/ReadView';
@@ -17,7 +20,6 @@ import { useActiveDocument, useHasDocuments, useWorkspaceStore } from '../state/
 import { Tooltip } from '../ui/Tooltip';
 import { LayoutSwitch } from '../viewer/LayoutSwitch';
 import { EmptyNote } from './EmptyNote';
-import { EmptyState } from './EmptyState';
 import { FloatingToolbar } from './FloatingToolbar';
 import styles from './Stage.module.css';
 import { STAGE_ID, tabDomId } from './TabBar';
@@ -40,7 +42,23 @@ export function Stage({ dragging }: { readonly dragging: boolean }) {
         aria-label={m.stage_start_label()}
         aria-busy={opening > 0}
       >
-        <EmptyState dragging={dragging} />
+        <HomeView dragging={dragging} />
+      </main>
+    );
+  }
+
+  if (viewMode === 'home') {
+    return (
+      <main
+        id={STAGE_ID}
+        className={styles.stage}
+        aria-label={m.home_label()}
+        aria-busy={opening > 0}
+      >
+        <div className={styles.header}>
+          <ModeSwitch />
+        </div>
+        <HomeView dragging={dragging} />
       </main>
     );
   }
@@ -93,6 +111,7 @@ const MODES: readonly {
   tooltip: () => string;
   command: string;
 }[] = [
+  { id: 'home', label: m.home_label, tooltip: m.home_long, command: 'view.home' },
   { id: 'read', label: m.mode_read, tooltip: m.mode_read_long, command: 'mode.read' },
   { id: 'arrange', label: m.mode_arrange, tooltip: m.mode_arrange_long, command: 'mode.arrange' },
   { id: 'compare', label: m.compare_mode, tooltip: m.compare_mode_long, command: 'mode.compare' },
@@ -104,8 +123,12 @@ function ModeSwitch() {
   const setViewMode = useUiStore((s) => s.setViewMode);
   const compareOpen = useCompareStore((s) => comparisonOpen(viewMode === 'compare', s.status));
   // Compare is entered with its command (3, the palette); the segment returns to it.
-  const modes = compareOpen ? MODES : MODES.filter((mode) => mode.id !== 'compare');
+  // Home's segment shows only while Home is showing (0 and the app glyph lead there).
+  const modes = MODES.filter(
+    (mode) => (mode.id !== 'compare' || compareOpen) && (mode.id !== 'home' || viewMode === 'home'),
+  );
   const shortcuts = {
+    home: useCommandShortcut('view.home'),
     read: useCommandShortcut('mode.read'),
     arrange: useCommandShortcut('mode.arrange'),
     compare: useCommandShortcut('mode.compare'),

@@ -86,3 +86,14 @@ export async function sentInkWidths(page: Page): Promise<number[][][]> {
     () => (window as unknown as { __inkWidths?: number[][][] }).__inkWidths ?? [],
   );
 }
+
+/**
+ * Opens the inspector (Selection, Properties, History, Info), which is closed until the
+ * person opens it (experience-redesign §4.2); tests that read the history or a section
+ * call this first.
+ */
+export async function showInspector(page: Page): Promise<void> {
+  const inspector = page.locator('#right-panel');
+  if (!(await inspector.isVisible())) await page.keyboard.press('ControlOrMeta+Alt+b');
+  await expect(inspector).toBeVisible();
+}

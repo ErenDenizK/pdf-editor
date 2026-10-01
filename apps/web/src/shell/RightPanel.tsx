@@ -1,8 +1,11 @@
 /**
- * Inspector: shows only what applies to the current selection (DESIGN.md §2). Selection
- * and history come from the document model; Info shows the active document's file facts,
- * the engine-reported honesty badges (light-table spec §6), editable metadata, passwords
- * and diagnostics (document-tools spec §3, §4, §7).
+ * Inspector: shows only what applies to the current selection (DESIGN.md §2). Closed by
+ * default and opened only by the person (its toggle, Mod+Alt+B, or a button they press);
+ * selecting never opens it (experience-redesign §4.2, decision 4). Selection and history
+ * come from the document model; Info shows the active document's file facts and the
+ * engine-reported honesty badges (light-table spec §6), with "Document info…" for the
+ * metadata, passwords and diagnostics, which live in the Document info sheet
+ * (`document/DocumentDialogs.tsx`).
  */
 import {
   effectiveLabel,
@@ -10,14 +13,13 @@ import {
   historyEntries,
   type PageId,
   type SourceFlags,
+  type VirtualDocument,
   type Workspace,
 } from '@pdf-editor/document-model';
 import { type ReactNode, useEffect, useRef } from 'react';
 
 import { AnnotationProperties } from '../annotations/AnnotationProperties';
-import { DiagnosticsDetails } from '../document/Diagnostics';
-import { MetadataEditor } from '../document/MetadataEditor';
-import { SecurityInfo } from '../document/SecurityInfo';
+import { openDocumentDialog } from '../document/document-store';
 import { OcrSection, useHasOcrSection } from '../ocr';
 import { SignaturesSection, useHasSignatureSection } from '../signatures/SignaturesSection';
 import { useAnnotationStore } from '../annotations/annotation-store';
@@ -229,15 +231,32 @@ function HistorySection() {
   );
 }
 
-/**
- * The active document's Info (spec document-tools.md §3, §4, §7): file facts and honesty
- * badges, editable metadata, passwords, and the collapsible diagnostics ("Details").
- */
+/** The active document's Info: file facts and badges, and the way to the Document info sheet. */
 function InfoSection() {
   const doc = useActiveDocument();
+  if (!doc) return <EmptyNote title={m.no_document_title()} />;
+  return (
+    <div className={styles.info}>
+      <DocumentFacts doc={doc} />
+      <button
+        type="button"
+        className={styles.infoButton}
+        aria-haspopup="dialog"
+        onClick={() => openDocumentDialog('info', doc.id)}
+      >
+        {m.docinfo_open()}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * File facts of a document (document-tools spec §3): name, files, size, pages, modified,
+ * and the honesty badges with their export explanation. Shared with the Document info sheet.
+ */
+export function DocumentFacts({ doc }: { readonly doc: VirtualDocument }) {
   const ws = useWorkspaceStore((s) => s.workspace);
   const files = useWorkspaceStore((s) => s.files);
-  if (!doc) return <EmptyNote title={m.no_document_title()} />;
   const sources = documentSources(doc);
   const first = sources[0];
   const file = first === undefined ? undefined : files[first];
@@ -246,50 +265,39 @@ function InfoSection() {
   const badges = SOURCE_BADGES.filter((badge) =>
     sources.some((id) => ws.sources[id]?.flags[badge.flag] === true),
   );
-  const sourceDocs = sources.flatMap((id) => {
-    const source = ws.sources[id];
-    return source ? [source] : [];
-  });
   return (
-    <div className={styles.info}>
-      <dl className={styles.facts}>
-        <dt>{m.info_name()}</dt>
-        <dd title={name}>{name}</dd>
-        {sources.length > 1 ? (
-          <>
-            <dt>{m.info_files()}</dt>
-            <dd className={styles.numeric}>{sources.length}</dd>
-          </>
-        ) : null}
-        <dt>{m.info_size()}</dt>
-        <dd className={styles.numeric}>{formatBytes(size)}</dd>
-        <dt>{m.info_pages()}</dt>
-        <dd className={styles.numeric}>{doc.pages.length}</dd>
-        <dt>{m.info_modified()}</dt>
-        <dd className={styles.numeric}>
-          {file && file.lastModified > 0 ? dateFormat(file.lastModified) : '—'}
-        </dd>
-        {badges.length > 0 ? (
-          <>
-            <dt>{m.info_notes()}</dt>
-            <dd className={styles.badges}>
-              {badges.map((badge) => (
-                <Tooltip key={badge.flag} label={badge.explanation} side="left">
-                  <button type="button" className={styles.badge} aria-label={badge.explanation}>
-                    {badge.label}
-                  </button>
-                </Tooltip>
-              ))}
-            </dd>
-          </>
-        ) : null}
-      </dl>
-      <h3 className={styles.subTitle}>{m.info_metadata()}</h3>
-      <MetadataEditor doc={doc} />
-      <h3 className={styles.subTitle}>{m.info_security()}</h3>
-      <SecurityInfo doc={doc} />
-      {sourceDocs.length > 0 ? <DiagnosticsDetails sources={sourceDocs} /> : null}
-    </div>
+    <dl className={styles.facts}>
+      <dt>{m.info_name()}</dt>
+      <dd title={name}>{name}</dd>
+      {sources.length > 1 ? (
+        <>
+          <dt>{m.info_files()}</dt>
+          <dd className={styles.numeric}>{sources.length}</dd>
+        </>
+      ) : null}
+      <dt>{m.info_size()}</dt>
+      <dd className={styles.numeric}>{formatBytes(size)}</dd>
+      <dt>{m.info_pages()}</dt>
+      <dd className={styles.numeric}>{doc.pages.length}</dd>
+      <dt>{m.info_modified()}</dt>
+      <dd className={styles.numeric}>
+        {file && file.lastModified > 0 ? dateFormat(file.lastModified) : '—'}
+      </dd>
+      {badges.length > 0 ? (
+        <>
+          <dt>{m.info_notes()}</dt>
+          <dd className={styles.badges}>
+            {badges.map((badge) => (
+              <Tooltip key={badge.flag} label={badge.explanation} side="left">
+                <button type="button" className={styles.badge} aria-label={badge.explanation}>
+                  {badge.label}
+                </button>
+              </Tooltip>
+            ))}
+          </dd>
+        </>
+      ) : null}
+    </dl>
   );
 }
 

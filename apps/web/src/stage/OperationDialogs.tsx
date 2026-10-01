@@ -93,7 +93,7 @@ function DialogContent({ dialog }: { readonly dialog: OperationDialog }) {
     case 'merge-into':
       return <MergeIntoDialog documentId={dialog.documentId} />;
     case 'merge-all':
-      return <MergeAllDialog />;
+      return <MergeAllDialog order={dialog.order} />;
     case 'interleave':
       return <InterleaveDialog documentId={dialog.documentId} />;
     case 'resize':
@@ -435,12 +435,19 @@ function MergeIntoDialog({ documentId }: { readonly documentId: DocumentId }) {
 // Merge all open documents
 // ---------------------------------------------------------------------------
 
-function MergeAllDialog() {
+function MergeAllDialog({ order: given }: { readonly order?: readonly DocumentId[] | undefined }) {
   const liveTabs = useTabItems();
+  // The merge consumes the documents; keep showing them while the dialog closes.
   const [initialTabs] = useState(liveTabs);
-  const tabs = liveTabs.length > 1 ? liveTabs : initialTabs;
-  const [order, setOrder] = useState<readonly DocumentId[]>(() => tabs.map((t) => t.id));
-  const [title, setTitle] = useState(() => tabs[0]?.title ?? '');
+  const [order, setOrder] = useState<readonly DocumentId[]>(() =>
+    given === undefined
+      ? initialTabs.map((t) => t.id)
+      : given.filter((id) => initialTabs.some((t) => t.id === id)),
+  );
+  const tabs = order.every((id) => liveTabs.some((t) => t.id === id)) ? liveTabs : initialTabs;
+  const [title, setTitle] = useState(
+    () => tabs.find((t) => t.id === order[0])?.title ?? tabs[0]?.title ?? '',
+  );
   const [touched, setTouched] = useState(false);
   const listRef = useRef<HTMLOListElement>(null);
   const titleId = useId();
@@ -471,13 +478,18 @@ function MergeAllDialog() {
       mergeAll(
         rows.map((r) => r.id),
         title,
-      ) !== undefined
+      ) === undefined
     )
-      closeOperationDialog();
+      return;
+    closeOperationDialog();
+    // Combined from Home: the new document opens in Read (experience-redesign §3).
+    if (useUiStore.getState().viewMode === 'home') useUiStore.getState().setViewMode('read');
   };
 
+  const dialogTitle =
+    given === undefined ? m.merge_all_title() : m.home_combine_title({ count: rows.length });
   return (
-    <Frame title={m.merge_all_title()} testId="merge-all-dialog" wide>
+    <Frame title={dialogTitle} testId="merge-all-dialog" wide>
       <form className={styles.body} onSubmit={submit}>
         <p className={styles.description}>{m.merge_all_description()}</p>
         <ol ref={listRef} className={local.list} aria-label={m.merge_all_order_label()}>

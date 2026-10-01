@@ -5,7 +5,7 @@
  */
 import type { CommandRegistry } from '../commands/registry';
 import { m } from '../i18n';
-import { useUiStore } from '../state/ui-store';
+import { isNavigatorShowing, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useSearchStore } from '../viewer/search';
 import { useToolStore } from '../viewer/tool-store';
@@ -25,8 +25,7 @@ const reviewing = () => {
   const ui = useUiStore.getState();
   return (
     readMode() &&
-    ((ui.leftPanelOpen && ui.leftPanelView === 'redactions') ||
-      useToolStore.getState().mode === 'redact') &&
+    (isNavigatorShowing(ui, 'redactions') || useToolStore.getState().mode === 'redact') &&
     currentMarks().length > 0
   );
 };

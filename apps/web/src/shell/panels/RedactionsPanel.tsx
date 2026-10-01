@@ -1,15 +1,15 @@
 /**
- * Left rail "Redactions" (redaction spec §1.1–§1.2): every redaction mark of the workspace,
- * grouped by document and page, with the text under it, a tick for a later "apply
- * selected", reveal on click, J / K review and delete. The header states honestly, in one
- * line with a "Why?" disclosure (experience-redesign §4.1), what a mark is (only a mark
- * until applied; applying is irreversible after export) and holds
- * the sensitive-data finder, whose matches are reviewed here before "Mark selected".
- * "Apply redactions" is enabled while a listed mark is ticked and opens the confirmation
- * dialog (redaction/ApplyRedactionsDialog.tsx), which applies the ticked marks.
+ * Redaction marks in the Review tab (redaction spec §1.1–§1.2, experience-redesign §4.1):
+ * the mark rows (text under the mark, a tick for a later "apply selected", reveal on click,
+ * J / K review and delete) and the Marks filter's header. The header states honestly, in
+ * one line with a "Why?" disclosure, what a mark is (only a mark until applied; applying
+ * is irreversible after export) and holds the sensitive-data finder, whose matches are
+ * reviewed here before "Mark selected". "Apply redactions" is enabled while a listed mark
+ * is ticked and opens the confirmation dialog (redaction/ApplyRedactionsDialog.tsx), which
+ * applies the ticked marks.
  */
 import type { Rect, SourceId } from '@pdf-editor/document-model';
-import { ScanSearch, ShieldAlert, Trash2, X } from 'lucide-react';
+import { EyeOff, ScanSearch, ShieldAlert, Trash2, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 
 import { useAnnotationStore } from '../../annotations/annotation-store';
@@ -29,7 +29,6 @@ import { PATTERN_IDS } from '../../redaction/patterns';
 import { ApplyRedactionsDialog } from '../../redaction/ApplyRedactionsDialog';
 import { useApplyDialogStore } from '../../redaction/apply-store';
 import {
-  collectMarks,
   type FinderMatch,
   type MarkEntry,
   useRedactionStore,
@@ -40,7 +39,6 @@ import { useViewStore } from '../../state/view-store';
 import { useActiveDocument, useWorkspaceStore } from '../../state/workspace-store';
 import { IconButton } from '../../ui/IconButton';
 import { Tooltip } from '../../ui/Tooltip';
-import { EmptyNote } from '../EmptyNote';
 import styles from './RedactionsPanel.module.css';
 
 const PATTERN_NAMES: Readonly<Record<PatternId, () => string>> = {
@@ -55,28 +53,18 @@ const PATTERN_NAMES: Readonly<Record<PatternId, () => string>> = {
 /** Display order of the finder's groups. */
 const GROUP_ORDER: readonly PatternId[] = ['email', 'phone', 'iban', 'tckn', 'card', 'date'];
 
-export function RedactionsPanel() {
-  const workspace = useWorkspaceStore((s) => s.workspace);
-  const pages = useAnnotationStore((s) => s.pages);
-  const ensurePage = useAnnotationStore((s) => s.ensurePage);
+/**
+ * The Review tab's Marks filter header: the honesty line, "Find sensitive data", "Apply
+ * redactions", the summary of ticked marks and the finder's results. `entries` are the
+ * marks the list shows (every open document's).
+ */
+export function RedactionTools({ entries }: { readonly entries: readonly MarkEntry[] }) {
   const excluded = useRedactionStore((s) => s.excluded);
-
-  // Read the annotations of every page of every document (marks anywhere are listed).
-  useEffect(() => {
-    for (const id of workspace.documentOrder) {
-      for (const page of workspace.documents[id]?.pages ?? []) {
-        if (page.ref.kind === 'source') ensurePage(page.ref.source, page.ref.index);
-      }
-    }
-  }, [workspace, ensurePage]);
-
-  const { entries, loading } = collectMarks(workspace, pages);
   const included = new Set(entries.filter((e) => !excluded.has(e.markKey)).map((e) => e.markKey));
   const total = new Set(entries.map((e) => e.markKey)).size;
-
   return (
-    <div className={styles.panel} data-redactions-panel="" data-annotation-keep="">
-      <div className={styles.header}>
+    <>
+      <div className={styles.header} data-redaction-tools="">
         <Honesty />
         <Actions ticked={included.size} />
         {total > 0 ? (
@@ -90,20 +78,7 @@ export function RedactionsPanel() {
         ) : null}
       </div>
       <Finder />
-      {entries.length === 0 ? (
-        <div className={styles.empty} aria-busy={loading}>
-          {workspace.documentOrder.length === 0 ? (
-            <EmptyNote title={m.no_document_title()} body={m.redaction_no_document_body()} />
-          ) : loading ? (
-            <EmptyNote title={m.redaction_loading()} />
-          ) : (
-            <EmptyNote title={m.redaction_empty_title()} body={m.redaction_empty_body()} />
-          )}
-        </div>
-      ) : (
-        <MarkList entries={entries} multipleDocuments={workspace.documentOrder.length > 1} />
-      )}
-    </div>
+    </>
   );
 }
 
@@ -190,62 +165,6 @@ function Actions({ ticked }: { readonly ticked: number }) {
 // Marks
 // ---------------------------------------------------------------------------
 
-interface PageGroup {
-  readonly key: string;
-  readonly documentTitle: string;
-  readonly showDocument: boolean;
-  readonly position: number;
-  readonly entries: MarkEntry[];
-}
-
-function MarkList({
-  entries,
-  multipleDocuments,
-}: {
-  readonly entries: readonly MarkEntry[];
-  readonly multipleDocuments: boolean;
-}) {
-  const groups: PageGroup[] = [];
-  let lastDocument: string | undefined;
-  for (const entry of entries) {
-    const key = `${entry.documentId}\u0000${entry.pageId}`;
-    const last = groups[groups.length - 1];
-    if (last?.key === key) {
-      last.entries.push(entry);
-      continue;
-    }
-    groups.push({
-      key,
-      documentTitle: entry.documentTitle,
-      showDocument: multipleDocuments && entry.documentId !== lastDocument,
-      position: entry.position,
-      entries: [entry],
-    });
-    lastDocument = entry.documentId;
-  }
-  return (
-    <div className={styles.scroll}>
-      {groups.map((group) => (
-        <section
-          key={group.key}
-          className={styles.group}
-          aria-label={m.redaction_page({ page: group.position })}
-        >
-          {group.showDocument ? (
-            <h3 className={styles.documentTitle}>{group.documentTitle}</h3>
-          ) : null}
-          <h4 className={styles.pageTitle}>{m.redaction_page({ page: group.position })}</h4>
-          <ul className={styles.list}>
-            {group.entries.map((entry, index) => (
-              <MarkRow key={entry.key} entry={entry} index={index + 1} />
-            ))}
-          </ul>
-        </section>
-      ))}
-    </div>
-  );
-}
-
 /**
  * Snippets per source page, content revision and quads: a text edit (or an applied
  * redaction) changes the text under a mark and bumps the page's revision (`pageText` is
@@ -288,7 +207,21 @@ function useSnippet(entry: MarkEntry): string | undefined {
 /** Longest snippet quoted in a checkbox's accessible name. */
 const LABEL_SNIPPET = 40;
 
-function MarkRow({ entry, index }: { readonly entry: MarkEntry; readonly index: number }) {
+/**
+ * One mark: the text under it (or "Area without text"), reveal on click, delete, and in the
+ * Marks filter the tick for "Apply redactions". The current mark of J / K review scrolls
+ * into view.
+ */
+export function MarkRow({
+  entry,
+  index,
+  checkable,
+}: {
+  readonly entry: MarkEntry;
+  /** 1-based number of the mark on its page (names the checkbox). */
+  readonly index: number;
+  readonly checkable: boolean;
+}) {
   const snippet = useSnippet(entry);
   const checked = useRedactionStore((s) => !s.excluded.has(entry.markKey));
   const current = useRedactionStore((s) => s.current === entry.key);
@@ -315,20 +248,30 @@ function MarkRow({ entry, index }: { readonly entry: MarkEntry; readonly index: 
       ? m.redaction_include_index({ index, page: entry.position })
       : m.redaction_include_text({ index, page: entry.position, text: quoted });
   return (
-    <li ref={rowRef} className={styles.row} aria-current={current || selected ? 'true' : undefined}>
-      <input
-        type="checkbox"
-        className={styles.check}
-        checked={checked}
-        aria-label={checkLabel}
-        onChange={(e) => setIncluded([entry.markKey], e.target.checked)}
-      />
+    <li
+      ref={rowRef}
+      className={styles.row}
+      data-review-kind="mark"
+      aria-current={current || selected ? 'true' : undefined}
+    >
+      {checkable ? (
+        <input
+          type="checkbox"
+          className={styles.check}
+          checked={checked}
+          aria-label={checkLabel}
+          onChange={(e) => setIncluded([entry.markKey], e.target.checked)}
+        />
+      ) : null}
       <button
         type="button"
         className={styles.item}
         data-redaction-row={entry.mark.id}
         onClick={() => revealMark(entry)}
       >
+        <span className={styles.glyph} aria-hidden="true">
+          <EyeOff />
+        </span>
         <span
           className={snippet === '' ? styles.noText : styles.snippet}
           data-testid="redaction-snippet"

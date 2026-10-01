@@ -23,6 +23,7 @@ import { m } from '../i18n';
 import { useUiStore } from '../state/ui-store';
 import { Keycaps } from '../ui/Keycaps';
 import styles from './CommandPalette.module.css';
+import { barGroupLabelOfCommand } from './FloatingToolbar.groups';
 
 interface Row {
   readonly command: Command;
@@ -283,6 +284,12 @@ function PalettePopup({ onClose }: { readonly onClose: () => void }) {
                     </span>
                     {section.group === RECENT_GROUP ? (
                       <span className={styles.groupHint}>{row.command.group}</span>
+                    ) : null}
+                    {/* The tool bar group of a tool (experience-redesign spec §5.1). */}
+                    {section.group !== RECENT_GROUP && barGroupLabelOfCommand(row.command.id) ? (
+                      <span className={styles.groupHint} data-bar-group-hint="">
+                        {barGroupLabelOfCommand(row.command.id)}
+                      </span>
                     ) : null}
                     {shortcut ? <Keycaps shortcut={shortcut} /> : null}
                   </div>
