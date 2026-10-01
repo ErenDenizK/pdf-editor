@@ -1,0 +1,37 @@
+# Records the README and about-page media (docs/specs/presentation.md §2) and checks their
+# budgets. Used by deploy.yml and release.yml after checkout, pnpm, Node and
+# `pnpm install`. Leaves the publishable files (and requests.log) in tools/media/out/media/.
+#
+# Runs on a plain ubuntu-24.04 runner, not the Playwright container, whose ffmpeg is
+# stripped (spec §2.6).
+name: Record media
+description: Build the app for the root path, record the media scenes, encode them with ffmpeg and check the budgets.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Chromium and ffmpeg
+      shell: bash
+      run: |
+        pnpm exec playwright install --with-deps chromium
+        sudo apt-get install -y --no-install-recommends ffmpeg
+
+    # The media tool serves the build with `vite preview` at the server root
+    # (tools/media/playwright.config.ts), so it records a build made for `/`. The Pages
+    # build (base /<repository>/) cannot be served there; the pixels are the same.
+    - name: Build for the root path
+      shell: bash
+      run: pnpm build
+      env:
+        VITE_BASE_PATH: /
+
+    - name: Record and encode
+      shell: bash
+      run: pnpm --filter @pdf-editor/media-tool all
+      env:
+        MEDIA_SKIP_BUILD: '1'
+
+    # `all` ends with the same check; repeated here so the budget table is its own step.
+    - name: Check budgets
+      shell: bash
+      run: pnpm --filter @pdf-editor/media-tool check

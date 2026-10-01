@@ -1,0 +1,12 @@
+{
+  "name": "@pdf-editor/copy-check",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Checks the public copy (README, about page, release-notes template) for the banned words, exclamation marks and emoji of docs/specs/presentation.md §1.3.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "check": "node --experimental-strip-types --no-warnings=ExperimentalWarning check.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

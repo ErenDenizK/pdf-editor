@@ -207,6 +207,8 @@ importers:
         specifier: 6.3.289
         version: 6.3.289
 
+  tools/copy-check: {}
+
   tools/fixtures:
     dependencies:
       '@cantoo/pdf-lib':

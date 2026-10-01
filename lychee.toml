@@ -1,0 +1,37 @@
+# Link checker configuration (lychee), used by the `docs` job in .github/workflows/ci.yml
+# (docs/specs/presentation.md §8 "Links"). Inputs are given on the command line there.
+# Written for lychee 0.24 (the version pinned in ci.yml); keys change between versions.
+
+# Retries and a generous timeout: research snapshots link to many slow sites.
+max_retries = 3
+retry_wait_time = 4
+timeout = 30
+max_concurrency = 16
+
+# 403: sites that refuse automated clients (review sites, some vendors) answer 403 to every
+# bot while the page is there for readers; a dead page answers 404 or 410, which still fails.
+# 429: rate limited, not broken.
+accept = ["100..=103", "200..=299", "403", "429"]
+
+# Anchors inside pages are not checked (the default): GitHub builds heading ids its own way.
+
+exclude_loopback = true
+include_mail = false
+
+exclude = [
+  # Local development addresses and documentation placeholders.
+  '^https?://localhost',
+  '^https?://127\.0\.0\.1',
+  '^https?://([a-z0-9-]+\.)*example\.(com|org|net)',
+  '^mailto:',
+
+  # Media are recorded by the deploy workflow's `media` job only; the CI build has none.
+  '/apps/web/dist/media/',
+
+  # TEMPORARY, until the repository is renamed pdf-editor → recto (ADR-0016 decision 6,
+  # docs/specs/presentation.md §9 WP10). These addresses do not exist before the rename.
+  # Remove the three patterns below in the rename commit, so the checker covers them.
+  '^https://github\.com/ErenDenizK/recto',
+  '^https://erendenizk\.github\.io/recto/',
+  '^https://img\.shields\.io/github/.+/ErenDenizK/recto',
+]

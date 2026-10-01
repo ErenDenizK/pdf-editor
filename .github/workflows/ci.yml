@@ -140,3 +140,51 @@ jobs:
             apps/web/playwright-report
             apps/web/test-results
           retention-days: 14
+
+  # Public copy and links (docs/specs/presentation.md §1.3, §8 "Links"). A plain runner: no
+  # browsers. After `verify`, so the built about page (base path `/`) can be checked too.
+  docs:
+    name: Copy and links
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # Banned words, exclamation marks and emoji in README.md, apps/web/about/ and
+      # .github/release-notes.md. No dependencies, so no install.
+      - name: Copy check
+        run: node --experimental-strip-types --no-warnings=ExperimentalWarning tools/copy-check/check.ts
+
+      # lychee's configuration (lychee.toml) is written for this version.
+      - name: Links in the documentation
+        uses: lycheeverse/lychee-action@v2
+        with:
+          lycheeVersion: v0.24.2
+          fail: true
+          args: >-
+            --config lychee.toml --no-progress
+            README.md 'docs/**/*.md' CONTRIBUTING.md SECURITY.md
+
+      - name: Download build
+        uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: apps/web/dist
+
+      # Root-relative links in the built page resolve against dist/; the media it shows are
+      # built by the deploy workflow only and are excluded in lychee.toml.
+      - name: Links in the built about page
+        if: hashFiles('apps/web/dist/about/index.html') != ''
+        uses: lycheeverse/lychee-action@v2
+        with:
+          lycheeVersion: v0.24.2
+          fail: true
+          args: >-
+            --config lychee.toml --no-progress
+            --root-dir ${{ github.workspace }}/apps/web/dist
+            apps/web/dist/about/index.html

@@ -1,0 +1,229 @@
+# Publishes one GitHub Release per version of the web package (ADR-0017 §3,
+# docs/specs/presentation.md §5). Runs when apps/web/package.json changes on `main` (the
+# release pull request from `develop` carries the version that `changeset version` wrote),
+# and by hand from `main`.
+#
+# It creates the tag v<version> on the built commit if it is missing, builds the app for the
+# root path, records the media, and creates the release with recto-<version>-dist.zip,
+# recto-<version>-media.zip and SHA256SUMS. A version with a pre-release part (a "-", such
+# as 1.0.0-beta.0) is published as a pre-release, so it is never "Latest". Nothing happens
+# when the release already exists, and 0.x versions are never released (ADR-0017 §1).
+# Actions are pinned to major tags here; Renovate (helpers:pinGitHubActionDigests) rewrites
+# them to commit digests with the tag kept as a comment.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [apps/web/package.json]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "::error::Releases are cut from main only (ADR-0017); this run is on $GITHUB_REF."
+            exit 1
+          fi
+          version=$(node -p "require('./apps/web/package.json').version")
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::apps/web/package.json has no valid version: '$version'."
+            exit 1
+          fi
+          tag="v$version"
+          publish=true
+          if [[ "$version" == 0.* ]]; then
+            echo "::notice::$version is a 0.x version; those are never released (ADR-0017 §1)."
+            publish=false
+          elif gh release view "$tag" > /dev/null 2>&1; then
+            echo "::notice::The release $tag exists already; nothing to do."
+            publish=false
+          fi
+          prerelease=false
+          if [[ "$version" == *-* ]]; then prerelease=true; fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "prerelease=$prerelease"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+
+  dist:
+    name: Dist zip
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6 # version read from "packageManager"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # For self-hosting at the root of any static host (README "Use it"). The build date is
+      # the commit's, so a rebuild of the tag gives the same About dialog.
+      - name: Build
+        run: |
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          pnpm build
+        env:
+          VITE_BASE_PATH: /
+
+      - name: Zip
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          cd apps/web/dist
+          zip -r -X -q "$RUNNER_TEMP/release/recto-$VERSION-dist.zip" .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-dist
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 7
+
+  media:
+    name: Media zip
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    # A plain runner, not the Playwright container (its ffmpeg is stripped).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # The same scenes as the deploy workflow's media job, recorded from this commit.
+      - name: Record media
+        uses: ./.github/actions/media
+
+      - name: Zip
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          cd tools/media/out/media
+          zip -r -X -q "$RUNNER_TEMP/release/recto-$VERSION-media.zip" .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-media
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload scene results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: media-test-results
+          path: tools/media/out/test-results
+          retention-days: 14
+
+  publish:
+    name: Tag and release
+    needs: [prepare, dist, media]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Creating a tag and a release; nothing else is written.
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the zips
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: release
+        run: |
+          sha256sum -- *.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      # The tag must name the commit these files were built from.
+      - name: Tag
+        run: |
+          if git fetch --quiet --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG" 2> /dev/null; then
+            tagged=$(git rev-list -n 1 "$TAG")
+            if [[ "$tagged" != "$GITHUB_SHA" ]]; then
+              echo "::error::$TAG exists and points at $tagged, not at the built commit $GITHUB_SHA."
+              exit 1
+            fi
+            echo "$TAG exists at $GITHUB_SHA."
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$GITHUB_SHA" > /dev/null
+            echo "Created $TAG at $GITHUB_SHA."
+          fi
+
+      - name: Notes
+        run: |
+          dist_zip="recto-$VERSION-dist.zip"
+          dist_sha256=$(sha256sum "release/$dist_zip" | cut -d ' ' -f 1)
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          .github/scripts/release-notes.sh "$VERSION" "$dist_zip" "$dist_sha256" "$run_url" \
+            "${GITHUB_SHA:0:7}" > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Release
+        run: |
+          title="Recto $VERSION"
+          flags=()
+          if [[ "$PRERELEASE" == true ]]; then
+            if [[ "$VERSION" == *-rc.* ]]; then title="$title (release candidate)"; else title="$title (beta)"; fi
+            flags+=(--prerelease)
+          fi
+          gh release create "$TAG" release/* \
+            --verify-tag \
+            --title "$title" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            "${flags[@]}"
