@@ -126,7 +126,8 @@ export function hasCustomLabels(labels: readonly string[]): boolean {
 // Remembered position
 // ---------------------------------------------------------------------------
 
-const POSITIONS_KEY = 'pdf-editor:viewer:positions:v1';
+/** Remembered reading positions, per document fingerprint (see `rememberPosition`). */
+export const POSITIONS_KEY = 'pdf-editor:viewer:positions:v1';
 const MAX_POSITIONS = 50;
 
 interface StoredPosition {

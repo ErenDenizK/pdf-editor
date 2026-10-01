@@ -25,11 +25,13 @@ import { ReadView } from '../stage/ReadView';
 import { useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
+import { documentFingerprint, POSITIONS_KEY, rememberPosition } from '../viewer/navigation';
 import { useToolStore } from '../viewer/tool-store';
 import { AnnotationProperties } from './AnnotationProperties';
 import {
   DEFAULT_STYLES,
   type PageTarget,
+  pageKey,
   resetAnnotationStore,
   TOOL_STYLES_STORAGE_KEY,
   useAnnotationStore,
@@ -54,6 +56,13 @@ interface Mounted {
 }
 
 async function mountRead(): Promise<Mounted> {
+  // The Read view opens at the document's remembered page. Every test file of the run shares
+  // one browser origin, so its localStorage: another file reading this fixture (crop.test
+  // leaves it at page 2) would make the view open there, with page 1 mounted only as
+  // overscan. The strokes below are dispatched straight onto page 1's layer, which a person
+  // could not press while it is out of view, and a layer out of view does not load its page,
+  // so the engine would hold the strokes while the layer never showed them.
+  localStorage.removeItem(POSITIONS_KEY);
   const report = await useWorkspaceStore
     .getState()
     .openFiles([await fixtureFile(simpleUrl, 'simple.pdf')]);
@@ -79,6 +88,13 @@ async function mountRead(): Promise<Mounted> {
     const l = container.querySelector<HTMLElement>('[data-annotation-layer="0"]');
     if (!l) throw new Error('no annotation layer');
     return l;
+  }, SETTLE);
+  // Page 1 is in view: its layer has loaded the page's annotations (it loads them only then).
+  const key = pageKey(first.ref.source, 0);
+  await waitFor(() => {
+    if (!store().pages[key]?.loaded) {
+      throw new Error('page 1 is not in view: its annotation layer has not loaded');
+    }
   }, SETTLE);
   return {
     container,
@@ -149,6 +165,7 @@ describe('writing is never interrupted', () => {
     useToolStore.getState().setMode('select');
     localStorage.removeItem(TOOL_STYLES_STORAGE_KEY);
     localStorage.removeItem(PEN_PRESETS_STORAGE_KEY);
+    localStorage.removeItem(POSITIONS_KEY);
     resetAnnotationStore();
     resetWorkspace();
   });
@@ -178,6 +195,27 @@ describe('writing is never interrupted', () => {
     expect(bars).toEqual([]);
     expect(store().selection).toBeNull();
     expect(container.querySelector('[data-testid="annotation-bar"]')).toBeNull();
+  });
+
+  it('writes on page 1 even when another test file left this document at a later page', async () => {
+    // What crop.test leaves in the shared localStorage: this fixture remembered at page 2.
+    await useWorkspaceStore.getState().openFiles([await fixtureFile(simpleUrl, 'simple.pdf')]);
+    const ws = useWorkspaceStore.getState().workspace;
+    const fingerprint = documentFingerprint(ws, getActiveDocument(ws) as VirtualDocument);
+    if (fingerprint === undefined) throw new Error('no fingerprint');
+    rememberPosition(fingerprint, 1);
+    resetWorkspace();
+    resetEditRunner();
+    resetAnnotationStore();
+    const { container, layer, target } = await mountRead();
+    await armInk(layer);
+    stroke(layer, [0.2, 0.3], [0.5, 0.31]);
+    await waitFor(async () => expect(await inkOnPage(target)).toHaveLength(1), SETTLE);
+    await waitFor(
+      () =>
+        expect(container.querySelectorAll('[data-annotation-kind="ink"] polyline')).toHaveLength(1),
+      SETTLE,
+    );
   });
 
   it('keeps the preview until the page canvas has painted the committed stroke', async () => {
