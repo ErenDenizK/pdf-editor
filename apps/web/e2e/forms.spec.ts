@@ -106,14 +106,29 @@ test('add a text field and a checkbox by drag, fill them, export: the fields exi
   await page.goto('./');
   await expect(page.getByTestId('app-shell')).toBeVisible();
   await openFixtures(page, ['simple-text.pdf']);
-  await showFields(page);
+  // No fields yet: the Review tab has no Fields chip (chips show the kinds present); "Add
+  // field" is in the tool bar's Fill & sign group (experience-redesign §4.1).
+  const review = page.getByRole('tab', { name: /^Review/ });
+  await review.click();
+  await expect(page.getByRole('radio', { name: /^Fields/ })).toHaveCount(0);
 
   const layer = page.locator('[data-page-index="0"] [data-created-field-layer]');
   const pageBox = page.locator('[data-page-index="0"]');
   await expect(pageBox).toBeVisible({ timeout: 20_000 });
 
-  const addByDrag = async (kind: string, from: [number, number], to: [number, number]) => {
-    await page.locator('[data-add-field]').click();
+  const bar = page.getByRole('toolbar', { name: 'Tools', exact: true });
+  const fromBar = async () => {
+    await bar.getByRole('button', { name: 'Fill & sign', exact: true }).click();
+    await bar.getByRole('button', { name: 'Add field' }).click();
+  };
+  const fromReview = () => page.locator('[data-add-field]').click();
+  const addByDrag = async (
+    open: () => Promise<void>,
+    kind: string,
+    from: [number, number],
+    to: [number, number],
+  ) => {
+    await open();
     await page.getByRole('menuitem', { name: kind, exact: true }).click();
     await expect(layer).toHaveAttribute('data-placing');
     const box = await pageBox.boundingBox();
@@ -125,9 +140,11 @@ test('add a text field and a checkbox by drag, fill them, export: the fields exi
     await page.mouse.up();
   };
 
-  await addByDrag('Text field', [80, 120], [320, 150]);
+  await addByDrag(fromBar, 'Text field', [80, 120], [320, 150]);
+  // The first field brings the Fields chip, whose filter holds the field tools.
+  await showFields(page);
   await expect(page.locator('[data-created-row="Text1"]')).toBeVisible();
-  await addByDrag('Checkbox', [80, 200], [100, 220]);
+  await addByDrag(fromReview, 'Checkbox', [80, 200], [100, 220]);
   await expect(page.locator('[data-created-row="CheckBox1"]')).toBeVisible();
 
   // Leave "Edit fields" and fill them like any field.

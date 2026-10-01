@@ -39,6 +39,13 @@ import { readAnnotations, resetEditRunner, whenIdle } from './edit-runner';
 
 const store = () => useAnnotationStore.getState();
 
+/**
+ * How long a wait on the engine or on paint may take. Testing Library's default (1 s) is
+ * shorter than a commit through the engine worker and a repaint under a loaded full-suite
+ * run; each wait still ends as soon as its condition holds.
+ */
+const SETTLE = { timeout: 10_000 };
+
 interface Mounted {
   readonly container: HTMLElement;
   readonly layer: HTMLElement;
@@ -61,21 +68,18 @@ async function mountRead(): Promise<Mounted> {
       <ReadView doc={doc} />
     </div>,
   );
-  const canvas = await waitFor(
-    () => {
-      const c = container.querySelector<HTMLCanvasElement>(
-        '[data-page-index="0"] canvas[data-state="rendered"]',
-      );
-      if (!c) throw new Error('page not rendered');
-      return c;
-    },
-    { timeout: 10_000 },
-  );
+  const canvas = await waitFor(() => {
+    const c = container.querySelector<HTMLCanvasElement>(
+      '[data-page-index="0"] canvas[data-state="rendered"]',
+    );
+    if (!c) throw new Error('page not rendered');
+    return c;
+  }, SETTLE);
   const layer = await waitFor(() => {
     const l = container.querySelector<HTMLElement>('[data-annotation-layer="0"]');
     if (!l) throw new Error('no annotation layer');
     return l;
-  });
+  }, SETTLE);
   return {
     container,
     layer,
@@ -125,7 +129,7 @@ async function inkOnPage(target: PageTarget) {
 
 async function armInk(layer: HTMLElement): Promise<void> {
   useToolStore.getState().setMode('ink');
-  await waitFor(() => expect(layer).toHaveAttribute('data-tool', 'ink'));
+  await waitFor(() => expect(layer).toHaveAttribute('data-tool', 'ink'), SETTLE);
 }
 
 describe('writing is never interrupted', () => {
@@ -163,10 +167,12 @@ describe('writing is never interrupted', () => {
       (await inkOnPage(target)).reduce((n, a) => n + (a.kind === 'ink' ? a.paths.length : 0), 0);
     for (const [i, y] of [0.3, 0.35, 0.4].entries()) {
       stroke(layer, [0.2, y], [0.5, y + 0.01]);
-      await waitFor(async () => expect(await strokes()).toBe(i + 1));
+      await waitFor(async () => expect(await strokes()).toBe(i + 1), SETTLE);
     }
-    await waitFor(() =>
-      expect(container.querySelectorAll('[data-annotation-kind="ink"] polyline')).toHaveLength(3),
+    await waitFor(
+      () =>
+        expect(container.querySelectorAll('[data-annotation-kind="ink"] polyline')).toHaveLength(3),
+      SETTLE,
     );
     observer.disconnect();
     expect(bars).toEqual([]);

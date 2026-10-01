@@ -7,7 +7,7 @@
 import type { SourceId } from '@pdf-editor/document-model';
 import type { Annotation } from '@pdf-editor/engine';
 import { act, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 
 import annotationsUrl from '../../../../../test/fixtures/annotations.pdf?url';
@@ -109,13 +109,29 @@ describe('Review list', () => {
   it('merges comments, redaction marks and form fields by page, with counts per filter', async () => {
     await openFixture(formsAUrl, 'forms-a.pdf');
     setAnnotations({ 0: [note, mark, pen] });
-    render(<ReviewPanel />);
+    // The list is virtualized: give it a viewport tall enough for every row of this short
+    // list, so what is rendered does not depend on the test page's size or on when the
+    // virtualizer first measured its scroller.
+    render(
+      <div style={{ display: 'flex', flexDirection: 'column', height: 1600 }}>
+        <ReviewPanel />
+      </div>,
+    );
     const page1 = await screen.findByRole('region', { name: 'Page 1' });
     // Fields come from the form store once read; every row is rendered (a short list).
     await expect.poll(() => kinds().filter((k) => k === 'field').length).toBeGreaterThan(1);
-    await expect
-      .poll(() => radio(/^All/).textContent, { timeout: 5000 })
-      .toBe(`All${kinds().length}`);
+    // The list done loading, and the rendered rows and the All count read together on each
+    // try: both settle (fields read, virtualizer measured) before the order and counts below.
+    await vi.waitFor(
+      () => {
+        expect(document.querySelector('[data-review-scroll]')).toHaveAttribute(
+          'aria-busy',
+          'false',
+        );
+        expect(radio(/^All/).textContent).toBe(`All${kinds().length}`);
+      },
+      { timeout: 10_000 },
+    );
     const fields = kinds().filter((k) => k === 'field').length;
     const fieldsOnPage1 = within(page1)
       .getAllByRole('listitem')

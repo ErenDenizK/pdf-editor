@@ -196,7 +196,7 @@ minor, plus one bypass found while fixing) resolved in six fix commits with regr
 tests and five new attack fixtures; docs and changesets current (relabelled 0.5,
 unpublished; the first public release follows M7).
 
-## M6 — Experience  (→ 1.0.0-beta.0 together with M7)
+## M6 — Experience  (→ 1.0.0-beta.0 together with M7) — **done 2026-10-01**
 
 Owner review after M5 (`DISCUSSION.md` item 23): the features are right, the experience is
 not. Too much is visible at once, nobody can find Merge, and the pen interrupts writing.
@@ -218,27 +218,35 @@ Known behaviours and follow-ups from the workstreams:
 
 - Home has no per-card ⋯ menu (Combine with…, Document info…), no reordering of cards by
   drag and no recent files; the card's size is the file's size as opened. The Files tab
-  lists the open files without the spec's "Combine N files" button and "Show Home" link
-  (Home is `0`, the app glyph or the palette).
+  shares Home's selection with Combine and Show Home (review fix).
 - Compare still has no "the file as opened" side (as in M5).
-- Bursts' N (1.5 s) and D (36 pt) are reasoned defaults; they are still to be tried on a
-  real tablet with the owner. Both are overridable in the stored pen settings, with no UI.
+- Bursts' N (1.5 s), D (36 pt horizontally) and the line rule (bands overlapping by 30 %
+  or a gap under 0.6 of the burst's median stroke height) are reasoned defaults; they are
+  still to be tried on a real tablet with the owner. Both numbers are overridable in the
+  stored pen settings, with no UI. Inside an open burst, undo removes one stroke.
 - Variable width lives in our appearance stream; `/InkList` keeps the centre lines and
   `/BS /W` the nominal width, so a viewer that redraws ink itself (an editor rebuilding
   the appearance) shows one width. The pen's options tier says so in one honesty line,
   and the tier stays hidden until a pen has reported pressure in the session.
-- A page resize scales ink paths but not their widths.
+- A page resize scales the stored ink widths by the geometric mean of the scale (review
+  fix); an ink that loses its widths keeps an empty `/PdfEditorInkWidths` key, read as
+  "no widths".
+- Clicking the armed preset while its tooltip is showing does not open the editor
+  (keyboard and quick clicks do); a pre-existing tooltip interaction, listed for P2's
+  follow-up.
 - The bytes of a plain `save()` keep the replaced ink appearance streams until export,
   which rewrites the file.
-- Read: after the window narrows and widens again (1440 → 1024 → 1440 px), page 1 can
-  show blank while its canvas reports "rendered" (seen while capturing the screenshots).
 - The §11 visual baselines (`visual.spec.ts`) are not in the suite, and the no-blink
   check is a component test (`annotations/writing.test.tsx`), not the frame-sampling e2e
   the spec describes.
 
-Exit: pending A11 (accessibility: F6 regions, roving tabindex, announcements, axe) and the
-independent experience review R on the live build; the merge, pen, navigator and contrast
-criteria pass as recorded above, and `docs/DESIGN.md` and the screenshots are updated.
+Exit: the independent review on the live build (no blocker; 3 major correctness findings
+on lasso and selection width changes and self-selecting redaction marks, 4 minor, and five
+experience gaps) and the accessibility pass (F6 regions, roving tabindex everywhere, joined
+announcements, zero axe violations on every state) are resolved in one fix commit with
+regression tests; the merge, pen, navigator and contrast criteria pass as recorded above;
+`docs/DESIGN.md` and the screenshots are current. **Done 2026-10-01**, pending the owner's
+tablet try-out of the burst defaults.
 
 ## M7 — Presentation and public beta  (→ 1.0.0-beta.0)
 

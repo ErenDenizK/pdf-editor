@@ -45,13 +45,19 @@ test('compare-a against compare-b: the seeded changes, the heat map and the repo
   page,
 }) => {
   await setUp(page);
-  // No comparison open: the view switch has no Compare segment and its arrows skip it.
+  // Two files opened together land on Home (experience-redesign §3); Read is one segment on.
   const compareSegment = page.getByRole('radio', { name: 'Compare', exact: true });
+  await expect(page.getByRole('radio', { name: 'Home', exact: true })).toBeChecked();
+  await page.getByRole('radio', { name: 'Read', exact: true }).click();
   await expect(page.getByRole('radio', { name: 'Read', exact: true })).toBeChecked();
+  // No comparison open: the view switch (Home · Read · Arrange) has no Compare segment and
+  // its arrows skip it.
   await expect(compareSegment).toHaveCount(0);
   await page.getByRole('radio', { name: 'Read', exact: true }).focus();
-  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('radio', { name: 'Arrange', exact: true })).toBeChecked();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('radio', { name: 'Home', exact: true })).toBeChecked();
   await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('radio', { name: 'Read', exact: true })).toBeChecked();
   // 3 switches to the Compare view; the Changes panel opens in the left rail.
