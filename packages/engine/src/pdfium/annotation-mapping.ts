@@ -644,6 +644,30 @@ function samePoints(a: readonly Point[], b: readonly Point[]): boolean {
 }
 
 /**
+ * The ink's per-point widths when they match its paths point for point (ADR-0018 §4), else
+ * `undefined`: widths that no longer match (a path removed or edited without them) mean a
+ * constant-width stroke. Data only: the appearance from the widths is written elsewhere.
+ */
+export function matchingInkWidths(
+  a: Pick<InkAnnotation, 'paths' | 'widths'>,
+): readonly (readonly number[])[] | undefined {
+  const widths = a.widths;
+  if (widths?.length !== a.paths.length) return undefined;
+  const matches = widths.every(
+    (ws, i) =>
+      ws.length === (a.paths[i]?.length ?? -1) && ws.every((w) => Number.isFinite(w) && w > 0),
+  );
+  return matches ? widths : undefined;
+}
+
+/** `a` with its widths kept only when they match its paths. */
+function withMatchingInkWidths<T extends InkAnnotation>(a: T): T {
+  if (a.widths === undefined || matchingInkWidths(a)) return a;
+  const { widths: _dropped, ...rest } = a;
+  return rest as T;
+}
+
+/**
  * For kinds whose geometry is not the rect (quads, ink paths, vertices): when an update
  * changes only `rect`, maps the geometry from the old rect onto the new one (a move, or a
  * resize that scales the geometry). An update that changes the geometry is taken as is.
@@ -679,7 +703,8 @@ export function followRect(before: Annotation, after: Annotation): Annotation {
       const unchanged =
         old.length === after.paths.length &&
         old.every((p, i) => samePoints(p, after.paths[i] ?? []));
-      return unchanged ? { ...after, paths: after.paths.map((path) => path.map(map)) } : after;
+      const next = withMatchingInkWidths(after);
+      return unchanged ? { ...next, paths: next.paths.map((path) => path.map(map)) } : next;
     }
     case 'line':
     case 'polygon':

@@ -2,6 +2,12 @@
  * Freehand stroke processing (spec §3, §8): Catmull-Rom smoothing of the sampled pointer
  * path, then Douglas–Peucker simplification (0.3 pt) before the stroke is written. Points
  * are in PDF user space (points), so the tolerance is physical, not zoom-dependent.
+ *
+ * Variable-width strokes (experience-redesign spec §6.6, §9; ADR-0018) go the same way with
+ * a width per point: the widths follow the points through each step (kept with their point,
+ * interpolated along the smoothed curve), and simplification also keeps a point whose
+ * outline edge would move by more than 0.1 pt without it, so the outline is simplified at
+ * 0.1 pt while the centre line keeps its 0.3 pt.
  */
 
 export interface Point {
@@ -9,8 +15,26 @@ export interface Point {
   readonly y: number;
 }
 
+/** A centre-line point with the stroke's full width there (points). */
+export interface WidthPoint extends Point {
+  readonly w: number;
+}
+
 /** Tolerance of the simplification, in points (spec §8). */
 export const INK_TOLERANCE_PT = 0.3;
+/** Tolerance of the outline edges (half widths) under simplification, points (spec §9). */
+export const INK_OUTLINE_TOLERANCE_PT = 0.1;
+/** Samples closer than this to the previous kept one are pointer jitter (points). */
+export const INK_DEDUPE_PT = 0.5;
+
+/** Where the projection of `p` falls on segment a–b, 0 at `a` to 1 at `b`. */
+function segmentParameter(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length2 = dx * dx + dy * dy;
+  if (length2 === 0) return 0;
+  return Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / length2));
+}
 
 function distanceToSegment(p: Point, a: Point, b: Point): number {
   const dx = b.x - a.x;
@@ -21,10 +45,18 @@ function distanceToSegment(p: Point, a: Point, b: Point): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
-/** Douglas–Peucker: keeps the points needed to stay within `tolerance` of the input. */
-export function simplify(points: readonly Point[], tolerance = INK_TOLERANCE_PT): Point[] {
-  if (points.length <= 2) return [...points];
+/**
+ * Douglas–Peucker as a keep mask. With `widths`, a point is also kept when the half width
+ * interpolated between the ends of its span misses its own by more than `widthTolerance`.
+ */
+function simplifyMask(
+  points: readonly Point[],
+  tolerance: number,
+  widths?: readonly number[],
+  widthTolerance = INK_OUTLINE_TOLERANCE_PT,
+): Uint8Array {
   const keep = new Uint8Array(points.length);
+  if (points.length <= 2) return keep.fill(1);
   keep[0] = 1;
   keep[points.length - 1] = 1;
   const stack: [number, number][] = [[0, points.length - 1]];
@@ -33,12 +65,21 @@ export function simplify(points: readonly Point[], tolerance = INK_TOLERANCE_PT)
     const a = points[first] as Point;
     const b = points[last] as Point;
     let worst = -1;
-    let worstDistance = tolerance;
+    // Errors relative to their tolerances: above 1 the point is needed.
+    let worstError = 1;
     for (let i = first + 1; i < last; i++) {
-      const d = distanceToSegment(points[i] as Point, a, b);
-      if (d > worstDistance) {
+      const p = points[i] as Point;
+      let error = distanceToSegment(p, a, b) / tolerance;
+      if (widths) {
+        const t = segmentParameter(p, a, b);
+        const wa = widths[first] ?? 0;
+        const wb = widths[last] ?? 0;
+        const half = (wa + (wb - wa) * t) / 2;
+        error = Math.max(error, Math.abs((widths[i] ?? 0) / 2 - half) / widthTolerance);
+      }
+      if (error > worstError) {
         worst = i;
-        worstDistance = d;
+        worstError = error;
       }
     }
     if (worst >= 0) {
@@ -46,6 +87,13 @@ export function simplify(points: readonly Point[], tolerance = INK_TOLERANCE_PT)
       stack.push([first, worst], [worst, last]);
     }
   }
+  return keep;
+}
+
+/** Douglas–Peucker: keeps the points needed to stay within `tolerance` of the input. */
+export function simplify(points: readonly Point[], tolerance = INK_TOLERANCE_PT): Point[] {
+  if (points.length <= 2) return [...points];
+  const keep = simplifyMask(points, tolerance);
   return points.filter((_, i) => keep[i] === 1);
 }
 
@@ -77,22 +125,70 @@ export function catmullRom(points: readonly Point[], steps = 4): Point[] {
   return out;
 }
 
-/** Drops consecutive samples closer than `min` (pointer jitter at high sample rates). */
-export function dedupe(points: readonly Point[], min: number): Point[] {
-  const out: Point[] = [];
-  for (const p of points) {
-    const last = out[out.length - 1];
-    if (!last || Math.hypot(p.x - last.x, p.y - last.y) >= min) out.push(p);
+/**
+ * Values along `catmullRom(points, steps)`: one per output point, interpolated linearly
+ * between the values of the input points each curve segment joins.
+ */
+function catmullRomValues(values: readonly number[], steps = 4): number[] {
+  if (values.length < 3 || steps < 2) return [...values];
+  const out: number[] = [values[0] as number];
+  for (let i = 0; i < values.length - 1; i++) {
+    const a = values[i] as number;
+    const b = values[i + 1] as number;
+    for (let s = 1; s <= steps; s++) out.push(a + ((b - a) * s) / steps);
   }
-  const final = points[points.length - 1];
-  if (final && out[out.length - 1] !== final && out.length > 0) out.push(final);
   return out;
 }
 
+/** Indices of the samples `dedupe` keeps. */
+function dedupeIndices(points: readonly Point[], min: number): number[] {
+  const out: number[] = [];
+  for (const [i, p] of points.entries()) {
+    const last = points[out[out.length - 1] ?? -1];
+    if (!last || Math.hypot(p.x - last.x, p.y - last.y) >= min) out.push(i);
+  }
+  if (out.length > 0 && out[out.length - 1] !== points.length - 1) out.push(points.length - 1);
+  return out;
+}
+
+/** Drops consecutive samples closer than `min` (pointer jitter at high sample rates). */
+export function dedupe(points: readonly Point[], min: number): Point[] {
+  return dedupeIndices(points, min).map((i) => points[i] as Point);
+}
+
+const round2 = (v: number) => Math.round(v * 100) / 100;
+
 /** The stroke as written: de-jittered, smoothed, simplified; rounded to 0.01 pt. */
 export function finishStroke(points: readonly Point[]): Point[] {
-  const smooth = simplify(catmullRom(dedupe(points, 0.5)), INK_TOLERANCE_PT);
-  return smooth.map((p) => ({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 }));
+  const smooth = simplify(catmullRom(dedupe(points, INK_DEDUPE_PT)), INK_TOLERANCE_PT);
+  return smooth.map((p) => ({ x: round2(p.x), y: round2(p.y) }));
+}
+
+/** A variable-width stroke as written: the centre line and its widths, point for point. */
+export interface FinishedInk {
+  readonly points: Point[];
+  readonly widths: number[];
+}
+
+/**
+ * `finishStroke` with a width per point (spec §9): the same dedupe (0.5 pt), Catmull-Rom
+ * and Douglas–Peucker (0.3 pt) on the centre line; each width stays with its point,
+ * smoothed points take the width interpolated between the two input points they lie
+ * between, and simplification keeps the points the outline needs within 0.1 pt. Points and
+ * widths are rounded to 0.01 pt (the `/PdfEditorInkWidths` precision); widths stay ≥ 0.01.
+ */
+export function finishInkStroke(points: readonly WidthPoint[]): FinishedInk {
+  const kept = dedupeIndices(points, INK_DEDUPE_PT).map((i) => points[i] as WidthPoint);
+  const smooth = catmullRom(kept);
+  const widths = catmullRomValues(kept.map((p) => p.w));
+  const keep = simplifyMask(smooth, INK_TOLERANCE_PT, widths, INK_OUTLINE_TOLERANCE_PT);
+  const out: FinishedInk = { points: [], widths: [] };
+  smooth.forEach((p, i) => {
+    if (keep[i] !== 1) return;
+    out.points.push({ x: round2(p.x), y: round2(p.y) });
+    out.widths.push(Math.max(0.01, round2(widths[i] ?? 0)));
+  });
+  return out;
 }
 
 /** Shift constraint for lines: the end point snapped to the nearest multiple of 45°. */

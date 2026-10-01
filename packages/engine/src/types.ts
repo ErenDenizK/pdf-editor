@@ -224,7 +224,16 @@ export interface MarkupAnnotation extends AnnotationBase {
 export interface InkAnnotation extends AnnotationBase {
   readonly kind: 'ink';
   readonly paths: readonly (readonly { readonly x: number; readonly y: number }[])[];
+  /** The nominal width (`/BS /W`), points: what viewers that redraw from `/InkList` use. */
   readonly strokeWidth: number;
+  /**
+   * Variable width (ADR-0018, experience-redesign spec §9): the full width in points at each
+   * point of `paths`, one group per path, parallel to it point for point. The appearance is
+   * the filled outline of `annotations/ink-outline.ts`; the file keeps the widths in the
+   * private `/PdfEditorInkWidths` string. Absent, or not matching `paths`, the stroke is
+   * constant width (`strokeWidth`).
+   */
+  readonly widths?: readonly (readonly number[])[];
 }
 
 /** Line ending styles (/LE, ISO 32000-2 Table 179). An arrow is a line with `open-arrow`. */

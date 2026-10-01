@@ -41,3 +41,48 @@ export async function openFixtures(page: Page, names: readonly string[]): Promis
     await expect(page.getByRole('tab', { name: name.replace(/\.pdf$/, '') })).toBeVisible();
   }
 }
+
+/**
+ * Call before the first `page.goto`: records the per-point widths of every ink annotation
+ * the app sends to the PDFium worker (the create's payload), so a test can read what was
+ * committed without a hook in the production build. Read them with `sentInkWidths`.
+ */
+export async function recordInkWidths(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const found: number[][][] = [];
+    (window as unknown as { __inkWidths: number[][][] }).__inkWidths = found;
+    const collect = (value: unknown, depth: number): void => {
+      if (typeof value !== 'object' || value === null || depth > 8) return;
+      if (Array.isArray(value)) {
+        for (const item of value) collect(item, depth + 1);
+        return;
+      }
+      if (Object.getPrototypeOf(value) !== Object.prototype) return;
+      const record = value as Record<string, unknown>;
+      if (record.kind === 'ink' && Array.isArray(record.widths)) {
+        found.push(JSON.parse(JSON.stringify(record.widths)) as number[][]);
+        return;
+      }
+      for (const key of Object.keys(record)) collect(record[key], depth + 1);
+    };
+    const post = Object.getOwnPropertyDescriptor(Worker.prototype, 'postMessage')?.value as (
+      this: Worker,
+      ...args: unknown[]
+    ) => void;
+    Worker.prototype.postMessage = function (this: Worker, ...args: unknown[]) {
+      try {
+        collect(args[0], 0);
+      } catch {
+        // Recording must never break the message.
+      }
+      post.apply(this, args);
+    } as Worker['postMessage'];
+  });
+}
+
+/** The widths recorded by `recordInkWidths`, one entry per ink sent (paths × points). */
+export async function sentInkWidths(page: Page): Promise<number[][][]> {
+  return page.evaluate(
+    () => (window as unknown as { __inkWidths?: number[][][] }).__inkWidths ?? [],
+  );
+}

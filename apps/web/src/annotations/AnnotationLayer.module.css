@@ -12,10 +12,24 @@
   touch-action: none;
 }
 
+/*
+ * A drawing tool takes every pointer on the page: `touch-action: none` (kept from the base
+ * rule, and applied by browsers to pens as well) stops native panning and zooming, so a
+ * stroke is never taken for a scroll. With the pen, fingers pan through our own handler
+ * and pinch through the Read view's (pen/ink-input.ts, experience-redesign spec §6.6).
+ */
 .layer[data-drawing] {
   z-index: 2;
   pointer-events: auto;
   cursor: crosshair;
+  touch-action: none;
+}
+
+/* The pen's live and settling canvases (pen/ink-preview.ts), above the SVG feedback. */
+.inkPreview {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 .layer[data-tool='text-box'] {

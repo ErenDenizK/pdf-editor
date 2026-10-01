@@ -16,6 +16,11 @@
  * is not selected (no contextual bar, no inspector change), its preview stays until the
  * page bitmap shows the committed annotation (`whenPainted`), and a press while an inline
  * editor is open commits the editor and draws in the same press.
+ *
+ * The pen (ink tool) has its own input pipeline (spec §6.6, `pen/ink-input.ts`): native
+ * pointer handlers attached while it is armed, coalesced points, a canvas preview drawn by
+ * the engine's outline function (`pen/ink-preview.ts`) and width from pressure or speed,
+ * with no React state per move. The other tools keep the React gesture below.
  */
 import type { Rect } from '@pdf-editor/document-model';
 import type { Annotation, NewAnnotation } from '@pdf-editor/engine';
@@ -54,12 +59,14 @@ import { commitOpenEditor, InlineEditorView } from './InlineEditors';
 import {
   boundsOf,
   distanceToPolyline,
-  finishStroke,
+  finishInkStroke,
   type Point,
   snapAngle,
   snapSquare,
 } from './ink';
 import { mountedLayers } from './layer-registry';
+import { attachInkInput, type InkStrokeInput, type SettleInk } from './pen/ink-input';
+import { InkPreview, previewPath } from './pen/ink-preview';
 import { pageText } from './page-text';
 import { glyphIndexAt, quadsForRange } from './quads';
 import styles from './AnnotationLayer.module.css';
@@ -140,6 +147,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
   const editor = useAnnotationStore((s) => (s.editor?.target.pageId === pageId ? s.editor : null));
   const ensurePage = useAnnotationStore((s) => s.ensurePage);
   const rootRef = useRef<HTMLDivElement>(null);
+  const inkHostRef = useRef<HTMLDivElement>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const gestureRef = useRef<Gesture | null>(null);
   const [settling, setSettling] = useState<readonly SettlingPreview[]>([]);
@@ -161,6 +169,43 @@ export function AnnotationLayer(props: PageOverlayProps) {
       if (mountedLayers.get(pageId)?.element === element) mountedLayers.delete(pageId);
     };
   });
+
+  // The pen: native input while armed (spec §6.6). Style, zoom and target are read at the
+  // press from the store and the layer registry, so nothing re-attaches per render.
+  const penArmed = mode === 'ink' && sourceId !== undefined;
+  useEffect(() => {
+    const element = rootRef.current;
+    const host = inkHostRef.current;
+    if (!penArmed || !element || !host) return;
+    const preview = new InkPreview(host);
+    const detach = attachInkInput({
+      element,
+      preview,
+      context: () => {
+        const layer = mountedLayers.get(pageId);
+        if (!layer) return null;
+        const style = useAnnotationStore.getState().styles.ink;
+        return {
+          width: style.strokeWidth,
+          color: style.color,
+          opacity: style.opacity,
+          scale: layer.frame.scale,
+        };
+      },
+      onBegin: () => {
+        beginDrawingPress();
+      },
+      onStroke: (stroke, settle) => {
+        const layer = mountedLayers.get(pageId);
+        if (!layer) return;
+        void commitInkStroke(stroke, settle, layer.frame, layer.target);
+      },
+    });
+    return () => {
+      detach();
+      preview.destroy();
+    };
+  }, [penArmed, pageId]);
 
   if (sourceId === undefined) return null;
   const frame = pageFrame(props);
@@ -210,23 +255,14 @@ export function AnnotationLayer(props: PageOverlayProps) {
   // -------------------------------------------------------------------------
 
   const onRootPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!drawing || event.button !== 0) return;
+    // The pen has its own native handlers (see above).
+    if (!drawing || mode === 'ink' || event.button !== 0) return;
     // Presses in the layer's own chrome (bar, editors) are theirs.
     if (event.target instanceof Element && event.target.closest('[data-annotation-keep]')) return;
     event.preventDefault();
-    const store = useAnnotationStore.getState();
-    store.select(null);
-    if (store.editor) {
-      // Commit the editor and go on with the press (spec §6.1): the first stroke after
-      // typing a label is not lost. preventDefault above keeps focus in the editor, so an
-      // editor that is not mounted (its page scrolled away) is committed by a blur.
-      if (!commitOpenEditor() && document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur();
-      }
-      // With the text box or note tool the press only finishes the editor; going on would
-      // open a second, empty editor under the pointer at once.
-      if (mode === 'text-box' || mode === 'note') return;
-    }
+    // With the text box or note tool a press that finishes an editor does only that; going
+    // on would open a second, empty editor under the pointer at once.
+    if (beginDrawingPress() && (mode === 'text-box' || mode === 'note')) return;
     const start = localPoint(event);
     if (mode === 'eraser') {
       const first: Gesture = {
@@ -308,8 +344,6 @@ export function AnnotationLayer(props: PageOverlayProps) {
             if (outcome === 'committed') {
               const generation = getEngineService().pageRevision(target.source, target.pageIndex);
               await whenPainted(target.source, target.pageIndex, generation);
-            } else if (outcome === 'failed' && final.tool === 'ink') {
-              announce(m.annot_stroke_not_saved());
             }
             release();
           });
@@ -462,6 +496,8 @@ export function AnnotationLayer(props: PageOverlayProps) {
         {gesture?.type === 'draw' ? <DrawPreview gesture={gesture} frame={frame} /> : null}
         {gesture?.type === 'erase' ? <EraseTrail points={gesture.points} /> : null}
       </svg>
+      {/* The pen's canvases (pen/ink-preview.ts); React never renders into it. */}
+      <div ref={inkHostRef} className={styles.inkPreview} aria-hidden="true" />
       {selected.length > 0 && gesture === null && editor === null ? (
         <AnnotationBar target={target} annotations={selected} frame={frame} />
       ) : null}
@@ -471,6 +507,22 @@ export function AnnotationLayer(props: PageOverlayProps) {
 }
 
 AnnotationLayer.displayName = 'AnnotationLayer';
+
+/**
+ * What every drawing press does first: clear the selection and commit an open inline
+ * editor (spec §6.1), so the first stroke after typing a label is not lost. The caller has
+ * prevented the press's default, which keeps focus in the editor; an editor that is not
+ * mounted (its page scrolled away) is committed by a blur. True when an editor was open.
+ */
+function beginDrawingPress(): boolean {
+  const store = useAnnotationStore.getState();
+  store.select(null);
+  if (!store.editor) return false;
+  if (!commitOpenEditor() && document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+  return true;
+}
 
 // ---------------------------------------------------------------------------
 // Hit targets and selection
@@ -781,8 +833,7 @@ function GhostShape({
 
 function constrainedEnd(g: DrawGesture): Point {
   if (!g.shift) return g.current;
-  if (g.tool === 'line' || g.tool === 'arrow' || g.tool === 'ink')
-    return snapAngle(g.start, g.current);
+  if (g.tool === 'line' || g.tool === 'arrow') return snapAngle(g.start, g.current);
   if (g.tool === 'rectangle' || g.tool === 'ellipse') return snapSquare(g.start, g.current);
   return g.current;
 }
@@ -847,18 +898,6 @@ function DrawPreview({
           stroke={stroke}
           strokeWidth={width}
           markerEnd={g.tool === 'arrow' ? 'url(#annotation-arrow)' : undefined}
-          data-testid="annotation-preview"
-          {...marker}
-        />
-      );
-    case 'ink':
-      return (
-        <polyline
-          className={styles.previewShape}
-          points={polyline(g.shift ? [g.start, end] : g.points)}
-          stroke={stroke}
-          strokeWidth={width}
-          opacity={style.opacity}
           data-testid="annotation-preview"
           {...marker}
         />
@@ -938,7 +977,14 @@ async function commitErase(
         if (a.kind !== 'ink') return undefined;
         const gone = hits.get(a.id) ?? new Set<number>();
         const paths = a.paths.filter((_, i) => !gone.has(i));
-        return { ...a, paths, rect: roundRect(boundsOf(paths, a.strokeWidth / 2 + 1)) };
+        // Per-point widths stay parallel to the paths that remain (ADR-0018).
+        const widths = a.widths?.filter((_, i) => !gone.has(i));
+        return {
+          ...a,
+          paths,
+          ...(widths ? { widths } : {}),
+          rect: roundRect(boundsOf(paths, a.strokeWidth / 2 + 1)),
+        };
       },
       { action: 'erase' },
     );
@@ -1000,26 +1046,6 @@ async function finishDraw(
         ...(g.tool === 'arrow' ? { lineEndings: { start: 'none', end: 'open-arrow' } } : {}),
       };
       if (g.tool === 'arrow') labelKind = 'arrow';
-      break;
-    }
-    case 'ink': {
-      const raw = g.shift ? [g.start, end] : g.points;
-      const user = raw.map((p) => cssPointToUser(frame, p));
-      const path = g.shift ? user : finishStroke(user);
-      if (path.length < 2 && !dragged(g)) {
-        // A dot: a tiny stroke so a tap leaves a mark.
-        const p = user[0];
-        if (!p) return 'none';
-        path.push({ x: p.x + 0.5, y: p.y });
-      }
-      draft = {
-        ...base,
-        kind: 'ink',
-        paths: [path],
-        rect: roundRect(boundsOf([path], style.strokeWidth / 2 + 1)),
-        color: style.color,
-        strokeWidth: style.strokeWidth,
-      };
       break;
     }
     case 'highlight':
@@ -1091,4 +1117,104 @@ async function finishDraw(
     ...(placed ? { select: true } : {}),
   });
   return created && created.length > 0 ? 'committed' : 'failed';
+}
+
+// ---------------------------------------------------------------------------
+// Pen commit (spec §6.6, §9)
+// ---------------------------------------------------------------------------
+
+/** A stroke as it is committed: user-space centre line and the full width per point (pt). */
+export interface InkCommit {
+  readonly path: Point[];
+  readonly widths: number[];
+}
+
+/**
+ * The centre line and widths a finished pen stroke commits: points mapped to user space,
+ * then `finishInkStroke` (dedupe 0.5 pt, Catmull-Rom, Douglas–Peucker 0.3 pt, outline
+ * within 0.1 pt) with the widths resampled to the points it keeps. Shift draws a straight
+ * line at the nominal width; a tap becomes a short dot so it leaves a mark.
+ */
+export function inkCommit(
+  stroke: InkStrokeInput,
+  frame: PageFrame,
+  nominal: number,
+): InkCommit | undefined {
+  const first = stroke.points[0];
+  const last = stroke.points[stroke.points.length - 1];
+  if (!first || !last) return undefined;
+  let path: Point[];
+  let widths: number[];
+  if (stroke.straight) {
+    const end = snapAngle(first, last);
+    path = [cssPointToUser(frame, first), cssPointToUser(frame, end)];
+    widths = [nominal, nominal];
+  } else {
+    const done = finishInkStroke(
+      stroke.points.map((p, i) => ({
+        ...cssPointToUser(frame, p),
+        w: stroke.widths[i] ?? nominal,
+      })),
+    );
+    path = done.points;
+    widths = done.widths;
+  }
+  const bounds = boundsOf([path]);
+  const start = path[0];
+  if (start && (path.length < 2 || (bounds.width < 0.01 && bounds.height < 0.01))) {
+    // A dot: a tiny stroke so a tap leaves a mark.
+    const w = widths[0] ?? nominal;
+    path = [start, { x: start.x + 0.5, y: start.y }];
+    widths = [w, w];
+  }
+  return { path, widths };
+}
+
+/**
+ * Commits a finished pen stroke as one Ink annotation (not selected, spec §6.1) with its
+ * per-point widths (ADR-0018). `/BS /W` is the preset's width, the stroke's nominal width:
+ * a pressure of 0.5 or a moderate speed draws exactly it. Until the engine writes the
+ * variable-width appearance (P4) PDFium draws the stroke at that width. The preview settles
+ * to the committed outline and stays until the page has painted the stroke.
+ */
+async function commitInkStroke(
+  stroke: InkStrokeInput,
+  settle: SettleInk,
+  frame: PageFrame,
+  target: PageTarget,
+): Promise<void> {
+  const style = useAnnotationStore.getState().styles.ink;
+  const ink = inkCommit(stroke, frame, style.strokeWidth);
+  if (!ink) return;
+  const release = settle(
+    previewPath(
+      ink.path.map((p) => userToCss(frame, p)),
+      ink.widths.map((w) => w * frame.scale),
+    ),
+  );
+  const widest = Math.max(style.strokeWidth, ...ink.widths);
+  const draft: NewAnnotation = {
+    kind: 'ink',
+    pageIndex: target.pageIndex,
+    opacity: style.opacity,
+    paths: [ink.path],
+    widths: [ink.widths],
+    rect: roundRect(boundsOf([ink.path], widest / 2 + 1)),
+    color: style.color,
+    strokeWidth: style.strokeWidth,
+  };
+  let committed = false;
+  try {
+    const created = await createAnnotations(target, [draft], { select: false });
+    committed = created !== undefined && created.length > 0;
+  } catch (error) {
+    console.warn('Creating the annotation failed', error);
+  }
+  if (committed) {
+    const generation = getEngineService().pageRevision(target.source, target.pageIndex);
+    await whenPainted(target.source, target.pageIndex, generation);
+  } else {
+    announce(m.annot_stroke_not_saved());
+  }
+  release();
 }

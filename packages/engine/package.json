@@ -35,6 +35,10 @@
       "types": "./src/pdflib/overlay-public.ts",
       "import": "./src/pdflib/overlay-public.ts"
     },
+    "./ink-outline": {
+      "types": "./src/annotations/ink-outline.ts",
+      "import": "./src/annotations/ink-outline.ts"
+    },
     "./fonts": {
       "types": "./src/fonts/index.ts",
       "import": "./src/fonts/index.ts"
