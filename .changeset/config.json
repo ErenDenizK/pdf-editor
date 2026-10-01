@@ -2,8 +2,16 @@
   "$schema": "https://unpkg.com/@changesets/config@4.0.1/schema.json",
   "baseBranch": "develop",
   "access": "restricted",
-  "ignore": [],
-  "fixed": [["@pdf-editor/*"]],
+  "ignore": [
+    "@pdf-editor/copy-check",
+    "@pdf-editor/fixtures-tool",
+    "@pdf-editor/media-tool",
+    "@pdf-editor/ocr-spike",
+    "@pdf-editor/portfolio-redirect",
+    "@pdf-editor/qa-tool",
+    "@pdf-editor/signing-spike"
+  ],
+  "fixed": [["@pdf-editor/web", "@pdf-editor/engine", "@pdf-editor/document-model"]],
   "linked": [],
   "format": "auto",
   "updateInternalDependencies": "patch",

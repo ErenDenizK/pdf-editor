@@ -1,6 +1,6 @@
 {
   "name": "@pdf-editor/engine",
-  "version": "0.0.0",
+  "version": "1.0.0-beta.0",
   "private": true,
   "description": "Engine interfaces (PdfRenderer, PdfEditor, PdfAssembler, PdfPlumber) and their adapters. UI code depends only on the interfaces.",
   "license": "Apache-2.0",
