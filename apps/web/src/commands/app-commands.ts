@@ -51,6 +51,16 @@ const model = () => useWorkspaceStore.getState();
 const selection = () => useSelectionStore.getState();
 const activeDocument = () => getActiveDocument(model().workspace);
 
+/** The about page, `about/` under the deployment base (a sibling of the app). */
+function aboutPageUrl(): string {
+  return new URL('about/', new URL(import.meta.env.BASE_URL, location.href)).href;
+}
+
+/** Opens the about page in a new tab, with no handle back to the app. */
+function openAboutPage(): void {
+  window.open(aboutPageUrl(), '_blank', 'noopener');
+}
+
 function failureReason(error: EngineFailure): string {
   switch (error.code) {
     case 'password-cancelled':
@@ -258,6 +268,14 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
       group: m.group_general(),
       keywords: ['version', 'build', 'release notes', 'licence', 'license', 'source', 'storage'],
       run: () => openAbout(),
+    }),
+    // The about page beside the app (presentation spec §3), listed last in the Document
+    // menu's "Document" section.
+    registry.register({
+      id: 'help.aboutPage',
+      title: m.menu_about_page(),
+      group: m.group_general(),
+      run: openAboutPage,
     }),
     registry.register({
       id: 'selection.clear',

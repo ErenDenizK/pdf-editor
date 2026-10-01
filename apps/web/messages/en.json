@@ -3505,5 +3505,7 @@
   "about_storage_measuring": "Measuring…",
   "about_storage_unavailable": "Not available in this browser.",
   "about_offline": "Offline",
-  "about_version_line": "Version {version}"
+  "about_version_line": "Version {version}",
+  "menu_about_page": "About this app",
+  "cmd_help_about_page_keywords": "website, web page, about page, how it works"
 }

@@ -2263,5 +2263,7 @@
   "about_storage_measuring": "Ölçülüyor…",
   "about_storage_unavailable": "Bu tarayıcıda kullanılamıyor.",
   "about_offline": "Çevrimdışı",
-  "about_version_line": "Sürüm {version}"
+  "about_version_line": "Sürüm {version}",
+  "menu_about_page": "Bu uygulama hakkında",
+  "cmd_help_about_page_keywords": "web sitesi, web sayfası, tanıtım, nasıl çalışır"
 }

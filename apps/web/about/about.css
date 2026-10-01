@@ -1,0 +1,504 @@
+/*
+ * The about page (presentation spec §3). Plain CSS on the app's tokens: every colour, radius
+ * and spacing step comes from tokens.css; only the page's type sizes and measures are its
+ * own, because the app's UI scale (11–15 px) is too small for reading prose. Dark only.
+ */
+@import '../src/styles/tokens.css';
+/* The app's Inter: the same hashed files, from this origin (CSP `font-src 'self'`). The
+   browser fetches only the subsets the page's characters need. */
+@import '@fontsource-variable/inter/wght.css';
+
+:root {
+  --page-gutter: var(--space-4);
+  --page-width: 1120px;
+  --prose-width: 62ch;
+  --about-text: 16px;
+  --about-leading: 1.6;
+  --about-small: 14px;
+  --about-h1: clamp(30px, 4.2vw + 14px, 52px);
+  --about-h2: clamp(22px, 1.6vw + 14px, 30px);
+  --about-h3: 17px;
+}
+
+@media (min-width: 720px) {
+  :root {
+    --page-gutter: var(--space-8);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+  background: var(--surface-0);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--about-text);
+  line-height: var(--about-leading);
+  letter-spacing: var(--tracking-ui);
+  font-optical-sizing: auto;
+  overflow-wrap: break-word;
+}
+
+h1,
+h2,
+h3,
+p,
+ul,
+ol,
+dl,
+dd,
+figure {
+  margin: 0;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: var(--tracking-display);
+  line-height: 1.2;
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+p,
+li {
+  text-wrap: pretty;
+}
+
+a {
+  color: var(--text-primary);
+  text-decoration-color: var(--accent-line);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  text-decoration-color: var(--accent);
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--radius-1);
+}
+
+::selection {
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  padding: 1px var(--space-1);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-1);
+  background: var(--surface-1);
+  overflow-wrap: anywhere;
+}
+
+.skip-link {
+  position: absolute;
+  left: var(--space-2);
+  top: var(--space-2);
+  z-index: 2;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-2);
+  background: var(--surface-2);
+  transform: translateY(-200%);
+}
+
+.skip-link:focus-visible {
+  transform: none;
+}
+
+.wrap {
+  width: 100%;
+  max-width: calc(var(--page-width) + 2 * var(--page-gutter));
+  margin-inline: auto;
+  padding-inline: var(--page-gutter);
+}
+
+/* --- Top bar ----------------------------------------------------------------------------- */
+
+.topbar {
+  border-bottom: 1px solid var(--border-hairline);
+  background: var(--surface-1);
+}
+
+.topbar .wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 56px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-right: auto;
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: var(--text-lg);
+  text-decoration: none;
+}
+
+.glyph {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  fill: currentColor;
+}
+
+.topbar-link {
+  color: var(--text-secondary);
+  font-size: var(--about-small);
+  text-decoration: none;
+}
+
+.topbar-link:hover {
+  color: var(--text-primary);
+}
+
+@media (max-width: 420px) {
+  .topbar-link {
+    display: none;
+  }
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  font-size: var(--about-small);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.button:hover {
+  background: var(--surface-hover);
+}
+
+.button-primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--surface-0);
+}
+
+.button-primary:hover {
+  background: var(--accent-hover);
+}
+
+.button-primary:active {
+  background: var(--accent-pressed);
+}
+
+/* --- Sections ---------------------------------------------------------------------------- */
+
+main > section {
+  padding-block: var(--space-12);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.section-title {
+  font-size: var(--about-h2);
+  margin-bottom: var(--space-6);
+}
+
+.lead {
+  color: var(--text-secondary);
+  max-width: var(--prose-width);
+}
+
+.muted {
+  color: var(--text-secondary);
+}
+
+.small {
+  font-size: var(--about-small);
+}
+
+/* --- Hero -------------------------------------------------------------------------------- */
+
+.hero {
+  display: grid;
+  gap: var(--space-8);
+}
+
+.hero h1 {
+  font-size: var(--about-h1);
+  max-width: 20ch;
+}
+
+.hero .jobs {
+  margin-top: var(--space-4);
+  color: var(--text-secondary);
+  font-size: calc(var(--about-text) + 1px);
+  max-width: var(--prose-width);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.hero-meta {
+  margin-top: var(--space-4);
+  color: var(--text-tertiary);
+  font-size: var(--about-small);
+}
+
+/* --- Clips ------------------------------------------------------------------------------- */
+
+/* The box a clip sits in. Without its poster (or before the media job has run) it is a dark
+   placeholder with the card radius; nothing shifts when the file arrives. */
+.clip video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  object-fit: contain;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-3);
+  background: var(--surface-1);
+}
+
+.clip figcaption {
+  margin-top: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--about-small);
+}
+
+.clip + .clip {
+  margin-top: var(--space-6);
+}
+
+/* --- Facts ------------------------------------------------------------------------------- */
+
+.facts {
+  display: grid;
+  gap: var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 880px) {
+  .facts {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-3);
+  background: var(--surface-1);
+}
+
+.fact h3 {
+  font-size: var(--about-h3);
+}
+
+.fact p {
+  color: var(--text-secondary);
+  font-size: var(--about-small);
+}
+
+.evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin-top: auto;
+  padding: var(--space-2) 0 0;
+  list-style: none;
+  font-size: var(--about-small);
+}
+
+/* --- Feature sections: clip and text, alternating ---------------------------------------- */
+
+.feature {
+  display: grid;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (min-width: 960px) {
+  .feature {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: var(--space-12);
+  }
+
+  .feature.flip .feature-media {
+    order: 2;
+  }
+}
+
+.feature-text h2 {
+  font-size: var(--about-h2);
+}
+
+.feature-text .claim {
+  margin-top: var(--space-3);
+  color: var(--text-secondary);
+}
+
+.feature-text h3 {
+  margin-top: var(--space-6);
+  margin-bottom: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.feature-text ul {
+  display: grid;
+  gap: var(--space-2);
+  padding-left: var(--space-5);
+  font-size: var(--about-small);
+}
+
+.feature-text li::marker {
+  color: var(--text-tertiary);
+}
+
+.feature-text .limits li {
+  color: var(--text-secondary);
+}
+
+/* --- Check it yourself ------------------------------------------------------------------- */
+
+.checks {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 78ch;
+  padding-left: var(--space-6);
+}
+
+.checks li::marker {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.checks li > p + p {
+  margin-top: var(--space-1);
+}
+
+.source {
+  color: var(--text-tertiary);
+  font-size: var(--about-small);
+}
+
+/* --- How it works (inline SVG) ----------------------------------------------------------- */
+
+.diagram {
+  display: block;
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  margin-top: var(--space-6);
+  font-family: var(--font-sans);
+}
+
+.diagram .box {
+  fill: var(--surface-1);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.diagram .box-worker {
+  fill: var(--surface-2);
+  stroke: var(--border-hairline);
+}
+
+.diagram .box-check {
+  fill: var(--accent-subtle);
+  stroke: var(--accent-line);
+}
+
+.diagram .frame {
+  fill: none;
+  stroke: var(--border-hairline);
+  stroke-dasharray: 4 4;
+}
+
+.diagram .label {
+  fill: var(--text-primary);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.diagram .label-small {
+  fill: var(--text-primary);
+  font-size: 13px;
+}
+
+.diagram .note {
+  fill: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.diagram .edge {
+  fill: none;
+  stroke: var(--text-tertiary);
+  stroke-width: 1.5;
+}
+
+.diagram .arrowhead {
+  fill: var(--text-tertiary);
+}
+
+/* --- Footer ------------------------------------------------------------------------------ */
+
+.footer {
+  padding-block: var(--space-8) var(--space-12);
+  color: var(--text-tertiary);
+  font-size: var(--about-small);
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-6);
+  margin-top: var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.footer a {
+  color: var(--text-secondary);
+}
+
+.footer .version {
+  font-variant-numeric: tabular-nums;
+}

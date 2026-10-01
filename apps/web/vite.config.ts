@@ -40,6 +40,9 @@ const appVersion = (
   }
 ).version;
 
+/** The about page's footer reads the version as `%VITE_APP_VERSION%`; CI may set it. */
+process.env.VITE_APP_VERSION ??= appVersion;
+
 /** Short SHA of the built commit: CI's `GITHUB_SHA`, else the checkout's HEAD, else "unknown". */
 function appCommit(): string {
   const fromCi = process.env.GITHUB_SHA?.trim();
@@ -137,7 +140,9 @@ export default defineConfig({
         // factory: the app always passes a factory (ADR-0011), so it is never loaded. `ocr/`
         // (tesseract's worker, cores and ~22 MB of packs) downloads only when OCR is used
         // (ADR-0012 §4).
-        globIgnores: ['**/*.wasm', '404.html', '**/worker-engine-*.js', 'ocr/**'],
+        // `media/` (the about page's clips, posters and the media run's request log) is added
+        // to the site by the deploy job and is never precached (presentation spec §2.6).
+        globIgnores: ['**/*.wasm', '404.html', '**/worker-engine-*.js', 'ocr/**', 'media/**'],
         maximumFileSizeToCacheInBytes: MAX_PRECACHE_BYTES,
         manifestTransforms: [
           (entries) => {
@@ -222,6 +227,9 @@ export default defineConfig({
         // Static "not found" page for GitHub Pages. Built as an HTML entry (not copied from
         // `public/`) so that `%BASE_URL%` is substituted; no SPA redirect trick (ADR-0004).
         notFound: fileURLToPath(new URL('./404.html', import.meta.url)),
+        // The about page (presentation spec §3): plain HTML and CSS beside the app, built to
+        // about/index.html. It loads none of the app's code.
+        about: fileURLToPath(new URL('./about/index.html', import.meta.url)),
       },
     },
   },

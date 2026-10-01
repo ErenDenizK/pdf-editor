@@ -3,7 +3,8 @@
  * sections with headings, and no disabled twins: a "Remove …" item appears only when there
  * is something to remove. Combine and split (Merge files…, Split…, Compare with…, Rotate
  * pages) opens the existing dialogs and views. Commands of the "Document" group that no
- * section names join the last section, so tools registered elsewhere still appear.
+ * section names join the last section, so tools registered elsewhere still appear; "About
+ * this app" (`help.aboutPage`, presentation spec §3) closes that section.
  *
  * It also hosts the tool dialogs, the Batch dialog and the OCR dialog, which load lazily
  * (their code, the compress worker and the wasm stay out of the entry chunk).
@@ -122,11 +123,17 @@ export const DOCUMENT_MENU_SECTIONS: readonly DocumentMenuSection[] = [
   },
 ];
 
-const NAMED = new Set(
-  DOCUMENT_MENU_SECTIONS.flatMap((s) =>
+/** "About this app" (presentation spec §3): one quiet item, always last in "Document",
+ *  after any unnamed Document commands. It opens the about page in a new tab. */
+const ABOUT_PAGE_ID = 'help.aboutPage';
+const ABOUT_PAGE_ENTRY = command(ABOUT_PAGE_ID);
+
+const NAMED = new Set([
+  ...DOCUMENT_MENU_SECTIONS.flatMap((s) =>
     s.entries.flatMap((e) => (e.kind === 'command' ? [e.id] : [])),
   ),
-);
+  ABOUT_PAGE_ID,
+]);
 
 /** What a section shows now: the entries to render, each with its command and state. */
 export interface ShownEntry {
@@ -161,7 +168,7 @@ export function shownDocumentMenu(
     const entries: ShownEntry[] = [];
     const all: DocumentMenuEntry[] = [
       ...section.entries,
-      ...(section.id === 'document' ? extra.map((c) => command(c.id)) : []),
+      ...(section.id === 'document' ? [...extra.map((c) => command(c.id)), ABOUT_PAGE_ENTRY] : []),
     ];
     for (const entry of all) {
       if (entry.kind === 'merge') {
