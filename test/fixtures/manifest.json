@@ -5357,6 +5357,3408 @@
         "fileIdDeterministic": true
       },
       "derivedFrom": "signed-approval.pdf"
+    },
+    {
+      "file": "demo/demo-report-v1.pdf",
+      "bytes": 54088,
+      "sha256": "60bcee5d0a110564ba3daedb6a6a0d42265ccd6eafd1c67c15f345fa1d3a7d2b",
+      "pageCount": 10,
+      "tags": ["demo", "outline", "named-dests", "page-labels", "links", "compare", "type0-subset"],
+      "summary": "10 A4 pages, fictional club annual report: cover, contents with links, 8 sections in Inter / Noto Serif subsets, bar and line charts (vector), one table, outline with named destinations, page labels i-ii, 1-8. Version 1 of the compare pair.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 10,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 4,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 5,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 6,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 7,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 8,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 9,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 10,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          }
+        ],
+        "pageLabels": ["i", "ii", "1", "2", "3", "4", "5", "6", "7", "8"],
+        "outline": [
+          {
+            "title": "Cover",
+            "page": 1,
+            "target": "named-dest-string",
+            "destName": "cover"
+          },
+          {
+            "title": "Contents",
+            "page": 2,
+            "target": "named-dest-string",
+            "destName": "contents"
+          },
+          {
+            "title": "1. Chair’s foreword",
+            "page": 3,
+            "target": "named-dest-string",
+            "destName": "foreword"
+          },
+          {
+            "title": "2. The year in numbers",
+            "page": 4,
+            "target": "named-dest-string",
+            "destName": "year-in-numbers",
+            "open": true,
+            "children": [
+              {
+                "title": "Figure 1. Outings per month, 2024",
+                "page": 4,
+                "target": "named-dest-string",
+                "destName": "figure-1"
+              }
+            ]
+          },
+          {
+            "title": "3. Membership",
+            "page": 5,
+            "target": "named-dest-string",
+            "destName": "membership",
+            "open": true,
+            "children": [
+              {
+                "title": "Figure 2. Members at month end",
+                "page": 5,
+                "target": "named-dest-string",
+                "destName": "figure-2"
+              }
+            ]
+          },
+          {
+            "title": "4. Racing and regattas",
+            "page": 6,
+            "target": "named-dest-string",
+            "destName": "racing"
+          },
+          {
+            "title": "5. Fleet and boathouse",
+            "page": 7,
+            "target": "named-dest-string",
+            "destName": "fleet",
+            "open": true,
+            "children": [
+              {
+                "title": "Table 1. Fleet register",
+                "page": 7,
+                "target": "named-dest-string",
+                "destName": "table-1"
+              }
+            ]
+          },
+          {
+            "title": "6. Finances",
+            "page": 8,
+            "target": "named-dest-string",
+            "destName": "finances"
+          },
+          {
+            "title": "7. Community and juniors",
+            "page": 9,
+            "target": "named-dest-string",
+            "destName": "community"
+          },
+          {
+            "title": "8. The year ahead",
+            "page": 10,
+            "target": "named-dest-string",
+            "destName": "year-ahead"
+          }
+        ],
+        "outlineVisibleCount": 13,
+        "namedDests": [
+          {
+            "name": "cover",
+            "page": 1,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "contents",
+            "page": 2,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "foreword",
+            "page": 3,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "year-in-numbers",
+            "page": 4,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "membership",
+            "page": 5,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "racing",
+            "page": 6,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "fleet",
+            "page": 7,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "finances",
+            "page": 8,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "community",
+            "page": 9,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "year-ahead",
+            "page": 10,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "figure-1",
+            "page": 4,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "figure-2",
+            "page": 5,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "table-1",
+            "page": 7,
+            "tree": "Names/Dests"
+          }
+        ],
+        "links": [
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 3,
+            "destName": "foreword"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 4,
+            "destName": "year-in-numbers"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 5,
+            "destName": "membership"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 6,
+            "destName": "racing"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 7,
+            "destName": "fleet"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 8,
+            "destName": "finances"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 9,
+            "destName": "community"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 10,
+            "destName": "year-ahead"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 4,
+            "destName": "figure-1"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 5,
+            "destName": "figure-2"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 7,
+            "destName": "table-1"
+          }
+        ],
+        "info": {
+          "Title": "Harbourlight Rowing Club: Annual Report 2024",
+          "Author": "Harbourlight Rowing Club (fictional)"
+        },
+        "xref": "table",
+        "fileIdDeterministic": true,
+        "demo": {
+          "footer": "Demo document, fictional data",
+          "clips": [1, 2, 5, 6, 8],
+          "fonts": ["DEMOAA+Inter-Regular", "DEMOAB+Inter-Bold", "DEMOAC+NotoSerif-Regular"],
+          "headings": [
+            {
+              "page": 2,
+              "level": 1,
+              "text": "Contents",
+              "size": 26,
+              "box": [64, 723.73, 116.64, 31.46]
+            },
+            {
+              "page": 2,
+              "level": 2,
+              "text": "Figures and table",
+              "size": 12,
+              "box": [64, 409.11, 101.12, 14.52]
+            },
+            {
+              "page": 3,
+              "level": 1,
+              "text": "Chair’s foreword",
+              "size": 24,
+              "box": [64, 728.21, 197.85, 29.04]
+            },
+            {
+              "page": 4,
+              "level": 1,
+              "text": "The year in numbers",
+              "size": 24,
+              "box": [64, 728.21, 240.63, 29.04]
+            },
+            {
+              "page": 5,
+              "level": 1,
+              "text": "Membership",
+              "size": 24,
+              "box": [64, 728.21, 147.77, 29.04]
+            },
+            {
+              "page": 6,
+              "level": 1,
+              "text": "Racing and regattas",
+              "size": 24,
+              "box": [64, 728.21, 233.92, 29.04]
+            },
+            {
+              "page": 7,
+              "level": 1,
+              "text": "Fleet and boathouse",
+              "size": 24,
+              "box": [64, 728.21, 238.25, 29.04]
+            },
+            {
+              "page": 8,
+              "level": 1,
+              "text": "Finances",
+              "size": 24,
+              "box": [64, 728.21, 106.27, 29.04]
+            },
+            {
+              "page": 9,
+              "level": 1,
+              "text": "Community and juniors",
+              "size": 24,
+              "box": [64, 728.21, 272.1, 29.04]
+            },
+            {
+              "page": 10,
+              "level": 1,
+              "text": "The year ahead",
+              "size": 24,
+              "box": [64, 728.21, 181.31, 29.04]
+            },
+            {
+              "page": 5,
+              "level": 2,
+              "text": "Who our members are",
+              "size": 12,
+              "box": [64, 384.61, 129.9, 14.52]
+            },
+            {
+              "page": 5,
+              "level": 2,
+              "text": "Fees",
+              "size": 12,
+              "box": [64, 302.11, 28.06, 14.52]
+            },
+            {
+              "page": 6,
+              "level": 2,
+              "text": "Port Allery Regatta",
+              "size": 12,
+              "box": [64, 625.61, 110.16, 14.52]
+            },
+            {
+              "page": 6,
+              "level": 2,
+              "text": "Highlights",
+              "size": 12,
+              "box": [64, 474.11, 59.94, 14.52]
+            },
+            {
+              "page": 7,
+              "level": 2,
+              "text": "Boathouse",
+              "size": 12,
+              "box": [64, 405.61, 62.83, 14.52]
+            },
+            {
+              "page": 8,
+              "level": 2,
+              "text": "Income",
+              "size": 12,
+              "box": [64, 625.61, 43.36, 14.52]
+            },
+            {
+              "page": 8,
+              "level": 2,
+              "text": "Spending",
+              "size": 12,
+              "box": [64, 543.11, 55.91, 14.52]
+            },
+            {
+              "page": 8,
+              "level": 2,
+              "text": "Reserves",
+              "size": 12,
+              "box": [64, 460.61, 54.85, 14.52]
+            },
+            {
+              "page": 9,
+              "level": 2,
+              "text": "Schools and open days",
+              "size": 12,
+              "box": [64, 641.11, 135.63, 14.52]
+            },
+            {
+              "page": 9,
+              "level": 2,
+              "text": "Volunteers",
+              "size": 12,
+              "box": [64, 543.11, 64.81, 14.52]
+            },
+            {
+              "page": 10,
+              "level": 2,
+              "text": "Plans",
+              "size": 12,
+              "box": [64, 641.11, 32.19, 14.52]
+            },
+            {
+              "page": 10,
+              "level": 2,
+              "text": "Officers for 2025",
+              "size": 12,
+              "box": [64, 550.61, 101.24, 14.52]
+            }
+          ],
+          "charts": [
+            {
+              "id": "figure-1",
+              "page": 4,
+              "kind": "bar",
+              "title": "Outings per month, 2024",
+              "plot": [92, 354.5, 439.28, 174],
+              "categories": [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec"
+              ],
+              "yRange": [0, 250],
+              "series": [
+                {
+                  "name": "2024",
+                  "values": [92, 88, 41, 146, 189, 214, 236, 228, 197, 186, 141, 121]
+                }
+              ],
+              "bars": [
+                [99.69, 354.5, 21.23, 64.03],
+                [136.29, 354.5, 21.23, 61.25],
+                [172.9, 354.5, 21.23, 28.54],
+                [209.51, 354.5, 21.23, 101.62],
+                [246.11, 354.5, 21.23, 131.54],
+                [282.72, 354.5, 21.23, 148.94],
+                [319.33, 354.5, 21.23, 164.26],
+                [355.93, 354.5, 21.23, 158.69],
+                [392.54, 354.5, 21.23, 137.11],
+                [429.15, 354.5, 21.23, 129.46],
+                [465.75, 354.5, 21.23, 98.14],
+                [502.36, 354.5, 21.23, 84.22]
+              ]
+            },
+            {
+              "id": "figure-2",
+              "page": 5,
+              "kind": "line",
+              "title": "Members at month end",
+              "plot": [92, 452.5, 439.28, 154],
+              "categories": [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec"
+              ],
+              "yRange": [170, 220],
+              "series": [
+                {
+                  "name": "2023",
+                  "values": [176, 178, 180, 183, 186, 190, 193, 192, 190, 189, 188, 188]
+                },
+                {
+                  "name": "2024",
+                  "values": [188, 189, 187, 192, 199, 205, 210, 212, 213, 213, 214, 214]
+                }
+              ]
+            }
+          ],
+          "table": {
+            "id": "table-1",
+            "page": 7,
+            "title": "Table 1. Fleet register: the eight most used boats, 2024",
+            "box": [64, 440.5, 467.28, 180],
+            "columns": ["Boat", "Type", "Built", "Outings", "Condition"],
+            "rows": [
+              ["Kittiwake", "Coxed four", "2012", "214", "Good"],
+              ["Grey Heron", "Eight", "2016", "187", "Good"],
+              ["Tern", "Double scull", "2019", "243", "Very good"],
+              ["Cormorant", "Coxed four", "2008", "156", "Fair"],
+              ["Dunlin", "Single scull", "2021", "198", "Very good"],
+              ["Curlew", "Single scull", "2014", "172", "Good"],
+              ["Shearwater", "Quad scull", "2018", "205", "Good"],
+              ["Puffin", "Coastal four", "2022", "131", "Very good"]
+            ]
+          },
+          "compare": {
+            "role": "a",
+            "a": "demo/demo-report-v1.pdf",
+            "b": "demo/demo-report-v2.pdf",
+            "pageMap": [
+              {
+                "a": 1,
+                "b": 1
+              },
+              {
+                "a": 2,
+                "b": 2
+              },
+              {
+                "a": 3,
+                "b": 3
+              },
+              {
+                "a": 4,
+                "b": 4
+              },
+              {
+                "a": 5,
+                "b": 5
+              },
+              {
+                "a": 6,
+                "b": 6
+              },
+              {
+                "a": 7,
+                "b": 7
+              },
+              {
+                "a": 8,
+                "b": 8
+              },
+              {
+                "a": 9,
+                "b": 9
+              },
+              {
+                "a": 10,
+                "b": 10
+              }
+            ],
+            "changes": [
+              {
+                "kind": "paragraph",
+                "page": 3,
+                "section": "Chair’s foreword",
+                "sentences": {
+                  "a": "More than four hundred crews raced over two days, and the weather held until the final prize-giving.",
+                  "b": "Over two days, 412 crews raced on a course that the harbour authority had widened for us. The rain held off until the very last race."
+                },
+                "changedLines": [1, 2, 3],
+                "a": {
+                  "lines": [
+                    "The highlight of the summer was the Port Allery Regatta, which we hosted for the first time",
+                    "in eleven years. More than four hundred crews raced over two days, and the weather held",
+                    "until the final prize-giving. I would like to thank the regatta committee, who planned the",
+                    "event for almost a year and ran it without a single protest."
+                  ],
+                  "box": [64, 555.92, 454.82, 60.8]
+                },
+                "b": {
+                  "lines": [
+                    "The highlight of the summer was the Port Allery Regatta, which we hosted for the first time",
+                    "in eleven years. Over two days, 412 crews raced on a course that the harbour authority had",
+                    "widened for us. The rain held off until the very last race. I would like to thank the regatta",
+                    "committee, who planned the event for almost a year and ran it without a single protest."
+                  ],
+                  "box": [64, 555.92, 456.13, 60.8]
+                }
+              },
+              {
+                "kind": "chart-bar",
+                "page": 4,
+                "chart": "figure-1",
+                "bar": "Oct",
+                "a": {
+                  "value": 186,
+                  "rect": [429.15, 354.5, 21.23, 129.46]
+                },
+                "b": {
+                  "value": 168,
+                  "rect": [429.15, 354.5, 21.23, 116.93]
+                }
+              },
+              {
+                "kind": "table-cell",
+                "page": 7,
+                "table": "table-1",
+                "row": "Cormorant",
+                "column": "Outings",
+                "a": {
+                  "page": 7,
+                  "text": "156",
+                  "font": "Inter-Regular",
+                  "size": 9,
+                  "x": 409.42,
+                  "baseline": 527,
+                  "box": [409.42, 524.83, 14.58, 10.89]
+                },
+                "b": {
+                  "page": 7,
+                  "text": "165",
+                  "font": "Inter-Regular",
+                  "size": 9,
+                  "x": 409.42,
+                  "baseline": 527,
+                  "box": [409.42, 524.83, 14.58, 10.89]
+                }
+              }
+            ],
+            "identicalPages": [1, 2, 5, 6, 8, 9, 10]
+          },
+          "editTarget": {
+            "page": 3,
+            "text": "2024 was a year of steady water and full boats. We began the season with a waiting list for",
+            "font": "NotoSerif-Regular",
+            "size": 10.5,
+            "x": 64,
+            "baseline": 690,
+            "box": [64, 686.92, 451.02, 14.3]
+          }
+        }
+      }
+    },
+    {
+      "file": "demo/demo-report-v2.pdf",
+      "bytes": 54110,
+      "sha256": "0276e0a84e8993bd35dcee169bd9a57aac83e52b81088208f2b188df01009f99",
+      "pageCount": 10,
+      "tags": ["demo", "outline", "named-dests", "page-labels", "links", "compare", "type0-subset"],
+      "summary": "10 A4 pages, fictional club annual report: cover, contents with links, 8 sections in Inter / Noto Serif subsets, bar and line charts (vector), one table, outline with named destinations, page labels i-ii, 1-8. Version 2: one paragraph, one table figure and one chart bar differ from v1.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 10,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 4,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 5,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 6,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 7,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 8,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 9,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 10,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          }
+        ],
+        "pageLabels": ["i", "ii", "1", "2", "3", "4", "5", "6", "7", "8"],
+        "outline": [
+          {
+            "title": "Cover",
+            "page": 1,
+            "target": "named-dest-string",
+            "destName": "cover"
+          },
+          {
+            "title": "Contents",
+            "page": 2,
+            "target": "named-dest-string",
+            "destName": "contents"
+          },
+          {
+            "title": "1. Chair’s foreword",
+            "page": 3,
+            "target": "named-dest-string",
+            "destName": "foreword"
+          },
+          {
+            "title": "2. The year in numbers",
+            "page": 4,
+            "target": "named-dest-string",
+            "destName": "year-in-numbers",
+            "open": true,
+            "children": [
+              {
+                "title": "Figure 1. Outings per month, 2024",
+                "page": 4,
+                "target": "named-dest-string",
+                "destName": "figure-1"
+              }
+            ]
+          },
+          {
+            "title": "3. Membership",
+            "page": 5,
+            "target": "named-dest-string",
+            "destName": "membership",
+            "open": true,
+            "children": [
+              {
+                "title": "Figure 2. Members at month end",
+                "page": 5,
+                "target": "named-dest-string",
+                "destName": "figure-2"
+              }
+            ]
+          },
+          {
+            "title": "4. Racing and regattas",
+            "page": 6,
+            "target": "named-dest-string",
+            "destName": "racing"
+          },
+          {
+            "title": "5. Fleet and boathouse",
+            "page": 7,
+            "target": "named-dest-string",
+            "destName": "fleet",
+            "open": true,
+            "children": [
+              {
+                "title": "Table 1. Fleet register",
+                "page": 7,
+                "target": "named-dest-string",
+                "destName": "table-1"
+              }
+            ]
+          },
+          {
+            "title": "6. Finances",
+            "page": 8,
+            "target": "named-dest-string",
+            "destName": "finances"
+          },
+          {
+            "title": "7. Community and juniors",
+            "page": 9,
+            "target": "named-dest-string",
+            "destName": "community"
+          },
+          {
+            "title": "8. The year ahead",
+            "page": 10,
+            "target": "named-dest-string",
+            "destName": "year-ahead"
+          }
+        ],
+        "outlineVisibleCount": 13,
+        "namedDests": [
+          {
+            "name": "cover",
+            "page": 1,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "contents",
+            "page": 2,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "foreword",
+            "page": 3,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "year-in-numbers",
+            "page": 4,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "membership",
+            "page": 5,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "racing",
+            "page": 6,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "fleet",
+            "page": 7,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "finances",
+            "page": 8,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "community",
+            "page": 9,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "year-ahead",
+            "page": 10,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "figure-1",
+            "page": 4,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "figure-2",
+            "page": 5,
+            "tree": "Names/Dests"
+          },
+          {
+            "name": "table-1",
+            "page": 7,
+            "tree": "Names/Dests"
+          }
+        ],
+        "links": [
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 3,
+            "destName": "foreword"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 4,
+            "destName": "year-in-numbers"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 5,
+            "destName": "membership"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 6,
+            "destName": "racing"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 7,
+            "destName": "fleet"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 8,
+            "destName": "finances"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 9,
+            "destName": "community"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 10,
+            "destName": "year-ahead"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 4,
+            "destName": "figure-1"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 5,
+            "destName": "figure-2"
+          },
+          {
+            "page": 2,
+            "kind": "dest-named",
+            "targetPage": 7,
+            "destName": "table-1"
+          }
+        ],
+        "info": {
+          "Title": "Harbourlight Rowing Club: Annual Report 2024",
+          "Author": "Harbourlight Rowing Club (fictional)"
+        },
+        "xref": "table",
+        "fileIdDeterministic": true,
+        "demo": {
+          "footer": "Demo document, fictional data",
+          "clips": [1, 2, 5, 6, 8],
+          "fonts": ["DEMOAA+Inter-Regular", "DEMOAB+Inter-Bold", "DEMOAC+NotoSerif-Regular"],
+          "headings": [
+            {
+              "page": 2,
+              "level": 1,
+              "text": "Contents",
+              "size": 26,
+              "box": [64, 723.73, 116.64, 31.46]
+            },
+            {
+              "page": 2,
+              "level": 2,
+              "text": "Figures and table",
+              "size": 12,
+              "box": [64, 409.11, 101.12, 14.52]
+            },
+            {
+              "page": 3,
+              "level": 1,
+              "text": "Chair’s foreword",
+              "size": 24,
+              "box": [64, 728.21, 197.85, 29.04]
+            },
+            {
+              "page": 4,
+              "level": 1,
+              "text": "The year in numbers",
+              "size": 24,
+              "box": [64, 728.21, 240.63, 29.04]
+            },
+            {
+              "page": 5,
+              "level": 1,
+              "text": "Membership",
+              "size": 24,
+              "box": [64, 728.21, 147.77, 29.04]
+            },
+            {
+              "page": 6,
+              "level": 1,
+              "text": "Racing and regattas",
+              "size": 24,
+              "box": [64, 728.21, 233.92, 29.04]
+            },
+            {
+              "page": 7,
+              "level": 1,
+              "text": "Fleet and boathouse",
+              "size": 24,
+              "box": [64, 728.21, 238.25, 29.04]
+            },
+            {
+              "page": 8,
+              "level": 1,
+              "text": "Finances",
+              "size": 24,
+              "box": [64, 728.21, 106.27, 29.04]
+            },
+            {
+              "page": 9,
+              "level": 1,
+              "text": "Community and juniors",
+              "size": 24,
+              "box": [64, 728.21, 272.1, 29.04]
+            },
+            {
+              "page": 10,
+              "level": 1,
+              "text": "The year ahead",
+              "size": 24,
+              "box": [64, 728.21, 181.31, 29.04]
+            },
+            {
+              "page": 5,
+              "level": 2,
+              "text": "Who our members are",
+              "size": 12,
+              "box": [64, 384.61, 129.9, 14.52]
+            },
+            {
+              "page": 5,
+              "level": 2,
+              "text": "Fees",
+              "size": 12,
+              "box": [64, 302.11, 28.06, 14.52]
+            },
+            {
+              "page": 6,
+              "level": 2,
+              "text": "Port Allery Regatta",
+              "size": 12,
+              "box": [64, 625.61, 110.16, 14.52]
+            },
+            {
+              "page": 6,
+              "level": 2,
+              "text": "Highlights",
+              "size": 12,
+              "box": [64, 474.11, 59.94, 14.52]
+            },
+            {
+              "page": 7,
+              "level": 2,
+              "text": "Boathouse",
+              "size": 12,
+              "box": [64, 405.61, 62.83, 14.52]
+            },
+            {
+              "page": 8,
+              "level": 2,
+              "text": "Income",
+              "size": 12,
+              "box": [64, 625.61, 43.36, 14.52]
+            },
+            {
+              "page": 8,
+              "level": 2,
+              "text": "Spending",
+              "size": 12,
+              "box": [64, 543.11, 55.91, 14.52]
+            },
+            {
+              "page": 8,
+              "level": 2,
+              "text": "Reserves",
+              "size": 12,
+              "box": [64, 460.61, 54.85, 14.52]
+            },
+            {
+              "page": 9,
+              "level": 2,
+              "text": "Schools and open days",
+              "size": 12,
+              "box": [64, 641.11, 135.63, 14.52]
+            },
+            {
+              "page": 9,
+              "level": 2,
+              "text": "Volunteers",
+              "size": 12,
+              "box": [64, 543.11, 64.81, 14.52]
+            },
+            {
+              "page": 10,
+              "level": 2,
+              "text": "Plans",
+              "size": 12,
+              "box": [64, 641.11, 32.19, 14.52]
+            },
+            {
+              "page": 10,
+              "level": 2,
+              "text": "Officers for 2025",
+              "size": 12,
+              "box": [64, 550.61, 101.24, 14.52]
+            }
+          ],
+          "charts": [
+            {
+              "id": "figure-1",
+              "page": 4,
+              "kind": "bar",
+              "title": "Outings per month, 2024",
+              "plot": [92, 354.5, 439.28, 174],
+              "categories": [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec"
+              ],
+              "yRange": [0, 250],
+              "series": [
+                {
+                  "name": "2024",
+                  "values": [92, 88, 41, 146, 189, 214, 236, 228, 197, 168, 141, 121]
+                }
+              ],
+              "bars": [
+                [99.69, 354.5, 21.23, 64.03],
+                [136.29, 354.5, 21.23, 61.25],
+                [172.9, 354.5, 21.23, 28.54],
+                [209.51, 354.5, 21.23, 101.62],
+                [246.11, 354.5, 21.23, 131.54],
+                [282.72, 354.5, 21.23, 148.94],
+                [319.33, 354.5, 21.23, 164.26],
+                [355.93, 354.5, 21.23, 158.69],
+                [392.54, 354.5, 21.23, 137.11],
+                [429.15, 354.5, 21.23, 116.93],
+                [465.75, 354.5, 21.23, 98.14],
+                [502.36, 354.5, 21.23, 84.22]
+              ]
+            },
+            {
+              "id": "figure-2",
+              "page": 5,
+              "kind": "line",
+              "title": "Members at month end",
+              "plot": [92, 452.5, 439.28, 154],
+              "categories": [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec"
+              ],
+              "yRange": [170, 220],
+              "series": [
+                {
+                  "name": "2023",
+                  "values": [176, 178, 180, 183, 186, 190, 193, 192, 190, 189, 188, 188]
+                },
+                {
+                  "name": "2024",
+                  "values": [188, 189, 187, 192, 199, 205, 210, 212, 213, 213, 214, 214]
+                }
+              ]
+            }
+          ],
+          "table": {
+            "id": "table-1",
+            "page": 7,
+            "title": "Table 1. Fleet register: the eight most used boats, 2024",
+            "box": [64, 440.5, 467.28, 180],
+            "columns": ["Boat", "Type", "Built", "Outings", "Condition"],
+            "rows": [
+              ["Kittiwake", "Coxed four", "2012", "214", "Good"],
+              ["Grey Heron", "Eight", "2016", "187", "Good"],
+              ["Tern", "Double scull", "2019", "243", "Very good"],
+              ["Cormorant", "Coxed four", "2008", "165", "Fair"],
+              ["Dunlin", "Single scull", "2021", "198", "Very good"],
+              ["Curlew", "Single scull", "2014", "172", "Good"],
+              ["Shearwater", "Quad scull", "2018", "205", "Good"],
+              ["Puffin", "Coastal four", "2022", "131", "Very good"]
+            ]
+          },
+          "compare": {
+            "role": "b",
+            "a": "demo/demo-report-v1.pdf",
+            "b": "demo/demo-report-v2.pdf",
+            "pageMap": [
+              {
+                "a": 1,
+                "b": 1
+              },
+              {
+                "a": 2,
+                "b": 2
+              },
+              {
+                "a": 3,
+                "b": 3
+              },
+              {
+                "a": 4,
+                "b": 4
+              },
+              {
+                "a": 5,
+                "b": 5
+              },
+              {
+                "a": 6,
+                "b": 6
+              },
+              {
+                "a": 7,
+                "b": 7
+              },
+              {
+                "a": 8,
+                "b": 8
+              },
+              {
+                "a": 9,
+                "b": 9
+              },
+              {
+                "a": 10,
+                "b": 10
+              }
+            ],
+            "changes": [
+              {
+                "kind": "paragraph",
+                "page": 3,
+                "section": "Chair’s foreword",
+                "sentences": {
+                  "a": "More than four hundred crews raced over two days, and the weather held until the final prize-giving.",
+                  "b": "Over two days, 412 crews raced on a course that the harbour authority had widened for us. The rain held off until the very last race."
+                },
+                "changedLines": [1, 2, 3],
+                "a": {
+                  "lines": [
+                    "The highlight of the summer was the Port Allery Regatta, which we hosted for the first time",
+                    "in eleven years. More than four hundred crews raced over two days, and the weather held",
+                    "until the final prize-giving. I would like to thank the regatta committee, who planned the",
+                    "event for almost a year and ran it without a single protest."
+                  ],
+                  "box": [64, 555.92, 454.82, 60.8]
+                },
+                "b": {
+                  "lines": [
+                    "The highlight of the summer was the Port Allery Regatta, which we hosted for the first time",
+                    "in eleven years. Over two days, 412 crews raced on a course that the harbour authority had",
+                    "widened for us. The rain held off until the very last race. I would like to thank the regatta",
+                    "committee, who planned the event for almost a year and ran it without a single protest."
+                  ],
+                  "box": [64, 555.92, 456.13, 60.8]
+                }
+              },
+              {
+                "kind": "chart-bar",
+                "page": 4,
+                "chart": "figure-1",
+                "bar": "Oct",
+                "a": {
+                  "value": 186,
+                  "rect": [429.15, 354.5, 21.23, 129.46]
+                },
+                "b": {
+                  "value": 168,
+                  "rect": [429.15, 354.5, 21.23, 116.93]
+                }
+              },
+              {
+                "kind": "table-cell",
+                "page": 7,
+                "table": "table-1",
+                "row": "Cormorant",
+                "column": "Outings",
+                "a": {
+                  "page": 7,
+                  "text": "156",
+                  "font": "Inter-Regular",
+                  "size": 9,
+                  "x": 409.42,
+                  "baseline": 527,
+                  "box": [409.42, 524.83, 14.58, 10.89]
+                },
+                "b": {
+                  "page": 7,
+                  "text": "165",
+                  "font": "Inter-Regular",
+                  "size": 9,
+                  "x": 409.42,
+                  "baseline": 527,
+                  "box": [409.42, 524.83, 14.58, 10.89]
+                }
+              }
+            ],
+            "identicalPages": [1, 2, 5, 6, 8, 9, 10]
+          },
+          "editTarget": {
+            "page": 3,
+            "text": "2024 was a year of steady water and full boats. We began the season with a waiting list for",
+            "font": "NotoSerif-Regular",
+            "size": 10.5,
+            "x": 64,
+            "baseline": 690,
+            "box": [64, 686.92, 451.02, 14.3]
+          }
+        }
+      }
+    },
+    {
+      "file": "demo/demo-agreement.pdf",
+      "bytes": 46269,
+      "sha256": "a12abb3c5857dffc8bb4ef7373271b5f8cc4599931534ef3fd10e83c18365a5f",
+      "pageCount": 4,
+      "tags": ["demo", "acroform", "redaction", "sensitive-data", "type0-subset"],
+      "summary": "4 A4 pages, room-hire agreement: parties with a fictional e-mail and phone, 11 clauses with the documentation IBAN in clause 2 (once), 3 checkboxes and 3 text fields on page 4.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 4,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 3,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 4,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          }
+        ],
+        "fields": [
+          {
+            "name": "option_kitchen",
+            "type": "checkbox",
+            "value": false,
+            "page": 4,
+            "hasAppearance": true
+          },
+          {
+            "name": "option_projector",
+            "type": "checkbox",
+            "value": false,
+            "page": 4,
+            "hasAppearance": true
+          },
+          {
+            "name": "option_bar",
+            "type": "checkbox",
+            "value": false,
+            "page": 4,
+            "hasAppearance": true
+          },
+          {
+            "name": "hirer_name",
+            "type": "text",
+            "value": "",
+            "page": 4,
+            "hasAppearance": true
+          },
+          {
+            "name": "hirer_signature",
+            "type": "text",
+            "value": "",
+            "page": 4,
+            "hasAppearance": true
+          },
+          {
+            "name": "hirer_date",
+            "type": "text",
+            "value": "",
+            "page": 4,
+            "hasAppearance": true
+          }
+        ],
+        "info": {
+          "Title": "Room Hire Agreement HRC-RH-2024-031",
+          "Author": "Harbourlight Rowing Club (fictional)"
+        },
+        "xref": "table",
+        "fileIdDeterministic": true,
+        "demo": {
+          "footer": "Demo document, fictional data",
+          "clips": [1, 2, 3, 7],
+          "fonts": [
+            "DEMOAA+Inter-Regular",
+            "DEMOAB+Inter-Bold",
+            "DEMOAC+NotoSerif-Regular",
+            "Helvetica (form field appearances, standard font)"
+          ],
+          "headings": [
+            {
+              "page": 1,
+              "level": 1,
+              "text": "Room Hire Agreement",
+              "size": 24,
+              "box": [64, 710.21, 258.35, 29.04]
+            },
+            {
+              "page": 1,
+              "level": 2,
+              "text": "The parties",
+              "size": 12,
+              "box": [64, 607.61, 66.4, 14.52]
+            },
+            {
+              "page": 1,
+              "level": 2,
+              "text": "The booking",
+              "size": 12,
+              "box": [64, 450.61, 73.02, 14.52]
+            },
+            {
+              "page": 2,
+              "level": 1,
+              "text": "Terms of hire",
+              "size": 24,
+              "box": [64, 728.21, 156.59, 29.04]
+            },
+            {
+              "page": 4,
+              "level": 1,
+              "text": "Options and signatures",
+              "size": 24,
+              "box": [64, 728.21, 272.61, 29.04]
+            },
+            {
+              "page": 4,
+              "level": 2,
+              "text": "Options",
+              "size": 12,
+              "box": [64, 641.11, 46.01, 14.52]
+            },
+            {
+              "page": 4,
+              "level": 2,
+              "text": "Signatures",
+              "size": 12,
+              "box": [64, 540.11, 63.75, 14.52]
+            }
+          ],
+          "sensitive": [
+            {
+              "kind": "iban",
+              "text": "GB82 WEST 1234 5698 7654 32",
+              "occurrences": 1,
+              "page": 2,
+              "box": [116.86, 562.42, 151.61, 14.3],
+              "line": {
+                "page": 2,
+                "text": "IBAN GB82 WEST 1234 5698 7654 32, quoting the agreement number as the reference.",
+                "font": "NotoSerif-Regular",
+                "size": 10.5,
+                "x": 88,
+                "baseline": 565.5,
+                "box": [88, 562.42, 428.39, 14.3]
+              }
+            },
+            {
+              "kind": "email",
+              "text": "elena.marsh@example.com",
+              "occurrences": 1,
+              "page": 1,
+              "box": [318.64, 507.42, 138.26, 14.3],
+              "line": {
+                "page": 1,
+                "text": "elena.marsh@example.com",
+                "font": "NotoSerif-Regular",
+                "size": 10.5,
+                "x": 318.64,
+                "baseline": 510.5,
+                "box": [318.64, 507.42, 138.26, 14.3]
+              }
+            },
+            {
+              "kind": "phone",
+              "text": "+44 20 7946 0958",
+              "occurrences": 1,
+              "page": 1,
+              "box": [318.64, 492.42, 84.49, 14.3],
+              "line": {
+                "page": 1,
+                "text": "+44 20 7946 0958",
+                "font": "NotoSerif-Regular",
+                "size": 10.5,
+                "x": 318.64,
+                "baseline": 495.5,
+                "box": [318.64, 492.42, 84.49, 14.3]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "file": "demo/demo-letter-scan.pdf",
+      "bytes": 322751,
+      "sha256": "bdf0609385f959e0c6cbcc99304daf2eb5e7f264858bd6d0fabf47dc870ea466",
+      "pageCount": 2,
+      "tags": ["demo", "ocr", "scan", "image-only", "turkish"],
+      "summary": "2 A4 pages, image-only greyscale scans (200 dpi) of a letter: page 1 English, page 2 Turkish; slight skew, dust specks, a printed rule and a round RECEIVED stamp.",
+      "expect": {
+        "pdfLibLoad": "ok",
+        "pageCount": 2,
+        "pages": [
+          {
+            "page": 1,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          },
+          {
+            "page": 2,
+            "mediaBox": [0, 0, 595.28, 841.89],
+            "rotate": 0,
+            "displayedSize": [595.28, 841.89]
+          }
+        ],
+        "info": {
+          "Title": "Letter to Port Allery Town Council, 12 March 2024 (scan)"
+        },
+        "images": [
+          {
+            "page": 1,
+            "filter": "FlateDecode",
+            "width": 1654,
+            "height": 2339,
+            "smask": false
+          },
+          {
+            "page": 2,
+            "filter": "FlateDecode",
+            "width": 1654,
+            "height": 2339,
+            "smask": false
+          }
+        ],
+        "ocr": {
+          "languages": ["eng", "tur"],
+          "font": "Inter Regular and Bold (Inter-Regular.ttf, Inter-Bold.ttf), glyph outlines rasterised by lib/raster.ts",
+          "letters": "çğıöşüİ",
+          "pages": [
+            {
+              "page": 1,
+              "language": "eng",
+              "rotate": 0,
+              "image": {
+                "resource": "Im1",
+                "width": 1654,
+                "height": 2339,
+                "dpi": 200,
+                "colorSpace": "DeviceGray",
+                "bitsPerComponent": 8,
+                "filter": "FlateDecode",
+                "matrix": [595.28, 0, 0, 841.89, 0, 0]
+              },
+              "skewDegrees": 0.7,
+              "marks": [
+                {
+                  "kind": "rule",
+                  "box": [68.05, 739.82, 451.28, 8.31],
+                  "px": [189, 260, 1254, 24]
+                },
+                {
+                  "kind": "stamp",
+                  "text": "RECEIVED 18 MAR 2024 PORT ALLERY COUNCIL",
+                  "box": [392.08, 151.15, 101.21, 101.21],
+                  "px": [1089, 1637, 282, 282]
+                }
+              ],
+              "text": "HARBOURLIGHT ROWING CLUB\nThe Boathouse, Quay Road, Port Allery PA3 7RW\n12 March 2024\nThe Licensing Officer\nPort Allery Town Council\nMarket Street\nPort Allery PA1 2AB\nDear Sir or Madam,\nTemporary event notice: Autumn Head, 12 October 2024\nThe Harbourlight Rowing Club will hold its annual Autumn Head race on Saturday 12\nOctober 2024, between 8 am and 4 pm. We expect around 300 rowers and 200\nvisitors at the boathouse on Quay Road.\nWe would like to run a refreshments tent on the club lawn during the event and to sell\nsoft drinks, tea and cakes. No alcohol will be sold. Please let us know whether a\ntemporary event notice is needed for this, and which form we should use.\nOur marshals will keep the towpath clear for walkers and cyclists throughout the day.\nA site plan and our risk assessment are enclosed.\nThank you for your help.\nYours faithfully,\nTom Ashdown\nClub Secretary\nDemo document, fictional data",
+              "lines": [
+                {
+                  "text": "HARBOURLIGHT ROWING CLUB",
+                  "fontSize": 15,
+                  "baseline": 770,
+                  "box": [68.61, 767.08, 229.38, 14.01]
+                },
+                {
+                  "text": "The Boathouse, Quay Road, Port Allery PA3 7RW",
+                  "fontSize": 9,
+                  "baseline": 755,
+                  "box": [68.29, 750.35, 206.59, 11.03]
+                },
+                {
+                  "text": "12 March 2024",
+                  "fontSize": 11,
+                  "baseline": 712,
+                  "box": [68.88, 709.09, 76.47, 9.18]
+                },
+                {
+                  "text": "The Licensing Officer",
+                  "fontSize": 11,
+                  "baseline": 682,
+                  "box": [69.25, 676.86, 110.98, 12.11]
+                },
+                {
+                  "text": "Port Allery Town Council",
+                  "fontSize": 11,
+                  "baseline": 666,
+                  "box": [69.89, 660.95, 126.27, 12.09]
+                },
+                {
+                  "text": "Market Street",
+                  "fontSize": 11,
+                  "baseline": 650,
+                  "box": [70.09, 647.1, 69.27, 9.09]
+                },
+                {
+                  "text": "Port Allery PA1 2AB",
+                  "fontSize": 11,
+                  "baseline": 634,
+                  "box": [70.28, 628.95, 98.51, 11.6]
+                },
+                {
+                  "text": "Dear Sir or Madam,",
+                  "fontSize": 11,
+                  "baseline": 598,
+                  "box": [70.72, 593.31, 98.74, 11.4]
+                },
+                {
+                  "text": "Temporary event notice: Autumn Head, 12 October 2024",
+                  "fontSize": 11,
+                  "baseline": 572,
+                  "box": [70.47, 566.95, 301.82, 14.42]
+                },
+                {
+                  "text": "The Harbourlight Rowing Club will hold its annual Autumn Head race on Saturday 12",
+                  "fontSize": 11,
+                  "baseline": 546,
+                  "box": [70.91, 540.87, 433.61, 15.94]
+                },
+                {
+                  "text": "October 2024, between 8 am and 4 pm. We expect around 300 rowers and 200",
+                  "fontSize": 11,
+                  "baseline": 530,
+                  "box": [71.24, 525, 412.53, 15.39]
+                },
+                {
+                  "text": "visitors at the boathouse on Quay Road.",
+                  "fontSize": 11,
+                  "baseline": 514,
+                  "box": [71.07, 508.95, 206.12, 13.07]
+                },
+                {
+                  "text": "We would like to run a refreshments tent on the club lawn during the event and to sell",
+                  "fontSize": 11,
+                  "baseline": 490,
+                  "box": [71.35, 484.87, 441.25, 16.14]
+                },
+                {
+                  "text": "soft drinks, tea and cakes. No alcohol will be sold. Please let us know whether a",
+                  "fontSize": 11,
+                  "baseline": 474,
+                  "box": [71.85, 469.32, 413.04, 15.35]
+                },
+                {
+                  "text": "temporary event notice is needed for this, and which form we should use.",
+                  "fontSize": 11,
+                  "baseline": 458,
+                  "box": [71.57, 452.95, 381.16, 15.32]
+                },
+                {
+                  "text": "Our marshals will keep the towpath clear for walkers and cyclists throughout the day.",
+                  "fontSize": 11,
+                  "baseline": 434,
+                  "box": [72.41, 428.88, 439.32, 16.12]
+                },
+                {
+                  "text": "A site plan and our risk assessment are enclosed.",
+                  "fontSize": 11,
+                  "baseline": 418,
+                  "box": [72.23, 413, 256.26, 13.64]
+                },
+                {
+                  "text": "Thank you for your help.",
+                  "fontSize": 11,
+                  "baseline": 394,
+                  "box": [72.77, 388.96, 125.68, 12.2]
+                },
+                {
+                  "text": "Yours faithfully,",
+                  "fontSize": 11,
+                  "baseline": 366,
+                  "box": [72.87, 360.96, 79.37, 11.63]
+                },
+                {
+                  "text": "Tom Ashdown",
+                  "fontSize": 11,
+                  "baseline": 312,
+                  "box": [73.65, 309.14, 75.7, 9.04]
+                },
+                {
+                  "text": "Club Secretary",
+                  "fontSize": 11,
+                  "baseline": 296,
+                  "box": [74.1, 290.97, 76.66, 11.33]
+                },
+                {
+                  "text": "Demo document, fictional data",
+                  "fontSize": 8,
+                  "baseline": 40,
+                  "box": [77.3, 35.88, 114.59, 8.89]
+                }
+              ],
+              "words": [
+                {
+                  "text": "HARBOURLIGHT",
+                  "box": [68.61, 767.08, 118.33, 12.66],
+                  "px": [190, 172, 330, 36]
+                },
+                {
+                  "text": "ROWING",
+                  "box": [191.89, 768.59, 61.93, 11.96],
+                  "px": [533, 170, 173, 34]
+                },
+                {
+                  "text": "CLUB",
+                  "box": [258.64, 769.4, 39.35, 11.69],
+                  "px": [718, 168, 110, 34]
+                },
+                {
+                  "text": "The",
+                  "box": [68.29, 752.12, 15.59, 6.84],
+                  "px": [189, 230, 44, 20]
+                },
+                {
+                  "text": "Boathouse,",
+                  "box": [87.55, 750.88, 46.57, 8.69],
+                  "px": [243, 228, 130, 25]
+                },
+                {
+                  "text": "Quay",
+                  "box": [137.83, 751.2, 21.51, 8.77],
+                  "px": [382, 227, 61, 25]
+                },
+                {
+                  "text": "Road,",
+                  "box": [162.8, 751.8, 22.87, 8.4],
+                  "px": [452, 226, 64, 25]
+                },
+                {
+                  "text": "Port",
+                  "box": [189.63, 753.6, 16.68, 6.86],
+                  "px": [526, 226, 48, 20]
+                },
+                {
+                  "text": "Allery",
+                  "box": [209.16, 752.07, 24.04, 8.71],
+                  "px": [581, 225, 67, 25]
+                },
+                {
+                  "text": "PA3",
+                  "box": [236.66, 754.19, 15.61, 6.91],
+                  "px": [657, 224, 44, 20]
+                },
+                {
+                  "text": "7RW",
+                  "box": [255.68, 754.51, 19.17, 6.78],
+                  "px": [710, 223, 54, 20]
+                },
+                {
+                  "text": "12",
+                  "box": [68.88, 709.23, 9.98, 8.23],
+                  "px": [191, 345, 29, 24]
+                },
+                {
+                  "text": "March",
+                  "box": [83.61, 709.27, 31.14, 8.52],
+                  "px": [232, 344, 87, 25]
+                },
+                {
+                  "text": "2024",
+                  "box": [119.42, 709.74, 25.93, 8.53],
+                  "px": [331, 343, 73, 25]
+                },
+                {
+                  "text": "The",
+                  "box": [69.26, 679.1, 19.05, 8.36],
+                  "px": [192, 428, 54, 25]
+                },
+                {
+                  "text": "Licensing",
+                  "box": [92.8, 677.14, 48.11, 11.23],
+                  "px": [257, 426, 135, 32]
+                },
+                {
+                  "text": "Officer",
+                  "box": [145.38, 680.03, 34.83, 8.93],
+                  "px": [403, 424, 98, 26]
+                },
+                {
+                  "text": "Port",
+                  "box": [69.89, 663.11, 20.38, 8.38],
+                  "px": [194, 473, 57, 24]
+                },
+                {
+                  "text": "Allery",
+                  "box": [93.77, 661.24, 29.38, 10.65],
+                  "px": [260, 472, 83, 30]
+                },
+                {
+                  "text": "Town",
+                  "box": [126.93, 663.8, 26.86, 8.46],
+                  "px": [352, 471, 76, 24]
+                },
+                {
+                  "text": "Council",
+                  "box": [158.29, 664.19, 37.84, 8.86],
+                  "px": [439, 469, 106, 25]
+                },
+                {
+                  "text": "Market",
+                  "box": [70.09, 647.1, 35.14, 8.57],
+                  "px": [194, 517, 99, 25]
+                },
+                {
+                  "text": "Street",
+                  "box": [109.06, 647.57, 30.29, 8.62],
+                  "px": [302, 515, 86, 25]
+                },
+                {
+                  "text": "Port",
+                  "box": [70.28, 631.11, 20.38, 8.38],
+                  "px": [195, 562, 57, 24]
+                },
+                {
+                  "text": "Allery",
+                  "box": [94.16, 629.24, 29.38, 10.65],
+                  "px": [261, 561, 83, 30]
+                },
+                {
+                  "text": "PA1",
+                  "box": [127.77, 631.94, 16.07, 8.2],
+                  "px": [354, 560, 46, 24]
+                },
+                {
+                  "text": "2AB",
+                  "box": [148.62, 632.2, 20.14, 8.35],
+                  "px": [412, 559, 57, 24]
+                },
+                {
+                  "text": "Dear",
+                  "box": [70.72, 595.1, 23.66, 8.43],
+                  "px": [196, 662, 67, 24]
+                },
+                {
+                  "text": "Sir",
+                  "box": [98.24, 595.44, 13.09, 8.56],
+                  "px": [272, 660, 38, 25]
+                },
+                {
+                  "text": "or",
+                  "box": [115.16, 595.66, 10.01, 6.34],
+                  "px": [319, 666, 29, 18]
+                },
+                {
+                  "text": "Madam,",
+                  "box": [129.38, 594.03, 40.08, 10.42],
+                  "px": [359, 659, 112, 30]
+                },
+                {
+                  "text": "Temporary",
+                  "box": [70.48, 566.95, 58.29, 11],
+                  "px": [195, 733, 163, 31]
+                },
+                {
+                  "text": "event",
+                  "box": [131.86, 569.87, 29.64, 7.91],
+                  "px": [366, 733, 83, 23]
+                },
+                {
+                  "text": "notice:",
+                  "box": [164.88, 570.27, 35.81, 9],
+                  "px": [458, 729, 100, 26]
+                },
+                {
+                  "text": "Autumn",
+                  "box": [204.37, 570.79, 41.97, 8.6],
+                  "px": [567, 729, 118, 25]
+                },
+                {
+                  "text": "Head,",
+                  "box": [250.26, 569.31, 30.32, 10.49],
+                  "px": [695, 728, 85, 30]
+                },
+                {
+                  "text": "12",
+                  "box": [284.16, 571.85, 10.67, 8.24],
+                  "px": [789, 727, 30, 24]
+                },
+                {
+                  "text": "October",
+                  "box": [298.44, 571.9, 42.97, 8.75],
+                  "px": [829, 725, 120, 25]
+                },
+                {
+                  "text": "2024",
+                  "box": [344.71, 572.48, 27.56, 8.55],
+                  "px": [957, 724, 78, 25]
+                },
+                {
+                  "text": "The",
+                  "box": [70.92, 543.11, 19.05, 8.36],
+                  "px": [196, 806, 54, 24]
+                },
+                {
+                  "text": "Harbourlight",
+                  "box": [94.46, 541.15, 63.93, 11.42],
+                  "px": [262, 803, 178, 33]
+                },
+                {
+                  "text": "Rowing",
+                  "box": [162.54, 541.99, 36.54, 11.08],
+                  "px": [451, 802, 103, 32]
+                },
+                {
+                  "text": "Club",
+                  "box": [203.55, 544.73, 22.82, 8.52],
+                  "px": [565, 801, 64, 25]
+                },
+                {
+                  "text": "will",
+                  "box": [230.3, 545.19, 15.87, 8.46],
+                  "px": [639, 800, 45, 25]
+                },
+                {
+                  "text": "hold",
+                  "box": [250.86, 545.31, 20.9, 8.39],
+                  "px": [696, 800, 59, 24]
+                },
+                {
+                  "text": "its",
+                  "box": [276.27, 545.62, 10.85, 8.53],
+                  "px": [767, 799, 31, 24]
+                },
+                {
+                  "text": "annual",
+                  "box": [291.14, 545.79, 33.28, 8.55],
+                  "px": [808, 798, 94, 25]
+                },
+                {
+                  "text": "Autumn",
+                  "box": [328.55, 546.31, 39.3, 8.56],
+                  "px": [912, 797, 110, 25]
+                },
+                {
+                  "text": "Head",
+                  "box": [372.66, 546.79, 25.89, 8.46],
+                  "px": [1035, 796, 73, 24]
+                },
+                {
+                  "text": "race",
+                  "box": [403.26, 547.16, 21.7, 6.49],
+                  "px": [1120, 800, 61, 19]
+                },
+                {
+                  "text": "on",
+                  "box": [429.08, 547.49, 11.76, 6.35],
+                  "px": [1191, 800, 34, 18]
+                },
+                {
+                  "text": "Saturday",
+                  "box": [445.31, 545.53, 45.44, 10.95],
+                  "px": [1236, 792, 128, 32]
+                },
+                {
+                  "text": "12",
+                  "box": [494.52, 548.42, 9.98, 8.23],
+                  "px": [1373, 792, 29, 24]
+                },
+                {
+                  "text": "October",
+                  "box": [71.24, 527.11, 41.27, 8.74],
+                  "px": [197, 850, 116, 25]
+                },
+                {
+                  "text": "2024,",
+                  "box": [116.57, 525.87, 28.48, 10.38],
+                  "px": [323, 848, 80, 30]
+                },
+                {
+                  "text": "between",
+                  "box": [149.78, 528.07, 43.44, 8.66],
+                  "px": [416, 847, 121, 25]
+                },
+                {
+                  "text": "8",
+                  "box": [197.71, 528.68, 5.59, 8.28],
+                  "px": [549, 847, 16, 24]
+                },
+                {
+                  "text": "am",
+                  "box": [207.46, 528.77, 14.56, 6.43],
+                  "px": [576, 851, 41, 19]
+                },
+                {
+                  "text": "and",
+                  "box": [226.34, 529, 18.18, 8.36],
+                  "px": [628, 845, 52, 25]
+                },
+                {
+                  "text": "4",
+                  "box": [249.01, 529.42, 5.92, 8.07],
+                  "px": [691, 845, 18, 23]
+                },
+                {
+                  "text": "pm.",
+                  "box": [259.43, 527.3, 17.93, 8.57],
+                  "px": [720, 850, 51, 24]
+                },
+                {
+                  "text": "We",
+                  "box": [281.47, 529.68, 15.98, 8.33],
+                  "px": [781, 844, 46, 24]
+                },
+                {
+                  "text": "expect",
+                  "box": [301.54, 527.81, 34.54, 10.1],
+                  "px": [837, 844, 97, 29]
+                },
+                {
+                  "text": "around",
+                  "box": [339.76, 530.38, 35.23, 8.57],
+                  "px": [943, 841, 99, 25]
+                },
+                {
+                  "text": "300",
+                  "box": [379.5, 530.9, 19.45, 8.45],
+                  "px": [1054, 840, 55, 24]
+                },
+                {
+                  "text": "rowers",
+                  "box": [403.47, 531.17, 34.2, 6.64],
+                  "px": [1120, 844, 96, 20]
+                },
+                {
+                  "text": "and",
+                  "box": [441.69, 531.63, 18.18, 8.36],
+                  "px": [1226, 838, 52, 24]
+                },
+                {
+                  "text": "200",
+                  "box": [464.54, 531.94, 19.2, 8.45],
+                  "px": [1290, 837, 54, 24]
+                },
+                {
+                  "text": "visitors",
+                  "box": [71.07, 511.11, 36.61, 8.84],
+                  "px": [197, 894, 103, 25]
+                },
+                {
+                  "text": "at",
+                  "box": [111.71, 511.6, 9.16, 7.68],
+                  "px": [310, 896, 26, 22]
+                },
+                {
+                  "text": "the",
+                  "box": [124.2, 511.76, 15.97, 8.33],
+                  "px": [344, 893, 46, 25]
+                },
+                {
+                  "text": "boathouse",
+                  "box": [144.55, 512, 53.75, 8.8],
+                  "px": [401, 891, 150, 26]
+                },
+                {
+                  "text": "on",
+                  "box": [202.41, 512.72, 11.76, 6.35],
+                  "px": [562, 896, 33, 19]
+                },
+                {
+                  "text": "Quay",
+                  "box": [218.67, 510.76, 26.29, 10.72],
+                  "px": [607, 890, 74, 30]
+                },
+                {
+                  "text": "Road.",
+                  "box": [249.19, 513.28, 27.97, 8.48],
+                  "px": [692, 889, 78, 24]
+                },
+                {
+                  "text": "We",
+                  "box": [71.35, 487.11, 15.98, 8.33],
+                  "px": [198, 962, 45, 24]
+                },
+                {
+                  "text": "would",
+                  "box": [91.24, 487.36, 30.18, 8.5],
+                  "px": [253, 961, 85, 24]
+                },
+                {
+                  "text": "like",
+                  "box": [126.1, 487.78, 16.25, 8.59],
+                  "px": [350, 959, 46, 25]
+                },
+                {
+                  "text": "to",
+                  "box": [145.99, 488.02, 9.51, 7.68],
+                  "px": [405, 961, 27, 22]
+                },
+                {
+                  "text": "run",
+                  "box": [159.93, 488.25, 15.52, 6.35],
+                  "px": [444, 964, 44, 19]
+                },
+                {
+                  "text": "a",
+                  "box": [179.8, 488.43, 4.92, 6.28],
+                  "px": [499, 964, 15, 18]
+                },
+                {
+                  "text": "refreshments",
+                  "box": [189.41, 488.56, 67.67, 9.33],
+                  "px": [526, 955, 189, 27]
+                },
+                {
+                  "text": "tent",
+                  "box": [260.74, 489.43, 19.77, 7.8],
+                  "px": [724, 957, 56, 23]
+                },
+                {
+                  "text": "on",
+                  "box": [284.3, 489.71, 11.76, 6.35],
+                  "px": [789, 960, 34, 19]
+                },
+                {
+                  "text": "the",
+                  "box": [300.01, 489.91, 15.97, 8.33],
+                  "px": [833, 954, 45, 24]
+                },
+                {
+                  "text": "club",
+                  "box": [320.07, 490.15, 21.17, 8.39],
+                  "px": [889, 953, 59, 25]
+                },
+                {
+                  "text": "lawn",
+                  "box": [345.64, 490.45, 22.74, 8.42],
+                  "px": [960, 952, 64, 25]
+                },
+                {
+                  "text": "during",
+                  "box": [372.78, 488.55, 32.12, 11.03],
+                  "px": [1035, 950, 90, 32]
+                },
+                {
+                  "text": "the",
+                  "box": [408.82, 491.24, 15.97, 8.33],
+                  "px": [1135, 950, 45, 25]
+                },
+                {
+                  "text": "event",
+                  "box": [428.89, 491.48, 27.99, 7.9],
+                  "px": [1191, 951, 79, 23]
+                },
+                {
+                  "text": "and",
+                  "box": [460.57, 491.86, 18.18, 8.36],
+                  "px": [1279, 949, 51, 24]
+                },
+                {
+                  "text": "to",
+                  "box": [482.71, 492.14, 9.51, 7.68],
+                  "px": [1340, 950, 28, 22]
+                },
+                {
+                  "text": "sell",
+                  "box": [496.35, 492.31, 16.22, 8.33],
+                  "px": [1378, 947, 46, 25]
+                },
+                {
+                  "text": "soft",
+                  "box": [71.85, 471.12, 19, 8.74],
+                  "px": [199, 1005, 54, 25]
+                },
+                {
+                  "text": "drinks,",
+                  "box": [94.61, 469.6, 33.82, 10.61],
+                  "px": [262, 1004, 95, 31]
+                },
+                {
+                  "text": "tea",
+                  "box": [132.42, 471.85, 15.32, 7.76],
+                  "px": [367, 1006, 44, 22]
+                },
+                {
+                  "text": "and",
+                  "box": [152.07, 472.09, 18.18, 8.36],
+                  "px": [422, 1004, 51, 24]
+                },
+                {
+                  "text": "cakes.",
+                  "box": [174.65, 472.36, 32.43, 8.54],
+                  "px": [485, 1002, 91, 25]
+                },
+                {
+                  "text": "No",
+                  "box": [211.9, 472.83, 13.46, 8.29],
+                  "px": [588, 1002, 38, 24]
+                },
+                {
+                  "text": "alcohol",
+                  "box": [229.39, 473.03, 36.25, 8.58],
+                  "px": [637, 1000, 101, 25]
+                },
+                {
+                  "text": "will",
+                  "box": [269.85, 473.67, 15.87, 8.46],
+                  "px": [749, 999, 45, 24]
+                },
+                {
+                  "text": "be",
+                  "box": [290.42, 473.79, 11.86, 8.27],
+                  "px": [806, 999, 34, 24]
+                },
+                {
+                  "text": "sold.",
+                  "box": [306.39, 473.98, 23.63, 8.42],
+                  "px": [851, 998, 66, 24]
+                },
+                {
+                  "text": "Please",
+                  "box": [334.84, 474.32, 33.2, 8.55],
+                  "px": [930, 997, 93, 25]
+                },
+                {
+                  "text": "let",
+                  "box": [372.42, 474.79, 11.71, 8.27],
+                  "px": [1034, 996, 34, 24]
+                },
+                {
+                  "text": "us",
+                  "box": [388.21, 474.98, 10.99, 6.34],
+                  "px": [1078, 1001, 31, 19]
+                },
+                {
+                  "text": "know",
+                  "box": [403.59, 475.17, 26.81, 8.46],
+                  "px": [1121, 995, 75, 24]
+                },
+                {
+                  "text": "whether",
+                  "box": [434.14, 475.54, 42.05, 8.64],
+                  "px": [1205, 993, 118, 25]
+                },
+                {
+                  "text": "a",
+                  "box": [479.94, 476.09, 4.92, 6.28],
+                  "px": [1333, 998, 14, 19]
+                },
+                {
+                  "text": "temporary",
+                  "box": [71.58, 452.95, 53.4, 10.37],
+                  "px": [198, 1051, 150, 30]
+                },
+                {
+                  "text": "event",
+                  "box": [128.81, 455.81, 27.99, 7.9],
+                  "px": [357, 1050, 79, 23]
+                },
+                {
+                  "text": "notice",
+                  "box": [160.85, 456.2, 30.77, 8.77],
+                  "px": [446, 1046, 87, 26]
+                },
+                {
+                  "text": "is",
+                  "box": [195.82, 456.63, 7.36, 8.48],
+                  "px": [543, 1046, 22, 25]
+                },
+                {
+                  "text": "needed",
+                  "box": [207.57, 456.77, 37.61, 8.59],
+                  "px": [576, 1045, 106, 25]
+                },
+                {
+                  "text": "for",
+                  "box": [249.12, 457.28, 14.23, 8.68],
+                  "px": [691, 1044, 41, 25]
+                },
+                {
+                  "text": "this,",
+                  "box": [266.7, 455.7, 20.86, 10.45],
+                  "px": [740, 1043, 59, 30]
+                },
+                {
+                  "text": "and",
+                  "box": [291.91, 457.79, 18.18, 8.36],
+                  "px": [810, 1043, 52, 24]
+                },
+                {
+                  "text": "which",
+                  "box": [314.3, 458.08, 29.83, 8.76],
+                  "px": [873, 1041, 83, 26]
+                },
+                {
+                  "text": "form",
+                  "box": [348.08, 458.49, 23.44, 8.79],
+                  "px": [966, 1040, 67, 25]
+                },
+                {
+                  "text": "we",
+                  "box": [375.77, 458.83, 14.38, 6.38],
+                  "px": [1043, 1046, 41, 19]
+                },
+                {
+                  "text": "should",
+                  "box": [394.26, 459.06, 33.48, 8.54],
+                  "px": [1095, 1039, 94, 25]
+                },
+                {
+                  "text": "use.",
+                  "box": [432.45, 459.52, 20.26, 6.46],
+                  "px": [1201, 1044, 57, 19]
+                },
+                {
+                  "text": "Our",
+                  "box": [72.41, 431.14, 18.25, 8.44],
+                  "px": [201, 1117, 51, 24]
+                },
+                {
+                  "text": "marshals",
+                  "box": [94.76, 431.38, 45.61, 8.7],
+                  "px": [263, 1116, 127, 25]
+                },
+                {
+                  "text": "will",
+                  "box": [144.28, 432.13, 15.87, 8.46],
+                  "px": [400, 1114, 45, 25]
+                },
+                {
+                  "text": "keep",
+                  "box": [164.84, 430.13, 24.07, 10.54],
+                  "px": [457, 1114, 68, 30]
+                },
+                {
+                  "text": "the",
+                  "box": [192.55, 432.59, 15.97, 8.33],
+                  "px": [534, 1113, 46, 24]
+                },
+                {
+                  "text": "towpath",
+                  "box": [212.15, 430.71, 41.18, 10.75],
+                  "px": [589, 1112, 115, 31]
+                },
+                {
+                  "text": "clear",
+                  "box": [257.71, 433.37, 25.08, 8.45],
+                  "px": [715, 1111, 71, 24]
+                },
+                {
+                  "text": "for",
+                  "box": [286.13, 433.73, 14.23, 8.68],
+                  "px": [794, 1109, 41, 25]
+                },
+                {
+                  "text": "walkers",
+                  "box": [303.98, 433.94, 39.17, 8.62],
+                  "px": [844, 1109, 110, 25]
+                },
+                {
+                  "text": "and",
+                  "box": [347.17, 434.47, 18.18, 8.36],
+                  "px": [964, 1108, 51, 24]
+                },
+                {
+                  "text": "cyclists",
+                  "box": [369.75, 432.6, 37.77, 11.01],
+                  "px": [1027, 1106, 106, 31]
+                },
+                {
+                  "text": "throughout",
+                  "box": [411.14, 433.02, 56.91, 11.07],
+                  "px": [1142, 1105, 159, 31]
+                },
+                {
+                  "text": "the",
+                  "box": [471.34, 436, 15.97, 8.33],
+                  "px": [1309, 1104, 45, 24]
+                },
+                {
+                  "text": "day.",
+                  "box": [491.4, 434.08, 20.32, 10.54],
+                  "px": [1365, 1103, 57, 30]
+                },
+                {
+                  "text": "A",
+                  "box": [72.23, 415.25, 7.13, 8.09],
+                  "px": [200, 1162, 21, 24]
+                },
+                {
+                  "text": "site",
+                  "box": [83.21, 415.25, 17.36, 8.61],
+                  "px": [231, 1161, 49, 25]
+                },
+                {
+                  "text": "plan",
+                  "box": [104.95, 413.4, 20.5, 10.5],
+                  "px": [291, 1161, 58, 30]
+                },
+                {
+                  "text": "and",
+                  "box": [129.75, 415.81, 18.18, 8.36],
+                  "px": [360, 1160, 51, 24]
+                },
+                {
+                  "text": "our",
+                  "box": [152.36, 416.1, 16.51, 6.42],
+                  "px": [423, 1164, 47, 19]
+                },
+                {
+                  "text": "risk",
+                  "box": [172.95, 416.35, 17.86, 8.61],
+                  "px": [480, 1158, 51, 25]
+                },
+                {
+                  "text": "assessment",
+                  "box": [194.45, 416.6, 61.35, 8.32],
+                  "px": [540, 1158, 171, 24]
+                },
+                {
+                  "text": "are",
+                  "box": [259.51, 417.4, 15.6, 6.42],
+                  "px": [720, 1161, 45, 19]
+                },
+                {
+                  "text": "enclosed.",
+                  "box": [279.2, 417.65, 49.26, 8.73],
+                  "px": [775, 1154, 138, 25]
+                },
+                {
+                  "text": "Thank",
+                  "box": [72.77, 391.11, 31.74, 8.53],
+                  "px": [202, 1228, 89, 25]
+                },
+                {
+                  "text": "you",
+                  "box": [107.97, 389.39, 18.03, 8.59],
+                  "px": [299, 1233, 52, 24]
+                },
+                {
+                  "text": "for",
+                  "box": [129.92, 391.82, 14.23, 8.68],
+                  "px": [360, 1226, 41, 25]
+                },
+                {
+                  "text": "your",
+                  "box": [147.71, 389.88, 22.77, 8.66],
+                  "px": [410, 1231, 64, 25]
+                },
+                {
+                  "text": "help.",
+                  "box": [174.54, 390.25, 23.9, 10.54],
+                  "px": [484, 1225, 68, 30]
+                },
+                {
+                  "text": "Yours",
+                  "box": [72.87, 363.12, 28.94, 8.48],
+                  "px": [202, 1306, 81, 24]
+                },
+                {
+                  "text": "faithfully,",
+                  "box": [105.45, 361.36, 46.79, 11.24],
+                  "px": [292, 1303, 131, 32]
+                },
+                {
+                  "text": "Tom",
+                  "box": [73.65, 309.14, 22.27, 8.39],
+                  "px": [204, 1456, 63, 24]
+                },
+                {
+                  "text": "Ashdown",
+                  "box": [99.38, 309.45, 49.97, 8.73],
+                  "px": [276, 1454, 139, 25]
+                },
+                {
+                  "text": "Club",
+                  "box": [74.1, 293.13, 22.82, 8.52],
+                  "px": [205, 1500, 65, 25]
+                },
+                {
+                  "text": "Secretary",
+                  "box": [101.1, 291.3, 49.66, 11],
+                  "px": [280, 1498, 139, 32]
+                },
+                {
+                  "text": "Demo",
+                  "box": [77.3, 37.19, 21.2, 6.17],
+                  "px": [214, 2218, 60, 18]
+                },
+                {
+                  "text": "document,",
+                  "box": [101.5, 36.17, 39.34, 7.7],
+                  "px": [281, 2216, 111, 23]
+                },
+                {
+                  "text": "fictional",
+                  "box": [143.73, 37.99, 29.35, 6.55],
+                  "px": [399, 2214, 82, 20]
+                },
+                {
+                  "text": "data",
+                  "box": [176.28, 38.39, 15.59, 6.11],
+                  "px": [489, 2214, 44, 18]
+                }
+              ],
+              "noise": {
+                "kind": "speckle",
+                "specks": 700,
+                "seed": "demo/demo-letter-scan.pdf#page-1"
+              }
+            },
+            {
+              "page": 2,
+              "language": "tur",
+              "rotate": 0,
+              "image": {
+                "resource": "Im1",
+                "width": 1654,
+                "height": 2339,
+                "dpi": 200,
+                "colorSpace": "DeviceGray",
+                "bitsPerComponent": 8,
+                "filter": "FlateDecode",
+                "matrix": [595.28, 0, 0, 841.89, 0, 0]
+              },
+              "skewDegrees": -0.5,
+              "marks": [
+                {
+                  "kind": "rule",
+                  "box": [74.82, 740.62, 451.29, 6.74],
+                  "px": [207, 262, 1255, 20]
+                },
+                {
+                  "kind": "stamp",
+                  "text": "RECEIVED 18 MAR 2024 PORT ALLERY COUNCIL",
+                  "box": [387.63, 148.33, 100.87, 100.87],
+                  "px": [1076, 1646, 281, 281]
+                }
+              ],
+              "text": "HARBOURLIGHT ROWING CLUB\nThe Boathouse, Quay Road, Port Allery PA3 7RW\n12 Mart 2024\nRuhsat Birimi\nPort Allery Belediyesi\nMarket Street\nPort Allery PA1 2AB\nSayın Yetkili,\nGeçici etkinlik bildirimi: Autumn Head, 12 Ekim 2024\nHarbourlight Kürek Kulübü, yıllık Autumn Head yarışını 12 Ekim 2024 Cumartesi günü\nsaat 08.00 ile 16.00 arasında düzenleyecektir. Quay Road’daki kayıkhanede yaklaşık\n300 kürekçi ve 200 ziyaretçi bekliyoruz.\nEtkinlik süresince kulübün çimenliğinde bir ikram çadırı kurmak ve meşrubat, çay ve\nkek satmak istiyoruz. Alkollü içki satılmayacaktır. Bunun için geçici etkinlik bildirimi\ngerekip gerekmediğini ve hangi formu kullanmamız gerektiğini bildirmenizi rica ederiz.\nGörevlilerimiz gün boyunca yürüyüş ve bisiklet yolunu açık tutacaktır. Alan planı ve risk\ndeğerlendirmemiz ektedir.\nİlginiz ve yardımınız için teşekkür ederiz.\nSaygılarımla,\nTom Ashdown\nKulüp Sekreteri\nDemo document, fictional data",
+              "lines": [
+                {
+                  "text": "HARBOURLIGHT ROWING CLUB",
+                  "fontSize": 15,
+                  "baseline": 770,
+                  "box": [76.04, 769.79, 229.35, 13.21]
+                },
+                {
+                  "text": "The Boathouse, Quay Road, Port Allery PA3 7RW",
+                  "fontSize": 9,
+                  "baseline": 755,
+                  "box": [75.34, 753.28, 206.57, 10.31]
+                },
+                {
+                  "text": "12 Mart 2024",
+                  "fontSize": 11,
+                  "baseline": 712,
+                  "box": [75.06, 713.22, 67.61, 8.84]
+                },
+                {
+                  "text": "Ruhsat Birimi",
+                  "fontSize": 11,
+                  "baseline": 682,
+                  "box": [75.25, 683.23, 66.29, 8.98]
+                },
+                {
+                  "text": "Port Allery Belediyesi",
+                  "fontSize": 11,
+                  "baseline": 666,
+                  "box": [75.09, 664.71, 108.9, 11.5]
+                },
+                {
+                  "text": "Market Street",
+                  "fontSize": 11,
+                  "baseline": 650,
+                  "box": [74.97, 651.21, 69.24, 8.85]
+                },
+                {
+                  "text": "Port Allery PA1 2AB",
+                  "fontSize": 11,
+                  "baseline": 634,
+                  "box": [74.81, 632.81, 98.48, 11.26]
+                },
+                {
+                  "text": "Sayın Yetkili,",
+                  "fontSize": 11,
+                  "baseline": 598,
+                  "box": [74.16, 597.11, 63.91, 11.11]
+                },
+                {
+                  "text": "Geçici etkinlik bildirimi: Autumn Head, 12 Ekim 2024",
+                  "fontSize": 11,
+                  "baseline": 572,
+                  "box": [73.81, 569.29, 277.86, 13.11]
+                },
+                {
+                  "text": "Harbourlight Kürek Kulübü, yıllık Autumn Head yarışını 12 Ekim 2024 Cumartesi günü",
+                  "fontSize": 11,
+                  "baseline": 546,
+                  "box": [74.05, 541.77, 436.7, 14.45]
+                },
+                {
+                  "text": "saat 08.00 ile 16.00 arasında düzenleyecektir. Quay Road’daki kayıkhanede yaklaşık",
+                  "fontSize": 11,
+                  "baseline": 530,
+                  "box": [73.52, 525.9, 432.76, 14.33]
+                },
+                {
+                  "text": "300 kürekçi ve 200 ziyaretçi bekliyoruz.",
+                  "fontSize": 11,
+                  "baseline": 514,
+                  "box": [73.47, 511.87, 206.14, 12.35]
+                },
+                {
+                  "text": "Etkinlik süresince kulübün çimenliğinde bir ikram çadırı kurmak ve meşrubat, çay ve",
+                  "fontSize": 11,
+                  "baseline": 490,
+                  "box": [73.56, 485.81, 432.48, 14.52]
+                },
+                {
+                  "text": "kek satmak istiyoruz. Alkollü içki satılmayacaktır. Bunun için geçici etkinlik bildirimi",
+                  "fontSize": 11,
+                  "baseline": 474,
+                  "box": [73.3, 469.88, 424.47, 14.34]
+                },
+                {
+                  "text": "gerekip gerekmediğini ve hangi formu kullanmamız gerektiğini bildirmenizi rica ederiz.",
+                  "fontSize": 11,
+                  "baseline": 458,
+                  "box": [72.87, 453.71, 444.89, 14.63]
+                },
+                {
+                  "text": "Görevlilerimiz gün boyunca yürüyüş ve bisiklet yolunu açık tutacaktır. Alan planı ve risk",
+                  "fontSize": 11,
+                  "baseline": 434,
+                  "box": [72.76, 429.67, 448.81, 14.56]
+                },
+                {
+                  "text": "değerlendirmemiz ektedir.",
+                  "fontSize": 11,
+                  "baseline": 418,
+                  "box": [72.52, 416.42, 134.47, 11.91]
+                },
+                {
+                  "text": "İlginiz ve yardımınız için teşekkür ederiz.",
+                  "fontSize": 11,
+                  "baseline": 394,
+                  "box": [72.56, 391.77, 208.43, 14.46]
+                },
+                {
+                  "text": "Saygılarımla,",
+                  "fontSize": 11,
+                  "baseline": 366,
+                  "box": [72.13, 365.03, 64.41, 11.05]
+                },
+                {
+                  "text": "Tom Ashdown",
+                  "fontSize": 11,
+                  "baseline": 312,
+                  "box": [71.46, 313.19, 75.68, 8.78]
+                },
+                {
+                  "text": "Kulüp Sekreteri",
+                  "fontSize": 11,
+                  "baseline": 296,
+                  "box": [71.87, 295.04, 77.69, 11.19]
+                },
+                {
+                  "text": "Demo document, fictional data",
+                  "fontSize": 8,
+                  "baseline": 40,
+                  "box": [69.38, 39.58, 114.56, 8.5]
+                }
+              ],
+              "words": [
+                {
+                  "text": "HARBOURLIGHT",
+                  "box": [76.04, 770.76, 118.29, 12.24],
+                  "px": [211, 163, 329, 35]
+                },
+                {
+                  "text": "ROWING",
+                  "box": [199.33, 770.19, 61.89, 11.74],
+                  "px": [553, 166, 173, 34]
+                },
+                {
+                  "text": "CLUB",
+                  "box": [266.08, 769.79, 39.31, 11.56],
+                  "px": [739, 168, 110, 33]
+                },
+                {
+                  "text": "The",
+                  "box": [75.35, 756.71, 15.57, 6.79],
+                  "px": [209, 217, 44, 20]
+                },
+                {
+                  "text": "Boathouse,",
+                  "box": [94.61, 754.8, 46.54, 8.53],
+                  "px": [262, 218, 131, 24]
+                },
+                {
+                  "text": "Quay",
+                  "box": [144.88, 754.29, 21.48, 8.69],
+                  "px": [402, 219, 61, 25]
+                },
+                {
+                  "text": "Road,",
+                  "box": [169.85, 754.35, 22.84, 8.32],
+                  "px": [471, 220, 65, 24]
+                },
+                {
+                  "text": "Port",
+                  "box": [196.7, 755.64, 16.66, 6.8],
+                  "px": [546, 220, 47, 20]
+                },
+                {
+                  "text": "Allery",
+                  "box": [216.22, 753.64, 24.01, 8.63],
+                  "px": [600, 221, 68, 25]
+                },
+                {
+                  "text": "PA3",
+                  "box": [243.73, 755.26, 15.58, 6.86],
+                  "px": [677, 221, 44, 20]
+                },
+                {
+                  "text": "7RW",
+                  "box": [262.76, 755.15, 19.15, 6.71],
+                  "px": [729, 222, 55, 19]
+                },
+                {
+                  "text": "12",
+                  "box": [75.06, 713.87, 9.95, 8.2],
+                  "px": [208, 332, 29, 24]
+                },
+                {
+                  "text": "Mart",
+                  "box": [89.79, 713.49, 22.91, 8.34],
+                  "px": [249, 333, 65, 24]
+                },
+                {
+                  "text": "2024",
+                  "box": [116.77, 713.26, 25.9, 8.44],
+                  "px": [324, 333, 73, 25]
+                },
+                {
+                  "text": "Ruhsat",
+                  "box": [75.25, 683.51, 34.55, 8.44],
+                  "px": [209, 416, 97, 24]
+                },
+                {
+                  "text": "Birimi",
+                  "box": [114.02, 683.37, 27.53, 8.51],
+                  "px": [316, 416, 78, 25]
+                },
+                {
+                  "text": "Port",
+                  "box": [75.11, 667.65, 20.36, 8.31],
+                  "px": [208, 460, 58, 25]
+                },
+                {
+                  "text": "Allery",
+                  "box": [98.97, 665.2, 29.35, 10.55],
+                  "px": [274, 461, 83, 30]
+                },
+                {
+                  "text": "Belediyesi",
+                  "box": [132.58, 664.71, 51.41, 11],
+                  "px": [368, 461, 144, 32]
+                },
+                {
+                  "text": "Market",
+                  "box": [74.97, 651.51, 35.11, 8.45],
+                  "px": [208, 505, 98, 24]
+                },
+                {
+                  "text": "Street",
+                  "box": [113.95, 651.21, 30.27, 8.51],
+                  "px": [316, 506, 85, 24]
+                },
+                {
+                  "text": "Port",
+                  "box": [74.83, 635.65, 20.36, 8.31],
+                  "px": [207, 549, 58, 24]
+                },
+                {
+                  "text": "Allery",
+                  "box": [98.69, 633.2, 29.35, 10.55],
+                  "px": [274, 550, 82, 30]
+                },
+                {
+                  "text": "PA1",
+                  "box": [132.32, 635.31, 16.04, 8.14],
+                  "px": [367, 551, 46, 23]
+                },
+                {
+                  "text": "2AB",
+                  "box": [153.18, 635.09, 20.11, 8.28],
+                  "px": [425, 551, 57, 24]
+                },
+                {
+                  "text": "Sayın",
+                  "box": [74.16, 597.43, 27.04, 10.63],
+                  "px": [205, 649, 77, 31]
+                },
+                {
+                  "text": "Yetkili,",
+                  "box": [105.33, 597.47, 32.74, 10.48],
+                  "px": [292, 649, 92, 30]
+                },
+                {
+                  "text": "Geçici",
+                  "box": [73.81, 571.43, 32.7, 10.97],
+                  "px": [205, 720, 91, 32]
+                },
+                {
+                  "text": "etkinlik",
+                  "box": [110.08, 573.19, 38.75, 8.9],
+                  "px": [305, 721, 109, 26]
+                },
+                {
+                  "text": "bildirimi:",
+                  "box": [152.1, 572.78, 45.49, 8.94],
+                  "px": [422, 722, 127, 26]
+                },
+                {
+                  "text": "Autumn",
+                  "box": [201.29, 572.4, 41.94, 8.45],
+                  "px": [559, 725, 117, 24]
+                },
+                {
+                  "text": "Head,",
+                  "box": [247.16, 570.06, 30.28, 10.39],
+                  "px": [686, 726, 85, 30]
+                },
+                {
+                  "text": "12",
+                  "box": [281.09, 572.06, 10.64, 8.2],
+                  "px": [780, 726, 31, 24]
+                },
+                {
+                  "text": "Ekim",
+                  "box": [295.59, 571.81, 24.74, 8.66],
+                  "px": [821, 726, 69, 25]
+                },
+                {
+                  "text": "2024",
+                  "box": [324.14, 571.43, 27.53, 8.46],
+                  "px": [900, 727, 77, 25]
+                },
+                {
+                  "text": "Harbourlight",
+                  "box": [74.05, 545.03, 63.89, 11.2],
+                  "px": [205, 793, 179, 32]
+                },
+                {
+                  "text": "Kürek",
+                  "box": [142.15, 546.98, 28.89, 8.64],
+                  "px": [394, 795, 82, 25]
+                },
+                {
+                  "text": "Kulübü,",
+                  "box": [175.16, 544.82, 37.32, 10.51],
+                  "px": [486, 795, 105, 31]
+                },
+                {
+                  "text": "yıllık",
+                  "box": [216.67, 544.23, 22.52, 10.49],
+                  "px": [601, 797, 64, 30]
+                },
+                {
+                  "text": "Autumn",
+                  "box": [242.65, 546.07, 39.27, 8.42],
+                  "px": [674, 798, 110, 24]
+                },
+                {
+                  "text": "Head",
+                  "box": [286.76, 545.73, 25.86, 8.37],
+                  "px": [796, 799, 73, 24]
+                },
+                {
+                  "text": "yarışını",
+                  "box": [316.76, 543.24, 35.78, 8.69],
+                  "px": [879, 805, 101, 25]
+                },
+                {
+                  "text": "12",
+                  "box": [356.95, 545.4, 9.95, 8.2],
+                  "px": [991, 800, 29, 24]
+                },
+                {
+                  "text": "Ekim",
+                  "box": [371.68, 545.16, 23.2, 8.47],
+                  "px": [1032, 800, 65, 25]
+                },
+                {
+                  "text": "2024",
+                  "box": [399.58, 544.78, 25.9, 8.44],
+                  "px": [1109, 801, 73, 25]
+                },
+                {
+                  "text": "Cumartesi",
+                  "box": [429.79, 544.26, 51.81, 8.86],
+                  "px": [1193, 802, 145, 25]
+                },
+                {
+                  "text": "günü",
+                  "box": [485.81, 541.77, 24.94, 10.85],
+                  "px": [1349, 803, 70, 31]
+                },
+                {
+                  "text": "saat",
+                  "box": [73.54, 531.64, 21.02, 7.76],
+                  "px": [204, 840, 59, 22]
+                },
+                {
+                  "text": "08.00",
+                  "box": [98.47, 531.38, 29.03, 8.47],
+                  "px": [273, 838, 82, 25]
+                },
+                {
+                  "text": "ile",
+                  "box": [131.83, 531.23, 10.61, 8.49],
+                  "px": [366, 839, 30, 24]
+                },
+                {
+                  "text": "16.00",
+                  "box": [146.52, 530.98, 26.59, 8.45],
+                  "px": [406, 840, 75, 24]
+                },
+                {
+                  "text": "arasında",
+                  "box": [177.27, 530.54, 43.11, 8.52],
+                  "px": [492, 841, 121, 24]
+                },
+                {
+                  "text": "düzenleyecektir.",
+                  "box": [224.8, 527.62, 83.6, 11.28],
+                  "px": [624, 841, 233, 32]
+                },
+                {
+                  "text": "Quay",
+                  "box": [312.91, 527.35, 26.26, 10.63],
+                  "px": [869, 844, 74, 30]
+                },
+                {
+                  "text": "Road’daki",
+                  "box": [343.45, 529.04, 48.78, 8.83],
+                  "px": [954, 844, 136, 26]
+                },
+                {
+                  "text": "kayıkhanede",
+                  "box": [396.73, 526.29, 64.38, 10.85],
+                  "px": [1102, 846, 179, 31]
+                },
+                {
+                  "text": "yaklaşık",
+                  "box": [464.94, 525.9, 41.34, 10.65],
+                  "px": [1291, 848, 116, 30]
+                },
+                {
+                  "text": "300",
+                  "box": [73.49, 515.68, 19.42, 8.39],
+                  "px": [204, 882, 55, 25]
+                },
+                {
+                  "text": "kürekçi",
+                  "box": [97.42, 513.19, 36.24, 10.83],
+                  "px": [270, 882, 102, 32]
+                },
+                {
+                  "text": "ve",
+                  "box": [137.62, 515.17, 11.61, 6.31],
+                  "px": [382, 890, 33, 18]
+                },
+                {
+                  "text": "200",
+                  "box": [153.63, 514.99, 19.18, 8.38],
+                  "px": [426, 884, 55, 25]
+                },
+                {
+                  "text": "ziyaretçi",
+                  "box": [177.14, 512.4, 42.62, 10.92],
+                  "px": [492, 884, 119, 32]
+                },
+                {
+                  "text": "bekliyoruz.",
+                  "box": [224.26, 511.87, 55.35, 11.04],
+                  "px": [622, 886, 155, 31]
+                },
+                {
+                  "text": "Etkinlik",
+                  "box": [73.58, 491.57, 35.73, 8.65],
+                  "px": [204, 949, 100, 25]
+                },
+                {
+                  "text": "süresince",
+                  "box": [113.06, 491.05, 49.3, 8.82],
+                  "px": [314, 950, 138, 25]
+                },
+                {
+                  "text": "kulübün",
+                  "box": [166.77, 490.67, 39.82, 8.74],
+                  "px": [463, 951, 111, 25]
+                },
+                {
+                  "text": "çimenliğinde",
+                  "box": [211, 487.82, 64.88, 11.31],
+                  "px": [586, 952, 181, 32]
+                },
+                {
+                  "text": "bir",
+                  "box": [280.28, 489.92, 12.52, 8.5],
+                  "px": [778, 954, 36, 24]
+                },
+                {
+                  "text": "ikram",
+                  "box": [296.73, 489.63, 27.21, 8.64],
+                  "px": [824, 954, 76, 25]
+                },
+                {
+                  "text": "çadırı",
+                  "box": [328.35, 487.25, 27.56, 10.49],
+                  "px": [912, 955, 77, 31]
+                },
+                {
+                  "text": "kurmak",
+                  "box": [360.63, 488.98, 37.77, 8.47],
+                  "px": [1001, 956, 106, 25]
+                },
+                {
+                  "text": "ve",
+                  "box": [401.87, 488.86, 11.61, 6.31],
+                  "px": [1116, 963, 33, 18]
+                },
+                {
+                  "text": "meşrubat,",
+                  "box": [417.89, 486.27, 50.62, 10.69],
+                  "px": [1160, 958, 142, 30]
+                },
+                {
+                  "text": "çay",
+                  "box": [472.97, 486.03, 17.81, 8.52],
+                  "px": [1313, 964, 51, 25]
+                },
+                {
+                  "text": "ve",
+                  "box": [494.41, 488.06, 11.61, 6.31],
+                  "px": [1373, 965, 33, 18]
+                },
+                {
+                  "text": "kek",
+                  "box": [73.32, 475.68, 17.31, 8.28],
+                  "px": [203, 994, 49, 24]
+                },
+                {
+                  "text": "satmak",
+                  "box": [94.38, 475.32, 36.77, 8.46],
+                  "px": [262, 994, 103, 25]
+                },
+                {
+                  "text": "istiyoruz.",
+                  "box": [134.97, 472.73, 45.75, 10.95],
+                  "px": [374, 995, 129, 31]
+                },
+                {
+                  "text": "Alkollü",
+                  "box": [184.88, 474.57, 33.42, 8.68],
+                  "px": [513, 996, 94, 25]
+                },
+                {
+                  "text": "içki",
+                  "box": [222.82, 472.27, 16.42, 10.65],
+                  "px": [618, 997, 47, 30]
+                },
+                {
+                  "text": "satılmayacaktır.",
+                  "box": [243.47, 471.5, 79, 10.98],
+                  "px": [676, 998, 220, 31]
+                },
+                {
+                  "text": "Bunun",
+                  "box": [327.32, 473.39, 31.46, 8.35],
+                  "px": [909, 1000, 88, 24]
+                },
+                {
+                  "text": "için",
+                  "box": [363.3, 471.04, 16.69, 10.66],
+                  "px": [1009, 1000, 47, 31]
+                },
+                {
+                  "text": "geçici",
+                  "box": [384.4, 470.61, 29.94, 10.9],
+                  "px": [1067, 1001, 84, 31]
+                },
+                {
+                  "text": "etkinlik",
+                  "box": [418.57, 472.5, 35.94, 8.71],
+                  "px": [1162, 1001, 101, 26]
+                },
+                {
+                  "text": "bildirimi",
+                  "box": [458.52, 472.13, 39.25, 8.74],
+                  "px": [1273, 1002, 110, 26]
+                },
+                {
+                  "text": "gerekip",
+                  "box": [72.87, 457.26, 37.94, 10.97],
+                  "px": [202, 1037, 106, 32]
+                },
+                {
+                  "text": "gerekmediğini",
+                  "box": [114.93, 456.59, 72.47, 11.37],
+                  "px": [319, 1038, 202, 33]
+                },
+                {
+                  "text": "ve",
+                  "box": [191.36, 458.7, 11.61, 6.31],
+                  "px": [531, 1046, 33, 19]
+                },
+                {
+                  "text": "hangi",
+                  "box": [207.37, 456.18, 27.18, 10.88],
+                  "px": [576, 1041, 76, 31]
+                },
+                {
+                  "text": "formu",
+                  "box": [238.33, 458.13, 29.91, 8.77],
+                  "px": [662, 1041, 84, 26]
+                },
+                {
+                  "text": "kullanmamız",
+                  "box": [272.97, 457.53, 63.28, 8.69],
+                  "px": [758, 1043, 177, 25]
+                },
+                {
+                  "text": "gerektiğini",
+                  "box": [340.48, 454.79, 53.29, 11.21],
+                  "px": [945, 1044, 149, 32]
+                },
+                {
+                  "text": "bildirmenizi",
+                  "box": [398.28, 456.49, 58.3, 8.9],
+                  "px": [1106, 1045, 163, 26]
+                },
+                {
+                  "text": "rica",
+                  "box": [461.1, 456.28, 17.86, 8.56],
+                  "px": [1280, 1047, 51, 25]
+                },
+                {
+                  "text": "ederiz.",
+                  "box": [483.39, 455.95, 34.37, 8.69],
+                  "px": [1342, 1047, 97, 26]
+                },
+                {
+                  "text": "Görevlilerimiz",
+                  "box": [72.78, 435.23, 69.63, 9],
+                  "px": [202, 1104, 194, 26]
+                },
+                {
+                  "text": "gün",
+                  "box": [146.64, 432.78, 18.43, 10.79],
+                  "px": [407, 1106, 52, 31]
+                },
+                {
+                  "text": "boyunca",
+                  "box": [169.77, 432.45, 43.26, 10.67],
+                  "px": [471, 1107, 121, 31]
+                },
+                {
+                  "text": "yürüyüş",
+                  "box": [217.18, 432.06, 41.08, 10.91],
+                  "px": [603, 1108, 115, 31]
+                },
+                {
+                  "text": "ve",
+                  "box": [262.11, 434.08, 11.61, 6.31],
+                  "px": [728, 1115, 33, 18]
+                },
+                {
+                  "text": "bisiklet",
+                  "box": [278.14, 433.73, 35.59, 8.7],
+                  "px": [772, 1109, 100, 25]
+                },
+                {
+                  "text": "yolunu",
+                  "box": [317.24, 431.25, 33.68, 10.58],
+                  "px": [881, 1111, 94, 30]
+                },
+                {
+                  "text": "açık",
+                  "box": [355.26, 431.07, 20.62, 10.43],
+                  "px": [986, 1112, 59, 30]
+                },
+                {
+                  "text": "tutacaktır.",
+                  "box": [379.16, 432.71, 50.53, 8.58],
+                  "px": [1053, 1112, 141, 25]
+                },
+                {
+                  "text": "Alan",
+                  "box": [433.85, 432.48, 21.87, 8.33],
+                  "px": [1205, 1114, 61, 24]
+                },
+                {
+                  "text": "planı",
+                  "box": [460.42, 430.13, 23.13, 10.45],
+                  "px": [1278, 1114, 66, 30]
+                },
+                {
+                  "text": "ve",
+                  "box": [487.71, 432.11, 11.61, 6.31],
+                  "px": [1354, 1120, 33, 19]
+                },
+                {
+                  "text": "risk",
+                  "box": [503.74, 431.92, 17.83, 8.55],
+                  "px": [1399, 1115, 50, 24]
+                },
+                {
+                  "text": "değerlendirmemiz",
+                  "box": [72.52, 416.78, 93.19, 11.55],
+                  "px": [201, 1148, 260, 33]
+                },
+                {
+                  "text": "ektedir.",
+                  "box": [169.96, 418.66, 37.03, 8.72],
+                  "px": [472, 1151, 103, 25]
+                },
+                {
+                  "text": "İlginiz",
+                  "box": [72.56, 393.34, 28.89, 12.89],
+                  "px": [201, 1210, 81, 36]
+                },
+                {
+                  "text": "ve",
+                  "box": [105.42, 395.45, 11.61, 6.31],
+                  "px": [292, 1222, 34, 19]
+                },
+                {
+                  "text": "yardımınız",
+                  "box": [120.88, 392.8, 52.32, 10.75],
+                  "px": [335, 1217, 147, 31]
+                },
+                {
+                  "text": "için",
+                  "box": [177.54, 392.66, 16.69, 10.66],
+                  "px": [493, 1218, 47, 30]
+                },
+                {
+                  "text": "teşekkür",
+                  "box": [198.19, 392.23, 44.58, 10.89],
+                  "px": [550, 1218, 125, 32]
+                },
+                {
+                  "text": "ederiz.",
+                  "box": [246.59, 394.02, 34.37, 8.69],
+                  "px": [684, 1219, 97, 26]
+                },
+                {
+                  "text": "Saygılarımla,",
+                  "box": [72.13, 365.03, 64.41, 11.05],
+                  "px": [200, 1293, 180, 32]
+                },
+                {
+                  "text": "Tom",
+                  "box": [71.46, 313.66, 22.25, 8.31],
+                  "px": [198, 1444, 63, 24]
+                },
+                {
+                  "text": "Ashdown",
+                  "box": [97.19, 313.19, 49.94, 8.56],
+                  "px": [269, 1444, 140, 25]
+                },
+                {
+                  "text": "Kulüp",
+                  "box": [71.87, 295.48, 27.99, 10.75],
+                  "px": [199, 1487, 79, 31]
+                },
+                {
+                  "text": "Sekreteri",
+                  "box": [104.06, 297.15, 45.49, 8.8],
+                  "px": [289, 1488, 127, 26]
+                },
+                {
+                  "text": "Demo",
+                  "box": [69.39, 41.7, 21.18, 6.1],
+                  "px": [192, 2205, 60, 18]
+                },
+                {
+                  "text": "document,",
+                  "box": [93.57, 40.02, 39.32, 7.56],
+                  "px": [259, 2206, 111, 22]
+                },
+                {
+                  "text": "fictional",
+                  "box": [135.82, 41.04, 29.33, 6.45],
+                  "px": [377, 2206, 82, 19]
+                },
+                {
+                  "text": "data",
+                  "box": [168.37, 40.88, 15.57, 6.06],
+                  "px": [467, 2208, 44, 18]
+                }
+              ],
+              "noise": {
+                "kind": "speckle",
+                "specks": 700,
+                "seed": "demo/demo-letter-scan.pdf#page-2"
+              }
+            }
+          ]
+        },
+        "xref": "table",
+        "fileIdDeterministic": true,
+        "demo": {
+          "footer": "Demo document, fictional data",
+          "clips": [1, 4],
+          "fonts": []
+        }
+      }
     }
   ],
   "pki": {

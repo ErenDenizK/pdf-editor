@@ -41,6 +41,7 @@ import {
   sha256,
 } from './lib/common.ts';
 import { findToken } from './lib/scan.ts';
+import { checkDemo } from './demo-verify.ts';
 import { checkM5, checkPki } from './m5-verify.ts';
 
 // pdf-lib logs parse recoveries with console.warn; keep the report readable.
@@ -445,7 +446,8 @@ async function checkEntry(entry: ManifestEntry, c: Checker): Promise<void> {
       if (!field) continue;
       let value: string | boolean | undefined;
       let type: string | undefined;
-      if (field instanceof PDFTextField) [type, value] = ['text', field.getText()];
+      // An empty text field has no /V; it reads as "".
+      if (field instanceof PDFTextField) [type, value] = ['text', field.getText() ?? ''];
       else if (field instanceof PDFCheckBox) [type, value] = ['checkbox', field.isChecked()];
       else if (field instanceof PDFRadioGroup) [type, value] = ['radio', field.getSelected()];
       else if (field instanceof PDFDropdown) [type, value] = ['dropdown', field.getSelected()[0]];
@@ -699,6 +701,7 @@ async function checkEntry(entry: ManifestEntry, c: Checker): Promise<void> {
 
   await checkM4(entry, doc, bytes, c);
   await checkM5(entry, doc, bytes, c);
+  await checkDemo(entry, doc, c);
 }
 
 /** M4 fixtures: token locations, revision history, fonts and images behind regions. */
@@ -823,7 +826,11 @@ async function main(): Promise<void> {
   let checks = 0;
 
   const listed = new Set(manifest.fixtures.map((f) => f.file));
-  const onDisk = readdirSync(FIXTURES_DIR).filter((f) => f.endsWith('.pdf'));
+  // The flat corpus plus the M7 demo documents in demo/.
+  const onDisk = [
+    ...readdirSync(FIXTURES_DIR),
+    ...readdirSync(join(FIXTURES_DIR, 'demo')).map((f) => `demo/${f}`),
+  ].filter((f) => f.endsWith('.pdf'));
   const unlisted = onDisk.filter((f) => !listed.has(f));
   if (unlisted.length) {
     console.log(`FAIL  PDFs missing from manifest: ${unlisted.join(', ')}`);

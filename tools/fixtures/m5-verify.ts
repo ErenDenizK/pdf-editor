@@ -120,6 +120,10 @@ export async function checkM5(
 // OCR
 // ---------------------------------------------------------------------------
 
+function overlaps(a: Box, b: Box): boolean {
+  return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+}
+
 function checkOcr(entry: ManifestEntry, doc: PDFDocument, c: Check): void {
   const ocr = entry.expect.ocr;
   if (!ocr) return;
@@ -168,11 +172,14 @@ function checkOcr(entry: ManifestEntry, doc: PDFDocument, c: Check): void {
     };
     const { width, height, dpi } = truth.image;
     c.eq([num('Width'), num('Height')], [width, height], `${label}: image size`);
-    const [displayW, displayH] = truth.rotate % 180 ? [792, 612] : [612, 792];
+    // Letter for the M5 scans, A4 for demo-letter-scan: the size comes from the MediaBox.
+    const media = page?.getMediaBox() ?? { width: 612, height: 792 };
+    const [displayW, displayH] =
+      truth.rotate % 180 ? [media.height, media.width] : [media.width, media.height];
     c.eq(
       [width, height],
       [Math.round((displayW * dpi) / 72), Math.round((displayH * dpi) / 72)],
-      `${label}: image size matches ${dpi} dpi on the displayed Letter page`,
+      `${label}: image size matches ${dpi} dpi on the displayed page`,
     );
     c.eq(nameOf(doc, d.get(N('ColorSpace'))), truth.image.colorSpace, `${label}: /ColorSpace`);
     c.eq(num('BitsPerComponent'), 8, `${label}: /BitsPerComponent`);
@@ -204,10 +211,25 @@ function checkOcr(entry: ManifestEntry, doc: PDFDocument, c: Check): void {
       const fromBox =
         truth.rotate === 90
           ? [by * k, bx * k, bh * k, bw * k]
-          : [bx * k, (792 - by - bh) * k, bw * k, bh * k];
+          : [bx * k, (media.height - by - bh) * k, bw * k, bh * k];
       c.ok(
         fromBox.every((v, i) => Math.abs(v - (word.px[i] ?? 0)) <= 2),
         `${label}: px box of "${word.text}" matches its user-space box`,
+      );
+    }
+    // Non-text ink (a stamp, a printed rule) is declared with its pixel bounds.
+    for (const mark of truth.marks ?? []) {
+      const [left, top, w, h] = mark.px;
+      let darkest = 255;
+      for (let y = Math.max(0, top); y < Math.min(height, top + h); y++)
+        for (let x = Math.max(0, left); x < Math.min(width, left + w); x++) {
+          inside[y * width + x] = 1;
+          darkest = Math.min(darkest, grey[y * width + x] ?? 255);
+        }
+      c.ok(darkest < 200, `${label}: ink inside the ${mark.kind} mark`);
+      c.ok(
+        truth.words.every((wd) => !overlaps(wd.px, mark.px)),
+        `${label}: no word overlaps the ${mark.kind} mark`,
       );
     }
     let stray = 0;

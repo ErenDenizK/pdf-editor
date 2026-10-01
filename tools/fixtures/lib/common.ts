@@ -271,8 +271,21 @@ export interface OcrLineTruth {
   box: Box;
 }
 
+/** Ink on a scan that is not text (demo-letter-scan): OCR tests ignore words found inside. */
+export interface OcrMarkTruth {
+  kind: 'stamp' | 'rule';
+  /** What a stamp says, for information (it is not part of `text`). */
+  text?: string;
+  /** Bounds in user space (axis-aligned, after skew). */
+  box: Box;
+  /** The same bounds in image pixels [left, top, width, height], rounded outwards. */
+  px: Box;
+}
+
 export interface OcrPageTruth {
   page: number;
+  /** Tesseract language code of this page, when pages differ (demo-letter-scan). */
+  language?: string;
   /** Page /Rotate; the raster is drawn so that the displayed page reads upright. */
   rotate: number;
   /** One image XObject painted over the whole MediaBox (the only visible content). */
@@ -305,6 +318,8 @@ export interface OcrPageTruth {
   skewDegrees: number;
   /** Seeded speckle noise added after rasterising, if any. */
   noise?: { kind: 'speckle'; specks: number; seed: string };
+  /** Non-text ink (a stamp, a printed rule) with its bounds. */
+  marks?: OcrMarkTruth[];
   /** Exact text, lines joined with "\n", words with one space. */
   text: string;
   lines: OcrLineTruth[];
@@ -505,6 +520,125 @@ export interface MarkdownTruth {
   golden: string;
 }
 
+// ---------------------------------------------------------------------------
+// M7 demo fixtures (docs/specs/presentation.md §2.2)
+// ---------------------------------------------------------------------------
+
+/** One line of text as drawn (one Tj), decoded the way a text extractor reads it. */
+export interface DemoLineTruth {
+  page: number;
+  text: string;
+  /** BaseFont without the subset tag, e.g. "NotoSerif-Regular". */
+  font: string;
+  size: number;
+  /** Left edge of the line and its baseline. */
+  x: number;
+  baseline: number;
+  /** Advance width by the font's ascender..descender. */
+  box: Box;
+}
+
+export interface DemoHeadingTruth {
+  page: number;
+  level: 1 | 2;
+  text: string;
+  size: number;
+  box: Box;
+}
+
+/** A sensitive-data finder target written in the body text. */
+export interface DemoSensitiveTruth {
+  kind: 'iban' | 'email' | 'phone';
+  text: string;
+  /** How many times the text occurs in the whole document (text extraction). */
+  occurrences: number;
+  page: number;
+  /** The token alone (part of a longer line): x from the line start plus the prefix width. */
+  box: Box;
+  /** The whole line the token sits in. */
+  line: DemoLineTruth;
+}
+
+export interface DemoChartTruth {
+  id: string;
+  page: number;
+  kind: 'bar' | 'line';
+  title: string;
+  /** Plot area (inside the axes). */
+  plot: Box;
+  categories: string[];
+  yRange: [number, number];
+  series: { name: string; values: number[] }[];
+  /** Bar charts: the painted rectangle of every bar, in category order. */
+  bars?: Box[];
+}
+
+export interface DemoTableTruth {
+  id: string;
+  page: number;
+  title: string;
+  box: Box;
+  columns: string[];
+  rows: string[][];
+}
+
+export type DemoChangeTruth =
+  | {
+      kind: 'table-cell';
+      page: number;
+      table: string;
+      row: string;
+      column: string;
+      a: DemoLineTruth;
+      b: DemoLineTruth;
+    }
+  | {
+      kind: 'paragraph';
+      page: number;
+      section: string;
+      /** The sentences that were rewritten, before and after. */
+      sentences: { a: string; b: string };
+      /** 0-based indexes of the paragraph lines whose text differs. */
+      changedLines: number[];
+      a: { lines: string[]; box: Box };
+      b: { lines: string[]; box: Box };
+    }
+  | {
+      kind: 'chart-bar';
+      page: number;
+      chart: string;
+      bar: string;
+      a: { value: number; rect: Box };
+      b: { value: number; rect: Box };
+    };
+
+/** Expected differences between demo-report-v1.pdf (a) and demo-report-v2.pdf (b). */
+export interface DemoCompareTruth {
+  role: 'a' | 'b';
+  a: string;
+  b: string;
+  pageMap: { a: number; b: number }[];
+  changes: DemoChangeTruth[];
+  /** Pages whose decoded content streams are byte-identical in both files. */
+  identicalPages: number[];
+}
+
+export interface DemoTruth {
+  /** Drawn on every page ("Demo document, fictional data"). */
+  footer: string;
+  /** The clips of docs/specs/presentation.md §6 that use this file. */
+  clips: number[];
+  /** Embedded fonts (BaseFont), all subsets of the bundled OFL fonts. */
+  fonts: string[];
+  headings?: DemoHeadingTruth[];
+  charts?: DemoChartTruth[];
+  table?: DemoTableTruth;
+  sensitive?: DemoSensitiveTruth[];
+  compare?: DemoCompareTruth;
+  /** A body line holding "2024" for the text-edit clip (its font subset has every digit). */
+  editTarget?: DemoLineTruth;
+}
+
 export interface Expectations {
   /** What `PDFDocument.load` from @cantoo/pdf-lib does with this file. */
   pdfLibLoad: 'ok' | 'throws';
@@ -547,6 +681,8 @@ export interface Expectations {
   compare?: CompareTruth;
   /** M5: expected PDF -> Markdown conversion. */
   markdown?: MarkdownTruth;
+  /** M7: demo fixture facts (footer, headings, charts, sensitive data, v1/v2 changes). */
+  demo?: DemoTruth;
 }
 
 export interface ManifestEntry {
