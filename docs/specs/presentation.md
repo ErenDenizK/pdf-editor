@@ -1,6 +1,6 @@
 # Spec: Presentation and public beta (M7)
 
-**Status:** draft (2026-10-01) · **Milestone:** M7 (→ 1.0.0-beta.0) · **Owner:** project lead
+**Status:** implemented in the repository (2026-10-01; the owner's steps in §11 and the release remain) · **Milestone:** M7 (→ 1.0.0-beta.0) · **Owner:** project lead
 
 M7 makes the project presentable and releases it: a README that shows the product working,
 media produced by a script rather than by hand, a small about page beside the app, the
