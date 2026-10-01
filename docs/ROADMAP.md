@@ -1,8 +1,10 @@
 # Roadmap
 
-**Status:** proposed (2026-09-26). Milestones are ordered by dependency, not by calendar.
-We ship when a milestone's exit criteria pass, not on a date. Versions follow SemVer:
-`0.x` until the v1.0 success criteria in `VISION.md` are met.
+**Status:** revised 2026-10-01 after the owner's review of M5. Milestones are ordered by
+dependency, not by calendar. We ship when a milestone's exit criteria pass, not on a date.
+Versions follow SemVer and ADR-0017: M1–M5 were internal (0.1–0.5, never published); the
+first public release is `1.0.0-beta.0` at the end of M7, and `1.0.0` only when the exit
+criteria at the end of this document pass.
 
 Legend for engine columns: **P** = PDFium (EmbedPDF engines), **L** = @cantoo/pdf-lib,
 **Q** = qpdf-wasm, **T** = tesseract.js, **own** = our own code on top.
@@ -27,7 +29,7 @@ Exit: `pnpm run ci` green; a page from a dropped PDF renders in the shell; deplo
 Status: all three met except the first production deploy, which needs GitHub Pages enabled
 on the repository and a merge to `main` (owner action).
 
-## M1 — Light table and structural editing  (→ v0.1) — **done 2026-09-27**
+## M1 — Light table and structural editing  (→ 0.1, internal) — **done 2026-09-27**
 
 The mandatory feature: merge many PDFs with drag-and-drop reordering.
 
@@ -57,7 +59,7 @@ Exit: the five-file merge scenario in `VISION.md` passes with golden-file tests
 Merge all, export, page count checked with pdf-lib) is covered by
 `apps/web/e2e/light-table.spec.ts`.
 
-## M2 — Viewer and annotations  (→ v0.2) — **done 2026-09-27**
+## M2 — Viewer and annotations  (→ 0.2, internal) — **done 2026-09-27**
 
 | Feature | Engine | Notes | Status |
 |---|---|---|---|
@@ -101,7 +103,7 @@ follow-ups, not blockers):
   show it upright.
 - NoZoom is ignored by the renderer: note icons scale with the zoom.
 
-## M3 — Documents as data  (→ v0.3) — **done 2026-09-27**
+## M3 — Documents as data  (→ 0.3, internal) — **done 2026-09-27**
 
 | Feature | Engine | Notes | Status |
 |---|---|---|---|
@@ -116,12 +118,12 @@ follow-ups, not blockers):
 | Repair broken files with notice | P + Q | "Save repaired copy" through qpdf with verification; diagnostics panel | done (no e2e yet) |
 | qpdf built from source in CI behind `PdfPlumber` | Q | ADR-0008 amended: Emscripten 6, zlib and libjpeg-turbo in-tree | done |
 
-Exit: v1.0 success criteria met → **v1.0.0**, merge `develop` into `main`, tag.
+Exit: v1.0 success criteria met in Chromium (relabelled 0.3 on 2026-10-01: nothing was published, and 1.0 now has the criteria at the end of this document).
 Status: functionality complete and the independent correctness review of M3 resolved (9
 findings fixed with regression tests). The M2 cross-viewer gate is now the automated
 matrix; v1.0 is tagged once it is green in CI and the owner merges `develop` into `main`.
 
-## M4 — Editing content  (→ v1.1) — **done 2026-09-28**
+## M4 — Editing content  (→ 0.4, internal) — **done 2026-09-28**
 
 Engine hosting moved to our own PDFium worker with guarded raw access (ADR-0011); the
 viewer's PDFium worker chunk shrank from 1.7 MB to 1 MB.
@@ -151,10 +153,10 @@ Known behaviours and follow-ups from the workstreams:
 
 Exit: the independent correctness review (engine: 1 blocker, 5 major, 5 minor; web: 5
 major, 8 minor) is resolved with regression tests (24 findings, 9 fix commits); the
-blank-Read-view bug found on the way is fixed; docs and changesets current → **v1.1.0**
-once the owner merges `develop` into `main` and tags.
+blank-Read-view bug found on the way is fixed; docs and changesets current (relabelled
+0.4, unpublished).
 
-## M5 — Recognize and compare  (→ v1.2) — **done 2026-09-28**
+## M5 — Recognize and compare  (→ 0.5, internal) — **done 2026-09-28**
 
 Spec: `docs/specs/recognize-and-compare.md`; decisions in ADR-0012 (OCR hosting), ADR-0013
 (signatures), ADR-0014 (recipes); spikes in research 07 (OCR) and 08 (signing). Two new
@@ -191,10 +193,60 @@ Known behaviours and follow-ups from the workstreams:
 Exit: two independent correctness reviews (engine: 1 blocker, 3 major, 6 minor; web: 1
 blocker, 4 major, 7 minor) and a second pass on the blocker fixes (1 blocker, 1 major, 3
 minor, plus one bypass found while fixing) resolved in six fix commits with regression
-tests and five new attack fixtures; docs and changesets current → **v1.2.0** once the owner
-merges `develop` into `main` and tags.
+tests and five new attack fixtures; docs and changesets current (relabelled 0.5,
+unpublished; the first public release follows M7).
 
-## M6 — Ecosystem  (→ v2)
+## M6 — Experience  (→ 1.0.0-beta.0 together with M7)
+
+Owner review after M5 (`DISCUSSION.md` item 23): the features are right, the experience is
+not. Too much is visible at once, nobody can find Merge, and the pen interrupts writing.
+Spec: `docs/specs/experience-redesign.md`; evidence: `docs/design/experience-audit-2026-10.md`.
+
+| Feature | Notes | Status |
+|---|---|---|
+| Home view | open files as cards, multi-select, Combine N files, drag a card onto another to merge; the empty state is the same view with honest text | planned |
+| Navigator with four labelled tabs | Pages (with Bookmarks), Find, Review (comments, redaction marks, form fields in one list), Files; content first, settings folded; inspector closed by default, metadata in a Document info sheet | planned |
+| Task-grouped toolbar | about six labelled groups (Read, Mark up, Draw, Fill & sign, Pages, Redact); a group shows its 3–6 tools; options live with the armed tool; Document menu with sections and Merge, Split, Compare, Rotate | planned |
+| Natural pen | creating a stroke never selects it; a compact pen bar with four presets that persist; strokes in a burst become one Ink annotation (one comment row, one undo step); lasso to recolour, resize, move or delete; coalesced pointer events, live smoothed preview, width from pressure or speed, fingers scroll when a pen is present | planned (spike S1 first: variable-width appearance across viewers; constant width stays in the Ink dictionary) |
+| Merge discoverability and wording | Home actions, Document menu, Arrange shows every open document, palette synonyms in English and Turkish, "Ink" becomes "Pen", the two "Sign" features get distinct names | planned |
+| Visual refresh | surface ladder with measured contrast, livelier glass with one elevation shadow for floating chrome, capsule toolbar with a solid accent for the active tool, pen presets as ink dots, rise-in motion honouring reduced motion | planned (DESIGN.md amendments listed in the spec) |
+| Light theme | a real light theme on the same tokens | planned, may slip to M8 |
+
+Exit: a new user merges two dropped files in under five actions (e2e); writing with the
+pen never opens a bar or selects the stroke (e2e with synthetic pointer events and
+pressure); the navigator has four tabs with counts; every surface in the visual refresh
+passes the contrast checks recorded in the spec; screenshots and `docs/DESIGN.md` updated;
+an independent experience review on the live build.
+
+## M7 — Presentation and public beta  (→ 1.0.0-beta.0)
+
+Spec: `docs/specs/presentation.md`; decisions: ADR-0015 (name: Recto), ADR-0016 (addresses
+and migration), ADR-0017 (versioning and releases).
+
+| Item | Notes | Status |
+|---|---|---|
+| Name and addresses | display name Recto, descriptor "Recto PDF"; repository `recto` on its own domain in one step with redirect pages and a kill-switch worker at the old path; storage names unchanged | planned (owner: domain purchase, trademark check) |
+| README and media | thesis, hero, four GIFs (Arrange, Redact, OCR, Compare), feature table, "Check it yourself", worker diagram, limits; media produced by Playwright screencasts and ffmpeg in a deploy job, served from the site, zipped onto releases; fictional demo documents | planned |
+| About page and metadata | `/about/` as a second entry with no app bundle; "About this app" in the menu; repository description, topics, social preview | planned |
+| Release mechanics | Changesets pre-release mode, `v1.0.0-beta.0` tag, GitHub pre-release with notes and a dist zip with SHA-256 | planned |
+
+Exit: the live site answers at the new address with the old one redirecting; README
+renders with every image under budget; the About page passes its size budget; the
+`v1.0.0-beta.0` release exists with notes.
+
+## Exit criteria for 1.0 (ADR-0017)
+
+- Every v1.0 success criterion in `VISION.md` passes as an automated test on Chromium,
+  Firefox and WebKit.
+- Final name and domain in place; load time and the zero-external-requests budget measured
+  in CI.
+- Stored formats (recipes, settings, caches) versioned with migration tests.
+- At least four weeks and two betas without an open blocker or major bug; the known-issues
+  list fixed or documented.
+- Accessibility pass; complete English and Turkish; documentation current; an independent
+  review of the beta.
+
+## M8 — Ecosystem  (→ 2.0)
 
 - Plugin API for tools.
 - Optional Tauri desktop shell with file associations.

@@ -10,7 +10,9 @@
   (`feat/light-table-dnd`, `fix/outline-remap`, `docs/adr-0007`) branch from and merge
   back into `develop` via PR.
 - Milestones are merged from `develop` into `main` and tagged `vMAJOR.MINOR.PATCH`
-  (SemVer; `0.x` until v1.0). Changesets generate `CHANGELOG.md` and the GitHub Release.
+  (SemVer). Changesets generate `CHANGELOG.md` and the GitHub Release. *Amended by
+  ADR-0017 (2026-10-01): M1–M5 stay unpublished internal milestones and the first public
+  release is `1.0.0-beta.0`; prerelease mechanics and the 1.0 exit criteria live there.*
 - **Conventional Commits** enforced by commitlint: `feat`, `fix`, `docs`, `refactor`,
   `perf`, `test`, `build`, `ci`, `chore`, with scopes such as `engine`, `model`, `ui`,
   `light-table`, `viewer`, `export`, `docs`. Breaking changes carry `!` and a footer.
