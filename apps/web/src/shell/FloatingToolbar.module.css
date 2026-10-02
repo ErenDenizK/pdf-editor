@@ -52,6 +52,23 @@
   border-radius: var(--radius-round);
 }
 
+/*
+ * Keyboard focus rings sit inside the controls in the capsule bar and its options tier
+ * (DESIGN.md §5, 2026-10-02): outside, the ring around the shown group's chip sat next to the
+ * armed preset's ring as a second accent halo, and the tier clips what overflows it. On the
+ * chip's --surface-3 the accent ring is 4.8:1. The armed tool is the exception: inside its
+ * solid accent fill an accent ring would vanish, so its ring stays outside (the 36 px button
+ * plus the 2 px offset and ring is exactly the bar's height).
+ */
+.toolbar :focus-visible,
+.tier :focus-visible {
+  outline-offset: -2px;
+}
+
+.toolbar [data-tool][aria-pressed='true']:focus-visible {
+  outline-offset: var(--focus-offset);
+}
+
 /* A group: icon and name (spec §5.1). */
 .group {
   display: inline-flex;

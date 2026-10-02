@@ -15,8 +15,9 @@ import type {
   TextTier2Refusal,
 } from '@pdf-editor/engine';
 
-import { formatNumber, m } from '../i18n';
+import { formatPercent, getLocale, m } from '../i18n';
 import type { PageFrame } from '../viewer/geometry';
+import { humanFontName } from './font-names';
 
 // ---------------------------------------------------------------------------
 // Runs
@@ -225,15 +226,12 @@ export function screenAngle(frame: PageFrame, run: Pick<LocatedRun, 'direction'>
 // Honesty badge
 // ---------------------------------------------------------------------------
 
-/** The run's /BaseFont without a subset tag (`ABCDEF+Inter-Regular` → `Inter-Regular`). */
-export function fontDisplayName(font: Pick<TextRunFont, 'baseName'>): string {
-  const name = font.baseName.replace(/^[A-Z]{6}\+/, '');
-  return name === '' ? '?' : name;
-}
-
-/** "Helvetica · not embedded" for the editor's header. */
+/**
+ * "Times New Roman · not embedded" for the editor's header: the human name of the font
+ * (font-names.ts); the header keeps the raw /BaseFont in its tooltip.
+ */
 export function fontLine(font: Pick<TextRunFont, 'baseName' | 'embedded'>): string {
-  const name = fontDisplayName(font);
+  const name = humanFontName(font.baseName);
   return font.embedded
     ? m.text_edit_font_embedded({ font: name })
     : m.text_edit_font_not_embedded({ font: name });
@@ -265,7 +263,10 @@ export interface HonestyBadge {
   readonly label: string;
   /** A second line: why it is not editable, or what moving out of a form means. */
   readonly detail?: string;
-  /** Tier 2 was refused and tier 1 is used instead: why. */
+  /**
+   * Tier 2 was refused and tier 1 is used instead: why, as a sentence ("It has no glyph for
+   * “F”"). Absent when the reason is that the font is not embedded: the font line says so.
+   */
   readonly fellBack?: string;
 }
 
@@ -291,17 +292,27 @@ function refusalLabel(reason: TextTier2Refusal, missing: readonly string[]): str
   }
 }
 
+/** A clause as a sentence: its first letter in upper case ("it has…" → "It has…"). */
+function sentenceCase(text: string): string {
+  const first = text.charAt(0);
+  return first.toLocaleUpperCase(getLocale()) + text.slice(1);
+}
+
 /** The badge for an editability report (spec §2.2: font, embedded or not, honesty state). */
 export function honestyBadge(check: TextEditability): HonestyBadge {
   const family = check.tier1.ok ? check.tier1.family : undefined;
   // Fell back: tier 1 is used because the original font refused the new text. A run in a
-  // form never gets tier 2; its badge says so on its own.
+  // form never gets tier 2; its badge says so on its own. A font that is not embedded is
+  // already said by the font line above the badge, so it is not repeated.
   const fellBack =
     check.tier === 1 &&
     !check.tier2.ok &&
     check.tier2.reason !== 'blocked' &&
-    check.tier2.reason !== 'in-form'
-      ? m.text_edit_fell_back({ reason: refusalLabel(check.tier2.reason, check.tier2.missing) })
+    check.tier2.reason !== 'in-form' &&
+    check.tier2.reason !== 'not-embedded'
+      ? m.text_edit_fell_back({
+          reason: sentenceCase(refusalLabel(check.tier2.reason, check.tier2.missing)),
+        })
       : undefined;
   const withFallBack = fellBack === undefined ? {} : { fellBack };
   switch (check.honesty) {
@@ -379,10 +390,13 @@ export function resolveFit(
   return null;
 }
 
-/** "Needs 52.3 pt, 30.1 pt free". */
+/**
+ * How much wider than the line the new text is, in whole percent ("12% too wide for the
+ * line"). At least 1%: a text that does not fit is never "0% too wide".
+ */
 export function fitSummary(state: FitState): string {
-  const pt = (value: number) => formatNumber(value, { maximumFractionDigits: 1 });
-  return m.text_edit_fit_needs({ needed: pt(state.needed), available: pt(state.available) });
+  const over = state.available > 0 ? state.needed / state.available - 1 : 1;
+  return m.text_edit_fit_too_wide({ percent: formatPercent(Math.max(0.01, over)) });
 }
 
 // ---------------------------------------------------------------------------

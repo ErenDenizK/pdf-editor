@@ -17,10 +17,32 @@
   border-bottom: 1px solid var(--border-hairline);
 }
 
+/*
+ * The field (polish pass 2026-10-02): 32 px, a search icon at its start and the two option
+ * toggles at its end, so the options read as part of the query. The native clear button of
+ * the search input sits at the end of the text, left of the toggles.
+ */
+.field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.fieldIcon {
+  position: absolute;
+  left: var(--space-2);
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
 .input {
   width: 100%;
-  height: var(--control-height);
-  padding: 0 var(--space-2);
+  height: 32px;
+  /* 8 px, the 14 px icon and 6 px before the text; at the end, the two 24 px toggles. */
+  padding: 0 calc(var(--space-1) + 2 * 24px + var(--space-1)) 0 28px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-2);
   background: var(--surface-2);
@@ -32,8 +54,72 @@
   color: var(--text-tertiary);
 }
 
+/* The clear button: the native one is a heavy white cross; this one is a thin cross in the
+   secondary text colour, like the icons beside it (the SVG is only a mask, its colour unused). */
+.input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-left: var(--space-1);
+  background-color: var(--text-secondary);
+  --clear-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M18 6 6 18M6 6l12 12'/%3E%3C/svg%3E");
+  -webkit-mask: var(--clear-mask) center / 14px no-repeat;
+  mask: var(--clear-mask) center / 14px no-repeat;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .input::-webkit-search-cancel-button:hover {
+    background-color: var(--text-primary);
+  }
+}
+
+@media (forced-colors: active) {
+  .input::-webkit-search-cancel-button {
+    background-color: ButtonText;
+  }
+}
+
+/* This field only: the ring sits on its border rather than 2 px outside (DESIGN.md §5). */
 .input:focus-visible {
-  outline-offset: 0;
+  outline-offset: -1px;
+}
+
+.fieldOptions {
+  position: absolute;
+  right: var(--space-1);
+  display: flex;
+  align-items: center;
+}
+
+/* The option toggles: 24 px icon buttons inside the field; on, an option choice. */
+.toggle {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-1);
+}
+
+.toggle:focus-visible {
+  outline-offset: -2px;
+}
+
+.toggle[aria-pressed='true'] {
+  background: var(--accent-muted);
+  color: var(--text-primary);
+}
+
+/* Before a query: one quiet line, what the field does and its shortcut. */
+.hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--space-2);
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
 }
 
 .row {
@@ -43,30 +129,27 @@
   min-width: 0;
 }
 
-.toggle {
+.row[hidden] {
+  display: none;
+}
+
+.step {
   flex: none;
   width: 26px;
   height: 26px;
 }
 
-.toggle[aria-pressed='true'] {
-  background: var(--accent-muted);
-  color: var(--text-primary);
-}
-
-.toggle:disabled {
+.step:disabled {
   color: var(--text-disabled);
 }
 
 .status {
   flex: 1;
   min-width: 0;
-  padding: 0 var(--space-1);
   overflow: hidden;
   color: var(--text-secondary);
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
-  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

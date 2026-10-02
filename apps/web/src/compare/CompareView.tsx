@@ -63,6 +63,7 @@ import { useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import toolStyles from '../tools/ToolDialog.module.css';
 import { IconButton } from '../ui/IconButton';
+import { Range } from '../ui/Range';
 import { userRectToCss } from '../viewer/geometry';
 import { rowLabel } from './change-labels';
 import { buildChangeList, buildPartialChangeList, rowIndex, rowStatus } from './changes';
@@ -940,9 +941,9 @@ function CompareToolbar({ scale, changes }: { readonly scale: number; readonly c
       {mode === 'overlay' ? (
         <label className={styles.slider} htmlFor={opacityId}>
           <span>{m.compare_opacity()}</span>
-          <input
+          <Range
             id={opacityId}
-            type="range"
+            className={styles.range}
             min={0}
             max={100}
             step={5}

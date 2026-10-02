@@ -28,6 +28,7 @@ import overlay from '../shell/ShortcutOverlay.module.css';
 import local from '../stage/OperationDialogs.module.css';
 import { readJson, writeJson } from '../state/safe-storage';
 import { pagesPhrase, useTabItems, useWorkspaceStore } from '../state/workspace-store';
+import { Range } from '../ui/Range';
 import { useRetained } from '../ui/use-retained';
 import {
   applyBatesRun,
@@ -388,8 +389,7 @@ function Percent({
   return (
     <label className={local2.row}>
       <span className={local2.inline}>{label}</span>
-      <input
-        type="range"
+      <Range
         className={local2.range}
         min={min}
         max={max}
@@ -1063,8 +1063,7 @@ function WatermarkDialog({ documentId }: { readonly documentId: DocumentId }) {
       <Section legend={m.furniture_position()}>
         <label className={local2.row}>
           <span className={local2.inline}>{m.furniture_rotation()}</span>
-          <input
-            type="range"
+          <Range
             className={local2.range}
             min={-90}
             max={90}

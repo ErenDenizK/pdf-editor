@@ -88,7 +88,6 @@
 
 .range {
   flex: 1 1 120px;
-  accent-color: var(--accent);
 }
 
 .value {

@@ -17,6 +17,7 @@ import {
   editRange,
   familyOfFace,
   fitStateOf,
+  fitSummary,
   focusReturnRun,
   fontLine,
   glyphIndexAt,
@@ -107,7 +108,7 @@ describe('editability → badge', () => {
       }),
     );
     expect(substituted).toMatchObject({ tone: 'warning', label: 'Font substituted: Inter' });
-    expect(substituted.fellBack).toBe('Fell back from the original font: it has no glyph for “Q”');
+    expect(substituted.fellBack).toBe('It has no glyph for “Q”');
     const form = honestyBadge(
       check({
         tier: 1,
@@ -156,13 +157,17 @@ describe('editability → badge', () => {
         tier2: { ok: false, reason: 'not-embedded', missing: [] },
       }),
     );
-    expect(notEmbedded.fellBack).toBe('Fell back from the original font: the font is not embedded');
+    // The font line already says "not embedded": the badge does not repeat it.
+    expect(notEmbedded.fellBack).toBeUndefined();
   });
 
   it('describes the font and the substitute family', () => {
     expect(fontLine({ baseName: 'Helvetica', embedded: false })).toBe('Helvetica · not embedded');
     expect(fontLine({ baseName: 'FXTAAA+Inter-Regular', embedded: true })).toBe(
-      'Inter-Regular · embedded',
+      'Inter Regular · embedded',
+    );
+    expect(fontLine({ baseName: 'TimesNewRomanPSMT', embedded: false })).toBe(
+      'Times New Roman · not embedded',
     );
     expect(familyOfFace('Inter-Regular')).toBe('Inter');
     expect(familyOfFace('JetBrainsMono-Regular')).toBe('JetBrains Mono');
@@ -191,6 +196,14 @@ describe('fit choice', () => {
     // A shrink chosen earlier no longer applies once the text needs more than the floor.
     expect(resolveFit(wider, 'shrink')).toBeNull();
     expect(resolveFit(wider, 'overflow')).toBe('overflow');
+  });
+
+  it('says how much too wide the text is in whole percent', () => {
+    const wide = fitStateOf(check({ fit: { ...check().fit, tier2: option(36, 30) } }));
+    expect(wide && fitSummary(wide)).toBe('20% too wide for the line');
+    const barely = fitStateOf(check({ fit: { ...check().fit, tier2: option(30.03, 30) } }));
+    // Never "0% too wide": a text that does not fit is at least 1% over.
+    expect(barely && fitSummary(barely)).toBe('1% too wide for the line');
   });
 
   it('measures the tier the edit will use, and nothing when not editable', () => {

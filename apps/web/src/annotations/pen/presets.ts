@@ -169,11 +169,14 @@ export function presetPatch(style: {
   };
 }
 
-/** Dot diameter in the bar (spec §7.4): 8, 11 or 14 px for widths ≤ 1, ≤ 3 and > 3 pt. */
-export function dotSize(width: number): 8 | 11 | 14 {
-  if (width <= 1) return 8;
-  if (width <= 3) return 11;
-  return 14;
+/**
+ * Dot diameter in the bar (spec §7.4, enlarged 2026-10-02 so the presets read as ink, not
+ * specks): 10, 13 or 16 px for widths ≤ 1, ≤ 3 and > 3 pt.
+ */
+export function dotSize(width: number): 10 | 13 | 16 {
+  if (width <= 1) return 10;
+  if (width <= 3) return 13;
+  return 16;
 }
 
 /** A preset below full opacity is a highlighter (drawn as a short capsule in the bar). */

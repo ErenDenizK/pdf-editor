@@ -194,14 +194,16 @@ test('a character the Identity-H subset lacks switches the badge to the substitu
   await clickWord(page, 1, 'fox');
   const editor = page.getByRole('textbox', { name: 'Line text' });
   await expect(editor).toBeFocused();
-  await expect(page.getByTestId('text-edit-font')).toHaveText('Inter-Regular · embedded');
+  // The human font name; the raw /BaseFont stays in the tooltip.
+  await expect(page.getByTestId('text-edit-font')).toHaveText('Inter Regular · embedded');
+  await expect(page.getByTestId('text-edit-font')).toHaveAttribute('title', /Inter-Regular$/);
   const badge = page.getByTestId('text-edit-badge');
   await expect(badge).toHaveText('Same font');
 
   // "F" is not in the subset (only the glyphs of the sentence are).
   await editor.fill(FOX.replace('fox', 'Fox'));
   await expect(badge).toHaveText('Font substituted: Inter');
-  await expect(page.getByTestId('text-edit-fell-back')).toContainText('no glyph for “F”');
+  await expect(page.getByTestId('text-edit-fell-back')).toHaveText('It has no glyph for “F”');
   if (capture) {
     await page.screenshot({
       path: fileURLToPath(new URL('m4-text-edit-substituted-1440.png', screenshots)),
@@ -211,9 +213,12 @@ test('a character the Identity-H subset lacks switches the badge to the substitu
   // Wider than the free space: the editor asks how to fit before it applies.
   const fit = page.getByTestId('text-edit-fit');
   if (await fit.isVisible()) {
+    // One sentence in whole percent, and no decimals anywhere in the header.
+    await expect(fit).toContainText(/\d+% too wide for the line/);
+    await expect(page.locator('[data-text-edit-panel]')).not.toHaveText(/\d[.,]\d/);
     await editor.press('Enter');
     await expect(editor).toBeFocused();
-    await fit.getByRole('button', { name: 'Allow overflow' }).click();
+    await fit.getByRole('button', { name: 'Let it run over' }).click();
   }
   await editor.press('Enter');
   await expect(editor).toHaveCount(0);
@@ -263,7 +268,7 @@ test('rotated page: the editor turns with the line; an upright line is edited in
   await editor.fill(upright.replace('reads', 'looks'));
   await expect(page.getByTestId('text-edit-badge')).toHaveText(/^Same font/);
   const fit = page.getByTestId('text-edit-fit');
-  if (await fit.isVisible()) await fit.getByRole('button', { name: 'Allow overflow' }).click();
+  if (await fit.isVisible()) await fit.getByRole('button', { name: 'Let it run over' }).click();
   await editor.press('Enter');
   await expect(editor).toHaveCount(0);
   await expect(historyRow(page, /^Text edited/)).toBeVisible();

@@ -77,7 +77,12 @@ test('finds text, steps through the hits and clears with Escape', async ({ page 
   await page.keyboard.press(`${await mod(page)}+f`);
   const field = page.getByRole('searchbox', { name: 'Find in document' });
   await expect(field).toBeFocused();
+  // Before a query: one hint line with the shortcut, and no count or previous/next yet.
+  await expect(page.getByTestId('search-hint')).toContainText('Type to search the document’s text');
+  await expect(page.getByRole('button', { name: 'Next result' })).toHaveCount(0);
   await field.fill('outline-named-dests');
+  await expect(page.getByTestId('search-hint')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Next result' })).toBeVisible();
 
   const status = page.getByTestId('status-search');
   await expect(status).toContainText('1 of 6');

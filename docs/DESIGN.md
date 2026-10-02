@@ -225,9 +225,16 @@ Rules:
   Files tab, the tabs and the light table). Chrome is never tinted; the accent stays its
   only colour. *Amended 2026-10-01 (M6, A3).*
 - **Ink dots.** A pen preset is a dot of its real colour with the `--border-swatch` ring,
-  8, 11 or 14 px for widths ≤ 1, ≤ 3 and > 3 pt, in a 28 px target; a preset below full
-  opacity is a short capsule (a highlighter mark). The armed preset gets a 2 px accent
-  ring, not a fill, so its colour shows.
+  10, 13 or 16 px for widths ≤ 1, ≤ 3 and > 3 pt, in a 32 px cell; a preset below full
+  opacity is an 18 × 9 px capsule (a highlighter mark). The four sit in one quiet well (half
+  `--surface-1`, a hairline, round) so they read as one control. The armed preset gets a
+  2 px accent ring (26 px), not a fill, so its colour shows. *Amended 2026-10-02.*
+- **Swatches and the range.** Colour swatches are 14 px dots (16 px in the inspector) in
+  24 px targets, centres 24 px apart; the custom colour is a neutral dashed ring with a plus,
+  filled with the colour once one is chosen, never a rainbow. Every range input is the shared
+  `ui/Range` control: a 2 px `--border-strong` track filled in `--accent-line` up to a 12 px
+  `--text-primary` thumb (14 px on hover, the focus ring on the thumb), native under forced
+  colours. *Added 2026-10-02.*
 - **State patterns.** "On" has two looks: a view switch is `--surface-3` with an inset
   hairline (Home | Read | Arrange, page layout, signature tabs, the shown group's chip in
   the tool bar); an option choice is
@@ -330,9 +337,12 @@ does not blink.
   Delete removes, Alt+Arrows move pages, R / Shift+R rotate.
 - Live region announcements for moves, rotations, long operations, export completion.
 - Focus ring 2px accent on 2px offset, always visible on keyboard focus. Deliberate offset
-  overrides: −2px for rows inside scrollers, 0 for inputs and menu items, 1px for segments,
-  presets, hotspots and swatches, 3px (outline) for thumbnails, 4px for grid cells, and
-  −2px for page layers.
+  overrides: −2px for rows inside scrollers, 0 for inputs and menu items (−1px for the Find
+  field), 1px for segments, presets and hotspots, −2px for swatches (inside their 24 px
+  target), 3px (outline) for thumbnails, 4px for grid cells, −2px for page layers, and −2px
+  inside the capsule bar and its options tier, so a focused chip never adds a second halo
+  beside the armed preset's ring; the armed tool keeps 2px, as an inset ring would vanish in
+  its accent fill. *Amended 2026-10-02.*
 - Target sizes ≥ 24×24; reduced motion respected; nothing conveyed by color alone.
 
 ## 6. Naming and brand

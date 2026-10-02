@@ -185,11 +185,12 @@ export function TextEditor({
       refocus();
       return;
     }
-    const fit = resolveFit(fitStateOf(current), choice);
+    const fitNow = fitStateOf(current);
+    const fit = resolveFit(fitNow, choice);
     if (fit === null) {
       setBusy(false);
       setAttention(true);
-      announce(m.text_edit_fit_choose());
+      announce(fitNow ? fitSummary(fitNow) : m.text_edit_error_does_not_fit());
       refocus();
       return;
     }
@@ -283,7 +284,7 @@ export function TextEditor({
         }}
         onPointerDown={(event) => event.stopPropagation()}
       >
-        <div className={styles.font} data-testid="text-edit-font">
+        <div className={styles.font} data-testid="text-edit-font" title={run.font.baseName}>
           {fontLine(run.font)}
         </div>
         <div
@@ -308,10 +309,7 @@ export function TextEditor({
             data-testid="text-edit-fit"
             data-attention={attention || undefined}
           >
-            <p className={styles.fitText}>
-              {fitSummary(fitState)}
-              {resolved === null ? ` · ${m.text_edit_fit_choose()}` : ''}
-            </p>
+            <p className={styles.fitText}>{fitSummary(fitState)}</p>
             <div className={styles.fitChoices}>
               <button
                 type="button"

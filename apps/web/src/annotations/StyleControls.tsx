@@ -10,11 +10,12 @@
  * or width can be set before drawing; with a selection it shows (and edits) the selection.
  */
 import type { Annotation } from '@pdf-editor/engine';
-import { MessageSquare, Trash2 } from 'lucide-react';
-import { type CSSProperties, useRef, useState } from 'react';
+import { ChevronDown, MessageSquare, Plus, Trash2 } from 'lucide-react';
+import { type CSSProperties, Fragment, type ReactNode, useRef, useState } from 'react';
 
 import { formatPercent, m } from '../i18n';
 import { IconButton } from '../ui/IconButton';
+import { Range } from '../ui/Range';
 import { deleteAnnotations } from './actions';
 import { deleteLassoSelection } from './lasso/edits';
 import {
@@ -41,6 +42,9 @@ const SWATCH_NAMES: readonly (() => string)[] = [
   m.color_green,
   m.color_black,
 ];
+
+/** A `#rrggbb` colour, the only form the custom colour input takes. */
+const HEX = /^#[0-9a-f]{6}$/i;
 
 /** Style groups whose annotations have a stroke width (ink and shapes). */
 const STROKED_GROUPS: ReadonlySet<StyleGroup> = new Set(['ink', 'shape']);
@@ -119,6 +123,10 @@ export function StyleControls(props: StyleControlsProps) {
         : shownForTool(props.group, toolStyle)
       : shownForSelection(editable);
   const { disabled, color, opacity } = shown;
+  // A colour that is none of the swatches shows in the custom control, which then reads as
+  // the chosen one.
+  const custom =
+    color !== undefined && HEX.test(color) && !SWATCHES.some((s) => s === color.toUpperCase());
 
   const setColor = (value: string) => {
     applyStyle({ color: normalizeHex(value) });
@@ -133,13 +141,17 @@ export function StyleControls(props: StyleControlsProps) {
     applyStyle({ fontSize: value });
   };
 
-  return (
-    <div
-      className={styles.controls}
-      data-variant={variant}
-      data-placement={props.variant === 'tool' ? (props.placement ?? 'panel') : undefined}
-    >
-      {shown.colorable ? (
+  // A bar or the options tier lays the controls out in one row; the inspector (a selection's
+  // properties, or the armed tool's style) stacks them.
+  const placement = props.variant === 'tool' ? (props.placement ?? 'panel') : undefined;
+  const layout = variant === 'bar' || placement === 'tier' ? 'row' : 'stack';
+  // The groups in reading order: colour, opacity, size (stroke width or font size). In a row
+  // a hairline divider separates them.
+  const groups: { key: string; node: ReactNode }[] = [];
+  if (shown.colorable) {
+    groups.push({
+      key: 'color',
+      node: (
         <div role="radiogroup" aria-label={m.annot_color()} className={styles.swatches}>
           {SWATCHES.map((swatch, i) => (
             <button
@@ -155,17 +167,31 @@ export function StyleControls(props: StyleControlsProps) {
               onClick={() => setColor(swatch)}
             />
           ))}
-          <label className={styles.custom} title={m.annot_custom_color()}>
+          <label
+            className={styles.custom}
+            title={m.annot_custom_color()}
+            data-custom={custom ? '' : undefined}
+            data-disabled={disabled ? '' : undefined}
+            style={custom ? ({ '--swatch': color } as CSSProperties) : undefined}
+          >
             <span className={styles.visuallyHidden}>{m.annot_custom_color()}</span>
+            <span className={styles.customMark} aria-hidden="true">
+              {custom ? null : <Plus className={styles.customIcon} />}
+            </span>
             <input
               type="color"
               disabled={disabled}
-              value={color && /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : '#000000'}
+              value={color && HEX.test(color) ? color.toLowerCase() : '#000000'}
               onChange={(e) => setColor(e.target.value)}
             />
           </label>
         </div>
-      ) : null}
+      ),
+    });
+  }
+  groups.push({
+    key: 'opacity',
+    node: (
       <label className={styles.slider}>
         <span className={styles.sliderLabel}>{m.annot_opacity()}</span>
         <LiveRange
@@ -178,7 +204,12 @@ export function StyleControls(props: StyleControlsProps) {
           onValue={(v) => setOpacity(v / 100)}
         />
       </label>
-      {shown.strokeWidth !== undefined ? (
+    ),
+  });
+  if (shown.strokeWidth !== undefined) {
+    groups.push({
+      key: 'stroke',
+      node: (
         <label className={styles.slider}>
           <span className={styles.sliderLabel}>{m.annot_stroke_width()}</span>
           <LiveRange
@@ -191,25 +222,51 @@ export function StyleControls(props: StyleControlsProps) {
             onValue={setStroke}
           />
         </label>
-      ) : null}
-      {shown.fontSize !== undefined ? (
+      ),
+    });
+  }
+  if (shown.fontSize !== undefined) {
+    groups.push({
+      key: 'font-size',
+      node: (
         <label className={styles.select}>
           <span className={styles.sliderLabel}>{m.annot_font_size()}</span>
-          <select
-            value={Math.round(shown.fontSize)}
-            disabled={disabled}
-            onChange={(e) => setFontSize(Number(e.target.value))}
-          >
-            {[...new Set([...FONT_SIZES, Math.round(shown.fontSize)])]
-              .sort((a, b) => a - b)
-              .map((size) => (
-                <option key={size} value={size}>
-                  {size}
-                </option>
-              ))}
-          </select>
+          <span className={styles.selectBox}>
+            <select
+              value={Math.round(shown.fontSize)}
+              disabled={disabled}
+              onChange={(e) => setFontSize(Number(e.target.value))}
+            >
+              {[...new Set([...FONT_SIZES, Math.round(shown.fontSize)])]
+                .sort((a, b) => a - b)
+                .map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+            </select>
+            <ChevronDown className={styles.selectChevron} aria-hidden="true" />
+          </span>
         </label>
-      ) : null}
+      ),
+    });
+  }
+
+  return (
+    <div
+      className={styles.controls}
+      data-variant={variant}
+      data-placement={placement}
+      data-flow={layout}
+    >
+      {groups.map(({ key, node }, i) => (
+        <Fragment key={key}>
+          {i > 0 && layout === 'row' ? (
+            <span className={styles.divider} aria-hidden="true" />
+          ) : null}
+          {node}
+        </Fragment>
+      ))}
       {variant === 'bar' ? (
         <>
           <span className={styles.divider} aria-hidden="true" />
@@ -274,9 +331,9 @@ function LiveRange({
   const shown = local ?? value;
   return (
     <>
-      <input
-        type="range"
+      <Range
         {...rest}
+        className={styles.range}
         value={shown}
         aria-valuetext={valueText(shown)}
         onChange={(e) => {

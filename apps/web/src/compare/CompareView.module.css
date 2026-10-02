@@ -363,9 +363,8 @@
   white-space: nowrap;
 }
 
-.slider input {
+.range {
   width: 96px;
-  accent-color: var(--accent);
 }
 
 .zoom {

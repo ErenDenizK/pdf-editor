@@ -445,10 +445,12 @@ test.describe('annotations', () => {
     await presets.getByRole('radio', { name: /^Blue pen/ }).click();
     await stroke(loops(0.12, 0.36, 6));
     await stroke(loops(0.32, 0.36, 4));
+    // The underline sits close under the loops: a gap of more than 0.6 of the median stroke
+    // height would start a new line, and so a new burst (bursts.ts, `onBurstLine`).
     await stroke([
-      [0.12, 0.39],
-      [0.3, 0.392],
-      [0.47, 0.388],
+      [0.12, 0.379],
+      [0.3, 0.381],
+      [0.47, 0.377],
     ]);
     await expect(ink).toHaveCount(3, { timeout: 10_000 });
     await expect(ink.last().locator('polyline')).toHaveCount(3);

@@ -1,12 +1,14 @@
 /**
  * Left rail "Search" (spec §1, Mod+F): query, match case, whole word, results grouped by
- * page with context. Enter / Shift+Enter (and F3 / Shift+F3 anywhere) step through hits;
+ * page with context. The field carries a search icon and the two option toggles at its end;
+ * the count and the previous/next buttons show once there is a query, and before that one
+ * quiet line says what the field does and how to reach it. Enter / Shift+Enter (and F3 / Shift+F3 anywhere) step through hits;
  * Esc clears the search and closes the panel. Typing restarts the search after a short
  * pause and cancels the running one; results stream in as the engine reports them.
  */
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { VirtualDocument } from '@pdf-editor/document-model';
-import { CaseSensitive, ChevronDown, ChevronUp, WholeWord } from 'lucide-react';
+import { CaseSensitive, ChevronDown, ChevronUp, Search, WholeWord } from 'lucide-react';
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 
 import { formatNumber, m } from '../i18n';
@@ -14,6 +16,7 @@ import { MarkMatchesButton } from '../redaction/MarkMatchesButton';
 import { useViewStore } from '../state/view-store';
 import { useActiveDocument, useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
+import { Keycaps } from '../ui/Keycaps';
 import { documentLabels, hasCustomLabels } from '../viewer/navigation';
 import {
   closeSearchPanel,
@@ -61,6 +64,7 @@ function SearchView({ doc }: { readonly doc: VirtualDocument }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const nextShortcut = useCommandShortcut('search.next');
   const previousShortcut = useCommandShortcut('search.previous');
+  const openShortcut = useCommandShortcut('search.open');
   const statusId = useId();
 
   // Mod+F: focus and select the field (also when the panel was already open).
@@ -91,8 +95,9 @@ function SearchView({ doc }: { readonly doc: VirtualDocument }) {
     }
   };
 
+  const hasQuery = query.trim() !== '';
   let summary = '';
-  if (query.trim() !== '') {
+  if (hasQuery) {
     if (hits.length > 0) {
       summary = m.search_count({
         current: formatNumber(Math.max(0, current) + 1),
@@ -107,34 +112,47 @@ function SearchView({ doc }: { readonly doc: VirtualDocument }) {
   return (
     <div className={styles.root}>
       <div className={styles.controls}>
-        <input
-          ref={inputRef}
-          type="search"
-          className={styles.input}
-          placeholder={m.search_placeholder()}
-          aria-label={m.search_label()}
-          aria-describedby={statusId}
-          autoComplete="off"
-          spellCheck={false}
-          value={query}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          onKeyDown={onKeyDown}
-        />
-        <div className={styles.row}>
-          <IconButton
-            label={m.search_match_case()}
-            icon={<CaseSensitive />}
-            aria-pressed={matchCase}
-            className={styles.toggle}
-            onClick={() => setSearchOptions({ matchCase: !matchCase })}
+        <div className={styles.field}>
+          <Search className={styles.fieldIcon} aria-hidden="true" />
+          <input
+            ref={inputRef}
+            type="search"
+            className={styles.input}
+            placeholder={m.search_placeholder()}
+            aria-label={m.search_label()}
+            aria-describedby={statusId}
+            autoComplete="off"
+            spellCheck={false}
+            value={query}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={onKeyDown}
           />
-          <IconButton
-            label={m.search_whole_word()}
-            icon={<WholeWord />}
-            aria-pressed={wholeWord}
-            className={styles.toggle}
-            onClick={() => setSearchOptions({ wholeWord: !wholeWord })}
-          />
+          <div className={styles.fieldOptions}>
+            <IconButton
+              label={m.search_match_case()}
+              icon={<CaseSensitive />}
+              aria-pressed={matchCase}
+              className={styles.toggle}
+              onClick={() => setSearchOptions({ matchCase: !matchCase })}
+            />
+            <IconButton
+              label={m.search_whole_word()}
+              icon={<WholeWord />}
+              aria-pressed={wholeWord}
+              className={styles.toggle}
+              onClick={() => setSearchOptions({ wholeWord: !wholeWord })}
+            />
+          </div>
+        </div>
+        {hasQuery ? null : (
+          <p className={styles.hint} data-testid="search-hint">
+            <span>{m.search_hint()}</span>
+            {openShortcut ? <Keycaps shortcut={openShortcut} /> : null}
+          </p>
+        )}
+        {/* Hidden rather than unmounted while there is no query, so the status stays a live
+            region the screen reader already knows when the first count arrives. */}
+        <div className={styles.row} hidden={!hasQuery}>
           <span
             id={statusId}
             className={styles.status}
@@ -151,7 +169,7 @@ function SearchView({ doc }: { readonly doc: VirtualDocument }) {
             icon={<ChevronUp />}
             shortcut={previousShortcut}
             disabled={hits.length === 0}
-            className={styles.toggle}
+            className={styles.step}
             onClick={() => searchStep(-1)}
           />
           <IconButton
@@ -159,7 +177,7 @@ function SearchView({ doc }: { readonly doc: VirtualDocument }) {
             icon={<ChevronDown />}
             shortcut={nextShortcut}
             disabled={hits.length === 0}
-            className={styles.toggle}
+            className={styles.step}
             onClick={() => searchStep(1)}
           />
         </div>

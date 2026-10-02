@@ -86,9 +86,10 @@ describe('pen bar', () => {
       'rgba(255, 212, 0, 0.4)',
     ]);
     expect(marks.map((mark) => Math.round(mark.getBoundingClientRect().height))).toEqual([
-      11, 11, 11, 8,
+      13, 13, 13, 9,
     ]);
-    expect(Math.round(marks[3]?.getBoundingClientRect().width ?? 0)).toBe(20);
+    // The highlighter: an 18 × 9 px capsule.
+    expect(Math.round(marks[3]?.getBoundingClientRect().width ?? 0)).toBe(18);
     expect(marks[3]?.dataset.shape).toBe('capsule');
     // The first preset is the pen's, but nothing is armed yet: no ring.
     expect(radios[0]).toHaveAttribute('aria-checked', 'true');

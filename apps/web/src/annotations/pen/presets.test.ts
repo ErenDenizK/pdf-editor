@@ -70,7 +70,7 @@ describe('pen presets', () => {
     // A colour that is not a swatch is never named as one.
     expect(presetName(2, { color: '#123456', width: 1, opacity: 1 })).toBe('Pen 3');
     expect(presetName(3, { color: '#123456', width: 9, opacity: 0.5 })).toBe('Highlighter 4');
-    expect([0.25, 1, 1.5, 3, 3.25, 24].map(dotSize)).toEqual([8, 8, 11, 11, 14, 14]);
+    expect([0.25, 1, 1.5, 3, 3.25, 24].map(dotSize)).toEqual([10, 10, 13, 13, 16, 16]);
   });
 
   it('reads stored settings field by field', () => {

@@ -1,0 +1,132 @@
+/*
+ * The shared range input (DESIGN.md §3, "Range"; dated 2026-10-02). The native control drew a
+ * thick accent track and a large accent thumb, the loudest thing in a quiet bar. This one is
+ * a 2 px --border-strong track whose filled part (up to the thumb) is --accent-line, and a
+ * 12 px --text-primary thumb with a 1 px --surface-0 hairline so it holds its edge over a
+ * light page seen through the glass. Hover grows the thumb to 14 px; keyboard focus puts the
+ * 2 px accent ring on the thumb, not around the whole input. The input stays 24 px tall, so
+ * the target meets the 24 px minimum (DESIGN.md §5). Width comes from the consumer.
+ *
+ * Chromium and WebKit have no "filled" part, so the track paints it from `--fill` (set by
+ * Range.tsx); Firefox has `::-moz-range-progress`. Forced colours get the native control.
+ */
+.range {
+  --fill: 0%;
+  --range-thumb: 12px;
+  --range-track: 2px;
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  height: 24px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* The ring goes on the thumb (below), not around the whole input. */
+.range:focus-visible {
+  outline: none;
+}
+
+.range::-webkit-slider-runnable-track {
+  height: var(--range-track);
+  border-radius: var(--radius-round);
+  background: linear-gradient(
+    to right,
+    var(--accent-line) var(--fill),
+    var(--border-strong) var(--fill)
+  );
+}
+
+.range::-moz-range-track {
+  height: var(--range-track);
+  border-radius: var(--radius-round);
+  background: var(--border-strong);
+}
+
+.range::-moz-range-progress {
+  height: var(--range-track);
+  border-radius: var(--radius-round);
+  background: var(--accent-line);
+}
+
+.range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  width: var(--range-thumb);
+  height: var(--range-thumb);
+  /* Centred on the track: half the difference between the two heights. */
+  margin-top: calc((var(--range-track) - var(--range-thumb)) / 2);
+  border: 1px solid var(--surface-0);
+  border-radius: var(--radius-round);
+  background: var(--text-primary);
+  transition:
+    width var(--duration-fast) var(--ease-out),
+    height var(--duration-fast) var(--ease-out),
+    margin-top var(--duration-fast) var(--ease-out);
+}
+
+.range::-moz-range-thumb {
+  box-sizing: border-box;
+  width: var(--range-thumb);
+  height: var(--range-thumb);
+  border: 1px solid var(--surface-0);
+  border-radius: var(--radius-round);
+  background: var(--text-primary);
+  transition:
+    width var(--duration-fast) var(--ease-out),
+    height var(--duration-fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .range:not(:disabled):hover {
+    --range-thumb: 14px;
+  }
+}
+
+.range:focus-visible::-webkit-slider-thumb {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.range:focus-visible::-moz-range-thumb {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.range:disabled {
+  cursor: default;
+}
+
+.range:disabled::-webkit-slider-runnable-track {
+  background: var(--border-hairline);
+}
+
+.range:disabled::-webkit-slider-thumb {
+  background: var(--text-disabled);
+}
+
+.range:disabled::-moz-range-progress {
+  background: var(--border-hairline);
+}
+
+.range:disabled::-moz-range-thumb {
+  background: var(--text-disabled);
+}
+
+/* Forced colours: the system draws the control, in system colours. */
+@media (forced-colors: active) {
+  .range,
+  .range::-webkit-slider-thumb {
+    appearance: auto;
+    -webkit-appearance: auto;
+  }
+
+  .range:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}

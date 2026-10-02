@@ -2,10 +2,11 @@
  * The pen's presets in the Draw group (experience-redesign spec §6.2, §7.4, §10), plugged into
  * the tool bar through `registerPenSlots` (PenBar.register.ts).
  *
- * Four ink dots of their real colour: the dot's size hints the width (8, 11 or 14 px), a
- * preset below full opacity is a short capsule (a highlighter), and the armed preset has a
- * 2 px accent ring, not a fill, so its colour shows. These dots are the only colour that
- * enters the chrome through content (DESIGN.md §3).
+ * Four ink dots of their real colour: the dot's size hints the width (10, 13 or 16 px), a
+ * preset below full opacity is an 18 × 9 px capsule (a highlighter), and the armed preset has
+ * a 2 px accent ring, not a fill, so its colour shows. The four sit in one quiet well so they
+ * read as one control. These dots are the only colour that enters the chrome through content
+ * (DESIGN.md §3).
  *
  * Tap a preset to arm it; tap the armed one again for its editor, a popover rising from the
  * dot: eight swatches and a custom colour, width stops and a slider (0.25–24 pt), opacity,
@@ -23,6 +24,7 @@
  * and hidden.
  */
 import { Popover } from '@base-ui/react/popover';
+import { Plus } from 'lucide-react';
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -35,6 +37,7 @@ import { formatNumber, formatPercent, m } from '../../i18n';
 import { announce } from '../../shell/announcer';
 import type { PenBarProps } from '../../shell/FloatingToolbar.slots';
 import popoverStyles from '../../ui/Popover.module.css';
+import { Range } from '../../ui/Range';
 import { Tooltip } from '../../ui/Tooltip';
 import { useAnnotationStore } from '../annotation-store';
 import { penSession } from './ink-input';
@@ -222,6 +225,8 @@ function PresetEditor({
   const name = presetName(i, preset);
   const edit = (patch: Partial<PenPreset>) => useAnnotationStore.getState().editPreset(i, patch);
   const swatchChosen = PEN_SWATCHES.some((swatch) => swatch.color === preset.color);
+  // A colour that is none of the swatches shows in the custom control (then the chosen one).
+  const custom = !swatchChosen;
   const stopChosen = WIDTH_STOPS.some((stop) => stop === preset.width);
 
   return (
@@ -273,8 +278,16 @@ function PresetEditor({
                   onClick={() => edit({ color: swatch.color })}
                 />
               ))}
-              <label className={styles.custom} title={m.annot_custom_color()}>
+              <label
+                className={styles.custom}
+                title={m.annot_custom_color()}
+                data-custom={custom ? '' : undefined}
+                style={custom ? ({ '--swatch': preset.color } as CSSProperties) : undefined}
+              >
                 <span className={styles.visuallyHidden}>{m.annot_custom_color()}</span>
+                <span className={styles.customMark} aria-hidden="true">
+                  {custom ? null : <Plus className={styles.customIcon} />}
+                </span>
                 <input
                   type="color"
                   aria-label={m.annot_custom_color()}
@@ -308,8 +321,8 @@ function PresetEditor({
             </div>
             <label className={styles.slider}>
               <span className={styles.rowLabel}>{m.pen_editor_width_exact()}</span>
-              <input
-                type="range"
+              <Range
+                className={styles.range}
                 aria-label={m.pen_editor_width_exact()}
                 min={PRESET_LIMITS.width.min}
                 max={PRESET_LIMITS.width.max}
@@ -322,8 +335,8 @@ function PresetEditor({
             </label>
             <label className={styles.slider}>
               <span className={styles.rowLabel}>{m.annot_opacity()}</span>
-              <input
-                type="range"
+              <Range
+                className={styles.range}
                 aria-label={m.annot_opacity()}
                 min={10}
                 max={100}
