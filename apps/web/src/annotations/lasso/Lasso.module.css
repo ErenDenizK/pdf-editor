@@ -78,3 +78,81 @@
   cursor: move;
   touch-action: none;
 }
+
+/*
+ * Group resize and rotate (craft spec §5.5): handles are page white with a 1.5 px accent
+ * stroke (DESIGN §3); a wider transparent area around each takes the press.
+ */
+.handle {
+  fill: var(--page-background);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.stem {
+  stroke: var(--accent);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.handleHit,
+.rotateHit {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+  touch-action: none;
+}
+
+.handleHit[data-lasso-handle='nw'],
+.handleHit[data-lasso-handle='se'] {
+  cursor: nwse-resize;
+}
+
+.handleHit[data-lasso-handle='ne'],
+.handleHit[data-lasso-handle='sw'] {
+  cursor: nesw-resize;
+}
+
+.handleHit[data-lasso-handle='n'],
+.handleHit[data-lasso-handle='s'] {
+  cursor: ns-resize;
+}
+
+.handleHit[data-lasso-handle='e'],
+.handleHit[data-lasso-handle='w'] {
+  cursor: ew-resize;
+}
+
+.rotateHit {
+  cursor: grab;
+}
+
+[data-annotation-layer][data-lasso-transforming='rotate'] {
+  cursor: grabbing;
+}
+
+/*
+ * The selection box: the keyboard path to the selection. It takes no pointer (the dashed
+ * box and handles under it do) and shows only the focus ring.
+ */
+.box {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 2px;
+}
+
+.box:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(var(--focus-offset) + 6px);
+}
+
+/* The bar's one-line notice ("Stamps keep their orientation"). */
+.notice {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  padding-inline: 4px;
+}

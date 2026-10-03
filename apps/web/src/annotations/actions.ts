@@ -7,10 +7,13 @@
 import type { EngineEdit, SourceId } from '@pdf-editor/document-model';
 import type { Annotation, InkAnnotation, NewAnnotation } from '@pdf-editor/engine';
 
+import { getEngineService } from '../engine/engine-service';
 import { announce } from '../shell/announcer';
-import { type PageTarget, useAnnotationStore } from './annotation-store';
+import { type PageTarget, patchAfterEdit, useAnnotationStore } from './annotation-store';
 import {
   type ActionResult,
+  appliedEdits,
+  editAnnotationId,
   type EngineContext,
   type ExecutedEdit,
   executeEdit,
@@ -28,7 +31,8 @@ import {
   updateLabel,
 } from './labels';
 import { type LassoPicks, lassoable } from './lasso/geometry';
-import { type PathEdit, splitInk } from './lasso/split';
+import type { PathEdit } from './lasso/split';
+import { type LassoEdit, splitLassoInk } from './lasso/transform';
 import { editWhole, patchTouchesInk } from './lasso/whole';
 import { builtinStampImage } from './stamps';
 
@@ -141,6 +145,32 @@ export interface InkPathInput {
   readonly widths: readonly number[];
 }
 
+/**
+ * A pen burst's own copy of its ink (craft spec §5.3 item 8): the ink as the edit `editId`
+ * left it (`undefined`: its create).
+ */
+export interface KnownInk {
+  readonly ink: InkAnnotation;
+  readonly editId?: string;
+}
+
+/**
+ * Whether `known` is still what the engine has: the newest edit of the ink the engine applied
+ * is the one that produced it. Any other edit of the ink (an undo, a redo, a move, a replay)
+ * makes it stale, and the page is read instead.
+ */
+function knownIsCurrent(source: SourceId, known: KnownInk): boolean {
+  const edits = appliedEdits(source);
+  for (let i = edits.length - 1; i >= 0; i--) {
+    const edit = edits[i];
+    if (!edit || editAnnotationId(edit) !== known.ink.id) continue;
+    return known.editId === undefined
+      ? edit.kind === 'annotation.create'
+      : edit.id === known.editId;
+  }
+  return false;
+}
+
 export interface AppendInkOptions {
   /** The history label for the ink once it holds `paths` paths. */
   readonly label: (paths: number) => string;
@@ -151,6 +181,13 @@ export interface AppendInkOptions {
    * back (an engine without per-point widths); else the old paths keep a constant width.
    */
   readonly knownWidths?: readonly (readonly number[])[];
+  /**
+   * The burst's copy of the ink, read when the queued action runs: while it is current
+   * (`knownIsCurrent`) the page is not listed.
+   */
+  readonly known?: () => KnownInk | undefined;
+  /** Receives the ink as the edit left it, inside the queued action (the next `known`). */
+  readonly onWritten?: (known: KnownInk) => void;
 }
 
 /**
@@ -159,6 +196,12 @@ export interface AppendInkOptions {
  * the queued action runs, so a burst can append to an ink whose create is still queued.
  * Resolves to the updated ink, or undefined when there was nothing to append to (the ink was
  * deleted, locked or never created): the caller then creates a new one.
+ *
+ * Cheaper bursts (craft spec §5.3 items 8–9): the ink comes from the burst's copy
+ * (`options.known`) instead of a listing while it is current; the update carries the
+ * `inkAppend` hint, so the engine appends the path in place and inverts to the copy without
+ * listing; the annotation store takes the written ink in place of a reload
+ * (`patchAfterEdit`), and the page repaints only the new path's box (`noteClippedChange`).
  */
 export function appendInkPath(
   target: PageTarget,
@@ -169,8 +212,13 @@ export function appendInkPath(
   return runAction(async (ctx): Promise<ActionResult<InkAnnotation> | undefined> => {
     const annotationId = await id();
     if (annotationId === undefined) return undefined;
-    const list = await readAnnotations(target.source, target.pageIndex, ctx);
-    const current = list.find((a) => a.id === annotationId);
+    const known = options.known?.();
+    const current =
+      known?.ink.id === annotationId && knownIsCurrent(target.source, known)
+        ? known.ink
+        : (await readAnnotations(target.source, target.pageIndex, ctx)).find(
+            (a) => a.id === annotationId,
+          );
     if (current?.kind !== 'ink' || current.flags?.locked || current.flags?.hidden) return undefined;
     const aligned = (w: readonly (readonly number[])[] | undefined) =>
       w?.length === current.paths.length &&
@@ -190,11 +238,25 @@ export function appendInkPath(
       rect: roundRect(boundsOf(paths, widest / 2 + 1)),
     };
     const annotation = await serializeAnnotation(stamped(next));
+    const before = await serializeAnnotation(current);
     const done = await executeEdit(
       ctx,
-      edit('annotation.update', target.source, current.pageIndex, { annotation }),
+      edit('annotation.update', target.source, current.pageIndex, {
+        annotation,
+        inkAppend: { before },
+      }),
     );
     const updated = done.annotation?.kind === 'ink' ? done.annotation : next;
+    options.onWritten?.({ ink: updated, editId: done.recorded.id });
+    patchAfterEdit(target.source, current.pageIndex, updated, done.recorded.id);
+    // Only the new path changed on the page: its outline box (round caps, joins up to 8 %
+    // past the half width) plus a point of anti-aliasing.
+    const reach = Math.max(current.strokeWidth, ...input.widths) * 0.55 + 1;
+    getEngineService().noteClippedChange(
+      target.source,
+      current.pageIndex,
+      boundsOf([input.path], reach),
+    );
     return {
       edits: [done.recorded],
       label: options.label(paths.length),
@@ -216,7 +278,7 @@ export function appendInkPath(
 export function removeLastInkPath(
   target: PageTarget,
   id: () => Promise<string | undefined>,
-  options: Omit<AppendInkOptions, 'knownWidths'>,
+  options: Omit<AppendInkOptions, 'knownWidths' | 'known'>,
 ): Promise<InkAnnotation | undefined> {
   return runAction(async (ctx): Promise<ActionResult<InkAnnotation> | undefined> => {
     const annotationId = await id();
@@ -242,10 +304,12 @@ export function removeLastInkPath(
       ctx,
       edit('annotation.update', target.source, current.pageIndex, { annotation }),
     );
+    const updated = done.annotation?.kind === 'ink' ? done.annotation : next;
+    options.onWritten?.({ ink: updated, editId: done.recorded.id });
     return {
       edits: [done.recorded],
       label: options.label(paths.length),
-      value: done.annotation?.kind === 'ink' ? done.annotation : next,
+      value: updated,
       coalesceKey: options.coalesceKey,
       ...(options.coalesceWindowMs === undefined
         ? {}
@@ -402,8 +466,9 @@ export interface LassoEditOptions extends Omit<InkPathEditOptions, 'label'> {
 /**
  * Edits what the lasso took on one page (craft spec §5.5) as one history entry: ink paths by
  * the rule of `editInkPaths` (`lasso/split.ts`), and annotations taken whole by
- * `lasso/whole.ts` (moved, recoloured, restyled or deleted in place; a change that does not
- * apply to a kind, such as a width for a note, leaves it out). `picks` and `change` are read
+ * `lasso/whole.ts` (moved, recoloured, restyled or deleted in place, resized or rotated by
+ * `lasso/transform.ts`; a change that does not apply to a kind, such as a width for a note,
+ * leaves it out). `picks` and `change` are read
  * when the queued action runs. Locked, hidden, missing and never-lassoed annotations (links,
  * redaction marks) are skipped. Undo restores everything in one step. Resolves to where the
  * taken paths are afterwards (whole annotations keep their ids), or undefined when nothing
@@ -412,7 +477,7 @@ export interface LassoEditOptions extends Omit<InkPathEditOptions, 'label'> {
 export function editLassoSelection(
   target: PageTarget,
   picks: () => LassoPicks,
-  change: () => PathEdit,
+  change: () => LassoEdit,
   options: LassoEditOptions,
 ): Promise<Readonly<Record<string, readonly number[]>> | undefined> {
   return runAction(
@@ -427,7 +492,7 @@ export function editLassoSelection(
       for (const [id, indices] of patchTouchesInk(pathEdit) ? Object.entries(paths) : []) {
         const current = list.find((a) => a.id === id);
         if (current?.kind !== 'ink' || current.flags?.locked || current.flags?.hidden) continue;
-        const outcome = splitInk(current, indices, pathEdit, newId());
+        const outcome = splitLassoInk(current, indices, pathEdit, newId());
         if (outcome.count === 0) continue;
         if (outcome.remove) {
           const done = await executeEdit(

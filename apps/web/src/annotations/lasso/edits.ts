@@ -12,21 +12,33 @@
  * Ink and then restyles the new one is one entry; while an edit waits in the queue, newer
  * values of the same control replace its value. The paths an edit takes are read when it
  * runs, so an edit queued behind a split acts on the split's result.
+ *
+ * Resize and rotate (`transformLassoSelection`, `transform.ts`) queue like a move: each
+ * drag or key press is its own edit, and a series under one key within 800 ms is one entry.
+ * A rotation that includes a stamp says once, in the bar, that stamps keep their orientation
+ * (`useLassoNotice`).
  */
+import { create } from 'zustand';
+
 import { m } from '../../i18n';
 import { announce } from '../../shell/announcer';
 import { editLassoSelection } from '../actions';
 import {
   activePathSelection,
   type PageTarget,
+  pageKey,
   type ToolStyle,
   useAnnotationStore,
 } from '../annotation-store';
 import { type KindCounts, lassoItems, onlyStrokes } from '../labels';
-import type { LassoPicks } from './geometry';
-import type { PathEdit } from './split';
+import { type LassoPicks, pickedWhole } from './geometry';
+import type { Affine, LassoEdit } from './transform';
+import type { PageFrame } from '../geometry';
 
-type Control = 'color' | 'opacity' | 'stroke' | 'font' | 'move' | 'delete';
+type Control = 'color' | 'opacity' | 'stroke' | 'font' | 'move' | 'resize' | 'rotate' | 'delete';
+
+/** Controls whose edits all apply in turn (a value slot would drop all but the last). */
+const STEPS: ReadonlySet<Control> = new Set(['move', 'resize', 'rotate']);
 
 /** History labels for strokes only ("Recolor 3 strokes"). */
 const STROKE_LABELS: Record<Exclude<Control, 'font'>, (count: number) => string> = {
@@ -34,6 +46,8 @@ const STROKE_LABELS: Record<Exclude<Control, 'font'>, (count: number) => string>
   opacity: (count) => m.lasso_history_opacity({ count }),
   stroke: (count) => m.lasso_history_width({ count }),
   move: (count) => m.lasso_history_move({ count }),
+  resize: (count) => m.lasso_history_resize({ count }),
+  rotate: (count) => m.lasso_history_rotate({ count }),
   delete: (count) => m.lasso_history_delete({ count }),
 };
 
@@ -44,6 +58,8 @@ const MIX_LABELS: Record<Control, (items: string) => string> = {
   stroke: (items) => m.lasso_history_width_items({ items }),
   font: (items) => m.lasso_history_font_items({ items }),
   move: (items) => m.lasso_history_move_items({ items }),
+  resize: (items) => m.lasso_history_resize_items({ items }),
+  rotate: (items) => m.lasso_history_rotate_items({ items }),
   delete: (items) => m.lasso_history_delete_items({ items }),
 };
 
@@ -54,14 +70,24 @@ export function lassoHistoryLabel(control: Control, counts: KindCounts): string 
 }
 
 /** Latest-value slots per control and lasso key (a slider drag sends one edit at a time). */
-const pending = new Map<string, { change: PathEdit }>();
+const pending = new Map<string, { change: LassoEdit }>();
 
-/** Tests: forget queued values. */
-export function resetLassoEdits(): void {
-  pending.clear();
+/** A line the lasso bar shows for one selection (its lasso key). */
+interface LassoNotice {
+  readonly key: string | null;
+  readonly message: string | null;
 }
 
-function run(control: Control, change: PathEdit): Promise<void> {
+/** The bar's notice: "Stamps keep their orientation", once per selection. */
+export const useLassoNotice = create<LassoNotice>()(() => ({ key: null, message: null }));
+
+/** Tests: forget queued values and notices. */
+export function resetLassoEdits(): void {
+  pending.clear();
+  useLassoNotice.setState({ key: null, message: null });
+}
+
+function run(control: Control, change: LassoEdit): Promise<void> {
   const state = useAnnotationStore.getState();
   const selection = state.selection;
   const captured = activePathSelection(state);
@@ -74,12 +100,12 @@ function run(control: Control, change: PathEdit): Promise<void> {
   };
   const key = `lasso:${control}:${captured.key}`;
   const slot = pending.get(key);
-  if (slot && control !== 'move') {
+  if (slot && !STEPS.has(control)) {
     slot.change = change;
     return Promise.resolve();
   }
   const fresh = { change };
-  if (control !== 'move') pending.set(key, fresh);
+  if (!STEPS.has(control)) pending.set(key, fresh);
   // The paths are read when the edit runs: an edit behind a split acts on its result.
   const picks = (): LassoPicks => {
     const now = activePathSelection(useAnnotationStore.getState());
@@ -137,6 +163,34 @@ export function styleLassoSelection(patch: Partial<ToolStyle>): void {
 export function moveLassoSelection(dx: number, dy: number): Promise<void> {
   if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return Promise.resolve();
   return run('move', { kind: 'move', dx, dy });
+}
+
+/**
+ * Resizes or rotates what the lasso took by `matrix` (user space, `transform.ts`); `frame`
+ * places note icons. Consecutive edits of one kind within 800 ms join. A rotation that
+ * includes a stamp says once per selection that stamps keep their orientation.
+ */
+export function transformLassoSelection(
+  kind: 'resize' | 'rotate',
+  matrix: Affine,
+  frame?: PageFrame,
+): Promise<void> {
+  if (kind === 'rotate') noteStampOrientation();
+  return run(kind, { kind: 'transform', matrix, ...(frame ? { frame } : {}) });
+}
+
+/** Shows (and announces) the stamp notice when the selection holds a stamp, once per key. */
+function noteStampOrientation(): void {
+  const state = useAnnotationStore.getState();
+  const selection = activePathSelection(state);
+  if (!selection || useLassoNotice.getState().key === selection.key) return;
+  const at = state.selection;
+  const page = at ? state.pages[pageKey(at.source, at.pageIndex)] : undefined;
+  const whole = pickedWhole(page?.annotations ?? [], selection.whole);
+  if (!whole.some((a) => a.kind === 'stamp')) return;
+  const message = m.lasso_stamps_keep_orientation();
+  useLassoNotice.setState({ key: selection.key, message });
+  announce(message);
 }
 
 /**
