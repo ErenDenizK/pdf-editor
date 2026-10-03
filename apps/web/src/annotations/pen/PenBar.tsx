@@ -45,13 +45,13 @@ import {
   dotSize,
   isHighlighter,
   needsDotRing,
-  PEN_SWATCHES,
   type PenPreset,
   PRESET_INDICES,
   PRESET_LIMITS,
   type PresetIndex,
   presetLabel,
   presetName,
+  presetSwatches,
   WIDTH_STOPS,
   widthText,
 } from './presets';
@@ -224,7 +224,9 @@ function PresetEditor({
   const preset = useAnnotationStore((s) => s.pen.presets[i]);
   const name = presetName(i, preset);
   const edit = (patch: Partial<PenPreset>) => useAnnotationStore.getState().editPreset(i, patch);
-  const swatchChosen = PEN_SWATCHES.some((swatch) => swatch.color === preset.color);
+  // The eight inks for a pen, the four tints for the highlighter (craft spec §6).
+  const swatches = presetSwatches(preset);
+  const swatchChosen = swatches.some((swatch) => swatch.color === preset.color);
   // A colour that is none of the swatches shows in the custom control (then the chosen one).
   const custom = !swatchChosen;
   const stopChosen = WIDTH_STOPS.some((stop) => stop === preset.width);
@@ -263,7 +265,7 @@ function PresetEditor({
             </Popover.Title>
 
             <div role="radiogroup" aria-label={m.annot_color()} className={styles.swatches}>
-              {PEN_SWATCHES.map((swatch, n) => (
+              {swatches.map((swatch, n) => (
                 <button
                   key={swatch.color}
                   type="button"

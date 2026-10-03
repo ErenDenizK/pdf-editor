@@ -24,6 +24,7 @@ import {
 import { readAnnotations, resetEditRunner, whenIdle } from '../edit-runner';
 import type { Point } from '../ink';
 import { annotationName, burstClosedLabel, burstLabel, capitalize, deleteLabel } from '../labels';
+import { INK } from '../palette';
 import {
   burstLimits,
   type BurstStroke,
@@ -261,7 +262,7 @@ describe('bursts on the engine', () => {
     const [ink, ...others] = await inks(page1);
     expect(others).toEqual([]);
     expect(ink?.paths).toHaveLength(3);
-    expect(ink?.color?.toUpperCase()).toBe('#1F1F1F');
+    expect(ink?.color?.toUpperCase()).toBe(INK.black);
     expect(ink?.strokeWidth).toBe(1.5);
     expect(model().history.past.length).toBe(before + 1);
     expect(model().history.present.label).toBe('Pen on page 1 · 3 strokes');
@@ -307,7 +308,7 @@ describe('bursts on the engine', () => {
     await stroke(page1, 150, 400, 2200);
     const page1Inks = await inks(page1);
     expect(page1Inks.map((a) => a.paths.length)).toEqual([1, 1, 1]);
-    expect(page1Inks.at(-1)?.color?.toUpperCase()).toBe('#1E5BD8');
+    expect(page1Inks.at(-1)?.color?.toUpperCase()).toBe(INK.blue);
   });
 
   it('the next line of writing is a new burst, though within D', async () => {

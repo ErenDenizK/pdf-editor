@@ -29,8 +29,10 @@ import { toolStyleGroup } from './drafts';
 import { onPagesChanged, readAnnotations } from './edit-runner';
 import { styleLassoSelection } from './lasso/edits';
 import { restyleInk } from './lasso/split';
+import { INK, migrateLegacyColor, TINT } from './palette';
 import {
   DEFAULT_PRESETS,
+  LEGACY_PEN_PRESETS_STORAGE_KEY,
   parsePenSettings,
   PEN_PRESETS_STORAGE_KEY,
   type PenPreset,
@@ -48,19 +50,9 @@ export const AUTHOR_STORAGE_KEY = 'pdf-editor:annotations:author:v1';
  * Tool styles, per device (spec §6.3, §9). Under the `ui:` namespace with its own version:
  * a change of shape gets a new key, and anything unreadable falls back to the defaults.
  */
-export const TOOL_STYLES_STORAGE_KEY = 'pdf-editor:ui:tool-styles:v1';
-
-/** The fixed palette (spec §2); a custom colour is available next to it. */
-export const SWATCHES = [
-  '#FFEB3B',
-  '#FB8C00',
-  '#E53935',
-  '#D81B60',
-  '#8E24AA',
-  '#1E88E5',
-  '#43A047',
-  '#000000',
-] as const;
+export const TOOL_STYLES_STORAGE_KEY = 'pdf-editor:ui:tool-styles:v2';
+/** Tool styles before the M8 palette (craft spec §6), read once when no version 2 is stored. */
+export const LEGACY_TOOL_STYLES_STORAGE_KEY = 'pdf-editor:ui:tool-styles:v1';
 
 export type StyleGroup =
   | 'highlight'
@@ -79,19 +71,23 @@ export interface ToolStyle {
   readonly fontSize: number;
 }
 
-const base: ToolStyle = { color: '#E53935', opacity: 1, strokeWidth: 2, fontSize: 12 };
+const base: ToolStyle = { color: INK.red, opacity: 1, strokeWidth: 2, fontSize: 12 };
 
+/** Colours from the one palette (craft spec §6). */
 export const DEFAULT_STYLES: Readonly<Record<StyleGroup, ToolStyle>> = {
-  highlight: { ...base, color: '#FFEB3B' },
-  underline: { ...base, color: '#1E88E5' },
-  strikeout: { ...base, color: '#E53935' },
-  squiggly: { ...base, color: '#43A047' },
+  highlight: { ...base, color: TINT.yellow },
+  underline: { ...base, color: INK.blue },
+  strikeout: { ...base, color: INK.red },
+  squiggly: { ...base, color: INK.green },
   // The first pen preset (spec §6.2); the pen draws with its armed preset (`pen`).
-  ink: { ...base, color: '#1F1F1F', strokeWidth: 1.5 },
-  shape: { ...base, color: '#E53935' },
-  text: { ...base, color: '#000000' },
-  note: { ...base, color: '#FFEB3B' },
+  ink: { ...base, color: INK.black, strokeWidth: 1.5 },
+  shape: { ...base, color: INK.red },
+  text: { ...base, color: INK.black },
+  note: { ...base, color: TINT.yellow },
 };
+
+/** Groups whose colour is a highlighter tint rather than an ink (palette migration). */
+const TINT_GROUPS: ReadonlySet<StyleGroup> = new Set(['highlight', 'note']);
 
 /** Accepted ranges of stored style values (the pen range of spec §6.2 for widths). */
 export const STYLE_LIMITS = {
@@ -123,27 +119,41 @@ function validStyle(current: ToolStyle, patch: unknown): ToolStyle {
 
 /**
  * Reads stored tool styles, field by field (like `parseLayout`): an unknown version, group
- * or value keeps the default for that field only.
+ * or value keeps the default for that field only. Version 1 (before the M8 palette) is
+ * migrated: an old default or swatch colour becomes the new colour of its role, a custom
+ * colour stays (`migrateLegacyColor`).
  */
 export function parseToolStyles(value: unknown): Readonly<Record<StyleGroup, ToolStyle>> {
   if (typeof value !== 'object' || value === null) return DEFAULT_STYLES;
   const v = value as { v?: unknown; styles?: unknown };
-  if (v.v !== 1 || typeof v.styles !== 'object' || v.styles === null) return DEFAULT_STYLES;
+  if ((v.v !== 1 && v.v !== 2) || typeof v.styles !== 'object' || v.styles === null) {
+    return DEFAULT_STYLES;
+  }
+  const legacy = v.v === 1;
   const stored = v.styles as Record<string, unknown>;
   return Object.fromEntries(
-    STYLE_GROUPS.map((group) => [group, validStyle(DEFAULT_STYLES[group], stored[group])]),
+    STYLE_GROUPS.map((group) => {
+      const style = validStyle(DEFAULT_STYLES[group], stored[group]);
+      if (!legacy) return [group, style];
+      const color = migrateLegacyColor(style.color, TINT_GROUPS.has(group) ? 'tint' : 'ink');
+      return [group, { ...style, color }];
+    }),
   ) as Record<StyleGroup, ToolStyle>;
 }
 
 function readPenSettings(): PenSettings {
-  return parsePenSettings(readJson(PEN_PRESETS_STORAGE_KEY));
+  return parsePenSettings(
+    readJson(PEN_PRESETS_STORAGE_KEY) ?? readJson(LEGACY_PEN_PRESETS_STORAGE_KEY),
+  );
 }
 
 /** Stored tool styles, the pen's being its armed preset's. */
 function readToolStyles(
   pen: PenSettings = readPenSettings(),
 ): Readonly<Record<StyleGroup, ToolStyle>> {
-  const styles = parseToolStyles(readJson(TOOL_STYLES_STORAGE_KEY));
+  const styles = parseToolStyles(
+    readJson(TOOL_STYLES_STORAGE_KEY) ?? readJson(LEGACY_TOOL_STYLES_STORAGE_KEY),
+  );
   return { ...styles, ink: validStyle(styles.ink, presetStyle(pen.presets[pen.active])) };
 }
 
@@ -161,17 +171,20 @@ export interface AnnotationSelection extends PageTarget {
 }
 
 /**
- * Pen paths taken by the lasso (experience-redesign spec §6.5): the selection's Ink ids, each
- * with the indices of its taken paths. Edits through the contextual bar and `applyStyle` act
- * on those paths only (`lasso/edits.ts`), splitting an Ink when only some of its paths are
- * taken (`lasso/split.ts`). It lives beside `selection`, which holds the same ids, and only
- * counts while the two agree (`activePathSelection`).
+ * What the lasso took (craft spec §5.5): pen paths, the selection's Ink ids each with the
+ * indices of its taken paths, and other annotations whole. Edits through the contextual bar
+ * and `applyStyle` act on those paths and annotations only, in one history entry
+ * (`lasso/edits.ts`), splitting an Ink when only some of its paths are taken
+ * (`lasso/split.ts`). It lives beside `selection`, which holds the same ids, and only counts
+ * while the two agree (`activePathSelection`).
  */
 export interface PathSelection {
   readonly pageId: PageId;
   /** One lasso selection: its edits coalesce under it, across the split that renames ids. */
   readonly key: string;
   readonly paths: Readonly<Record<string, readonly number[]>>;
+  /** Annotations taken whole (every kind but ink); their ids do not change by an edit. */
+  readonly whole: readonly string[];
   /**
    * Where an edit put the taken paths (a split moves them to a new Ink): the selection
    * follows when the page next loads with those ids, so it never points at an Ink the page
@@ -220,7 +233,7 @@ interface PageEntry {
 interface AnnotationState {
   readonly pages: Readonly<Record<string, PageEntry>>;
   readonly selection: AnnotationSelection | null;
-  /** Paths taken by the lasso within `selection` (spec §6.5); null for whole annotations. */
+  /** What the lasso took within `selection` (craft spec §5.5); null outside the lasso. */
   readonly pathSelection: PathSelection | null;
   readonly editor: InlineEditor | null;
   readonly styles: Readonly<Record<StyleGroup, ToolStyle>>;
@@ -234,13 +247,15 @@ interface AnnotationState {
   reloadPage: (source: SourceId, pageIndex: number) => Promise<void>;
   select: (selection: AnnotationSelection | null) => void;
   /**
-   * Selects Ink paths (the lasso, spec §6.5): `paths` maps ids to path indices. `key` keeps
-   * the identity of a selection whose ids changed by an edit (a split); else a new one.
+   * Selects what the lasso took (craft spec §5.5): `paths` maps Ink ids to path indices,
+   * `whole` lists other annotations taken whole. `key` keeps the identity of a selection
+   * whose ids changed by an edit (a split); else a new one.
    */
   selectPaths: (
     target: PageTarget,
     paths: Readonly<Record<string, readonly number[]>>,
     key?: string,
+    whole?: readonly string[],
   ) => void;
   /** The lasso selection `key` follows its paths to `next` at the page's next load. */
   followPaths: (key: string, next: Readonly<Record<string, readonly number[]>> | undefined) => void;
@@ -325,7 +340,12 @@ export const useAnnotationStore = create<AnnotationState>()((set, get) => ({
           next &&
           Object.keys(next).every((id) => annotations.some((a) => a.id === id))
         ) {
-          const nextIds = Object.keys(next);
+          const nextIds = [
+            ...Object.keys(next),
+            ...s.pathSelection.whole.filter((id) =>
+              annotations.some((a) => a.id === id && !a.flags?.hidden),
+            ),
+          ];
           const { next: _done, ...current } = s.pathSelection;
           const followed = livePaths({ ...current, paths: next }, nextIds, annotations);
           return {
@@ -351,18 +371,20 @@ export const useAnnotationStore = create<AnnotationState>()((set, get) => ({
       selection: selection && selection.ids.length > 0 ? selection : null,
       pathSelection: null,
     }),
-  selectPaths: (target, paths, key) => {
+  selectPaths: (target, paths, key, whole = []) => {
     const entries = Object.entries(paths).filter(([, indices]) => indices.length > 0);
-    if (entries.length === 0) {
+    const wholeIds = [...new Set(whole)].filter((id) => paths[id] === undefined);
+    if (entries.length === 0 && wholeIds.length === 0) {
       set({ selection: null, pathSelection: null });
       return;
     }
     set({
-      selection: { ...target, ids: entries.map(([id]) => id) },
+      selection: { ...target, ids: [...entries.map(([id]) => id), ...wholeIds] },
       pathSelection: {
         pageId: target.pageId,
         key: key ?? globalThis.crypto.randomUUID(),
         paths: Object.fromEntries(entries),
+        whole: wholeIds,
       },
     });
   },
@@ -386,7 +408,7 @@ export const useAnnotationStore = create<AnnotationState>()((set, get) => ({
       next = { ...next, ...presetStyle(preset) };
     }
     const styles = { ...current, [group]: next };
-    writeJson(TOOL_STYLES_STORAGE_KEY, { v: 1, styles });
+    writeJson(TOOL_STYLES_STORAGE_KEY, { v: 2, styles });
     if (pen) writeJson(PEN_PRESETS_STORAGE_KEY, pen);
     set(pen ? { styles, pen } : { styles });
   },
@@ -501,35 +523,48 @@ function styleSelection(selection: AnnotationSelection, patch: Partial<ToolStyle
 }
 
 /**
- * The lasso's paths when they describe the current selection (same page, same ids), else
- * null: a selection set any other way is of whole annotations.
+ * The lasso's selection when it describes the current selection (same page, same ids: its
+ * paths and its whole annotations), else null: a selection set any other way is of whole
+ * annotations, outside the lasso.
  */
 export function activePathSelection(
   state: Pick<AnnotationState, 'selection' | 'pathSelection'>,
 ): PathSelection | null {
   const { selection, pathSelection } = state;
   if (!selection || selection.pageId !== pathSelection?.pageId) return null;
-  const ids = Object.keys(pathSelection.paths);
-  if (ids.length !== selection.ids.length) return null;
-  return selection.ids.every((id) => (pathSelection.paths[id]?.length ?? 0) > 0)
+  const count = Object.keys(pathSelection.paths).length + pathSelection.whole.length;
+  if (count !== selection.ids.length) return null;
+  return selection.ids.every(
+    (id) => (pathSelection.paths[id]?.length ?? 0) > 0 || pathSelection.whole.includes(id),
+  )
     ? pathSelection
     : null;
 }
 
-/** The lasso's paths that still exist among `ids` and `annotations`, or null for none. */
+/**
+ * The lasso's paths and whole annotations that still exist among `ids` and `annotations`,
+ * or null when any of `ids` lost everything the lasso took of it.
+ */
 function livePaths(
   current: PathSelection,
   ids: readonly string[],
   annotations: readonly Annotation[],
 ): PathSelection | null {
   const paths: Record<string, readonly number[]> = {};
+  const whole: string[] = [];
   for (const id of ids) {
     const a = annotations.find((x) => x.id === id);
+    if (a && current.whole.includes(id)) {
+      whole.push(id);
+      continue;
+    }
     const count = a?.kind === 'ink' ? a.paths.length : 0;
     const indices = (current.paths[id] ?? []).filter((i) => i < count);
     if (indices.length > 0) paths[id] = indices;
   }
-  return Object.keys(paths).length === ids.length ? { ...current, paths } : null;
+  return Object.keys(paths).length + whole.length === ids.length
+    ? { ...current, paths, whole }
+    : null;
 }
 
 /** Visible annotations of a page (hidden ones are not shown or listed). */

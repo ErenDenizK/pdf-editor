@@ -1,23 +1,45 @@
 /**
- * Lasso geometry (experience-redesign spec §6.5): which pen paths a freehand lasso takes.
+ * Lasso geometry (craft spec §5.5, after experience-redesign spec §6.5): what a freehand
+ * lasso takes.
  *
  * **Match rule.** The lasso is the closed polygon of the dragged points (the last point joins
- * the first). A path of an Ink annotation is taken when it touches the region: at least one
- * of its points lies inside the polygon (even–odd rule, so a lasso that crosses itself
- * leaves its doubly enclosed loops out), or at least one of its segments crosses an edge of
- * the polygon. A stroke the lasso line merely passes through is therefore taken, as is a
- * stroke wholly inside. Locked and hidden inks are never taken (they cannot be edited), and
- * other annotation kinds are left to the Select tool. All of it runs in page user space, so
- * zoom and page rotation do not change the result.
+ * the first). A path is taken when it touches the region: at least one of its points lies
+ * inside the polygon (even–odd rule, so a lasso that crosses itself leaves its doubly
+ * enclosed loops out), or at least one of its segments crosses an edge of the polygon. A
+ * stroke the lasso line merely passes through is therefore taken, as is a stroke wholly
+ * inside. Every kind is reduced to such paths (`hitOutlines`):
+ *
+ * - **Ink**: each path on its own; the lasso takes paths, not the annotation (`paths`).
+ * - **Line, arrow, polyline**: the vertices as one open path; **polygon**: closed.
+ * - **Rectangle**: its four edges; **ellipse**: 32 points sampled on it (both on the
+ *   border's centre line, the rect inset by half the stroke).
+ * - **Free text, stamp, signature image**: the rect's corners and edges, so a corner inside
+ *   or an edge crossing takes it.
+ * - **Note**: its icon rect, where the renderer draws it (`displayRect`, NoRotate notes).
+ * - **Text markups** (highlight, underline, strikeout, squiggly): each quad, and any quad
+ *   touched takes it: a corner inside, an edge crossing, or the lasso drawn inside the quad.
+ *
+ * Links, redaction marks and form widgets are never taken; locked and hidden annotations are
+ * skipped (they cannot be edited). Everything but ink is taken whole (`whole`). All of it
+ * runs in page user space, so zoom and page rotation do not change the result.
  */
 import type { Rect } from '@pdf-editor/document-model';
 import type { Annotation } from '@pdf-editor/engine';
 
-import { type Box, type PageFrame, userToCss } from '../geometry';
+import { type Box, displayRect, type PageFrame, userToCss } from '../geometry';
 import { boundsOf, type Point } from '../ink';
 
 /** Path indices per Ink annotation id, ascending. */
 export type PathPicks = Readonly<Record<string, readonly number[]>>;
+
+/** What a lasso took: ink paths, and other annotations whole (ids in page order). */
+export interface LassoPicks {
+  readonly paths: PathPicks;
+  readonly whole: readonly string[];
+}
+
+/** Points sampled on an ellipse for its hit test and highlight. */
+export const ELLIPSE_SAMPLES = 32;
 
 /** True when `p` lies inside `polygon` (even–odd rule; the edge counts as either side). */
 export function pointInPolygon(p: Point, polygon: readonly Point[]): boolean {
@@ -99,26 +121,157 @@ export function pathTouchesPolygon(
   return false;
 }
 
+/** The rect's corners as a closed path (counter-clockwise from the lower left). */
+export function rectOutline(r: Rect): Point[] {
+  const x1 = r.x + r.width;
+  const y1 = r.y + r.height;
+  return [
+    { x: r.x, y: r.y },
+    { x: x1, y: r.y },
+    { x: x1, y: y1 },
+    { x: r.x, y: y1 },
+    { x: r.x, y: r.y },
+  ];
+}
+
+/** `n` points on the ellipse inscribed in `r`, closed (the first point repeats). */
+export function ellipseOutline(r: Rect, n: number = ELLIPSE_SAMPLES): Point[] {
+  const cx = r.x + r.width / 2;
+  const cy = r.y + r.height / 2;
+  const out: Point[] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = ((i % n) / n) * 2 * Math.PI;
+    out.push({ x: cx + (r.width / 2) * Math.cos(t), y: cy + (r.height / 2) * Math.sin(t) });
+  }
+  return out;
+}
+
+/** `r` shrunk by `by` on every side, never below a point. */
+function inset(r: Rect, by: number): Rect {
+  const dx = Math.min(by, r.width / 2);
+  const dy = Math.min(by, r.height / 2);
+  return { x: r.x + dx, y: r.y + dy, width: r.width - 2 * dx, height: r.height - 2 * dy };
+}
+
+/** Whether the lasso can take `a` at all (never links, redaction marks; never locked or hidden). */
+export function lassoable(a: Annotation): boolean {
+  return a.kind !== 'link' && a.kind !== 'redact' && !a.flags?.locked && !a.flags?.hidden;
+}
+
+/** True for kinds hit as areas as well as outlines (text markup quads). */
+function hitAsArea(a: Annotation): boolean {
+  return (
+    a.kind === 'highlight' ||
+    a.kind === 'underline' ||
+    a.kind === 'strikeout' ||
+    a.kind === 'squiggly'
+  );
+}
+
 /**
- * The paths a lasso takes on one page (user space): for every visible, unlocked Ink with at
- * least one matching path, its matching path indices. Other kinds are not taken.
+ * The paths (user space) a whole annotation is hit by, and its highlight traces (module
+ * header); empty for ink (taken by path) and for kinds the lasso never takes. `frame` places
+ * a note's icon (`displayRect`); without it the note's /Rect is used.
+ */
+export function hitOutlines(a: Annotation, frame?: PageFrame): Point[][] {
+  switch (a.kind) {
+    case 'line':
+    case 'polyline':
+      return a.vertices && a.vertices.length > 0
+        ? [a.vertices.map((p) => ({ x: p.x, y: p.y }))]
+        : [rectOutline(a.rect)];
+    case 'polygon': {
+      const v = a.vertices;
+      if (!v || v.length === 0) return [rectOutline(a.rect)];
+      const first = v[0] as Point;
+      return [[...v.map((p) => ({ x: p.x, y: p.y })), { x: first.x, y: first.y }]];
+    }
+    case 'square':
+      return [rectOutline(inset(a.rect, a.strokeWidth / 2))];
+    case 'circle':
+      return [ellipseOutline(inset(a.rect, a.strokeWidth / 2))];
+    case 'free-text':
+    case 'stamp':
+      return [rectOutline(a.rect)];
+    case 'text':
+      return [rectOutline(frame ? displayRect(frame, a) : a.rect)];
+    case 'highlight':
+    case 'underline':
+    case 'strikeout':
+    case 'squiggly':
+      return a.quads.map(rectOutline);
+    default:
+      return [];
+  }
+}
+
+/** The match rule for a whole annotation (module header); false for ink and excluded kinds. */
+export function annotationTouchesPolygon(
+  a: Annotation,
+  polygon: readonly Point[],
+  frame?: PageFrame,
+  polygonBounds: Rect = boundsOf([polygon]),
+): boolean {
+  if (polygon.length < 3 || a.kind === 'ink' || !lassoable(a)) return false;
+  const area = hitAsArea(a);
+  const first = polygon[0] as Point;
+  return hitOutlines(a, frame).some(
+    (outline) =>
+      pathTouchesPolygon(outline, polygon, polygonBounds) ||
+      // A lasso drawn inside a quad touches it too.
+      (area && outline.length > 2 && pointInPolygon(first, outline)),
+  );
+}
+
+/**
+ * What a lasso takes on one page (user space): for every visible, unlocked Ink with at least
+ * one matching path, its matching path indices; every other annotation it touches, whole
+ * (module header). `frame` places note icons.
  */
 export function lassoPicks(
   annotations: readonly Annotation[],
   polygon: readonly Point[],
-): PathPicks {
-  const picks: Record<string, number[]> = {};
-  if (polygon.length < 3) return picks;
+  frame?: PageFrame,
+): LassoPicks {
+  const paths: Record<string, number[]> = {};
+  const whole: string[] = [];
+  if (polygon.length < 3) return { paths, whole };
   const bounds = boundsOf([polygon]);
   for (const a of annotations) {
-    if (a.kind !== 'ink' || a.flags?.locked || a.flags?.hidden) continue;
-    const taken: number[] = [];
-    a.paths.forEach((path, i) => {
-      if (pathTouchesPolygon(path, polygon, bounds)) taken.push(i);
-    });
-    if (taken.length > 0) picks[a.id] = taken;
+    if (!lassoable(a)) continue;
+    if (a.kind === 'ink') {
+      const taken: number[] = [];
+      a.paths.forEach((path, i) => {
+        if (pathTouchesPolygon(path, polygon, bounds)) taken.push(i);
+      });
+      if (taken.length > 0) paths[a.id] = taken;
+    } else if (annotationTouchesPolygon(a, polygon, frame, bounds)) {
+      whole.push(a.id);
+    }
   }
-  return picks;
+  return { paths, whole };
+}
+
+/**
+ * The lasso picks of a selection: `paths` for its ink, and every other selected annotation
+ * whole (the selection holds exactly the lasso's ids, `activePathSelection`).
+ */
+export function picksOfSelection(selected: readonly Annotation[], paths: PathPicks): LassoPicks {
+  return { paths, whole: selected.filter((a) => paths[a.id] === undefined).map((a) => a.id) };
+}
+
+/** How many items the lasso took: paths plus whole annotations. */
+export function lassoCount(picks: LassoPicks): number {
+  return pickCount(picks.paths) + picks.whole.length;
+}
+
+/** The whole annotations of `picks` among `annotations`, in page order. */
+export function pickedWhole(
+  annotations: readonly Annotation[],
+  whole: readonly string[],
+): Annotation[] {
+  const ids = new Set(whole);
+  return annotations.filter((a) => ids.has(a.id));
 }
 
 /** How many paths `picks` holds. */
@@ -164,19 +317,26 @@ export function thinTrail(points: readonly Point[], min: number): Point[] {
 }
 
 /**
- * The box (CSS px of the displayed page) around the picked paths, grown by half their widest
- * stroke; null when none of them is loaded.
+ * The box (CSS px of the displayed page) around the picked paths and whole annotations,
+ * grown by half their widest stroke; null when none of them is loaded.
  */
 export function pickedCssBounds(
   frame: PageFrame,
   annotations: readonly Annotation[],
   picks: PathPicks,
+  whole: readonly string[] = [],
 ): Box | null {
   let pad = 0;
   const css: Point[][] = [];
   for (const { annotation, path } of pickedPaths(annotations, picks)) {
     css.push(path.map((p) => userToCss(frame, p)));
     if (annotation.kind === 'ink') pad = Math.max(pad, (annotation.strokeWidth * frame.scale) / 2);
+  }
+  for (const a of pickedWhole(annotations, whole)) {
+    for (const outline of hitOutlines(a, frame)) css.push(outline.map((p) => userToCss(frame, p)));
+    if (a.kind === 'line' || a.kind === 'polyline' || a.kind === 'polygon') {
+      pad = Math.max(pad, (a.strokeWidth * frame.scale) / 2);
+    }
   }
   if (css.length === 0) return null;
   const r = boundsOf(css, pad);

@@ -36,6 +36,7 @@ import {
   TOOL_STYLES_STORAGE_KEY,
   useAnnotationStore,
 } from './annotation-store';
+import { INK } from './palette';
 import { PEN_PRESETS_STORAGE_KEY } from './pen/presets';
 import { readAnnotations, resetEditRunner, whenIdle } from './edit-runner';
 
@@ -303,7 +304,7 @@ describe('writing is never interrupted', () => {
   });
 
   it('arming the pen draws with the persisted style', async () => {
-    store().setStyle('ink', { color: '#1E88E5', strokeWidth: 4 });
+    store().setStyle('ink', { color: INK.purple, strokeWidth: 4 });
     resetAnnotationStore(); // As a reload would: the style comes back from storage.
     const { layer, target } = await mountRead();
     await armInk(layer);
@@ -311,7 +312,7 @@ describe('writing is never interrupted', () => {
     await waitFor(async () => expect(await inkOnPage(target)).toHaveLength(1));
     const [ink] = await inkOnPage(target);
     expect(ink?.kind === 'ink' ? [ink.color?.toUpperCase(), ink.strokeWidth] : []).toEqual([
-      '#1E88E5',
+      INK.purple,
       4,
     ]);
   });
@@ -338,11 +339,11 @@ describe('tool style controls', () => {
     });
     expect(section).toBeVisible();
     screen.getByRole('radio', { name: 'Blue' }).click();
-    await waitFor(() => expect(store().styles.ink.color).toBe('#1E88E5'));
+    await waitFor(() => expect(store().styles.ink.color).toBe(INK.blue));
     expect(screen.getByRole('radio', { name: 'Blue' })).toHaveAttribute('aria-checked', 'true');
     expect(store().styles.shape).toEqual(DEFAULT_STYLES.shape);
     // Persisted: a reload starts with it.
     resetAnnotationStore();
-    expect(store().styles.ink.color).toBe('#1E88E5');
+    expect(store().styles.ink.color).toBe(INK.blue);
   });
 });

@@ -16,7 +16,7 @@ import { announce } from '../shell/announcer';
 import type { CommandRegistry } from '../commands/registry';
 import { registerRedactionCommands } from '../redaction/commands';
 import { markSelection } from '../redaction/marks';
-import { useUiStore } from '../state/ui-store';
+import { isPageView, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useToolStore } from '../viewer/tool-store';
 import { deleteAnnotations } from './actions';
@@ -27,7 +27,7 @@ import { BUILTIN_STAMPS, builtinPendingStamp, imageStamp } from './stamps';
 import { ANNOTATION_TOOLS, isMarkupMode, type ToolDefinition } from './tools';
 
 const readMode = () =>
-  useUiStore.getState().viewMode === 'read' &&
+  isPageView(useUiStore.getState()) &&
   useWorkspaceStore.getState().workspace.documentOrder.length > 0;
 
 /** Asks for an image and arms the stamp tool with it. Needs a user gesture. */

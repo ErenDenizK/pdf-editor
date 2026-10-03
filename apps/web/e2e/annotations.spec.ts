@@ -34,7 +34,7 @@ async function drag(
 }
 
 /**
- * Share of note-yellow pixels (the default #FFEB3B) in a region of the screen: decoded in
+ * Share of note-yellow pixels (the default #FFEA00) in a region of the screen: decoded in
  * the page, so the test needs no image library.
  */
 async function yellowShare(

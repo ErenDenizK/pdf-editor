@@ -1,13 +1,15 @@
 /** Colour helpers for annotation chrome (SVG previews use the annotation's own colours). */
 import type { Annotation } from '@pdf-editor/engine';
 
+import { PURE_BLACK } from './palette';
+
 /**
  * The colour the colour controls edit for an annotation, if it has one. For a redaction
  * mark that is the fill applying will paint (/IC), not its outline.
  */
 export function primaryColor(a: Annotation): string | undefined {
   if (a.kind === 'free-text') return a.textColor ?? a.color;
-  if (a.kind === 'redact') return a.interiorColor ?? '#000000';
+  if (a.kind === 'redact') return a.interiorColor ?? PURE_BLACK;
   if (a.kind === 'stamp' || a.kind === 'link') return undefined;
   return a.color;
 }

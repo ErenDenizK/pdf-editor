@@ -52,8 +52,12 @@
   "view_mode_label": "View mode",
   "mode_read": "Read",
   "mode_arrange": "Arrange",
-  "mode_read_long": "Read mode",
+  "mode_read_long": "Read mode, locked",
   "mode_arrange_long": "Arrange pages",
+  "mode_read_label": "Read, locked",
+  "mode_edit": "Edit",
+  "mode_edit_long": "Edit mode",
+  "read_locked_announce": "Read mode, locked",
   "drop_no_pdfs": "No PDF or image files found in the drop",
   "nav_label": "Navigator",
   "nav_views_label": "Navigator views",
@@ -761,6 +765,7 @@
   "cmd_show_outline": "Show outline",
   "cmd_show_files": "Show files",
   "cmd_mode_read": "Switch to Read",
+  "cmd_mode_edit": "Switch to Edit",
   "cmd_mode_arrange": "Arrange pages",
   "cmd_zoom_in": "Zoom in",
   "cmd_zoom_out": "Zoom out",
@@ -797,6 +802,8 @@
   "cmd_section_interleave_keywords": "interleave, duplex, collate, odd and even",
   "cmd_mode_compare_keywords": "diff, compare, difference, changes",
   "cmd_mode_arrange_keywords": "organize, reorder, thumbnails, light table",
+  "cmd_mode_read_keywords": "read, view, viewer, lock, locked",
+  "cmd_mode_edit_keywords": "edit, annotate, mark up, write, draw, change",
   "cmd_document_ocr_keywords": "OCR, scan, recognize text",
   "cmd_pages_rotate_right_keywords": "rotate, turn, clockwise",
   "cmd_pages_rotate_left_keywords": "rotate, turn, counterclockwise",
@@ -1463,6 +1470,7 @@
   "color_blue": "Blue",
   "color_green": "Green",
   "color_black": "Black",
+  "color_cyan": "Cyan",
   "comments_author": "Your name on new annotations",
   "comments_author_placeholder": "Anonymous",
   "comments_author_prompt": "Name on your comments",
@@ -1491,7 +1499,7 @@
   "annot_action_failed": "The annotation change could not be applied; nothing was changed",
   "annot_stroke_not_saved": "Stroke not saved",
   "lasso_tool": "Lasso",
-  "lasso_tool_tooltip": "Lasso: draw around pen strokes to select them",
+  "lasso_tool_tooltip": "Lasso: draw around strokes, shapes and notes to select them",
   "lasso_selected": [
     {
       "declarations": ["input count", "local countPlural = count: plural"],
@@ -1512,7 +1520,7 @@
       }
     }
   ],
-  "lasso_none": "No pen strokes inside the lasso",
+  "lasso_none": "Nothing to select inside the lasso",
   "lasso_move": "Move strokes",
   "lasso_move_tooltip": "Drag to move the strokes; arrow keys nudge them",
   "lasso_history_color": [
@@ -1565,6 +1573,156 @@
       }
     }
   ],
+  "lasso_count_line": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} line",
+        "countPlural=*": "{count} lines"
+      }
+    }
+  ],
+  "lasso_count_arrow": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} arrow",
+        "countPlural=*": "{count} arrows"
+      }
+    }
+  ],
+  "lasso_count_polyline": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} polyline",
+        "countPlural=*": "{count} polylines"
+      }
+    }
+  ],
+  "lasso_count_polygon": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} polygon",
+        "countPlural=*": "{count} polygons"
+      }
+    }
+  ],
+  "lasso_count_square": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} rectangle",
+        "countPlural=*": "{count} rectangles"
+      }
+    }
+  ],
+  "lasso_count_circle": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} ellipse",
+        "countPlural=*": "{count} ellipses"
+      }
+    }
+  ],
+  "lasso_count_free_text": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} text box",
+        "countPlural=*": "{count} text boxes"
+      }
+    }
+  ],
+  "lasso_count_text": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} note",
+        "countPlural=*": "{count} notes"
+      }
+    }
+  ],
+  "lasso_count_stamp": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} stamp",
+        "countPlural=*": "{count} stamps"
+      }
+    }
+  ],
+  "lasso_count_signature": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} signature",
+        "countPlural=*": "{count} signatures"
+      }
+    }
+  ],
+  "lasso_count_highlight": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} highlight",
+        "countPlural=*": "{count} highlights"
+      }
+    }
+  ],
+  "lasso_count_underline": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} underline",
+        "countPlural=*": "{count} underlines"
+      }
+    }
+  ],
+  "lasso_count_strikeout": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} strikeout",
+        "countPlural=*": "{count} strikeouts"
+      }
+    }
+  ],
+  "lasso_count_squiggly": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} squiggly underline",
+        "countPlural=*": "{count} squiggly underlines"
+      }
+    }
+  ],
+  "lasso_selected_items": "{items} selected",
+  "lasso_move_selection": "Move selection",
+  "lasso_move_selection_tooltip": "Drag to move the selection; arrow keys nudge it",
+  "lasso_width_none": "Nothing selected has a line width",
+  "lasso_history_color_items": "Recolor {items}",
+  "lasso_history_opacity_items": "Change opacity of {items}",
+  "lasso_history_width_items": "Change width of {items}",
+  "lasso_history_font_items": "Change font size of {items}",
+  "lasso_history_move_items": "Move {items}",
+  "lasso_history_delete_items": "Delete {items}",
   "pen_name_strokes": [
     {
       "declarations": ["input count", "local countPlural = count: plural"],
@@ -3293,7 +3451,7 @@
       }
     }
   ],
-  "cmd_view_home": "Home",
+  "cmd_view_home": "Show Home",
   "cmd_view_home_keywords": "home, start, files, overview, cards, all files",
   "home_label": "Home",
   "home_long": "Home: every open file",
@@ -3507,5 +3665,14 @@
   "about_offline": "Offline",
   "about_version_line": "Version {version}",
   "menu_about_page": "About this app",
+  "appearance_heading": "Appearance",
+  "appearance_glass_panels": "Glass panels",
+  "appearance_reduce_transparency": "Reduce transparency",
+  "cmd_view_glass_panels": "Toggle glass panels",
+  "cmd_view_reduce_transparency": "Toggle reduced transparency",
+  "announce_glass_panels_on": "Glass panels on",
+  "announce_glass_panels_off": "Glass panels off",
+  "announce_reduce_transparency_on": "Reduced transparency on",
+  "announce_reduce_transparency_off": "Reduced transparency off",
   "cmd_help_about_page_keywords": "website, web page, about page, how it works"
 }

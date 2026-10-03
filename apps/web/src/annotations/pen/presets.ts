@@ -7,11 +7,31 @@
  * The settings may also carry the burst limits (spec §6.4: pause 300–5,000 ms, gap 6–144 pt);
  * they have no UI. The store slice lives in annotation-store.ts (`pen`, `armPreset`,
  * `editPreset`, `resetPreset`); this module is pure.
+ *
+ * Colours come from the one palette (craft spec §6, `../palette.ts`). Version 2 of the
+ * stored settings holds palette colours; version 1 (the palette before M8) is migrated once
+ * when read (`parsePenSettings`).
  */
 import { formatNumber, m } from '../../i18n';
+import {
+  contrastRatio,
+  hexRgb,
+  INK,
+  INKS,
+  migrateLegacyColor,
+  nearestTint,
+  overRgb,
+  paletteName,
+  TINT,
+  TINTS,
+} from '../palette';
+
+export { contrastRatio, hexRgb, overRgb, type Rgb } from '../palette';
 
 /** Per device, under the `ui:` namespace with its own version (spec §9). */
-export const PEN_PRESETS_STORAGE_KEY = 'pdf-editor:ui:pen-presets:v1';
+export const PEN_PRESETS_STORAGE_KEY = 'pdf-editor:ui:pen-presets:v2';
+/** The settings before the M8 palette, read once when no version 2 is stored. */
+export const LEGACY_PEN_PRESETS_STORAGE_KEY = 'pdf-editor:ui:pen-presets:v1';
 
 export interface PenPreset {
   /** #RRGGBB. */
@@ -27,7 +47,7 @@ export type PresetIndex = 0 | 1 | 2 | 3;
 export type PenPresets = readonly [PenPreset, PenPreset, PenPreset, PenPreset];
 
 export interface PenSettings {
-  readonly v: 1;
+  readonly v: 2;
   /** The armed preset. */
   readonly active: PresetIndex;
   readonly presets: PenPresets;
@@ -39,15 +59,18 @@ export interface PenSettings {
 
 export const PRESET_INDICES: readonly PresetIndex[] = [0, 1, 2, 3];
 
-/** Black and blue 1.5 pt, red 2 pt, a yellow 12 pt highlighter at 40 % (spec §6.2). */
+/**
+ * Black and blue 1.5 pt, red 2 pt, the yellow highlighter tint 12 pt at 40 % (craft spec §6;
+ * the Highlighter's blend and opacity change with spec §5.4).
+ */
 export const DEFAULT_PRESETS: PenPresets = [
-  { color: '#1F1F1F', width: 1.5, opacity: 1 },
-  { color: '#1E5BD8', width: 1.5, opacity: 1 },
-  { color: '#E53935', width: 2, opacity: 1 },
-  { color: '#FFD400', width: 12, opacity: 0.4 },
+  { color: INK.black, width: 1.5, opacity: 1 },
+  { color: INK.blue, width: 1.5, opacity: 1 },
+  { color: INK.red, width: 2, opacity: 1 },
+  { color: TINT.yellow, width: 12, opacity: 0.4 },
 ];
 
-export const DEFAULT_PEN_SETTINGS: PenSettings = { v: 1, active: 0, presets: DEFAULT_PRESETS };
+export const DEFAULT_PEN_SETTINGS: PenSettings = { v: 2, active: 0, presets: DEFAULT_PRESETS };
 
 export const PRESET_LIMITS = {
   width: { min: 0.25, max: 24 },
@@ -59,17 +82,27 @@ export const PRESET_LIMITS = {
 /** The editor's width stops, points (spec §6.2). */
 export const WIDTH_STOPS = [0.5, 1, 1.5, 2, 3, 5, 8, 12] as const;
 
-/** The editor's eight swatches: the four default inks first, then four more. */
-export const PEN_SWATCHES: readonly { readonly color: string; readonly name: () => string }[] = [
-  { color: '#1F1F1F', name: m.color_black },
-  { color: '#1E5BD8', name: m.color_blue },
-  { color: '#E53935', name: m.color_red },
-  { color: '#FFD400', name: m.color_yellow },
-  { color: '#43A047', name: m.color_green },
-  { color: '#FB8C00', name: m.color_orange },
-  { color: '#8E24AA', name: m.color_purple },
-  { color: '#D81B60', name: m.color_pink },
-];
+export interface PenSwatch {
+  readonly color: string;
+  readonly name: () => string;
+}
+
+/** The editor's swatches for a pen: the eight inks of the palette. */
+export const PEN_SWATCHES: readonly PenSwatch[] = INKS.map(({ hex, name }) => ({
+  color: hex,
+  name,
+}));
+
+/** The editor's swatches for the highlighter: the four tints of the palette. */
+export const HIGHLIGHTER_SWATCHES: readonly PenSwatch[] = TINTS.map(({ hex, name }) => ({
+  color: hex,
+  name,
+}));
+
+/** The swatches the editor offers for a preset (a custom colour is always offered too). */
+export function presetSwatches(p: PenPreset): readonly PenSwatch[] {
+  return isHighlighter(p) ? HIGHLIGHTER_SWATCHES : PEN_SWATCHES;
+}
 
 interface Range {
   readonly min: number;
@@ -102,25 +135,35 @@ function isPresetIndex(x: unknown): x is PresetIndex {
 }
 
 /**
+ * A version 1 preset in the palette (craft spec §6): a translucent preset becomes the
+ * highlighter with the nearest tint; an old default or swatch colour becomes the ink of its
+ * role; a custom colour stays. Width and opacity stay.
+ */
+export function migratePreset(p: PenPreset): PenPreset {
+  const color = isHighlighter(p) ? nearestTint(p.color).hex : migrateLegacyColor(p.color, 'ink');
+  return color === p.color ? p : { ...p, color };
+}
+
+/**
  * Reads stored pen settings field by field: an unknown version keeps every default; a bad
  * preset field keeps that field's default; a bad active index arms the first preset; burst
- * limits are clamped to their ranges and dropped when not numbers.
+ * limits are clamped to their ranges and dropped when not numbers. Version 1 settings are
+ * migrated to the palette (`migratePreset`).
  */
 export function parsePenSettings(value: unknown): PenSettings {
   if (typeof value !== 'object' || value === null) return DEFAULT_PEN_SETTINGS;
   const v = value as Record<string, unknown>;
-  if (v.v !== 1) return DEFAULT_PEN_SETTINGS;
+  if (v.v !== 1 && v.v !== 2) return DEFAULT_PEN_SETTINGS;
+  const legacy = v.v === 1;
   const stored = Array.isArray(v.presets) ? (v.presets as unknown[]) : [];
-  const presets = DEFAULT_PRESETS.map((preset, i) => validPreset(preset, stored[i])) as [
-    PenPreset,
-    PenPreset,
-    PenPreset,
-    PenPreset,
-  ];
+  const presets = DEFAULT_PRESETS.map((preset, i) => {
+    const parsed = validPreset(preset, stored[i]);
+    return legacy ? migratePreset(parsed) : parsed;
+  }) as [PenPreset, PenPreset, PenPreset, PenPreset];
   const pause = clamp(v.burstPauseMs, PRESET_LIMITS.burstPauseMs);
   const gap = clamp(v.burstGapPt, PRESET_LIMITS.burstGapPt);
   return {
-    v: 1,
+    v: 2,
     active: isPresetIndex(v.active) ? v.active : 0,
     presets,
     ...(pause === undefined ? {} : { burstPauseMs: pause }),
@@ -193,39 +236,11 @@ export const PEN_BAR_FILLS: readonly string[] = ['#212328', '#47494d'];
 /** Least contrast of a dot against the bar (WCAG 1.4.11, non-text). */
 export const DOT_CONTRAST_MIN = 3;
 
-export type Rgb = readonly [number, number, number];
-
-export function hexRgb(hex: string): Rgb {
-  const n = Number.parseInt(hex.slice(1, 7), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-/** `ink` at `alpha` over `under`. */
-export function overRgb(ink: Rgb, alpha: number, under: Rgb): Rgb {
-  const mix = (a: number, b: number) => a * alpha + b * (1 - alpha);
-  return [mix(ink[0], under[0]), mix(ink[1], under[1]), mix(ink[2], under[2])];
-}
-
-function luminance([r, g, b]: Rgb): number {
-  const linear = (c: number) => {
-    const v = c / 255;
-    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
-}
-
-/** WCAG contrast ratio of two opaque colours. */
-export function contrastRatio(a: Rgb, b: Rgb): number {
-  const la = luminance(a);
-  const lb = luminance(b);
-  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
-}
-
 /**
  * Whether the preset's dot gets the light ring (spec §7.4): its ink, at its opacity, is
- * below `DOT_CONTRAST_MIN` against the bar over the canvas or over a page (the default black,
- * blue, red and 40 % yellow; of the swatches only orange and full yellow go without), so the
- * dot's edge shows wherever the bar floats.
+ * below `DOT_CONTRAST_MIN` against the bar over the canvas or over a page (every ink of the
+ * palette, and a tint at 40 %; only a tint at full opacity goes without), so the dot's edge
+ * shows wherever the bar floats.
  */
 export function needsDotRing(p: PenPreset, fills: readonly string[] = PEN_BAR_FILLS): boolean {
   const ink = hexRgb(p.color);
@@ -236,17 +251,17 @@ export function needsDotRing(p: PenPreset, fills: readonly string[] = PEN_BAR_FI
 }
 
 /**
- * The preset's name: its colour when that is one of the swatches ("Blue pen", "Yellow
- * highlighter"), else its place ("Pen 3"), so a name never claims a colour it does not have.
+ * The preset's name: its colour when that is an ink or tint of the palette ("Blue pen",
+ * "Yellow highlighter"), else its place ("Pen 3"), so a name never claims a colour it does
+ * not have.
  */
 export function presetName(index: number, p: PenPreset): string {
-  const swatch = PEN_SWATCHES.find((s) => s.color === p.color.toUpperCase());
-  if (!swatch) {
+  const color = paletteName(p.color);
+  if (color === undefined) {
     return isHighlighter(p)
       ? m.pen_preset_highlighter_numbered({ number: index + 1 })
       : m.pen_preset_numbered({ number: index + 1 });
   }
-  const color = swatch.name();
   return isHighlighter(p) ? m.pen_preset_highlighter({ color }) : m.pen_preset_pen({ color });
 }
 

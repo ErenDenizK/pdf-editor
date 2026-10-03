@@ -1,10 +1,11 @@
 /**
- * Keys of the lasso selection (experience-redesign spec §6.5), while the Lasso is armed:
- * Esc clears the selection and keeps the Lasso armed (with nothing selected it falls through
- * to the global Escape, which disarms); Delete or Backspace removes the taken paths; arrows
- * nudge them by 1 pt on screen, Shift by 10 pt. One listener on the document, in the bubble
- * phase, so focused widgets handle their own keys first; it claims a key with
- * `preventDefault()`, which the global shortcuts then skip (`dispatchShortcut`).
+ * Keys of the lasso selection (craft spec §5.5, after experience-redesign spec §6.5), while
+ * the Lasso is armed: Esc clears the selection and keeps the Lasso armed (with nothing
+ * selected it falls through to the global Escape, which disarms); Delete or Backspace
+ * removes what it took (paths and whole annotations); arrows nudge it by 1 pt on screen,
+ * Shift by 10 pt. One listener on the document, in the bubble phase, so focused widgets
+ * handle their own keys first; it claims a key with `preventDefault()`, which the global
+ * shortcuts then skip (`dispatchShortcut`).
  */
 import type { PageId } from '@pdf-editor/document-model';
 

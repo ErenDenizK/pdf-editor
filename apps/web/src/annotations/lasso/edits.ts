@@ -1,7 +1,9 @@
 /**
- * Edits of the lasso selection (experience-redesign spec §6.5): style through `applyStyle`
- * (colour, opacity, width), move, nudge and delete. Each acts on the taken paths only,
- * splitting an Ink when only some of its paths are taken (`split.ts`, `editInkPaths`).
+ * Edits of the lasso selection (craft spec §5.5, after experience-redesign spec §6.5): style
+ * through `applyStyle` (colour, opacity, width, and font size for text boxes), move, nudge
+ * and delete. Each acts on the taken paths and the annotations taken whole, in one history
+ * entry, splitting an Ink when only some of its paths are taken (`split.ts`) and editing the
+ * rest in place (`whole.ts`; `editLassoSelection`).
  *
  * After an edit the selection follows the edited paths: a split renames them (the new Ink),
  * so the selection moves to them under the same lasso `key` when the page next loads
@@ -13,24 +15,43 @@
  */
 import { m } from '../../i18n';
 import { announce } from '../../shell/announcer';
-import { editInkPaths } from '../actions';
+import { editLassoSelection } from '../actions';
 import {
   activePathSelection,
   type PageTarget,
   type ToolStyle,
   useAnnotationStore,
 } from '../annotation-store';
+import { type KindCounts, lassoItems, onlyStrokes } from '../labels';
+import type { LassoPicks } from './geometry';
 import type { PathEdit } from './split';
 
-type Control = 'color' | 'opacity' | 'stroke' | 'move' | 'delete';
+type Control = 'color' | 'opacity' | 'stroke' | 'font' | 'move' | 'delete';
 
-const LABELS: Record<Control, (count: number) => string> = {
+/** History labels for strokes only ("Recolor 3 strokes"). */
+const STROKE_LABELS: Record<Exclude<Control, 'font'>, (count: number) => string> = {
   color: (count) => m.lasso_history_color({ count }),
   opacity: (count) => m.lasso_history_opacity({ count }),
   stroke: (count) => m.lasso_history_width({ count }),
   move: (count) => m.lasso_history_move({ count }),
   delete: (count) => m.lasso_history_delete({ count }),
 };
+
+/** History labels naming a mix ("Recolor 3 strokes and 1 arrow"). */
+const MIX_LABELS: Record<Control, (items: string) => string> = {
+  color: (items) => m.lasso_history_color_items({ items }),
+  opacity: (items) => m.lasso_history_opacity_items({ items }),
+  stroke: (items) => m.lasso_history_width_items({ items }),
+  font: (items) => m.lasso_history_font_items({ items }),
+  move: (items) => m.lasso_history_move_items({ items }),
+  delete: (items) => m.lasso_history_delete_items({ items }),
+};
+
+/** The history label of a lasso edit of what `counts` holds. */
+export function lassoHistoryLabel(control: Control, counts: KindCounts): string {
+  if (control !== 'font' && onlyStrokes(counts)) return STROKE_LABELS[control](counts.ink ?? 0);
+  return MIX_LABELS[control](lassoItems(counts, 'sentence'));
+}
 
 /** Latest-value slots per control and lasso key (a slider drag sends one edit at a time). */
 const pending = new Map<string, { change: PathEdit }>();
@@ -60,11 +81,12 @@ function run(control: Control, change: PathEdit): Promise<void> {
   const fresh = { change };
   if (control !== 'move') pending.set(key, fresh);
   // The paths are read when the edit runs: an edit behind a split acts on its result.
-  const picks = () => {
+  const picks = (): LassoPicks => {
     const now = activePathSelection(useAnnotationStore.getState());
-    return now?.key === captured.key ? (now.next ?? now.paths) : (captured.next ?? captured.paths);
+    const at = now?.key === captured.key ? now : captured;
+    return { paths: at.next ?? at.paths, whole: at.whole };
   };
-  return editInkPaths(
+  return editLassoSelection(
     target,
     picks,
     () => {
@@ -73,7 +95,7 @@ function run(control: Control, change: PathEdit): Promise<void> {
       return fresh.change;
     },
     {
-      label: LABELS[control],
+      label: (counts) => lassoHistoryLabel(control, counts),
       coalesceKey: key,
       onEdited: (after) => {
         const store = useAnnotationStore.getState();
@@ -93,7 +115,10 @@ function run(control: Control, change: PathEdit): Promise<void> {
     });
 }
 
-/** `applyStyle` with a lasso selection: colour, opacity and width of the taken paths. */
+/**
+ * `applyStyle` with a lasso selection: colour, opacity and width of what it took (a width
+ * applies to kinds with a stroke width), and the font size of its text boxes.
+ */
 export function styleLassoSelection(patch: Partial<ToolStyle>): void {
   if (patch.color !== undefined)
     void run('color', { kind: 'style', patch: { color: patch.color } });
@@ -103,20 +128,27 @@ export function styleLassoSelection(patch: Partial<ToolStyle>): void {
   if (patch.strokeWidth !== undefined) {
     void run('stroke', { kind: 'style', patch: { strokeWidth: patch.strokeWidth } });
   }
+  if (patch.fontSize !== undefined) {
+    void run('font', { kind: 'style', patch: { fontSize: patch.fontSize } });
+  }
 }
 
-/** Moves the taken paths by (dx, dy), user space; consecutive moves within 800 ms join. */
+/** Moves what the lasso took by (dx, dy), user space; consecutive moves within 800 ms join. */
 export function moveLassoSelection(dx: number, dy: number): Promise<void> {
   if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return Promise.resolve();
   return run('move', { kind: 'move', dx, dy });
 }
 
-/** Deletes the taken paths (an Ink with none left goes) and clears the selection. */
+/**
+ * Deletes what the lasso took (an Ink with no path left goes) and clears the selection.
+ */
 export function deleteLassoSelection(): Promise<void> {
   return run('delete', { kind: 'delete' });
 }
 
-/** Says how many strokes the lasso took ("3 strokes selected"), or that it took none. */
-export function announceLasso(count: number): void {
-  announce(count === 0 ? m.lasso_none() : m.lasso_selected({ count }));
+/** Says what the lasso took ("3 strokes and 1 arrow selected"), or that it took none. */
+export function announceLasso(counts: KindCounts): void {
+  if (Object.values(counts).every((n) => !n)) announce(m.lasso_none());
+  else if (onlyStrokes(counts)) announce(m.lasso_selected({ count: counts.ink ?? 0 }));
+  else announce(m.lasso_selected_items({ items: lassoItems(counts, 'sentence') }));
 }

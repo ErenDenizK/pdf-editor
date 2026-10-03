@@ -4,9 +4,10 @@
  * Left / Right move between its controls, Home / End to the ends; Escape (the global
  * command) deselects.
  *
- * For a lasso selection (`paths`, experience-redesign spec §6.5) it sits above the taken
- * paths rather than the whole annotations, names the stroke count and shows the lasso's
- * controls (`lasso/LassoSelection.tsx`): colour, opacity, width, a move grip and Delete.
+ * For a lasso selection (`paths`, craft spec §5.5) it sits above what the lasso took (the
+ * taken paths rather than their whole inks, and the annotations taken whole), names the mix
+ * ("3 strokes, 1 arrow") and shows the lasso's controls (`lasso/LassoSelection.tsx`):
+ * colour, opacity, width, a move grip and Delete.
  */
 import type { Annotation } from '@pdf-editor/engine';
 import { Lock } from 'lucide-react';
@@ -17,8 +18,14 @@ import { useRovingTabindex } from '../shell/FloatingToolbar.roving';
 import { useFocusRescue } from '../ui/use-focus-rescue';
 import type { PageTarget } from './annotation-store';
 import { displayRect, type PageFrame, rectToCss } from './geometry';
-import { annotationName, capitalize } from './labels';
-import { type PathPicks, pickCount, pickedCssBounds } from './lasso/geometry';
+import { annotationName, capitalize, kindCounts, lassoItems, onlyStrokes } from './labels';
+import {
+  type PathPicks,
+  pickCount,
+  pickedCssBounds,
+  pickedWhole,
+  picksOfSelection,
+} from './lasso/geometry';
 import { LassoBarControls } from './lasso/LassoSelection';
 import styles from './AnnotationLayer.module.css';
 import { StyleControls } from './StyleControls';
@@ -39,7 +46,10 @@ export function AnnotationBar({
   readonly target: PageTarget;
   readonly annotations: readonly Annotation[];
   readonly frame: PageFrame;
-  /** The lasso's taken paths: the bar is about them (spec §6.5). */
+  /**
+   * The lasso's taken paths: the bar is about them and the other `annotations`, which the
+   * lasso took whole (craft spec §5.5).
+   */
   readonly paths?: PathPicks;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -57,8 +67,12 @@ export function AnnotationBar({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  // The lasso's taken paths.
-  const pathBox = paths ? pickedCssBounds(frame, annotations, paths) : null;
+  // What the lasso took: its paths, and the other selected annotations whole.
+  const lasso = paths ? picksOfSelection(annotations, paths) : null;
+  const counts = lasso
+    ? kindCounts(pickCount(lasso.paths), pickedWhole(annotations, lasso.whole))
+    : null;
+  const pathBox = lasso ? pickedCssBounds(frame, annotations, lasso.paths, lasso.whole) : null;
   let top = Number.POSITIVE_INFINITY;
   let bottom = Number.NEGATIVE_INFINITY;
   let left = Number.POSITIVE_INFINITY;
@@ -88,8 +102,8 @@ export function AnnotationBar({
       : Math.min(Math.max((left + right) / 2 - width / 2, 0), pageWidth - width);
   const first = annotations[0];
   const locked = !paths && annotations.every((a) => a.flags?.locked);
-  const name = paths
-    ? m.lasso_strokes({ count: pickCount(paths) })
+  const name = counts
+    ? lassoItems(counts)
     : annotations.length === 1 && first
       ? capitalize(annotationName(first))
       : m.annot_count({ count: annotations.length });
@@ -117,7 +131,10 @@ export function AnnotationBar({
         <>
           <span className={styles.barDivider} aria-hidden="true" />
           {paths ? (
-            <LassoBarControls pageId={target.pageId} />
+            <LassoBarControls
+              pageId={target.pageId}
+              strokesOnly={counts !== null && onlyStrokes(counts)}
+            />
           ) : (
             <StyleControls target={target} annotations={annotations} variant="bar" />
           )}

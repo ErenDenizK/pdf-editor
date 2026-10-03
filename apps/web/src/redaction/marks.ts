@@ -23,9 +23,10 @@ import { pageText } from '../annotations/page-text';
 import { glyphsInRects, quadsForGlyphs } from '../annotations/quads';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
+import { INK } from '../annotations/palette';
 
-/** Outline of a pending mark (/C): the annotation palette's red. */
-export const MARK_OUTLINE = '#E53935';
+/** Outline of a pending mark (/C): the palette's red. */
+export const MARK_OUTLINE: string = INK.red;
 /** Fill painted when the mark is applied (/IC). */
 export const MARK_FILL = '#000000';
 

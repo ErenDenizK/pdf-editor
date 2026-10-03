@@ -8,6 +8,7 @@
 import { decodeImageFile } from '../files/images';
 import { m } from '../i18n';
 import type { PendingStamp } from './annotation-store';
+import { INK } from './palette';
 
 export interface BuiltinStamp {
   /** /Name written to the annotation. */
@@ -16,10 +17,11 @@ export interface BuiltinStamp {
   readonly color: string;
 }
 
+/** Colours from the one palette (craft spec §6): blue, green and red writing inks. */
 export const BUILTIN_STAMPS: readonly BuiltinStamp[] = [
-  { name: 'Draft', label: m.stamp_draft, color: '#1E88E5' },
-  { name: 'Approved', label: m.stamp_approved, color: '#2E7D32' },
-  { name: 'Confidential', label: m.stamp_confidential, color: '#C62828' },
+  { name: 'Draft', label: m.stamp_draft, color: INK.blue },
+  { name: 'Approved', label: m.stamp_approved, color: INK.green },
+  { name: 'Confidential', label: m.stamp_confidential, color: INK.red },
 ];
 
 /** Natural size of a built-in stamp, in points. */
@@ -35,7 +37,7 @@ function canvas(width: number, height: number): OffscreenCanvas {
 export async function builtinStampImage(name: string): Promise<Blob> {
   const stamp = BUILTIN_STAMPS.find((s) => s.name === name);
   const text = name.toUpperCase();
-  const color = stamp?.color ?? '#C62828';
+  const color = stamp?.color ?? INK.red;
   const w = BUILTIN_STAMP_SIZE.width * IMAGE_SCALE;
   const h = BUILTIN_STAMP_SIZE.height * IMAGE_SCALE;
   const c = canvas(w, h);

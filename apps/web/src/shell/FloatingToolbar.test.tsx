@@ -25,6 +25,7 @@ import {
   useAnnotationStore,
 } from '../annotations/annotation-store';
 import { readAnnotations, resetEditRunner, whenIdle } from '../annotations/edit-runner';
+import { INK, TINT } from '../annotations/palette';
 import { builtinPendingStamp } from '../annotations/stamps';
 import { ANNOTATION_TOOLS } from '../annotations/tools';
 import { registerAppCommands } from '../commands/app-commands';
@@ -415,7 +416,8 @@ describe('options tier', () => {
       bar().getBoundingClientRect().top,
     );
     await userEvent.click(within(tier).getByRole('radio', { name: 'Blue' }));
-    expect(useAnnotationStore.getState().styles.highlight.color).toBe('#1E88E5');
+    // The highlight's swatches are the highlighter tints (craft spec §6).
+    expect(useAnnotationStore.getState().styles.highlight.color).toBe(TINT.blue);
     expect(within(tier).getByRole('radio', { name: 'Blue' })).toHaveAttribute(
       'aria-checked',
       'true',
@@ -437,7 +439,7 @@ describe('options tier', () => {
         kind: 'square',
         pageIndex: 0,
         rect: { x: 100, y: 500, width: 120, height: 60 },
-        color: '#E53935',
+        color: INK.red,
         opacity: 1,
         strokeWidth: 2,
       },
@@ -451,9 +453,9 @@ describe('options tier', () => {
     within(tier).getByRole('radio', { name: 'Green' }).click();
     await waitFor(async () => {
       const square = (await readAnnotations(target.source, 0)).find((a) => a.id === id);
-      expect(square && 'color' in square ? square.color : undefined).toBe('#43A047');
+      expect(square && 'color' in square ? square.color : undefined).toBe(INK.green);
     });
-    expect(useAnnotationStore.getState().styles.shape.color).toBe('#E53935');
+    expect(useAnnotationStore.getState().styles.shape.color).toBe(INK.red);
   });
 
   it('takes the pen presets when they plug in', async () => {

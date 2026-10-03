@@ -98,3 +98,74 @@ export function deleteLabel(annotations: readonly Annotation[]): string {
   }
   return m.history_annot_delete({ count: annotations.length });
 }
+
+/** Kinds the lasso takes whole (craft spec §5.5), in the order a mix names them. */
+type LassoKind = Exclude<DisplayKind, 'ink' | 'link' | 'redact'>;
+
+const LASSO_KIND_ORDER: readonly LassoKind[] = [
+  'line',
+  'arrow',
+  'polyline',
+  'polygon',
+  'square',
+  'circle',
+  'free-text',
+  'text',
+  'stamp',
+  'signature',
+  'highlight',
+  'underline',
+  'strikeout',
+  'squiggly',
+];
+
+const LASSO_KIND_COUNTS: Record<LassoKind, (inputs: { count: number }) => string> = {
+  line: m.lasso_count_line,
+  arrow: m.lasso_count_arrow,
+  polyline: m.lasso_count_polyline,
+  polygon: m.lasso_count_polygon,
+  square: m.lasso_count_square,
+  circle: m.lasso_count_circle,
+  'free-text': m.lasso_count_free_text,
+  text: m.lasso_count_text,
+  stamp: m.lasso_count_stamp,
+  signature: m.lasso_count_signature,
+  highlight: m.lasso_count_highlight,
+  underline: m.lasso_count_underline,
+  strikeout: m.lasso_count_strikeout,
+  squiggly: m.lasso_count_squiggly,
+};
+
+/** What a lasso holds, per kind as the UI names it; `ink` counts strokes (paths). */
+export type KindCounts = Partial<Record<DisplayKind, number>>;
+
+/** Counts of ink paths (`strokes`) and of whole annotations by kind. */
+export function kindCounts(strokes: number, whole: readonly Annotation[]): KindCounts {
+  const counts: KindCounts = strokes > 0 ? { ink: strokes } : {};
+  for (const a of whole) {
+    const kind = displayKind(a);
+    counts[kind] = (counts[kind] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** True when the counts hold ink strokes only. */
+export function onlyStrokes(counts: KindCounts): boolean {
+  return Object.entries(counts).every(([kind, n]) => kind === 'ink' || !n);
+}
+
+/**
+ * The mix a lasso holds: "3 strokes, 1 arrow" (`list`, the contextual bar) or "3 strokes and
+ * 1 arrow" (`sentence`, announcements and history), strokes first.
+ */
+export function lassoItems(counts: KindCounts, style: 'list' | 'sentence' = 'list'): string {
+  const parts: string[] = [];
+  if (counts.ink) parts.push(m.lasso_strokes({ count: counts.ink }));
+  for (const kind of LASSO_KIND_ORDER) {
+    const count = counts[kind];
+    if (count) parts.push(LASSO_KIND_COUNTS[kind]({ count }));
+  }
+  // A comma list reads the same in English and Turkish (Intl's unit lists drop the commas).
+  if (style === 'list') return parts.join(', ');
+  return new Intl.ListFormat(getLocale(), { style: 'long', type: 'conjunction' }).format(parts);
+}

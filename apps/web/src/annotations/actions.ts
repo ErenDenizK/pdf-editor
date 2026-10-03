@@ -19,8 +19,17 @@ import {
 } from './edit-runner';
 import { type DisplayKind, displayKind, roundRect } from './geometry';
 import { boundsOf, type Point } from './ink';
-import { createLabel, deleteLabel, type UpdateAction, updateLabel } from './labels';
+import {
+  createLabel,
+  deleteLabel,
+  type KindCounts,
+  kindCounts,
+  type UpdateAction,
+  updateLabel,
+} from './labels';
+import { type LassoPicks, lassoable } from './lasso/geometry';
 import { type PathEdit, splitInk } from './lasso/split';
+import { editWhole, patchTouchesInk } from './lasso/whole';
 import { builtinStampImage } from './stamps';
 
 /** The engine's JSON form of an annotation (engine chunk, loaded on first use). */
@@ -299,6 +308,30 @@ export function updateAnnotations(
 }
 
 /**
+ * The edit that deletes `current`: a stamp whose appearance the engine cannot export for
+ * undo (and that has no name to redraw it from) is hidden instead, which undo reverses
+ * exactly.
+ */
+async function deletion(
+  ctx: EngineContext,
+  target: PageTarget,
+  current: Annotation,
+): Promise<EngineEdit> {
+  const restorable =
+    current.kind !== 'stamp' ||
+    ctx.editor.getAnnotationAppearance !== undefined ||
+    current.name !== undefined;
+  return restorable
+    ? edit('annotation.delete', target.source, current.pageIndex, { annotationId: current.id })
+    : edit('annotation.update', target.source, current.pageIndex, {
+        annotation: await serializeAnnotation({
+          ...current,
+          flags: { ...current.flags, hidden: true },
+        }),
+      });
+}
+
+/**
  * Deletes annotations of one page as one history entry ("Delete 2 annotations"). A stamp
  * whose appearance the engine cannot export for undo (and that has no name to redraw it
  * from) is hidden instead, which undo reverses exactly.
@@ -314,19 +347,7 @@ export function deleteAnnotations(
     for (const id of ids) {
       const current = list.find((a) => a.id === id);
       if (!current || current.flags?.locked) continue;
-      const restorable =
-        current.kind !== 'stamp' ||
-        ctx.editor.getAnnotationAppearance !== undefined ||
-        current.name !== undefined;
-      const e = restorable
-        ? edit('annotation.delete', target.source, current.pageIndex, { annotationId: id })
-        : edit('annotation.update', target.source, current.pageIndex, {
-            annotation: await serializeAnnotation({
-              ...current,
-              flags: { ...current.flags, hidden: true },
-            }),
-          });
-      const done = await executeEdit(ctx, e);
+      const done = await executeEdit(ctx, await deletion(ctx, target, current));
       edits.push(done.recorded);
       removed.push(current);
     }
@@ -359,6 +380,7 @@ export interface InkPathEditOptions {
  * is split by the rule of `lasso/split.ts`: the rest keeps the id, the taken paths become a
  * new Ink with the edit, both in this entry. Locked and missing annotations are skipped.
  * Resolves to where the taken paths are afterwards, or undefined when nothing changed.
+ * `editLassoSelection` does the same for a selection that also holds whole annotations.
  */
 export function editInkPaths(
   target: PageTarget,
@@ -366,14 +388,43 @@ export function editInkPaths(
   change: () => PathEdit,
   options: InkPathEditOptions,
 ): Promise<Readonly<Record<string, readonly number[]>> | undefined> {
+  return editLassoSelection(target, () => ({ paths: picks(), whole: [] }), change, {
+    ...options,
+    label: (counts) => options.label(counts.ink ?? 0),
+  });
+}
+
+export interface LassoEditOptions extends Omit<InkPathEditOptions, 'label'> {
+  /** The history label for an edit of what `counts` holds ("Recolor 3 strokes, 1 arrow"). */
+  readonly label: (counts: KindCounts) => string;
+}
+
+/**
+ * Edits what the lasso took on one page (craft spec §5.5) as one history entry: ink paths by
+ * the rule of `editInkPaths` (`lasso/split.ts`), and annotations taken whole by
+ * `lasso/whole.ts` (moved, recoloured, restyled or deleted in place; a change that does not
+ * apply to a kind, such as a width for a note, leaves it out). `picks` and `change` are read
+ * when the queued action runs. Locked, hidden, missing and never-lassoed annotations (links,
+ * redaction marks) are skipped. Undo restores everything in one step. Resolves to where the
+ * taken paths are afterwards (whole annotations keep their ids), or undefined when nothing
+ * changed.
+ */
+export function editLassoSelection(
+  target: PageTarget,
+  picks: () => LassoPicks,
+  change: () => PathEdit,
+  options: LassoEditOptions,
+): Promise<Readonly<Record<string, readonly number[]>> | undefined> {
   return runAction(
     async (ctx): Promise<ActionResult<Readonly<Record<string, readonly number[]>>> | undefined> => {
       const list = await readAnnotations(target.source, target.pageIndex, ctx);
       const edits: EngineEdit[] = [];
       const after: Record<string, readonly number[]> = {};
-      let count = 0;
+      const changed: Annotation[] = [];
+      let strokes = 0;
       const pathEdit = change();
-      for (const [id, indices] of Object.entries(picks())) {
+      const { paths, whole } = picks();
+      for (const [id, indices] of patchTouchesInk(pathEdit) ? Object.entries(paths) : []) {
         const current = list.find((a) => a.id === id);
         if (current?.kind !== 'ink' || current.flags?.locked || current.flags?.hidden) continue;
         const outcome = splitInk(current, indices, pathEdit, newId());
@@ -398,10 +449,29 @@ export function editInkPaths(
           edits.push(done.recorded);
         }
         Object.assign(after, outcome.picks);
-        count += outcome.count;
+        strokes += outcome.count;
+      }
+      for (const id of whole) {
+        const current = list.find((a) => a.id === id);
+        if (!current || current.kind === 'ink' || !lassoable(current)) continue;
+        if (pathEdit.kind === 'delete') {
+          const done = await executeEdit(ctx, await deletion(ctx, target, current));
+          edits.push(done.recorded);
+          changed.push(current);
+          continue;
+        }
+        const next = editWhole(current, pathEdit);
+        if (!next || comparable(next) === comparable(current)) continue;
+        const annotation = await serializeAnnotation(stamped({ ...next, id: current.id }));
+        const done = await executeEdit(
+          ctx,
+          edit('annotation.update', target.source, current.pageIndex, { annotation }),
+        );
+        edits.push(done.recorded);
+        changed.push(current);
       }
       if (edits.length === 0) return undefined;
-      const label = options.label(count);
+      const label = options.label(kindCounts(strokes, changed));
       if (pathEdit.kind === 'delete') announce(label);
       options.onEdited?.(after);
       return {

@@ -6,7 +6,7 @@
  */
 import { getEngineService } from '../engine/engine-service';
 import { registerPageOverlay } from '../stage/page-overlays';
-import { useUiStore } from '../state/ui-store';
+import { isPageView, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { clearLinksForSource } from '../viewer/LinkLayer';
 import { useToolStore } from '../viewer/tool-store';
@@ -47,7 +47,7 @@ if (typeof window !== 'undefined') {
 
 // Arrange mode has no annotation tools; a new active document starts with nothing selected.
 useUiStore.subscribe((state, previous) => {
-  if (state.viewMode !== previous.viewMode && state.viewMode !== 'read') {
+  if (isPageView(previous) && !isPageView(state)) {
     useToolStore.getState().setMode('select');
     useAnnotationStore.getState().select(null);
     useAnnotationStore.getState().setEditor(null);

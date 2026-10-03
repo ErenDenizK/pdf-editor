@@ -1,6 +1,6 @@
 /*
- * The lasso (experience-redesign spec §6.5): its trail, the highlight of the taken paths and
- * the bar's move grip. Accent only, at the tokens' alphas.
+ * The lasso (craft spec §5.5): its trail, the highlight of what it took, its bounding box
+ * and the bar's move grip. Accent only, at the tokens' alphas.
  */
 
 /* The trail's own SVG over the page (lasso-input.ts); never takes a pointer. */
@@ -41,7 +41,7 @@
   }
 }
 
-/* The taken paths, each traced at the accent's highlight alpha. */
+/* The taken paths and outlines, each traced at the accent's highlight alpha. */
 .highlight {
   pointer-events: none;
 }
@@ -53,10 +53,19 @@
   stroke-linejoin: round;
 }
 
-/* The grab area: a press inside the selection moves it. */
+/* Text boxes, stamps, notes and text markups: their area tinted at the same alpha. */
+.highlight polygon {
+  fill: var(--accent-highlight);
+  stroke: none;
+}
+
+/* The grab area, one dashed box around the selection: a press inside it moves it. */
 .grab {
   fill: transparent;
-  stroke: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
   pointer-events: all;
   cursor: move;
 }

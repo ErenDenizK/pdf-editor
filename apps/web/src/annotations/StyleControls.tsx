@@ -1,6 +1,8 @@
 /**
  * The controls shared by the contextual bar and the Properties panel (spec §2): colour
- * swatches (8 fixed + custom), opacity, stroke width, font size, comment, delete.
+ * swatches from the one palette (craft spec §6: the eight inks, or the four highlighter
+ * tints for a highlight or a note, plus custom), opacity, stroke width, font size, comment,
+ * delete.
  *
  * Every style control goes through `applyStyle` (experience-redesign spec §6.3): with a
  * selection it edits the selection (slider changes coalesce into one history entry, and
@@ -23,25 +25,25 @@ import {
   type PageTarget,
   selectedAnnotations,
   type StyleGroup,
-  SWATCHES,
   type ToolStyle,
   useAnnotationStore,
 } from './annotation-store';
 import { hasStrokeWidth, normalizeHex, primaryColor } from './colors';
+import { INKS, isTint, type PaletteColor, TINTS } from './palette';
 import styles from './StyleControls.module.css';
 
 export const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72] as const;
 
-const SWATCH_NAMES: readonly (() => string)[] = [
-  m.color_yellow,
-  m.color_orange,
-  m.color_red,
-  m.color_pink,
-  m.color_purple,
-  m.color_blue,
-  m.color_green,
-  m.color_black,
-];
+/** Style groups coloured with a highlighter tint rather than an ink. */
+const TINTED_GROUPS: ReadonlySet<StyleGroup> = new Set(['highlight', 'note']);
+
+/**
+ * The swatches for what the controls show: the four tints for a highlight or a note, or
+ * for any colour that is a tint (a highlighter stroke); else the eight inks.
+ */
+export function swatchesFor(tinted: boolean, color: string | undefined): readonly PaletteColor[] {
+  return tinted || (color !== undefined && isTint(color)) ? TINTS : INKS;
+}
 
 /** A `#rrggbb` colour, the only form the custom colour input takes. */
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -62,12 +64,19 @@ export type StyleControlsProps =
       readonly group: StyleGroup;
       /** Where the controls sit: the inspector (default) or the tool bar's options tier. */
       readonly placement?: 'panel' | 'tier';
+      /**
+       * With a selection none of which takes a stroke width, show the width disabled rather
+       * than leave it out (the lasso bar, craft spec §5.5).
+       */
+      readonly keepStrokeWidth?: boolean;
     };
 
 /** What the controls show, from the selection or from a tool style. */
 interface Shown {
   readonly disabled: boolean;
   readonly colorable: boolean;
+  /** A highlight or a note: its swatches are the highlighter tints. */
+  readonly tinted: boolean;
   readonly color: string | undefined;
   readonly opacity: number;
   readonly strokeWidth: number | undefined;
@@ -81,6 +90,7 @@ function shownForSelection(editable: readonly Annotation[]): Shown {
   return {
     disabled: first === undefined,
     colorable: editable.some((a) => primaryColor(a) !== undefined || a.kind !== 'stamp'),
+    tinted: first?.kind === 'highlight' || first?.kind === 'text',
     color: first ? primaryColor(first) : undefined,
     opacity: first?.opacity ?? 1,
     strokeWidth: stroke?.strokeWidth,
@@ -92,6 +102,7 @@ function shownForTool(group: StyleGroup, style: ToolStyle): Shown {
   return {
     disabled: false,
     colorable: true,
+    tinted: TINTED_GROUPS.has(group),
     color: style.color,
     opacity: style.opacity,
     strokeWidth: STROKED_GROUPS.has(group) ? style.strokeWidth : undefined,
@@ -123,10 +134,17 @@ export function StyleControls(props: StyleControlsProps) {
         : shownForTool(props.group, toolStyle)
       : shownForSelection(editable);
   const { disabled, color, opacity } = shown;
+  // The lasso bar says that nothing selected takes a width by a disabled control.
+  const strokeOff =
+    props.variant === 'tool' &&
+    props.keepStrokeWidth === true &&
+    toolSelection.length > 0 &&
+    shown.strokeWidth === undefined;
+  const swatches = swatchesFor(shown.tinted, color);
   // A colour that is none of the swatches shows in the custom control, which then reads as
   // the chosen one.
   const custom =
-    color !== undefined && HEX.test(color) && !SWATCHES.some((s) => s === color.toUpperCase());
+    color !== undefined && HEX.test(color) && !swatches.some((s) => s.hex === color.toUpperCase());
 
   const setColor = (value: string) => {
     applyStyle({ color: normalizeHex(value) });
@@ -153,18 +171,18 @@ export function StyleControls(props: StyleControlsProps) {
       key: 'color',
       node: (
         <div role="radiogroup" aria-label={m.annot_color()} className={styles.swatches}>
-          {SWATCHES.map((swatch, i) => (
+          {swatches.map((swatch) => (
             <button
-              key={swatch}
+              key={swatch.hex}
               type="button"
               role="radio"
-              aria-checked={color?.toUpperCase() === swatch}
-              aria-label={SWATCH_NAMES[i]?.() ?? swatch}
-              title={SWATCH_NAMES[i]?.() ?? swatch}
+              aria-checked={color?.toUpperCase() === swatch.hex}
+              aria-label={swatch.name()}
+              title={swatch.name()}
               disabled={disabled}
               className={styles.swatch}
-              style={{ '--swatch': swatch } as CSSProperties}
-              onClick={() => setColor(swatch)}
+              style={{ '--swatch': swatch.hex } as CSSProperties}
+              onClick={() => setColor(swatch.hex)}
             />
           ))}
           <label
@@ -206,18 +224,22 @@ export function StyleControls(props: StyleControlsProps) {
       </label>
     ),
   });
-  if (shown.strokeWidth !== undefined) {
+  if (shown.strokeWidth !== undefined || strokeOff) {
     groups.push({
       key: 'stroke',
       node: (
-        <label className={styles.slider}>
+        <label
+          className={styles.slider}
+          title={strokeOff ? m.lasso_width_none() : undefined}
+          data-stroke-off={strokeOff ? '' : undefined}
+        >
           <span className={styles.sliderLabel}>{m.annot_stroke_width()}</span>
           <LiveRange
             min={0.5}
             max={12}
             step={0.5}
-            disabled={disabled}
-            value={shown.strokeWidth}
+            disabled={disabled || strokeOff}
+            value={shown.strokeWidth ?? toolStyle?.strokeWidth ?? 1}
             valueText={(v) => m.annot_points({ value: v })}
             onValue={setStroke}
           />

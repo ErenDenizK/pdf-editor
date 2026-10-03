@@ -250,7 +250,7 @@ test.describe('pen presets and bursts', () => {
     const ink = layer(page).locator('[data-annotation-kind="ink"]');
     await mouseStroke(page, [0.2, 0.3], [0.5, 0.31]);
     await expect(ink).toHaveCount(1, { timeout: 10_000 });
-    expect(await lastInkStyle(page)).toMatchObject({ color: '#1E5BD8', strokeWidth: 1.5 });
+    expect(await lastInkStyle(page)).toMatchObject({ color: '#1760EE', strokeWidth: 1.5 });
 
     await page.reload();
     await openSimple(page);
@@ -263,7 +263,7 @@ test.describe('pen presets and bursts', () => {
     await expect(again).toHaveAttribute('data-armed', '');
     await mouseStroke(page, [0.2, 0.3], [0.5, 0.31]);
     await expect(ink).toHaveCount(1, { timeout: 10_000 });
-    expect(await lastInkStyle(page)).toMatchObject({ color: '#1E5BD8', strokeWidth: 1.5 });
+    expect(await lastInkStyle(page)).toMatchObject({ color: '#1760EE', strokeWidth: 1.5 });
 
     // The armed preset again: its editor; a width stop changes the next stroke.
     await again.click();
@@ -275,7 +275,7 @@ test.describe('pen presets and bursts', () => {
     await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
     await mouseStroke(page, [0.2, 0.7], [0.5, 0.71]);
     await expect(ink).toHaveCount(2, { timeout: 10_000 });
-    expect(await lastInkStyle(page)).toMatchObject({ color: '#1E5BD8', strokeWidth: 5 });
+    expect(await lastInkStyle(page)).toMatchObject({ color: '#1760EE', strokeWidth: 5 });
   });
 
   test('two quick strokes are one annotation and one Review row; a later one is another', async ({

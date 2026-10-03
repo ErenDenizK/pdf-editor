@@ -19,12 +19,14 @@ import {
   TOOL_STYLES_STORAGE_KEY,
   useAnnotationStore,
 } from '../annotation-store';
+import { INK, INKS, TINT, TINTS } from '../palette';
 import { penSession, resetPenSession } from './ink-input';
 import { PenBar, PenTier } from './PenBar';
 import {
   contrastRatio,
   DEFAULT_PRESETS,
   DOT_CONTRAST_MIN,
+  HIGHLIGHTER_SWATCHES,
   needsDotRing,
   overRgb,
   PEN_PRESETS_STORAGE_KEY,
@@ -80,10 +82,10 @@ describe('pen bar', () => {
     ]);
     const marks = radios.map((r) => r.querySelector<HTMLElement>('span') as HTMLElement);
     expect(marks.map((mark) => getComputedStyle(mark).backgroundColor)).toEqual([
-      'rgb(31, 31, 31)',
-      'rgb(30, 91, 216)',
-      'rgb(229, 57, 53)',
-      'rgba(255, 212, 0, 0.4)',
+      'rgb(26, 26, 26)',
+      'rgb(23, 96, 238)',
+      'rgb(219, 28, 34)',
+      'rgba(255, 234, 0, 0.4)',
     ]);
     expect(marks.map((mark) => Math.round(mark.getBoundingClientRect().height))).toEqual([
       13, 13, 13, 9,
@@ -101,7 +103,7 @@ describe('pen bar', () => {
     await userEvent.click(dot('Blue pen, 1.5 pt'));
     expect(useToolStore.getState().mode).toBe('ink');
     expect(store().pen.active).toBe(1);
-    expect(store().styles.ink.color).toBe('#1E5BD8');
+    expect(store().styles.ink.color).toBe(INK.blue);
     expect(useAnnouncer.getState().message).toBe('Blue pen, 1.5 pt');
     expect(dot('Blue pen, 1.5 pt')).toHaveAttribute('data-armed');
     await frame();
@@ -124,8 +126,8 @@ describe('pen bar', () => {
     const editor = await screen.findByRole('dialog', { name: 'Edit Blue pen' });
 
     await userEvent.click(within(editor).getByRole('radio', { name: 'Green' }));
-    expect(store().pen.presets[1].color).toBe('#43A047');
-    expect(store().styles.ink.color).toBe('#43A047');
+    expect(store().pen.presets[1].color).toBe(INK.green);
+    expect(store().styles.ink.color).toBe(INK.green);
     const named = await screen.findByRole('dialog', { name: 'Edit Green pen' });
 
     await userEvent.click(within(named).getByRole('radio', { name: '5 pt' }));
@@ -150,7 +152,7 @@ describe('pen bar', () => {
       active: 1,
       presets: [
         DEFAULT_PRESETS[0],
-        { color: '#43A047', width: 17.5, opacity: 0.6 },
+        { color: INK.green, width: 17.5, opacity: 0.6 },
         DEFAULT_PRESETS[2],
         DEFAULT_PRESETS[3],
       ],
@@ -164,6 +166,38 @@ describe('pen bar', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(useToolStore.getState().mode).toBe('ink');
     await waitFor(() => expect(dot(/^Blue pen/)).toHaveFocus());
+  });
+
+  it('the editor offers the eight inks for a pen and the four tints for the highlighter', async () => {
+    render(<Harness />);
+    const swatchNames = (editor: HTMLElement) =>
+      within(within(editor).getByRole('radiogroup', { name: 'Color' }))
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('aria-label'));
+
+    await userEvent.click(dot(/^Black pen/));
+    await userEvent.click(dot(/^Black pen/));
+    const pen = await screen.findByRole('dialog', { name: 'Edit Black pen' });
+    expect(swatchNames(pen)).toEqual(INKS.map((ink) => ink.name()));
+    // The default colour is its swatch, never "custom".
+    expect(within(pen).getByRole('radio', { name: 'Black' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    await userEvent.click(dot(/^Yellow highlighter/));
+    await userEvent.click(dot(/^Yellow highlighter/));
+    const highlighter = await screen.findByRole('dialog', { name: 'Edit Yellow highlighter' });
+    expect(swatchNames(highlighter)).toEqual(TINTS.map((tint) => tint.name()));
+    expect(within(highlighter).getByRole('radio', { name: 'Yellow' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await userEvent.click(within(highlighter).getByRole('radio', { name: 'Pink' }));
+    expect(store().pen.presets[3]).toEqual({ ...DEFAULT_PRESETS[3], color: TINT.pink });
+    expect(await screen.findByRole('dialog', { name: 'Edit Pink highlighter' })).toBeVisible();
   });
 
   it('keyboard: arrows move, Enter arms, Enter on the armed opens, Shift+Enter edits', async () => {
@@ -225,6 +259,8 @@ describe('pen bar', () => {
     const inks: PenPreset[] = [
       ...DEFAULT_PRESETS,
       ...PEN_SWATCHES.map((swatch) => ({ color: swatch.color, width: 1.5, opacity: 1 })),
+      ...HIGHLIGHTER_SWATCHES.map((swatch) => ({ color: swatch.color, width: 12, opacity: 0.4 })),
+      ...HIGHLIGHTER_SWATCHES.map((swatch) => ({ color: swatch.color, width: 12, opacity: 1 })),
     ];
     for (const ink of inks) {
       for (const [where, under] of Object.entries(fills)) {
@@ -236,6 +272,10 @@ describe('pen bar', () => {
       }
     }
     // Black, blue, red and the 40 % yellow have the ring; it is drawn in the ring colour.
+    // So does every ink of the palette.
+    expect(
+      PEN_SWATCHES.filter((s) => !needsDotRing({ color: s.color, width: 1.5, opacity: 1 })),
+    ).toEqual([]);
     expect(DEFAULT_PRESETS.map((p) => needsDotRing(p))).toEqual([true, true, true, true]);
     const marks = within(presets())
       .getAllByRole('radio')
@@ -244,8 +284,8 @@ describe('pen bar', () => {
       expect(mark).toHaveAttribute('data-ring');
       expect(getComputedStyle(mark).borderTopColor).toBe(`rgb(${ring.join(', ')})`);
     }
-    // A light ink keeps the plain swatch border.
-    expect(needsDotRing({ color: '#FB8C00', width: 1.5, opacity: 1 })).toBe(false);
+    // A tint at full opacity keeps the plain swatch border.
+    expect(needsDotRing({ color: TINT.yellow, width: 1.5, opacity: 1 })).toBe(false);
   });
 
   it('the preset ring shows only while the pen is armed, not with another Draw tool', () => {

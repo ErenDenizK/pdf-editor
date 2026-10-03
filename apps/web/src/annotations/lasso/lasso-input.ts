@@ -1,18 +1,18 @@
 /**
- * Lasso input (experience-redesign spec §6.5): native pointer handlers on a page's annotation
- * layer while the Lasso is armed, like the pen's (`pen/ink-input.ts`): no React state per
- * move.
+ * Lasso input (craft spec §5.5, after experience-redesign spec §6.5): native pointer
+ * handlers on a page's annotation layer while the Lasso is armed, like the pen's
+ * (`pen/ink-input.ts`): no React state per move.
  *
  * - **Drawing.** A press outside the current selection clears it and draws a free path (a
- *   dashed accent line in an SVG of its own); release closes it and takes the paths it
- *   touches (`geometry.ts`) as the selection (`selectPaths`). A click without a drag only
- *   clears the selection.
+ *   dashed accent line in an SVG of its own); release closes it and takes the ink paths and
+ *   the other annotations it touches (`geometry.ts`) as the selection (`selectPaths`). A
+ *   click without a drag only clears the selection.
  * - **Moving.** A press inside the selection's bounds (its grab area, `[data-lasso-grab]`,
  *   which also keeps the selection against the app's press-outside rule) or on the bar's
- *   move grip drags the taken paths: the highlight follows the pointer as a transform, and
+ *   move grip drags what it took: the highlight follows the pointer as a transform, and
  *   release commits one move (`moveLassoSelection`), points translated, widths unchanged.
  * - **Keys** (`keys.ts`): Esc clears the selection and keeps the Lasso armed; Delete removes
- *   the taken paths; arrows nudge them by 1 pt, Shift by 10 pt.
+ *   what it took; arrows nudge it by 1 pt, Shift by 10 pt.
  */
 import type { PageId } from '@pdf-editor/document-model';
 
@@ -26,10 +26,11 @@ import {
 import { cssPointToUser } from '../geometry';
 import { commitOpenEditor } from '../InlineEditors';
 import type { Point } from '../ink';
+import { kindCounts } from '../labels';
 import { mountedLayers } from '../layer-registry';
 import { penSession } from '../pen/ink-input';
 import { announceLasso, moveLassoSelection } from './edits';
-import { lassoPicks, pickCount, thinTrail } from './geometry';
+import { lassoCount, lassoPicks, pickCount, pickedWhole, thinTrail } from './geometry';
 import { installLassoKeys } from './keys';
 import styles from './Lasso.module.css';
 
@@ -206,10 +207,12 @@ export function attachLassoInput(options: LassoInputOptions): () => void {
         const polygon = points.map((p) => cssPointToUser(current.frame, p));
         const state = useAnnotationStore.getState();
         const entry = state.pages[pageKey(current.target.source, current.target.pageIndex)];
-        const picks = lassoPicks(visibleAnnotations(entry), polygon);
-        const count = pickCount(picks);
-        if (count > 0) state.selectPaths(current.target, picks);
-        announceLasso(count);
+        const annotations = visibleAnnotations(entry);
+        const picks = lassoPicks(annotations, polygon, current.frame);
+        if (lassoCount(picks) > 0) {
+          state.selectPaths(current.target, picks.paths, undefined, picks.whole);
+        }
+        announceLasso(kindCounts(pickCount(picks.paths), pickedWhole(annotations, picks.whole)));
       },
     );
   };

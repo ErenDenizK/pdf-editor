@@ -1,10 +1,12 @@
 /**
- * The lasso on a mounted annotation layer (experience-redesign spec §6.5, §11), with real
- * PDFium: a lasso around two of three strokes selects their paths and shows the bar above
- * them; recolouring changes those two only. A lasso around one path of a three-path Ink
- * acts on that path alone: Delete leaves a two-path Ink and one undo restores it; a recolour
- * splits the Ink in one history entry; a drag moves the path, arrows nudge it, Esc clears
- * the selection and keeps the Lasso armed.
+ * The lasso on a mounted annotation layer (craft spec §5.5, experience-redesign spec §6.5,
+ * §11), with real PDFium: a lasso around two of three strokes selects their paths and shows
+ * the bar above them; recolouring changes those two only. A lasso around one path of a
+ * three-path Ink acts on that path alone: Delete leaves a two-path Ink and one undo restores
+ * it; a recolour splits the Ink in one history entry; a drag moves the path, arrows nudge
+ * it, Esc clears the selection and keeps the Lasso armed. A lasso around strokes, an arrow
+ * and a note takes all of them, the bar names the mix, and a recolour is one entry; a lasso
+ * around a note alone shows the width disabled.
  */
 import '../../styles/tokens.css';
 import '../../styles/reset.css';
@@ -27,6 +29,7 @@ import simpleUrl from '../../../../../test/fixtures/simple-text.pdf?url';
 import { fixtureFile } from '../../../test/store-harness';
 import { displaySize } from '../../pages/page-geometry';
 import { resetWorkspace, useWorkspaceStore } from '../../state/workspace-store';
+import { useAnnouncer } from '../../shell/announcer';
 import { useToolStore } from '../../viewer/tool-store';
 import { createAnnotations } from '../actions';
 import { AnnotationLayer } from '../AnnotationLayer';
@@ -41,6 +44,7 @@ import { readAnnotations, resetEditRunner, whenIdle } from '../edit-runner';
 import { userToCss } from '../geometry';
 import type { Point } from '../ink';
 import { mountedLayers } from '../layer-registry';
+import { INK } from '../palette';
 import { resetLassoEdits } from './edits';
 
 const model = () => useWorkspaceStore.getState();
@@ -222,13 +226,14 @@ describe('lasso on the annotation layer', () => {
       return b;
     });
     expect(bar).toHaveTextContent('2 strokes');
+    expect(useAnnouncer.getState().message).toBe('2 strokes selected');
 
     bar.querySelector<HTMLButtonElement>('button[aria-label="Red"]')?.click();
     await whenIdle();
     const after = await inks(source);
     const colour = (id: string) => after.find((a) => a.id === id)?.color?.toUpperCase();
-    expect(colour(mid.id)).toBe('#E53935');
-    expect(colour(high.id)).toBe('#E53935');
+    expect(colour(mid.id)).toBe(INK.red);
+    expect(colour(high.id)).toBe(INK.red);
     expect(colour(low.id)).toBe('#1F1F1F');
     expect(labels()).toHaveLength(before + 1);
     expect(labels().at(-1)).toBe('Recolor 2 strokes');
@@ -304,7 +309,7 @@ describe('lasso on the annotation layer', () => {
     expect(rest?.paths.map((p) => p[0]?.y)).toEqual([600, 520]);
     expect(rest?.color?.toUpperCase()).toBe('#1F1F1F');
     expect(taken?.paths.map((p) => p[0]?.y)).toEqual([560]);
-    expect(taken?.color?.toUpperCase()).toBe('#1E88E5');
+    expect(taken?.color?.toUpperCase()).toBe(INK.blue);
     expect(labels()).toHaveLength(before + 1);
     expect(labels().at(-1)).toBe('Recolor 1 stroke');
     // The selection follows the taken path to its new ink.
@@ -451,5 +456,120 @@ describe('lasso on the annotation layer', () => {
     await waitFor(() => expect(useAnnotationStore.getState().selection).not.toBeNull());
     useToolStore.getState().setMode('select');
     await waitFor(() => expect(useAnnotationStore.getState().selection).toBeNull());
+  });
+  it('takes strokes, an arrow and a note; the bar names the mix; a recolour is one entry', async () => {
+    const { layer, source, target } = await mountLayer();
+    await createAnnotations(target, [inkDraft([stroke(100, 600), stroke(100, 560)])]);
+    await createAnnotations(target, [
+      {
+        kind: 'line',
+        pageIndex: 0,
+        rect: { x: 94, y: 504, width: 112, height: 22 },
+        vertices: [
+          { x: 100, y: 510 },
+          { x: 200, y: 520 },
+        ],
+        lineEndings: { start: 'none', end: 'open-arrow' },
+        color: '#1F1F1F',
+        strokeWidth: 2,
+      },
+      {
+        kind: 'text',
+        pageIndex: 0,
+        rect: { x: 220, y: 560, width: 20, height: 20 },
+        contents: 'A note',
+        color: '#FFEA00',
+        icon: 'Comment',
+      },
+    ]);
+    // Outside the lasso: a rectangle far below.
+    await createAnnotations(target, [
+      {
+        kind: 'square',
+        pageIndex: 0,
+        rect: { x: 100, y: 200, width: 50, height: 30 },
+        color: '#1F1F1F',
+        strokeWidth: 2,
+      },
+    ]);
+    await waitFor(() => {
+      const pages = Object.values(useAnnotationStore.getState().pages);
+      expect(pages.flatMap((p) => p.annotations)).toHaveLength(4);
+    });
+    const all = await readAnnotations(source, 0);
+    const arrow = all.find((a) => a.kind === 'line');
+    const note = all.find((a) => a.kind === 'text');
+    const square = all.find((a) => a.kind === 'square');
+    if (!arrow || !note || !square) throw new Error('annotations missing');
+    const before = labels().length;
+
+    await armLasso(layer);
+    lasso(layer, { x: 80, y: 620 }, { x: 260, y: 500 });
+    await waitFor(() => expect(layer.querySelectorAll('[data-lasso-path]')).toHaveLength(2));
+    expect(
+      [...layer.querySelectorAll('[data-lasso-whole]')].map((e) =>
+        e.getAttribute('data-lasso-whole'),
+      ),
+    ).toEqual([arrow.id, note.id]);
+    expect(activePathSelection(useAnnotationStore.getState())?.whole).toEqual([arrow.id, note.id]);
+    const bar = await waitFor(() => {
+      const b = layer.querySelector<HTMLElement>('[data-lasso-bar]');
+      if (!b) throw new Error('no bar');
+      return b;
+    });
+    expect(bar.querySelector('span')).toHaveTextContent('2 strokes, 1 arrow, 1 note');
+    expect(useAnnouncer.getState().message).toBe('2 strokes, 1 arrow, and 1 note selected');
+    // The width applies to the strokes and the arrow.
+    expect(bar.querySelector('[data-stroke-off]')).toBeNull();
+    expect(bar.querySelector('[data-lasso-move]')).toHaveAttribute('aria-label', 'Move selection');
+
+    bar.querySelector<HTMLButtonElement>('button[aria-label="Red"]')?.click();
+    await whenIdle();
+    const after = await readAnnotations(source, 0);
+    for (const a of after) {
+      expect(a.color?.toUpperCase()).toBe(a.id === square.id ? '#1F1F1F' : INK.red);
+    }
+    expect(labels()).toHaveLength(before + 1);
+    expect(labels().at(-1)).toBe('Recolor 2 strokes, 1 arrow, and 1 note');
+
+    model().undo();
+    await whenIdle();
+    const undone = await readAnnotations(source, 0);
+    expect(undone.find((a) => a.id === note.id)?.color?.toUpperCase()).toBe('#FFEA00');
+    expect(undone.find((a) => a.id === arrow.id)?.color?.toUpperCase()).toBe('#1F1F1F');
+    expect(undone.filter((a) => a.kind === 'ink').map((a) => a.color?.toUpperCase())).toEqual([
+      '#1F1F1F',
+    ]);
+  });
+
+  it('a lasso around a note alone: the bar names it and shows the width disabled', async () => {
+    const { layer, target } = await mountLayer();
+    await createAnnotations(target, [
+      {
+        kind: 'text',
+        pageIndex: 0,
+        rect: { x: 120, y: 580, width: 20, height: 20 },
+        contents: 'A note',
+        color: '#FFEA00',
+        icon: 'Comment',
+      },
+    ]);
+    await waitFor(() => {
+      const pages = Object.values(useAnnotationStore.getState().pages);
+      expect(pages.flatMap((p) => p.annotations)).toHaveLength(1);
+    });
+    await armLasso(layer);
+    lasso(layer, { x: 100, y: 620 }, { x: 180, y: 560 });
+    const bar = await waitFor(() => {
+      const b = layer.querySelector<HTMLElement>('[data-lasso-bar]');
+      if (!b) throw new Error('no bar');
+      return b;
+    });
+    expect(bar.querySelector('span')).toHaveTextContent('1 note');
+    expect(useAnnouncer.getState().message).toBe('1 note selected');
+    const width = bar.querySelector('[data-stroke-off]');
+    expect(width).toHaveAttribute('title', 'Nothing selected has a line width');
+    expect(width?.querySelector('input[type="range"]')).toBeDisabled();
+    expect(layer.querySelectorAll('[data-lasso-whole]')).toHaveLength(1);
   });
 });
