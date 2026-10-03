@@ -1,11 +1,12 @@
 .panel {
+  /* Docked frame: --surface-1, or the tier-2 glass with "Glass panels" on (global.css). */
+  composes: glass-frame from global;
   grid-area: right;
   position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
   border-left: 1px solid var(--border-hairline);
-  background: var(--surface-1);
 }
 
 .scroll {

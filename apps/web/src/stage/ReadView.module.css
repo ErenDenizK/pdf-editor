@@ -1,0 +1,61 @@
+/*
+ * The full-bleed Read view (docs/specs/craft.md §7). `.frame` takes the stage's free space below
+ * its header, exactly where the scrolling viewport used to be: the unobscured rectangle. The
+ * viewport inside it reaches out under the docked frame to the edges of the app shell (inline
+ * offsets from stage-bleed.ts) and lays its pages out inside the frame's rectangle; its own
+ * scroll bars, which would sit under the frame, are hidden for the stand-ins in
+ * ScrollProxies.tsx, and its focus ring is repeated on the frame.
+ */
+.frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.viewport {
+  position: absolute;
+  /* A stacking context under the docked frame (AppShell.module.css) and the stage header. */
+  z-index: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.viewport:focus-visible {
+  outline-offset: -2px;
+}
+
+/* The viewport's own ring runs along the shell's edges, mostly under the frame; the visible ring
+   is drawn again around the unobscured rectangle, where the viewport's ring used to be. */
+.frame:has(> .viewport:focus-visible)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+  pointer-events: none;
+}
+
+.barVertical,
+.barHorizontal {
+  position: absolute;
+  outline: none;
+}
+
+.barVertical {
+  top: 0;
+  right: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
+}
+
+.barHorizontal {
+  bottom: 0;
+  left: 0;
+  overflow-x: scroll;
+  overflow-y: hidden;
+}

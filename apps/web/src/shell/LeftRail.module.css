@@ -1,8 +1,9 @@
 .left {
+  /* Docked frame: --surface-1, or the tier-2 glass with "Glass panels" on (global.css). */
+  composes: glass-frame from global;
   grid-area: left;
   display: flex;
   min-height: 0;
-  background: var(--surface-1);
   border-right: 1px solid var(--border-hairline);
 }
 

@@ -1,4 +1,6 @@
 .bar {
+  /* Docked frame: --surface-1, or the tier-2 glass with "Glass panels" on (global.css). */
+  composes: glass-frame from global;
   grid-area: title;
   display: flex;
   align-items: center;
@@ -6,7 +8,6 @@
   height: var(--titlebar-height);
   padding-right: var(--space-2);
   border-bottom: 1px solid var(--border-hairline);
-  background: var(--surface-1);
 }
 
 /* The glyph sits in a column exactly as wide as the rail, so both share one axis. */

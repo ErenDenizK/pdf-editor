@@ -12,3 +12,12 @@
   background: var(--surface-0);
   isolation: isolate;
 }
+
+/*
+ * Full-bleed stage (docs/specs/craft.md §7): the Read view's page canvas runs under the title
+ * bar, navigator, inspector and status bar (stage/ReadView.tsx, stage/stage-bleed.ts), so the
+ * docked frame stacks above the stage. Grid items take z-index without being positioned.
+ */
+.shell > :not(main) {
+  z-index: 1;
+}

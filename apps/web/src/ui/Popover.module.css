@@ -1,5 +1,5 @@
 .popup {
-  composes: glass from global;
+  composes: glass glass-menu from global;
   width: min(320px, calc(100vw - 16px));
   padding: var(--space-3) var(--space-4) var(--space-4);
   border-radius: var(--radius-2);

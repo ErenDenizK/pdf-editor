@@ -27,6 +27,14 @@
  *   --glass-text-secondary #b4b8bf -> #bcc0c6 (4.94:1), --glass-danger #ff8a8a -> #ffa0a0
  *   (4.63:1), warning 5.5:1. Over the canvas nothing changes (#212328, 1.27:1).
  *   tokens.test.ts asserts every ratio against this file.
+ * - Craft M8 (docs/specs/craft.md §7): two more glass tiers. Tier 2, the docked frame, is used
+ *   only while the "Glass panels" setting is on: rgb(29 31 37 / 0.80) over a backdrop blurred
+ *   40px, saturated 1.4 and darkened to 0.6, which over the canvas composites to exactly
+ *   --surface-1 (#181a1f), so nothing changes at rest, and over a white page to #36373c
+ *   (primary 9.6:1, --glass-text-secondary 6.5:1, --glass-danger 6.1:1, the accent 4.0:1).
+ *   Tier 3, menus and popovers, is denser than tier 1 because menus are lists of text:
+ *   rgb(40 43 50 / 0.80), blur 32px, saturate 1.6, brightness 0.5; #212329 over the canvas,
+ *   #393c42 over a white page (primary 8.9:1, secondary 6.1:1, danger 5.7:1, accent 3.7:1).
  */
 :root,
 [data-theme='dark'] {
@@ -46,6 +54,17 @@
   --glass: rgb(48 51 58 / 0.66);
   --glass-filter: blur(28px) saturate(1.8) brightness(0.45);
   --glass-solid: var(--surface-2);
+  /* Tier 2, the docked frame (title bar, navigator, inspector, status bar; .glass-frame), while
+     "Glass panels" is on. Its alpha never drops below 0.78 ("bigger gets denser"). No shadow:
+     a 1px inner top highlight is its only edge besides the hairline. */
+  --glass-frame: rgb(29 31 37 / 0.8);
+  --glass-frame-filter: blur(40px) saturate(1.4) brightness(0.6);
+  --glass-frame-solid: var(--surface-1);
+  --glass-frame-highlight: inset 0 1px 0 rgb(255 255 255 / 0.06);
+  /* Tier 3, menus and popovers (.glass-menu with .glass): denser than the floating bar. */
+  --glass-menu: rgb(40 43 50 / 0.8);
+  --glass-menu-filter: blur(32px) saturate(1.6) brightness(0.5);
+  --glass-menu-solid: var(--glass-solid);
   /* The one elevation token, for floating chrome only (every .glass surface): a 1px inner top
      highlight, a dark hairline ring that holds the edge over a white page, and one soft
      shadow. Docked surfaces, dialogs and tooltips stay flat. No other shadow, glow or halo. */
@@ -175,19 +194,39 @@
   }
 }
 
-/* Floating chrome falls back to a solid surface when transparency is unwelcome; the ring and
-   the shadow stay, so the surface still floats. */
+/* Every glass tier falls back to its solid surface when transparency is unwelcome; the ring,
+   the shadow and the frame's highlight stay, so the surfaces keep their edges. The in-app
+   "Reduce transparency" switch sets the same values (Safari does not report the media query);
+   tokens.test.ts keeps the two blocks identical. */
 @media (prefers-reduced-transparency: reduce) {
   :root {
     --glass: var(--glass-solid);
     --glass-filter: none;
+    --glass-frame: var(--glass-frame-solid);
+    --glass-frame-filter: none;
+    --glass-menu: var(--glass-menu-solid);
+    --glass-menu-filter: none;
   }
+}
+
+:root[data-transparency='reduced'] {
+  --glass: var(--glass-solid);
+  --glass-filter: none;
+  --glass-frame: var(--glass-frame-solid);
+  --glass-frame-filter: none;
+  --glass-menu: var(--glass-menu-solid);
+  --glass-menu-filter: none;
 }
 
 @media (prefers-contrast: more) {
   :root {
     --glass: var(--glass-solid);
     --glass-filter: none;
+    --glass-frame: var(--glass-frame-solid);
+    --glass-frame-filter: none;
+    --glass-frame-highlight: none;
+    --glass-menu: var(--glass-menu-solid);
+    --glass-menu-filter: none;
     --border-hairline: rgb(255 255 255 / 0.22);
     --border-strong: rgb(255 255 255 / 0.36);
     --border-glass: rgb(255 255 255 / 0.36);
@@ -203,6 +242,12 @@
     --glass: Canvas;
     --glass-solid: Canvas;
     --glass-filter: none;
+    --glass-frame: Canvas;
+    --glass-frame-solid: Canvas;
+    --glass-frame-filter: none;
+    --glass-frame-highlight: none;
+    --glass-menu: Canvas;
+    --glass-menu-filter: none;
     --border-glass: CanvasText;
     --elevation-float: none;
   }

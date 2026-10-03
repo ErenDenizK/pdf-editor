@@ -1,7 +1,7 @@
 /* Menus float over the document: frosted glass with a hairline and --elevation-float (global
-   .glass). */
+   .glass), in the denser tier 3 (.glass-menu, docs/specs/craft.md §7). */
 .popup {
-  composes: glass from global;
+  composes: glass glass-menu from global;
   min-width: 180px;
   padding: var(--space-1);
   border-radius: var(--radius-2);

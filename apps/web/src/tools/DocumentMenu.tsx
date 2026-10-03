@@ -4,7 +4,10 @@
  * is something to remove. Combine and split (Merge files…, Split…, Compare with…, Rotate
  * pages) opens the existing dialogs and views. Commands of the "Document" group that no
  * section names join the last section, so tools registered elsewhere still appear; "About
- * this app" (`help.aboutPage`, presentation spec §3) closes that section.
+ * this app" (`help.aboutPage`, presentation spec §3) closes that section. Just before it, an
+ * "Appearance" submenu holds the app's two appearance settings as checkbox items, "Glass
+ * panels" and "Reduce transparency" (craft spec §7; also palette commands,
+ * shell/appearance-commands.ts); one row, so the menu stays within an 800 px window.
  *
  * It also hosts the tool dialogs, the Batch dialog and the OCR dialog, which load lazily
  * (their code, the compress worker and the wasm stay out of the entry chunk).
@@ -21,6 +24,8 @@ import { pickFiles } from '../files/open-files';
 import { m } from '../i18n';
 import { OcrDialogHost } from '../ocr';
 import { announce } from '../shell/announcer';
+import { setGlassPanels, setReduceTransparency } from '../shell/appearance-commands';
+import { useAppearanceStore } from '../state/appearance-store';
 import { useSelectionStore } from '../state/selection-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import menuStyles from '../ui/Menu.module.css';
@@ -268,7 +273,20 @@ function DocumentMenuItems() {
           <Menu.Group data-section={section.id}>
             <Menu.GroupLabel className={styles.sectionLabel}>{section.label()}</Menu.GroupLabel>
             {entries.map((shown) =>
-              shown.entry.kind === 'rotate' ? (
+              shown.key === ABOUT_PAGE_ID ? (
+                <Fragment key={shown.key}>
+                  <AppearanceSubmenu />
+                  <Menu.Item
+                    className={menuStyles.item}
+                    disabled={!shown.enabled}
+                    onClick={() => {
+                      if (shown.command) void commandRegistry.execute(shown.command.id);
+                    }}
+                  >
+                    <span className={menuStyles.label}>{shown.label}</span>
+                  </Menu.Item>
+                </Fragment>
+              ) : shown.entry.kind === 'rotate' ? (
                 <RotateSubmenu key={shown.key} label={shown.label} enabled={shown.enabled} />
               ) : (
                 <Menu.Item
@@ -284,10 +302,51 @@ function DocumentMenuItems() {
                 </Menu.Item>
               ),
             )}
+            {section.id === 'document' && !entries.some((e) => e.key === ABOUT_PAGE_ID) ? (
+              <AppearanceSubmenu />
+            ) : null}
           </Menu.Group>
         </Fragment>
       ))}
     </>
+  );
+}
+
+/** "Appearance ▸": the two appearance settings as checkbox items (role menuitemcheckbox). */
+function AppearanceSubmenu() {
+  const glassPanels = useAppearanceStore((s) => s.glassPanels);
+  const reduceTransparency = useAppearanceStore((s) => s.reduceTransparency);
+  return (
+    <Menu.SubmenuRoot>
+      <Menu.SubmenuTrigger className={menuStyles.item} data-settings="appearance">
+        <span className={menuStyles.label}>{m.appearance_heading()}</span>
+        <ChevronRight className={menuStyles.submenuArrow} aria-hidden="true" />
+      </Menu.SubmenuTrigger>
+      <Menu.Portal>
+        <Menu.Positioner side="left" align="end" sideOffset={4} collisionPadding={8}>
+          <Menu.Popup className={menuStyles.popup} aria-label={m.appearance_heading()}>
+            <Menu.CheckboxItem
+              className={menuStyles.item}
+              checked={glassPanels}
+              onCheckedChange={setGlassPanels}
+              closeOnClick={false}
+            >
+              <span className={menuStyles.check} aria-hidden="true" />
+              <span className={menuStyles.label}>{m.appearance_glass_panels()}</span>
+            </Menu.CheckboxItem>
+            <Menu.CheckboxItem
+              className={menuStyles.item}
+              checked={reduceTransparency}
+              onCheckedChange={setReduceTransparency}
+              closeOnClick={false}
+            >
+              <span className={menuStyles.check} aria-hidden="true" />
+              <span className={menuStyles.label}>{m.appearance_reduce_transparency()}</span>
+            </Menu.CheckboxItem>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.SubmenuRoot>
   );
 }
 

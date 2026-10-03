@@ -1,6 +1,6 @@
 /**
  * Contrast and structure of the design tokens (docs/specs/experience-redesign.md §7.1–§7.3, §11;
- * DESIGN.md §3). The test reads the real `tokens.css` and `global.css`, resolves `var()`
+ * docs/specs/craft.md §7 for the three glass tiers; DESIGN.md §3). The test reads the real `tokens.css` and `global.css`, resolves `var()`
  * references and computes WCAG 2.2 contrast ratios, so a token change that breaks a ratio fails
  * here rather than in a screenshot review.
  *
@@ -139,9 +139,9 @@ function lightness(c: Rgb): number {
   return y > 216 / 24389 ? 116 * Math.cbrt(y) - 16 : (y * 24389) / 27;
 }
 
-/** The filter functions of `--glass-filter` that change a uniform backdrop. */
-function glassFilter(): { saturate: number; brightness: number } {
-  const filter = resolve('--glass-filter');
+/** The filter functions of a tier's filter token that change a uniform backdrop. */
+function glassFilter(token = '--glass-filter'): { saturate: number; brightness: number } {
+  const filter = resolve(token);
   const amount = (fn: string) => {
     const match = new RegExp(`${fn}\\(([\\d.]+)\\)`).exec(filter);
     return match?.[1] === undefined ? 1 : Number(match[1]);
@@ -162,13 +162,35 @@ function saturate(c: Rgb, s: number): Rgb {
   });
 }
 
-/** The glass as rendered over a uniform backdrop. */
-function glassOver(backdrop: Rgb): Rgb {
-  const tint = parseColour(resolve('--glass'));
-  const { saturate: s, brightness: k } = glassFilter();
+/** A glass tier: its tint, filter and opaque fallback tokens. */
+interface Tier {
+  readonly tint: string;
+  readonly filter: string;
+  readonly solid: string;
+}
+
+const TIER_1: Tier = { tint: '--glass', filter: '--glass-filter', solid: '--glass-solid' };
+const TIER_2: Tier = {
+  tint: '--glass-frame',
+  filter: '--glass-frame-filter',
+  solid: '--glass-frame-solid',
+};
+const TIER_3: Tier = {
+  tint: '--glass-menu',
+  filter: '--glass-menu-filter',
+  solid: '--glass-menu-solid',
+};
+
+/** A tier as rendered over a uniform backdrop. */
+function tierOver(tier: Tier, backdrop: Rgb): Rgb {
+  const tint = parseColour(resolve(tier.tint));
+  const { saturate: s, brightness: k } = glassFilter(tier.filter);
   const filtered = map3(saturate(backdrop, s), (v) => clamp(v * k));
   return round8(over(tint.rgb, tint.alpha, filtered));
 }
+
+/** The floating glass (tier 1) as rendered over a uniform backdrop. */
+const glassOver = (backdrop: Rgb): Rgb => tierOver(TIER_1, backdrop);
 
 const SURFACES = ['--surface-0', '--surface-1', '--surface-2', '--surface-3'] as const;
 const BODY_TEXT = [
@@ -260,6 +282,14 @@ describe('tokens.css', () => {
       '--radius-capsule',
       '--rise-distance',
       '--motion-rise',
+      // M8 (craft §7): tiers 2 and 3.
+      '--glass-frame',
+      '--glass-frame-filter',
+      '--glass-frame-solid',
+      '--glass-frame-highlight',
+      '--glass-menu',
+      '--glass-menu-filter',
+      '--glass-menu-solid',
     ];
     for (const name of names) expect(root.has(name), name).toBe(true);
   });
@@ -415,6 +445,205 @@ describe('tokens.css', () => {
           }
         }
       }
+    });
+  });
+
+  describe('three glass tiers (craft §7)', () => {
+    const TIERS: readonly (readonly [string, Tier])[] = [
+      ['1 floating', TIER_1],
+      ['2 docked frame', TIER_2],
+      ['3 menus and popovers', TIER_3],
+    ];
+    /** The four backdrops the spec names: white, the canvas, mid grey and black. */
+    const FOUR: readonly (readonly [string, () => Rgb])[] = [
+      ['white', () => literal('#ffffff')],
+      ['the canvas', canvas],
+      ['#808080', () => literal('#808080')],
+      ['black', () => literal('#000000')],
+    ];
+    const cases = TIERS.flatMap(([name, tier]) =>
+      FOUR.map(([backdrop, rgb]) => [name, backdrop, tier, rgb] as const),
+    );
+
+    it.each(cases)(
+      'tier %s over %s keeps glass text AA and the accent at 3:1',
+      (_, __, tier, rgb) => {
+        const glass = tierOver(tier, rgb());
+        for (const text of [
+          '--text-primary',
+          '--glass-text-secondary',
+          '--glass-danger',
+          '--warning',
+        ]) {
+          expect(contrast(colour(text), glass), text).toBeGreaterThanOrEqual(AA_TEXT);
+        }
+        expect(contrast(colour('--accent'), glass), 'accent').toBeGreaterThanOrEqual(AA_NON_TEXT);
+      },
+    );
+
+    it('composites tier 2 to --surface-1 over the canvas (#181a1f) and to #36373c over white', () => {
+      expect(tierOver(TIER_2, canvas())).toEqual(colour('--surface-1'));
+      expect(tierOver(TIER_2, canvas())).toEqual(literal('#181a1f'));
+      expect(tierOver(TIER_2, canvas())).toEqual(colour('--glass-frame-solid'));
+      expect(tierOver(TIER_2, literal('#ffffff'))).toEqual(literal('#36373c'));
+    });
+
+    it('composites tier 3 to #212329 over the canvas and #393c42 over white', () => {
+      expect(tierOver(TIER_3, canvas())).toEqual(literal('#212329'));
+      expect(tierOver(TIER_3, literal('#ffffff'))).toEqual(literal('#393c42'));
+    });
+
+    it('meets the worst-case numbers over white (tiers 1 / 2 / 3)', () => {
+      const minima: readonly (readonly [string, readonly [number, number, number]])[] = [
+        ['--text-primary', [7.29, 9.6, 8.94]],
+        ['--glass-text-secondary', [4.93, 6.495, 6.05]],
+        ['--glass-danger', [4.63, 6.095, 5.68]],
+        ['--accent', [3.025, 3.985, 3.71]],
+      ];
+      const white = literal('#ffffff');
+      for (const [text, perTier] of minima) {
+        TIERS.forEach(([name, tier], i) => {
+          expect(
+            contrast(colour(text), tierOver(tier, white)),
+            `${text} on tier ${name}`,
+          ).toBeGreaterThanOrEqual(perTier[i] ?? Number.POSITIVE_INFINITY);
+        });
+      }
+    });
+
+    it('keeps tier 2 dense (alpha ≥ 0.78) and its fallback on --surface-1, tier 3 on the menu surface', () => {
+      expect(parseColour(resolve('--glass-frame')).alpha).toBeGreaterThanOrEqual(0.78);
+      expect(resolve('--glass-frame-solid')).toBe(resolve('--surface-1'));
+      expect(resolve('--glass-menu-solid')).toBe(resolve('--glass-solid'));
+      for (const tier of [TIER_2, TIER_3]) {
+        for (const text of GLASS_TEXT) {
+          expect(
+            contrast(colour(text), colour(tier.solid)),
+            `${text} on ${tier.solid}`,
+          ).toBeGreaterThanOrEqual(AA_TEXT);
+        }
+      }
+    });
+
+    it('gives the docked frame no shadow: one inset 1px top highlight', () => {
+      const layers = splitLayers(resolve('--glass-frame-highlight'));
+      expect(layers).toHaveLength(1);
+      expect(layers[0]?.trim()).toMatch(/^inset 0 1px 0 rgb\(/);
+    });
+
+    it('allows only the floating elevation and the frame highlight as shadows in global.css', () => {
+      const css = stripComments(globalCss);
+      const shadows = [...css.matchAll(/box-shadow:\s*([^;}]+)/g)].map((m) => (m[1] ?? '').trim());
+      expect(shadows.sort()).toEqual(['var(--elevation-float)', 'var(--glass-frame-highlight)']);
+      expect(css.match(/var\(--glass-frame-highlight\)/g)).toHaveLength(1);
+      const frameRule =
+        /:root\[data-glass-panels\] \.glass-frame\s*\{([^{}]*)\}/.exec(css)?.[1] ?? '';
+      expect(frameRule).toMatch(/box-shadow:\s*var\(--glass-frame-highlight\)/);
+    });
+
+    it('paints the frame solid unless Glass panels is on, and maps its text then', () => {
+      const css = stripComments(globalCss);
+      const base = /(?:^|\})\s*\.glass-frame\s*\{([^{}]*)\}/.exec(css)?.[1] ?? '';
+      expect(base).toMatch(/background:\s*var\(--glass-frame-solid\)/);
+      expect(base).not.toMatch(/backdrop-filter/);
+      const on = /:root\[data-glass-panels\] \.glass-frame\s*\{([^{}]*)\}/.exec(css)?.[1] ?? '';
+      expect(on).toMatch(/--text-secondary:\s*var\(--glass-text-secondary\)/);
+      expect(on).toMatch(/--text-tertiary:\s*var\(--glass-text-secondary\)/);
+      expect(on).toMatch(/--danger:\s*var\(--glass-danger\)/);
+      // The blur only where the geometry gate lists a page near, behind the support gate.
+      const live =
+        /@supports[^{]*\{\s*:root\[data-glass-panels\]\s*:where\(([^)]*)\)\.glass-frame\s*\{([^{}]*)\}/.exec(
+          css,
+        );
+      expect(live?.[1]).toMatch(/data-glass-near~='title'/);
+      expect(live?.[1]).toMatch(/data-glass-near~='status'/);
+      expect(live?.[2]).toMatch(/backdrop-filter:\s*var\(--glass-frame-filter\)/);
+      expect(live?.[2]).toMatch(/background:\s*var\(--glass-frame\)/);
+      // Filters never animate.
+      expect(css).not.toMatch(/transition[^;]*(?:backdrop-filter|filter)/);
+    });
+
+    it('points menus and popovers at tier 3 through the one .glass rule', () => {
+      const css = stripComments(globalCss);
+      const menu = declarations(/\.glass-menu\s*\{([^{}]*)\}/.exec(css)?.[1] ?? '');
+      expect(menu.get('--glass')).toBe('var(--glass-menu)');
+      expect(menu.get('--glass-filter')).toBe('var(--glass-menu-filter)');
+      expect(menu.get('--glass-solid')).toBe('var(--glass-menu-solid)');
+      const modules = import.meta.glob<string>('../ui/{Menu,Popover}.module.css', {
+        query: '?raw',
+        import: 'default',
+        eager: true,
+      });
+      expect(Object.keys(modules)).toHaveLength(2);
+      for (const [file, source] of Object.entries(modules)) {
+        expect(source, file).toMatch(/composes:\s*glass glass-menu from global;/);
+      }
+    });
+
+    it('makes the docked surfaces compose the frame and paint no background of their own', () => {
+      const modules = import.meta.glob<string>(
+        '../shell/{TabBar,LeftRail,RightPanel,StatusBar}.module.css',
+        { query: '?raw', import: 'default', eager: true },
+      );
+      expect(Object.keys(modules)).toHaveLength(4);
+      for (const [file, source] of Object.entries(modules)) {
+        const css = stripComments(source);
+        const root = /^\.[\w]+\s*\{([^{}]*)\}/m.exec(css)?.[1] ?? '';
+        expect(root, file).toMatch(/composes:\s*glass-frame from global;/);
+        expect(root, file).not.toMatch(/background:/);
+      }
+    });
+
+    describe('Reduce transparency', () => {
+      const attribute = declarations(
+        /:root\[data-transparency='reduced'\]\s*\{([^{}]*)\}/.exec(tokensSource)?.[1] ?? '',
+      );
+      const media = mediaOverrides('prefers-reduced-transparency: reduce');
+
+      it('the in-app switch sets exactly what the media query sets', () => {
+        expect(attribute.size).toBeGreaterThan(0);
+        expect([...attribute.entries()].sort()).toEqual([...media.entries()].sort());
+      });
+
+      it('makes every tier solid and keeps rings, shadows and the highlight', () => {
+        for (const scope of [attribute, media]) {
+          for (const tier of [TIER_1, TIER_2, TIER_3]) {
+            expect(scope.get(tier.tint), tier.tint).toBe(`var(${tier.solid})`);
+            expect(scope.get(tier.filter), tier.filter).toBe('none');
+          }
+          expect(scope.has('--elevation-float')).toBe(false);
+          expect(scope.has('--glass-frame-highlight')).toBe(false);
+          expect(scope.has('--border-glass')).toBe(false);
+        }
+      });
+
+      it('flattens every tier for more contrast and forced colours, without the highlight', () => {
+        const more = mediaOverrides('prefers-contrast: more');
+        for (const tier of [TIER_1, TIER_2, TIER_3]) {
+          expect(more.get(tier.tint), tier.tint).toBe(`var(${tier.solid})`);
+          expect(more.get(tier.filter), tier.filter).toBe('none');
+        }
+        expect(more.get('--glass-frame-highlight')).toBe('none');
+        const forced = mediaOverrides('forced-colors: active');
+        expect(forced.get('--glass-frame')).toBe('Canvas');
+        expect(forced.get('--glass-menu')).toBe('Canvas');
+        expect(forced.get('--glass-frame-highlight')).toBe('none');
+      });
+
+      it('falls back to the opaque surfaces in global.css under the switch too', () => {
+        const css = stripComments(globalCss);
+        const glass =
+          /:root\[data-transparency='reduced'\] \.glass\s*\{([^{}]*)\}/.exec(css)?.[1] ?? '';
+        expect(glass).toMatch(/background:\s*var\(--glass-solid\)/);
+        expect(glass).toMatch(/(?:^|[^-])backdrop-filter:\s*none/);
+        expect(glass).toMatch(/--text-secondary:\s*inherit/);
+        const frame =
+          /:root\[data-glass-panels\]\[data-transparency='reduced'\] \.glass-frame\s*\{([^{}]*)\}/.exec(
+            css,
+          )?.[1] ?? '';
+        expect(frame).toMatch(/background:\s*var\(--glass-frame-solid\)/);
+        expect(frame).toMatch(/(?:^|[^-])backdrop-filter:\s*none/);
+      });
     });
   });
 

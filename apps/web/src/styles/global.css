@@ -175,3 +175,90 @@ textarea,
     backdrop-filter: none;
   }
 }
+
+/* The in-app "Reduce transparency" switch (appearance-store.ts) does what the media query does. */
+:root[data-transparency='reduced'] .glass {
+  --text-secondary: inherit;
+  --text-tertiary: inherit;
+  --text-disabled: inherit;
+  --danger: inherit;
+  background: var(--glass-solid);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/*
+ * Tier 3 (docs/specs/craft.md §7): menus and popovers compose `glass glass-menu`. The modifier
+ * only points .glass at the denser tier-3 tint, filter and solid fallback, so the one rule
+ * above still draws the border, the elevation, the text mapping and every fallback.
+ */
+.glass-menu {
+  --glass: var(--glass-menu);
+  --glass-filter: var(--glass-menu-filter);
+  --glass-solid: var(--glass-menu-solid);
+}
+
+/*
+ * Tier 2, the docked frame (docs/specs/craft.md §7): the title bar, the navigator, the
+ * inspector and the status bar compose `glass-frame from global`. It paints
+ * --glass-frame-solid (--surface-1), exactly what those surfaces painted before, unless the
+ * "Glass panels" setting is on (`data-glass-panels` on the root, appearance-store.ts).
+ *
+ * With the setting on, the frame takes the glass text steps and its 1px inner top highlight
+ * at once, so neither jumps when the blur turns on; the backdrop filter itself is
+ * geometry-gated: the Read view lists the surfaces that have a page within 80px in the shell's
+ * `data-glass-near` (stage/stage-bleed.ts), and only those blur. Elsewhere the frame paints the
+ * solid token, which is pixel-identical to the tier-2 glass over the bare canvas. Docked glass
+ * has no shadow and no ring; the highlight is the one inset rule besides --elevation-float.
+ * The filter never animates and no glass surface sits inside another (menus are portalled).
+ */
+.glass-frame {
+  background: var(--glass-frame-solid);
+}
+
+:root[data-glass-panels] .glass-frame {
+  --text-secondary: var(--glass-text-secondary);
+  --text-tertiary: var(--glass-text-secondary);
+  --text-disabled: var(--glass-text-disabled);
+  --danger: var(--glass-danger);
+  box-shadow: var(--glass-frame-highlight);
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  :root[data-glass-panels]
+    :where(
+      [data-glass-near~='title'] > header,
+      [data-glass-near~='left'] > [data-region='navigator'],
+      [data-glass-near~='right'] > #right-panel,
+      [data-glass-near~='status'] > footer
+    ).glass-frame {
+    background: var(--glass-frame);
+    -webkit-backdrop-filter: var(--glass-frame-filter);
+    backdrop-filter: var(--glass-frame-filter);
+  }
+}
+
+/* Solid frame, with the normal text ladder, when transparency is unwelcome or more contrast is
+   asked for (the highlight stays under reduced transparency; tokens.css drops it for more
+   contrast and forced colours). */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
+  :root[data-glass-panels] .glass-frame {
+    --text-secondary: inherit;
+    --text-tertiary: inherit;
+    --text-disabled: inherit;
+    --danger: inherit;
+    background: var(--glass-frame-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+:root[data-glass-panels][data-transparency='reduced'] .glass-frame {
+  --text-secondary: inherit;
+  --text-tertiary: inherit;
+  --text-disabled: inherit;
+  --danger: inherit;
+  background: var(--glass-frame-solid);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}

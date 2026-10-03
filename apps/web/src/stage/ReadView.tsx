@@ -13,6 +13,12 @@
  * Every page hosts the registered overlays (text layer, search highlights, links, …).
  * With a text layer the page is a `region` whose content is its text; the canvas is
  * decorative.
+ *
+ * Full bleed (craft spec §7): the scroll container covers the whole app shell, under the
+ * title bar, navigator, inspector and status bar, while fit, centring, the current page and
+ * scroll-into-view use the unobscured rectangle (`view`, measured by `stage-bleed.ts`, the
+ * stage's box below its header, with the stand-in scroll bars' room). At rest the pages sit
+ * exactly where they sat inside the old, smaller viewport.
  */
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -30,6 +36,7 @@ import { m } from '../i18n';
 import { PageCanvas } from '../pages/PageCanvas';
 import { CSS_PX_PER_PT, displaySize, rotationPhrase } from '../pages/page-geometry';
 import { needsTiles, TiledPage } from '../pages/TiledPage';
+import { useAppearanceStore } from '../state/appearance-store';
 import { useSelectionStore } from '../state/selection-store';
 import { MAX_ZOOM, MIN_ZOOM, useUiStore } from '../state/ui-store';
 import { type ReadLayout, useViewStore } from '../state/view-store';
@@ -48,7 +55,19 @@ import { setReadController } from '../viewer/read-controller';
 import '../viewer/register';
 import { installCopyHandler } from '../viewer/TextLayer';
 import { PageOverlays } from './page-overlays';
+import readStyles from './ReadView.module.css';
 import { type ContentFrame, contentFrame, ResizedContent } from './ResizedContent';
+import { ScrollProxies } from './ScrollProxies';
+import {
+  type Box as BleedBox,
+  type FrameSurface,
+  type Insets,
+  scrollbarSize,
+  scrollbarsNeeded,
+  surfacesNearPages,
+  useStageBleed,
+  writeGlassNear,
+} from './stage-bleed';
 
 const PAD_X = 48;
 const PAD_TOP = 16;
@@ -223,21 +242,55 @@ export function ReadView({ doc }: { readonly doc: VirtualDocument }) {
   const layout = computeLayout(ws, doc, readLayout, currentPage);
   const cssScale = zoom * CSS_PX_PER_PT;
 
-  // Fit width / fit page follow the viewport size.
+  // The unobscured rectangle (the frame) and the bars the page column needs inside it, as the
+  // old viewport of the frame's size would have shown them.
+  const frameRef = useRef<HTMLDivElement>(null);
+  const bleed = useStageBleed(frameRef);
+  const barSize = scrollbarSize();
+  const content = readContentSize(layout, cssScale);
+  const bars = scrollbarsNeeded(content, bleed, barSize);
+  const view: Insets = {
+    top: bleed.insets.top,
+    left: bleed.insets.left,
+    right: bleed.insets.right + (bars.vertical ? barSize : 0),
+    bottom: bleed.insets.bottom + (bars.horizontal ? barSize : 0),
+  };
+  const glassPanels = useAppearanceStore((s) => s.glassPanels);
+  const bleedElement = bleed.element;
+  const onGlassNear = useCallback(
+    (near: readonly FrameSurface[]) => writeGlassNear(bleedElement, near),
+    [bleedElement],
+  );
+  // Without the Read view no page passes under the frame: it paints its solid token.
+  useEffect(() => () => writeGlassNear(bleedElement, []), [bleedElement]);
+
+  // Fit width / fit page follow the unobscured rectangle: the window and the panels' sizes.
   useEffect(() => {
     const el = viewportRef.current;
     if (!el || fitMode === null) return;
     const fit = () => {
+      const width = el.clientWidth - view.left - view.right;
+      const height = el.clientHeight - view.top - view.bottom;
       const byWidth =
-        (el.clientWidth - PAD_X * 2 - layout.maxGaps * GAP) / (layout.maxWidth * CSS_PX_PER_PT);
-      const byHeight = (el.clientHeight - PAD_TOP - GAP) / (layout.maxHeight * CSS_PX_PER_PT);
+        (width - PAD_X * 2 - layout.maxGaps * GAP) / (layout.maxWidth * CSS_PX_PER_PT);
+      const byHeight = (height - PAD_TOP - GAP) / (layout.maxHeight * CSS_PX_PER_PT);
       applyFitZoom(fitMode === 'width' ? byWidth : Math.min(byWidth, byHeight));
     };
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [fitMode, applyFitZoom, layout.maxWidth, layout.maxHeight, layout.maxGaps]);
+  }, [
+    fitMode,
+    applyFitZoom,
+    layout.maxWidth,
+    layout.maxHeight,
+    layout.maxGaps,
+    view.left,
+    view.right,
+    view.top,
+    view.bottom,
+  ]);
 
   // Copy from the text layer assembles lines and pages (TextLayer.tsx).
   useEffect(() => installCopyHandler(), []);
@@ -262,35 +315,74 @@ export function ReadView({ doc }: { readonly doc: VirtualDocument }) {
   }, [fingerprint]);
 
   return (
-    <div
-      ref={attachViewport}
-      className={styles.viewport}
-      data-read-viewport
-      data-layout={readLayout}
-      // A Tab stop, so the pages scroll from the keyboard (the canvases hold no focusable
-      // content); named for the document.
-      role="region"
-      aria-label={m.a11y_pages_viewport({ title: doc.title })}
-      // A scrollable region must take focus (WCAG 2.1.1; axe scrollable-region-focusable).
-      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-      tabIndex={0}
-    >
-      {viewport ? (
-        <PageColumn
-          doc={doc}
-          ws={ws}
-          layout={layout}
-          readLayout={readLayout}
-          cssScale={cssScale}
-          scrollElement={viewport}
-          viewportRef={viewportRef}
-          fingerprint={fingerprint}
-          fitting={fitMode !== null}
-        />
-      ) : null}
-      <GoToPageDialog doc={doc} />
+    <div ref={frameRef} className={readStyles.frame}>
+      <div
+        ref={attachViewport}
+        className={readStyles.viewport}
+        data-read-viewport
+        data-layout={readLayout}
+        // A Tab stop, so the pages scroll from the keyboard (the canvases hold no focusable
+        // content); named for the document.
+        role="region"
+        aria-label={m.a11y_pages_viewport({ title: doc.title })}
+        // A scrollable region must take focus (WCAG 2.1.1; axe scrollable-region-focusable).
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+        tabIndex={0}
+        style={{
+          // Out to the edges of the shell, under the docked frame.
+          top: -bleed.insets.top,
+          right: -bleed.insets.right,
+          bottom: -bleed.insets.bottom,
+          left: -bleed.insets.left,
+          // Focus and scrollIntoView keep targets inside the unobscured rectangle.
+          scrollPadding: `${view.top}px ${view.right}px ${view.bottom}px ${view.left}px`,
+        }}
+      >
+        {viewport ? (
+          <PageColumn
+            doc={doc}
+            ws={ws}
+            layout={layout}
+            readLayout={readLayout}
+            cssScale={cssScale}
+            scrollElement={viewport}
+            viewportRef={viewportRef}
+            fingerprint={fingerprint}
+            fitting={fitMode !== null}
+            view={view}
+            frame={bleed.frame}
+            glassPanels={glassPanels}
+            onGlassNear={onGlassNear}
+          />
+        ) : null}
+        <GoToPageDialog doc={doc} />
+      </div>
+      <ScrollProxies
+        target={viewport}
+        content={content}
+        vertical={bars.vertical}
+        horizontal={bars.horizontal}
+        size={barSize}
+      />
     </div>
   );
+}
+
+/**
+ * The page column's size inside the unobscured rectangle (the old viewport's scroll content):
+ * the widest row with its side padding, and every row with the top and bottom padding.
+ * Exported for tests.
+ */
+export function readContentSize(
+  layout: Pick<Layout, 'rows' | 'maxWidth' | 'maxGaps'>,
+  cssScale: number,
+): { width: number; height: number } {
+  let height = PAD_TOP + PAD_BOTTOM - GAP;
+  for (const row of layout.rows) height += row.height * cssScale + GAP;
+  return {
+    width: layout.maxWidth * cssScale + layout.maxGaps * GAP + PAD_X * 2,
+    height,
+  };
 }
 
 /** A zoom anchor: a point of a row that must stay under a viewport position. */
@@ -318,6 +410,10 @@ function PageColumn({
   viewportRef,
   fingerprint,
   fitting,
+  view,
+  frame,
+  glassPanels,
+  onGlassNear,
 }: {
   readonly doc: VirtualDocument;
   readonly ws: Workspace;
@@ -338,6 +434,17 @@ function PageColumn({
    * (1440 → 1024 → 1440 px left page 1's only text scrolled out of view).
    */
   readonly fitting: boolean;
+  /**
+   * The unobscured rectangle's insets in the full-bleed viewport: the docked frame and the
+   * stage header, plus the stand-in scroll bars' room. Rows are laid out, centred and scrolled
+   * to inside it.
+   */
+  readonly view: Insets;
+  /** The docked frame alone (title bar, navigator, inspector, status bar), for the glass gate. */
+  readonly frame: Insets;
+  /** "Glass panels" is on: tell the shell which frame surfaces have a page near. */
+  readonly glassPanels: boolean;
+  readonly onGlassNear: (near: readonly FrameSurface[]) => void;
 }) {
   'use no memo'; // TanStack Virtual mutates its instance; the React Compiler must not cache it.
   const setCurrentPage = useViewStore((s) => s.setCurrentPage);
@@ -350,7 +457,8 @@ function PageColumn({
     const row = rows[r];
     return row ? row.width * cssScale + (row.pages.length - 1) * GAP : 0;
   };
-  const canvasWidth = layout.maxWidth * cssScale + layout.maxGaps * GAP + PAD_X * 2;
+  const canvasWidth =
+    layout.maxWidth * cssScale + layout.maxGaps * GAP + PAD_X * 2 + view.left + view.right;
 
   // Opted out of the compiler above ('use no memo'), so the instance is read fresh.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -362,13 +470,26 @@ function PageColumn({
       const first = rows[r]?.pages[0];
       return `${readLayout}:${(first === undefined ? undefined : pages[first]?.id) ?? r}`;
     },
-    paddingStart: PAD_TOP,
-    paddingEnd: PAD_BOTTOM - GAP,
+    paddingStart: view.top + PAD_TOP,
+    paddingEnd: view.bottom + PAD_BOTTOM - GAP,
+    // Rows scrolled to the start or end stop at the unobscured rectangle's edges.
+    scrollPaddingStart: view.top,
+    scrollPaddingEnd: view.bottom,
     overscan: 2,
   });
 
   /** Canvas width as laid out (at least the viewport). */
   const laidOutWidth = (el: HTMLElement, width: number) => Math.max(el.clientWidth, width);
+  /** The horizontal centre of the column the rows are centred in, between the side insets. */
+  const columnCentre = (el: HTMLElement) =>
+    view.left + (laidOutWidth(el, canvasWidth) - view.left - view.right) / 2;
+  /** Height of the unobscured rectangle. */
+  const visibleHeightOf = (el: HTMLElement) => el.clientHeight - view.top - view.bottom;
+  /** Content offset of a row's top (`getOffsetForIndex` answers in scroll offsets). */
+  const rowTopOf = (r: number) => {
+    const offset = virtualizer.getOffsetForIndex(r, 'start')?.[0];
+    return offset === undefined ? undefined : offset + view.top;
+  };
 
   /** An anchor for the point at viewport position (vx, vy). */
   const anchorAt = (vx: number, vy: number): Anchor | null => {
@@ -384,12 +505,33 @@ function PageColumn({
           fraction: Math.min(1, Math.max(0, (y - item.start) / height)),
           viewportX: vx,
           viewportY: vy,
-          fromCentre: el.scrollLeft + vx - laidOutWidth(el, canvasWidth) / 2,
+          fromCentre: el.scrollLeft + vx - columnCentre(el),
           scale: cssScale,
         };
       }
     }
     return found;
+  };
+
+  /**
+   * The glass gate (craft spec §7): the frame surfaces with a laid-out row within 80 px, in
+   * the viewport's coordinates, which are the shell's. Arithmetic on the layout only.
+   */
+  const nearSurfaces = (
+    el: HTMLElement,
+    items: readonly { readonly index: number; readonly start: number }[],
+  ): FrameSurface[] => {
+    const centre = columnCentre(el);
+    const boxes: BleedBox[] = items.map((item) => {
+      const width = rowCssWidth(item.index);
+      return {
+        left: centre - width / 2 - el.scrollLeft,
+        top: item.start - el.scrollTop,
+        width,
+        height: heightOf(item.index),
+      };
+    });
+    return surfacesNearPages(boxes, { width: el.clientWidth, height: el.clientHeight }, frame);
   };
 
   // Pending navigation target: cleared once the programmatic scroll goes quiet.
@@ -421,23 +563,26 @@ function PageColumn({
       el.scrollTop = 0;
       return;
     }
-    const start = virtualizer.getOffsetForIndex(a.row, 'start')?.[0];
+    const start = rowTopOf(a.row);
     if (start === undefined) return;
     el.scrollTop = start + a.fraction * heightOf(a.row) - a.viewportY;
     const ratio = cssScale / a.scale;
-    el.scrollLeft = laidOutWidth(el, canvasWidth) / 2 + a.fromCentre * ratio - a.viewportX;
+    el.scrollLeft = columnCentre(el) + a.fromCentre * ratio - a.viewportX;
   });
 
   // Current page, visible pages and the zoom anchor from the scroll position.
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
-    let frame = 0;
+    let frameId = 0;
     const update = () => {
-      frame = 0;
-      const top = el.scrollTop;
-      const bottom = top + el.clientHeight;
+      frameId = 0;
+      // What the docked frame leaves free: the current page is the most visible one there.
+      const top = el.scrollTop + view.top;
+      const bottom = el.scrollTop + el.clientHeight - view.bottom;
       const items = virtualizer.getVirtualItems();
+      if (glassPanels) onGlassNear(nearSurfaces(el, items));
+      else onGlassNear([]);
       // Current: the most visible row (the first on ties, so short pages read 1, 2, …).
       let current: (typeof items)[number] | undefined;
       let currentVisible = -1;
@@ -456,10 +601,11 @@ function PageColumn({
           }
         }
       }
-      const centre = anchorAt(el.clientWidth / 2, el.clientHeight / 2);
+      const midX = view.left + (el.clientWidth - view.left - view.right) / 2;
+      const centre = anchorAt(midX, (top + bottom) / 2 - el.scrollTop);
       if (centre) anchor.current = centre;
-      const edge = anchorAt(el.clientWidth / 2, 0);
-      if (edge) topAnchor.current = { ...edge, atTop: top <= 0 };
+      const edge = anchorAt(midX, view.top);
+      if (edge) topAnchor.current = { ...edge, atTop: el.scrollTop <= 0 };
       const page = current ? rows[current.index]?.pages[0] : undefined;
       if (page === undefined) return;
       setCurrentPage(page);
@@ -467,7 +613,7 @@ function PageColumn({
       else setVisibleRange(page, page);
     };
     const onScroll = () => {
-      if (frame === 0) frame = requestAnimationFrame(update);
+      if (frameId === 0) frameId = requestAnimationFrame(update);
       // A programmatic scroll is still moving: wait for it to go quiet.
       if (useViewStore.getState().navTarget !== null) armSettle();
     };
@@ -475,7 +621,7 @@ function PageColumn({
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       el.removeEventListener('scroll', onScroll);
-      if (frame !== 0) cancelAnimationFrame(frame);
+      if (frameId !== 0) cancelAnimationFrame(frameId);
     };
   });
 
@@ -608,10 +754,8 @@ function PageColumn({
     const page = pages[index];
     const size = sizes[index];
     const row = rows[r];
-    const rowStart = virtualizer.getOffsetForIndex(r, 'start')?.[0];
-    if (!page || !size || !row || rowStart === undefined) return;
-    // For 'start', the scroll offset that puts the row at the top is the row's top.
-    const rowTop = rowStart;
+    const rowTop = rowTopOf(r);
+    if (!page || !size || !row || rowTop === undefined) return;
     const frame = pageFrame({
       sourceId: page.ref.kind === 'source' ? page.ref.source : undefined,
       sourceIndex: page.ref.kind === 'source' ? page.ref.index : 0,
@@ -623,21 +767,25 @@ function PageColumn({
     const box = userRectToCss(frame, reveal);
     const top = rowTop + box.top;
     const bottom = top + box.height;
-    const margin = Math.min(96, el.clientHeight / 4);
-    if (top < el.scrollTop + margin || bottom > el.scrollTop + el.clientHeight - margin) {
-      el.scrollTop = Math.max(0, top - el.clientHeight / 3);
+    // Inside the unobscured rectangle.
+    const visibleHeight = visibleHeightOf(el);
+    const visibleWidth = el.clientWidth - view.left - view.right;
+    const viewTop = el.scrollTop + view.top;
+    const margin = Math.min(96, visibleHeight / 4);
+    if (top < viewTop + margin || bottom > viewTop + visibleHeight - margin) {
+      el.scrollTop = Math.max(0, top - view.top - visibleHeight / 3);
     }
-    // Horizontally: rows are centred in the canvas.
-    const width = laidOutWidth(el, canvasWidth);
-    let x = (width - rowCssWidth(r)) / 2;
+    // Horizontally: rows are centred in the column between the side insets.
+    let x = columnCentre(el) - rowCssWidth(r) / 2;
     for (const i of row.pages) {
       if (i === index) break;
       x += (sizes[i]?.width ?? 0) * cssScale + GAP;
     }
     const left = x + box.left;
     const right = left + box.width;
-    if (left < el.scrollLeft + 16 || right > el.scrollLeft + el.clientWidth - 16) {
-      el.scrollLeft = Math.max(0, left - el.clientWidth / 3);
+    const viewLeft = el.scrollLeft + view.left;
+    if (left < viewLeft + 16 || right > viewLeft + visibleWidth - 16) {
+      el.scrollLeft = Math.max(0, left - view.left - visibleWidth / 3);
     }
   };
   useEffect(() => {
@@ -698,7 +846,7 @@ function PageColumn({
       scrollByScreen: (direction) => {
         const el = viewportRef.current;
         if (!el) return;
-        const step = Math.max(40, el.clientHeight - 48);
+        const step = Math.max(40, visibleHeightOf(el) - 48);
         const view = useViewStore.getState();
         const pending = view.navTarget;
         if (readLayout === 'single') {
@@ -761,6 +909,8 @@ function PageColumn({
             data-row={item.index}
             style={{
               transform: `translateY(${item.start}px)`,
+              left: view.left,
+              width: `calc(100% - ${view.left + view.right}px)`,
               height: heightOf(item.index),
               gap: GAP,
             }}

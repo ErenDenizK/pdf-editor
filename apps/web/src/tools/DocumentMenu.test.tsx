@@ -2,8 +2,9 @@
  * The Document menu (experience-redesign spec §5.3), Vitest browser mode: sections with
  * headings in order, Merge files…, Split…, Compare with… and Rotate pages in "Combine and
  * split", no disabled "Remove …" twins (an item that removes appears only when there is
- * something to remove), unnamed Document commands join the last section, and Rotate pages
- * turns every page when none is selected.
+ * something to remove), unnamed Document commands join the last section, Rotate pages
+ * turns every page when none is selected, and the Appearance group toggles Glass panels and
+ * Reduce transparency (craft spec §7).
  */
 import '../styles/tokens.css';
 import '../styles/reset.css';
@@ -23,6 +24,7 @@ import { m } from '../i18n';
 import { registerOutlineCommands } from '../outline/outline-commands';
 import { registerSignatureCommands } from '../signatures/signature-commands';
 import { registerArrangeCommands } from '../stage/arrange-commands';
+import { DEFAULT_APPEARANCE, useAppearanceStore } from '../state/appearance-store';
 import { useSelectionStore } from '../state/selection-store';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { DocumentMenu, shownDocumentMenu } from './DocumentMenu';
@@ -137,5 +139,36 @@ describe('Document menu', () => {
       const doc = getActiveDocument(useWorkspaceStore.getState().workspace);
       expect(doc?.pages.map((p) => p.rotation)).toEqual([90, 90, 90]);
     });
+  });
+  it('toggles the appearance settings from checkbox items, keeping the menu open', async () => {
+    useAppearanceStore.setState(DEFAULT_APPEARANCE);
+    try {
+      render(<DocumentMenu visible />);
+      await userEvent.click(screen.getByTestId('document-menu'));
+      const menu = await screen.findByRole('menu', { name: 'Document' });
+      // One row in the Document section, just before "About this app".
+      const document = menu.querySelector<HTMLElement>('[data-section="document"]');
+      if (!document) throw new Error('no Document section');
+      const rows = within(document)
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent);
+      expect(rows.slice(-2)).toEqual(['Appearance', 'About this app']);
+      await userEvent.click(within(document).getByRole('menuitem', { name: 'Appearance' }));
+      const glass = await screen.findByRole('menuitemcheckbox', { name: 'Glass panels' });
+      const reduce = screen.getByRole('menuitemcheckbox', { name: 'Reduce transparency' });
+      expect(glass).toHaveAttribute('aria-checked', 'false');
+      expect(reduce).toHaveAttribute('aria-checked', 'false');
+
+      await userEvent.click(glass);
+      expect(useAppearanceStore.getState().glassPanels).toBe(true);
+      await waitFor(() => expect(glass).toHaveAttribute('aria-checked', 'true'));
+      await userEvent.click(reduce);
+      expect(useAppearanceStore.getState().reduceTransparency).toBe(true);
+      expect(screen.getByRole('menuitemcheckbox', { name: 'Glass panels' })).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Glass panels' }));
+      expect(useAppearanceStore.getState().glassPanels).toBe(false);
+    } finally {
+      useAppearanceStore.setState(DEFAULT_APPEARANCE);
+    }
   });
 });

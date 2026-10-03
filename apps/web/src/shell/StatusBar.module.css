@@ -1,4 +1,6 @@
 .bar {
+  /* Docked frame: --surface-1, or the tier-2 glass with "Glass panels" on (global.css). */
+  composes: glass-frame from global;
   grid-area: status;
   display: flex;
   align-items: center;
@@ -8,7 +10,6 @@
   height: var(--statusbar-height);
   padding: 0 var(--space-2) 0 var(--space-4);
   border-top: 1px solid var(--border-hairline);
-  background: var(--surface-1);
   color: var(--text-secondary);
   font-size: var(--text-sm);
   line-height: var(--leading-tight);
