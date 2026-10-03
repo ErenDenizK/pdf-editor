@@ -18,7 +18,7 @@ import { type CreatedFieldKind, getActiveDocument } from '@pdf-editor/document-m
 import type { CommandRegistry } from '../../commands/registry';
 import { m } from '../../i18n';
 import { announce } from '../../shell/announcer';
-import { isPageView, stageView, useUiStore } from '../../state/ui-store';
+import { canEditActive, isPageView, stageView, useUiStore } from '../../state/ui-store';
 import { useViewStore } from '../../state/view-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { useToolStore } from '../../viewer/tool-store';
@@ -100,9 +100,13 @@ function returnPlacingFocus(): void {
   target?.focus({ preventScroll: true });
 }
 
-/** Arms placing `kind`: Read mode, Select tool, the field editor closed. */
+/**
+ * Arms placing `kind`: the page view, Select tool, the field editor closed. A new field is
+ * a page edit: never in Read (ADR-0019 §3; the command is disabled there).
+ */
 export function startPlacing(kind: CreatedFieldKind): void {
   if (!getActiveDocument(useWorkspaceStore.getState().workspace)) return;
+  if (!canEditActive()) return;
   const ui = useUiStore.getState();
   if (!isPageView(ui)) ui.setViewMode('read');
   useToolStore.getState().setMode('select');
@@ -121,10 +125,11 @@ export function cancelPlacing(): void {
   announce(m.forms_create_placing_cancelled());
 }
 
-/** Turns "Edit fields" on or off. */
+/** Turns "Edit fields" on or off (on only in Edit: it moves and resizes fields). */
 export function setDesign(on: boolean): void {
   const store = useCreateStore.getState();
   if (store.design === on) return;
+  if (on && !canEditActive()) return;
   if (on) {
     const ui = useUiStore.getState();
     if (!isPageView(ui)) ui.setViewMode('read');
@@ -143,6 +148,8 @@ const stop = () => {
 
 useUiStore.subscribe((state, previous) => {
   if (stageView(state) !== stageView(previous)) stop();
+  // The document left Edit: placing and editing fields stop.
+  else if (state.documentMode !== previous.documentMode && !canEditActive()) stop();
 });
 // Placing ended (placed, cancelled, stopped): forget the invoker.
 useCreateStore.subscribe((state, previous) => {
@@ -172,8 +179,10 @@ if (typeof window !== 'undefined') {
 }
 
 export function registerCreateFieldCommands(registry: CommandRegistry): () => void {
+  // Adding and editing fields are page edits: disabled in Read (ADR-0019 §3).
   const hasDocument = () =>
-    (getActiveDocument(useWorkspaceStore.getState().workspace)?.pages.length ?? 0) > 0;
+    (getActiveDocument(useWorkspaceStore.getState().workspace)?.pages.length ?? 0) > 0 &&
+    canEditActive();
   const disposers = [
     ...FIELD_KINDS.map((kind) =>
       registry.register({

@@ -28,6 +28,15 @@
  * The lasso (spec §6.5, `lasso/`) also has native handlers: it draws a free path, takes the
  * pen paths it touches as a path selection, highlights only those paths and shows the
  * contextual bar for them; its edits split an Ink when they take only some of its paths.
+ *
+ * Pen rules of the Edit policy (craft spec §3.5), in any tool while the document is in
+ * Edit: the pen's eraser end is a temporary eraser and its barrel button a temporary lasso;
+ * with "Pen draws in Edit" on, a pen touching the page while Select is armed draws with the
+ * armed preset (the first pen preset when that is the Highlighter) and never reaches the
+ * text below. A capture listener on the page's overlays takes those presses before any
+ * layer sees them and hands them to the eraser gesture or to a lasso or pen pipeline on a
+ * proxy element that covers the layer. Annotation hit targets are live only for the tools
+ * of the one hit order (`viewer/hit-order.ts`).
  */
 import type { Rect } from '@pdf-editor/document-model';
 import type { Annotation, NewAnnotation } from '@pdf-editor/engine';
@@ -39,6 +48,8 @@ import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import type { PageOverlayProps } from '../stage/page-overlays';
 import { useCanEdit } from '../state/ui-store';
+import { penDrawsNow, usePenDrawsInEdit } from '../viewer/edit-policy';
+import { isLive, penButtonOf } from '../viewer/hit-order';
 import { pageFrame } from '../viewer/page-frame';
 import { whenPainted } from '../viewer/read-controller';
 import { type ToolMode, useToolStore } from '../viewer/tool-store';
@@ -47,8 +58,11 @@ import { AnnotationBar } from './AnnotationBar';
 import {
   activePathSelection,
   type PageTarget,
+  pageKey,
+  type ToolStyle,
   useAnnotationStore,
   usePageAnnotations,
+  visibleAnnotations,
 } from './annotation-store';
 import { markupDraft, styleGroupOf } from './drafts';
 import {
@@ -82,8 +96,12 @@ import { LassoHighlight } from './lasso/LassoSelection';
 import { mountedLayers } from './layer-registry';
 import { commitPenStroke, noteBurstPress } from './pen/bursts';
 import { attachInkInput, type InkStrokeInput, type SettleInk } from './pen/ink-input';
+import { drySettle, inkCommitted } from './pen/dry-ink';
+// Registers the dry ink overlay (craft spec §5.3 item 7) before this layer.
+import './pen/DryInkLayer';
 import { commitHighlighterStroke, createPenPreview } from './pen/highlighter';
 import { previewPath } from './pen/ink-preview';
+import { isHighlighter, presetStyle } from './pen/presets';
 import { pageText } from './page-text';
 import { glyphIndexAt, quadsForRange } from './quads';
 import styles from './AnnotationLayer.module.css';
@@ -135,6 +153,26 @@ interface SettlingPreview {
 }
 
 let settlingSerial = 0;
+
+/** A proxy over the layer that receives the pen presses the capture listener hands on. */
+const PROXY_STYLE = { position: 'absolute', inset: 0, pointerEvents: 'none' } as const;
+
+/**
+ * Presses that stay with what is under the pen, even when the pen draws in Select: page
+ * chrome (bars, editors, buttons, fields, links). Annotation hit targets are drawn over.
+ */
+const PEN_CHROME =
+  'button, input, textarea, select, a, [role="toolbar"], [role="dialog"], [data-text-edit-panel], [data-field-name], [data-created-design]';
+/** Page targets that look like chrome (buttons) but are drawn and erased over. */
+const PEN_PAGE_TARGETS = '[data-annotation-id], [data-text-run], [data-image-object]';
+
+function isPenChrome(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest(PEN_CHROME) !== null &&
+    target.closest(PEN_PAGE_TARGETS) === null
+  );
+}
 
 const MARKUP_TOOLS = new Set<ToolMode>(['highlight', 'underline', 'strikeout', 'squiggly']);
 const DRAWING_TOOLS = new Set<ToolMode>([
@@ -191,14 +229,25 @@ export function AnnotationLayer(props: PageOverlayProps) {
   });
 
   // The pen: native input while armed (spec §6.6). Style, zoom and target are read at the
-  // press from the store and the layer registry, so nothing re-attaches per render.
+  // press from the store and the layer registry, so nothing re-attaches per render. With
+  // "Pen draws in Edit" and Select armed, the same pipeline listens on the pen proxy, which
+  // only receives the pen presses the capture listener below hands on (craft spec §3.5).
   const penArmed = editable && mode === 'ink' && sourceId !== undefined;
+  const penDraws = usePenDrawsInEdit(editable && mode === 'select');
+  const penInSelect = penDraws && sourceId !== undefined;
+  const penProxyRef = useRef<HTMLDivElement>(null);
+  const lassoProxyRef = useRef<HTMLDivElement>(null);
+  /** The pen proxy's pipeline is attached (a press handed on earlier would be lost). */
+  const penProxyLive = useRef(false);
+  const penTarget = penArmed ? 'layer' : penInSelect ? 'proxy' : null;
   useEffect(() => {
-    const element = rootRef.current;
+    const proxy = penTarget === 'proxy';
+    const element = proxy ? penProxyRef.current : penTarget ? rootRef.current : null;
     const host = inkHostRef.current;
-    if (!penArmed || !element || !host) return;
+    if (!element || !host) return;
     // The Highlighter's profile (constant width, Multiply) applies when it is armed.
     const preview = createPenPreview(host, element, pageId);
+    const style = () => (proxy ? selectPenStyle() : useAnnotationStore.getState().styles.ink);
     // The press of the stroke in progress (`performance.now()` clock, as event time stamps).
     let downAt = 0;
     const detach = attachInkInput({
@@ -207,11 +256,11 @@ export function AnnotationLayer(props: PageOverlayProps) {
       context: () => {
         const layer = mountedLayers.get(pageId);
         if (!layer) return null;
-        const style = useAnnotationStore.getState().styles.ink;
+        const current = style();
         return {
-          width: style.strokeWidth,
-          color: style.color,
-          opacity: style.opacity,
+          width: current.strokeWidth,
+          color: current.color,
+          opacity: current.opacity,
           scale: layer.frame.scale,
         };
       },
@@ -223,17 +272,141 @@ export function AnnotationLayer(props: PageOverlayProps) {
       onStroke: (stroke, settle) => {
         const layer = mountedLayers.get(pageId);
         if (!layer) return;
-        void commitInkStroke(stroke, settle, layer.frame, layer.target, {
-          downAt,
-          upAt: performance.now(),
-        });
+        void commitInkStroke(
+          stroke,
+          // Into the page's dry ink layer instead of a settling canvas per stroke.
+          drySettle(settle, preview, layer.target, layer.frame, style),
+          layer.frame,
+          layer.target,
+          { downAt, upAt: performance.now() },
+          proxy ? style() : undefined,
+        );
       },
     });
+    // Handed-on presses stop at the proxy: the layer's own handlers never see them.
+    const stop = (event: Event) => event.stopPropagation();
+    if (proxy) {
+      element.addEventListener('pointerdown', stop);
+      penProxyLive.current = true;
+    }
     return () => {
+      if (proxy) {
+        element.removeEventListener('pointerdown', stop);
+        penProxyLive.current = false;
+      }
       detach();
       preview.destroy();
     };
-  }, [penArmed, pageId]);
+  }, [penTarget, pageId]);
+
+  // The pen's eraser end and barrel button in any tool, and the pen in Select while it
+  // draws (craft spec §3.5): taken in the capture phase on the page's overlays, before the
+  // text, the annotations or a tool's own handlers see the press.
+  useEffect(() => {
+    const root = rootRef.current;
+    const overlays = root?.parentElement;
+    if (!editable || sourceId === undefined || !root || !overlays) return;
+    let detachLasso: (() => void) | null = null;
+    const lassoStop = (event: Event) => event.stopPropagation();
+
+    const updateGesture = (next: Gesture | null) => {
+      gestureRef.current = next;
+      setGesture(next);
+    };
+
+    /** The temporary eraser: the eraser gesture for this press, whatever tool is armed. */
+    const erase = (down: PointerEvent) => {
+      const layer = mountedLayers.get(pageId);
+      if (!layer) return;
+      const { target } = layer;
+      const list = visibleAnnotations(
+        useAnnotationStore.getState().pages[pageKey(target.source, target.pageIndex)],
+      );
+      const local = (event: PointerEvent): Point => {
+        const r = root.getBoundingClientRect();
+        return { x: event.clientX - r.left, y: event.clientY - r.top };
+      };
+      const start = local(down);
+      updateGesture({
+        type: 'erase',
+        hits: eraseHits(new Map(), list, layer.frame, start),
+        points: [start],
+      });
+      const stop = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', cancel);
+      };
+      const move = (event: PointerEvent) => {
+        const g = gestureRef.current;
+        if (event.pointerId !== down.pointerId || g?.type !== 'erase') return;
+        const p = local(event);
+        updateGesture({
+          ...g,
+          hits: eraseHits(g.hits, list, layer.frame, p),
+          points: [...g.points, p],
+        });
+      };
+      const up = (event: PointerEvent) => {
+        if (event.pointerId !== down.pointerId) return;
+        stop();
+        const g = gestureRef.current;
+        updateGesture(null);
+        if (g?.type === 'erase') void commitErase(target, list, g.hits);
+      };
+      const cancel = (event: PointerEvent) => {
+        if (event.pointerId !== down.pointerId) return;
+        stop();
+        updateGesture(null);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', cancel);
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      // A press handed on below passes through here on its way to its proxy.
+      if (HANDED_ON.has(event)) return;
+      const part = penButtonOf(event);
+      if (part === undefined) return;
+      if (isPenChrome(event.target)) return;
+      if (part === 'eraser') {
+        event.preventDefault();
+        event.stopPropagation();
+        beginDrawingPress();
+        erase(event);
+        return;
+      }
+      if (part === 'barrel') {
+        const proxy = lassoProxyRef.current;
+        if (!proxy) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!detachLasso) {
+          const detach = attachLassoInput({ element: proxy, pageId });
+          proxy.addEventListener('pointerdown', lassoStop);
+          detachLasso = () => {
+            proxy.removeEventListener('pointerdown', lassoStop);
+            detach();
+          };
+        }
+        proxy.dispatchEvent(handedOnPress(event));
+        return;
+      }
+      // The tip: drawing in Select while "Pen draws in Edit" is on.
+      if (useToolStore.getState().mode !== 'select' || !penDrawsNow()) return;
+      const proxy = penProxyRef.current;
+      if (!proxy || !penProxyLive.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      proxy.dispatchEvent(handedOnPress(event));
+    };
+    overlays.addEventListener('pointerdown', onPointerDown, { capture: true });
+    return () => {
+      overlays.removeEventListener('pointerdown', onPointerDown, { capture: true });
+      detachLasso?.();
+    };
+  }, [editable, sourceId, pageId]);
 
   // The lasso: native input while armed, like the pen (spec §6.5, lasso/lasso-input.ts).
   const lassoArmed = editable && mode === 'lasso' && sourceId !== undefined;
@@ -486,7 +659,8 @@ export function AnnotationLayer(props: PageOverlayProps) {
   // -------------------------------------------------------------------------
 
   const selected = selection ? annotations.filter((a) => selection.ids.includes(a.id)) : [];
-  const hitsEnabled = editable && !drawing;
+  // Live only for the tools of the one hit order (Select): Edit text and Image ignore them.
+  const hitsEnabled = editable && !drawing && isLive('annotation', mode, editable);
   return (
     <div
       ref={rootRef}
@@ -542,6 +716,9 @@ export function AnnotationLayer(props: PageOverlayProps) {
       </svg>
       {/* The pen's canvases (pen/ink-preview.ts); React never renders into it. */}
       <div ref={inkHostRef} className={styles.inkPreview} aria-hidden="true" />
+      {/* Where the pen rules hand on pen presses (Select drawing, the barrel's lasso). */}
+      <div ref={penProxyRef} style={PROXY_STYLE} aria-hidden="true" data-pen-proxy="" />
+      <div ref={lassoProxyRef} style={PROXY_STYLE} aria-hidden="true" data-lasso-proxy="" />
       {editable && selected.length > 0 && gesture === null && editor === null ? (
         <AnnotationBar
           target={target}
@@ -1241,11 +1418,15 @@ async function commitInkStroke(
   frame: PageFrame,
   target: PageTarget,
   times: { readonly downAt: number; readonly upAt: number },
+  /** The style when the pen draws in Select (`selectPenStyle`); else the armed pen's. */
+  penStyle?: ToolStyle,
 ): Promise<void> {
   // The Highlighter: a Highlight over text, else free Multiply ink (craft spec §5.4).
-  const highlighter = commitHighlighterStroke(stroke, settle, frame, target, times);
+  const highlighter = penStyle
+    ? undefined
+    : commitHighlighterStroke(stroke, settle, frame, target, times);
   if (highlighter) return highlighter;
-  const style = useAnnotationStore.getState().styles.ink;
+  const style = penStyle ?? useAnnotationStore.getState().styles.ink;
   const ink = inkCommit(stroke, frame, style.strokeWidth);
   if (!ink) return;
   const release = settle(
@@ -1267,11 +1448,57 @@ async function commitInkStroke(
     console.warn('Saving the stroke failed', error);
   }
   if (committed) {
-    const generation = getEngineService().pageRevision(target.source, target.pageIndex);
-    await whenPainted(target.source, target.pageIndex, generation);
+    await inkCommitted(release, target.source, target.pageIndex);
   } else {
     // A loss the person did not see happen: said at once.
     announce(m.annot_stroke_not_saved(), { politeness: 'assertive' });
   }
   release();
+}
+
+/**
+ * The style a pen draws with in Select (craft spec §3.5): the armed preset's, or the first
+ * pen preset's when the armed one is the Highlighter (whose stroke needs the Highlighter
+ * tool's own profile and commit).
+ */
+function selectPenStyle(): ToolStyle {
+  const { pen, styles: tools } = useAnnotationStore.getState();
+  const armed = pen.presets[pen.active];
+  if (!isHighlighter(armed)) return tools.ink;
+  const first = pen.presets.find((p) => !isHighlighter(p));
+  return first ? { ...tools.ink, ...presetStyle(first) } : tools.ink;
+}
+
+/** Presses handed on to a proxy (the capture listener lets them pass). */
+const HANDED_ON = new WeakSet<Event>();
+
+/** A copy of a pen press as a primary-button press, for a pipeline on a proxy element. */
+function handedOnPress(event: PointerEvent): PointerEvent {
+  const press = new PointerEvent('pointerdown', {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    pointerId: event.pointerId,
+    pointerType: event.pointerType,
+    isPrimary: event.isPrimary,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    screenX: event.screenX,
+    screenY: event.screenY,
+    pressure: event.pressure,
+    tangentialPressure: event.tangentialPressure,
+    tiltX: event.tiltX,
+    tiltY: event.tiltY,
+    twist: event.twist,
+    width: event.width,
+    height: event.height,
+    button: 0,
+    buttons: 1,
+    shiftKey: event.shiftKey,
+    altKey: event.altKey,
+    ctrlKey: event.ctrlKey,
+    metaKey: event.metaKey,
+  });
+  HANDED_ON.add(press);
+  return press;
 }

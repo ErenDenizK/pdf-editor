@@ -72,3 +72,47 @@
 .layer[data-selecting='true'] .end {
   top: 0;
 }
+
+/*
+ * The idle hover outline and the one-time hint (craft spec §3.5): a sibling over the page
+ * that takes no pointer. The outline is faint (1 px of the accent line colour, no fill) and
+ * never animates; the hint is a small glass label under the run.
+ */
+.hover {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.outline {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-page);
+}
+
+.hintStatus {
+  display: contents;
+}
+
+.hint {
+  composes: glass from global;
+  position: absolute;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/* Holding Space pans the pages (viewer/space-pan.ts): the hand, whatever is below. */
+:global([data-read-viewport][data-space-pan]),
+:global([data-read-viewport][data-space-pan] *) {
+  cursor: grab !important;
+}
+
+:global([data-read-viewport][data-space-panning]),
+:global([data-read-viewport][data-space-panning] *) {
+  cursor: grabbing !important;
+}

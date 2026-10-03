@@ -5,9 +5,10 @@
  * pages) opens the existing dialogs and views. Commands of the "Document" group that no
  * section names join the last section, so tools registered elsewhere still appear; "About
  * this app" (`help.aboutPage`, presentation spec §3) closes that section. Just before it, an
- * "Appearance" submenu holds the app's two appearance settings as checkbox items, "Glass
+ * "Appearance" submenu holds the app's appearance settings as checkbox items, "Glass
  * panels" and "Reduce transparency" (craft spec §7; also palette commands,
- * shell/appearance-commands.ts); one row, so the menu stays within an 800 px window.
+ * shell/appearance-commands.ts), and "Pen draws in Edit" (craft spec §3.5; palette command
+ * in viewer/edit-policy.ts); one row, so the menu stays within an 800 px window.
  *
  * It also hosts the tool dialogs, the Batch dialog and the OCR dialog, which load lazily
  * (their code, the compress worker and the wasm stay out of the entry chunk).
@@ -26,6 +27,7 @@ import { OcrDialogHost } from '../ocr';
 import { announce } from '../shell/announcer';
 import { setGlassPanels, setReduceTransparency } from '../shell/appearance-commands';
 import { useAppearanceStore } from '../state/appearance-store';
+import { setPenDrawsInEdit, usePenDrawsInEdit } from '../viewer/edit-policy';
 import { useSelectionStore } from '../state/selection-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import menuStyles from '../ui/Menu.module.css';
@@ -312,10 +314,15 @@ function DocumentMenuItems() {
   );
 }
 
-/** "Appearance ▸": the two appearance settings as checkbox items (role menuitemcheckbox). */
+/**
+ * "Appearance ▸": the appearance settings and "Pen draws in Edit" as checkbox items (role
+ * menuitemcheckbox). The pen setting shows its effective value: "auto" is on once a pen has
+ * been seen; a click makes an explicit choice.
+ */
 function AppearanceSubmenu() {
   const glassPanels = useAppearanceStore((s) => s.glassPanels);
   const reduceTransparency = useAppearanceStore((s) => s.reduceTransparency);
+  const penDraws = usePenDrawsInEdit();
   return (
     <Menu.SubmenuRoot>
       <Menu.SubmenuTrigger className={menuStyles.item} data-settings="appearance">
@@ -342,6 +349,15 @@ function AppearanceSubmenu() {
             >
               <span className={menuStyles.check} aria-hidden="true" />
               <span className={menuStyles.label}>{m.appearance_reduce_transparency()}</span>
+            </Menu.CheckboxItem>
+            <Menu.CheckboxItem
+              className={menuStyles.item}
+              checked={penDraws}
+              onCheckedChange={setPenDrawsInEdit}
+              closeOnClick={false}
+            >
+              <span className={menuStyles.check} aria-hidden="true" />
+              <span className={menuStyles.label}>{m.pen_draws_in_edit()}</span>
             </Menu.CheckboxItem>
           </Menu.Popup>
         </Menu.Positioner>

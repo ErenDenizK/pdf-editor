@@ -16,7 +16,7 @@ import { type PageTarget, useAnnotationStore } from '../annotations/annotation-s
 import { pageText } from '../annotations/page-text';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
-import { isPageView, useUiStore } from '../state/ui-store';
+import { canEdit, isPageView, useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useSearchStore } from '../viewer/search';
@@ -231,12 +231,15 @@ export async function markCheckedFinds(): Promise<number> {
 // Search integration
 // ---------------------------------------------------------------------------
 
-/** Creates a mark over every hit of the current search (one history entry). */
+/**
+ * Creates a mark over every hit of the current search (one history entry). Marks are page
+ * edits: nothing in Read (ADR-0019 §3).
+ */
 export async function markSearchHits(): Promise<number> {
   const { hits, documentId } = useSearchStore.getState();
   const workspace = useWorkspaceStore.getState().workspace;
   const doc = documentId === null ? undefined : workspace.documents[documentId];
-  if (!doc || hits.length === 0) return 0;
+  if (!doc || hits.length === 0 || !canEdit(doc.id)) return 0;
   // A source page shown twice has its hits twice; one mark covers both.
   const seen = new Set<string>();
   const items: {

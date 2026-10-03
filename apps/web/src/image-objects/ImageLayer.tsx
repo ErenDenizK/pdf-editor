@@ -1,13 +1,14 @@
 /**
- * Image layer (M4 §3), a page overlay in Read mode. With the Image tool (I) it takes the
- * page: every image object of the page becomes a target over its bounds; hovering the page
- * outlines them and fills the one under the pointer. A click selects an image (a selection
+ * Image layer (M4 §3), a page overlay in Edit mode. Its root never takes the page (craft
+ * spec §3.5, `viewer/hit-order.ts`): it lets the pointer through and only its targets are
+ * live. With the Image tool (I) every image object of the page becomes a target over its
+ * bounds; hovering outlines the one under the pointer. A click selects an image (a selection
  * box with eight handles and the contextual bar); dragging it moves it, dragging a handle
  * resizes it (Shift keeps the aspect ratio, Alt resizes from the centre). Each committed
  * drag is one history entry. With the selection focused, arrow keys nudge by 1 pt (Shift:
  * 10 pt), Mod+Arrow resizes it keeping the aspect ratio (Right / Up grow, Left / Down
  * shrink the longer side by 1 pt, Shift: 10 pt; the new size is announced), Delete removes
- * the image and Esc deselects.
+ * the image and Esc deselects; a press on the page outside the images deselects.
  *
  * Images are located again for every page revision (object paths go stale after any
  * edit); after an edit the layer selects the image again where it expects it.
@@ -29,6 +30,7 @@ import { m } from '../i18n';
 import type { PageOverlayProps } from '../stage/page-overlays';
 import { useCanEdit } from '../state/ui-store';
 import { usePageRevision } from '../text-edit/runs';
+import { HIT_LAYER_Z } from '../viewer/hit-order';
 import { pageFrame } from '../viewer/page-frame';
 import { useToolStore } from '../viewer/tool-store';
 import { deleteImage, transformImage } from './actions';
@@ -120,6 +122,22 @@ export function ImageLayer(props: PageOverlayProps) {
   useEffect(() => {
     if (selectedKey) selectionRef.current?.focus({ preventScroll: true });
   }, [selectedKey]);
+
+  // A press on the page outside the images deselects. The root lets presses through, so
+  // this listens on the window; presses on the images, the selection and the bar keep it.
+  const hasSelection = selection !== null && active;
+  useEffect(() => {
+    if (!hasSelection) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest('[data-read-viewport]')) return;
+      if (target.closest('[data-image-object], [data-testid="image-selection"]')) return;
+      if (target.closest('[data-testid="image-bar"], [data-annotation-keep]')) return;
+      useImageStore.getState().select(null);
+    };
+    window.addEventListener('pointerdown', onPointerDown, { capture: true });
+    return () => window.removeEventListener('pointerdown', onPointerDown, { capture: true });
+  }, [hasSelection]);
 
   if (!active || sourceId === undefined) return null;
   const frame = pageFrame(props);
@@ -272,10 +290,7 @@ export function ImageLayer(props: PageOverlayProps) {
       role="group"
       aria-label={m.image_object_layer_label({ page: pageIndex + 1 })}
       tabIndex={-1}
-      onPointerDown={(event) => {
-        // A press on the page outside any image deselects.
-        if (event.target === event.currentTarget) useImageStore.getState().select(null);
-      }}
+      style={{ zIndex: HIT_LAYER_Z.image }}
     >
       {(images ?? []).map((image) => (
         <ImageTarget

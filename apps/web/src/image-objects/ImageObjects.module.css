@@ -1,14 +1,13 @@
 /*
- * Image tool (M4 §3). The layer takes the page while the tool is active (like Edit text).
+ * Image tool (M4 §3). The layer never takes the page (craft spec §3.5, viewer/hit-order.ts):
+ * its root lets the pointer through, and only the image targets, the selection and the bar
+ * are live; its stacking comes from `HIT_LAYER_Z`.
  * Only the image under the pointer (or with keyboard focus) is marked, with a 1px accent ring
  * and no fill: the page is never tinted (design audit D6, D7). The selected one gets the annotation selection's dashed accent frame with eight white handles, and the
  * contextual bar is the annotation bar's glass panel.
  */
 .layer {
-  z-index: 2;
-  pointer-events: auto;
-  touch-action: none;
-  cursor: default;
+  pointer-events: none;
 }
 
 .layer:focus {
@@ -23,6 +22,8 @@
   border-radius: var(--radius-page);
   background: transparent;
   cursor: move;
+  pointer-events: auto;
+  touch-action: none;
   transition: box-shadow var(--duration-fast) var(--ease-out);
 }
 
@@ -51,6 +52,8 @@
   border-radius: 0;
   background: transparent;
   cursor: move;
+  pointer-events: auto;
+  touch-action: none;
 }
 
 .selection:focus {
@@ -99,6 +102,7 @@
   composes: glass from global;
   position: absolute;
   z-index: 4;
+  pointer-events: auto;
   display: flex;
   align-items: center;
   gap: var(--space-2);

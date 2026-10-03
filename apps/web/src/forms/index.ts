@@ -10,7 +10,7 @@ import type { CommandRegistry } from '../commands/registry';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { registerPageOverlay } from '../stage/page-overlays';
-import { stageView, useUiStore } from '../state/ui-store';
+import { canEditActive, stageView, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useToolStore } from '../viewer/tool-store';
 import { clearAllFields } from './actions';
@@ -46,11 +46,12 @@ let clears = 0;
 
 /**
  * Clears every field of the active document: its sources' fields (engine edits) and the
- * fields created in the app (model), as one history entry.
+ * fields created in the app (model), as one history entry. A page edit: never in Read
+ * (ADR-0019 §3; the command is disabled there).
  */
 export async function clearActiveForm(): Promise<number> {
   const doc = activeDocument();
-  if (!doc) return 0;
+  if (!doc || !canEditActive()) return 0;
   close();
   const key = `forms-clear-${++clears}`;
   const engine = await clearAllFields(documentSources(doc), key);
@@ -86,7 +87,7 @@ export function registerFormCommands(registry: CommandRegistry): () => void {
       title: m.cmd_forms_clear(),
       group: m.group_edit(),
       keywords: ['form', 'fields', 'reset', 'empty'],
-      when: () => activeDocument() !== undefined,
+      when: () => activeDocument() !== undefined && canEditActive(),
       run: () => {
         void clearActiveForm();
       },

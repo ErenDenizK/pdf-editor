@@ -28,7 +28,8 @@ import { useUiStore } from '../../state/ui-store';
 import { resetWorkspace, useWorkspaceStore } from '../../state/workspace-store';
 import { useToolStore } from '../../viewer/tool-store';
 import { resetFormStore } from '../form-store';
-import { clearActiveForm } from '../index';
+import { CommandRegistry } from '../../commands/registry';
+import { clearActiveForm, registerFormCommands } from '../index';
 import { resetCreateStore, useCreateStore } from './create-store';
 import { CreatedFieldLayer } from './CreatedFieldLayer';
 import { setDesign, startPlacing } from './index';
@@ -370,6 +371,47 @@ describe('Clear all', () => {
     await settle();
     expect(fields()[0]?.value).toBe('Created');
     expect(await name()).toBe('Alice Example');
+  });
+});
+
+describe('in Read (ADR-0019 §3)', () => {
+  it('Add field, Edit fields and Clear all are page edits: blocked, their commands disabled', async () => {
+    const report = await model().openFiles([await fixtureFile(formsAUrl, 'forms-a.pdf')]);
+    expect(report.skipped).toEqual([]);
+    const registry = new CommandRegistry();
+    const dispose = registerFormCommands(registry);
+    const enabled = (id: string) => {
+      const command = registry.get(id);
+      return command !== undefined && registry.isEnabled(command);
+    };
+    try {
+      // Read: nothing places, designs or clears.
+      expect(enabled('forms.add.text')).toBe(false);
+      expect(enabled('forms.design')).toBe(false);
+      expect(enabled('forms.clear')).toBe(false);
+      act(() => startPlacing('text'));
+      expect(useCreateStore.getState().placing).toBeNull();
+      act(() => setDesign(true));
+      expect(useCreateStore.getState().design).toBe(false);
+      const before = labels().length;
+      await act(async () => {
+        expect(await clearActiveForm()).toBe(0);
+      });
+      expect(labels().length).toBe(before);
+
+      // Edit: they work; back to Read, placing stops.
+      enterEditMode();
+      expect(enabled('forms.add.text')).toBe(true);
+      expect(enabled('forms.clear')).toBe(true);
+      act(() => startPlacing('text'));
+      expect(useCreateStore.getState().placing).toBe('text');
+      const id = model().workspace.activeDocument;
+      if (id === undefined) throw new Error('no document');
+      act(() => useUiStore.getState().setDocumentMode(id, 'read'));
+      expect(useCreateStore.getState().placing).toBeNull();
+    } finally {
+      dispose();
+    }
   });
 });
 

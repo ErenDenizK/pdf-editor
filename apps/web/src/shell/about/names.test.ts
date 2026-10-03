@@ -81,6 +81,7 @@ describe('names kept by ADR-0015 §3', () => {
       'pdf-editor:appearance:v1',
       'pdf-editor:bates-last-number',
       'pdf-editor:dev:ink-stats',
+      'pdf-editor:edit-policy:v1',
       'pdf-editor:locale:v1',
       'pdf-editor:ui:pen-presets:v1',
       'pdf-editor:ui:pen-presets:v2',

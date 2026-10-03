@@ -41,6 +41,7 @@ import { selectAllOf, useSelectionStore } from '../state/selection-store';
 import { ARRANGE_SIZES, stageView, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { registerToolCommands } from '../tools/tool-commands';
+import { registerEditPolicyCommands } from '../viewer/edit-policy';
 import { registerViewerCommands } from '../viewer/viewer-commands';
 import { registerExportCommands } from './export-commands';
 import { type CommandRegistry, commandRegistry } from './registry';
@@ -535,6 +536,7 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
     registerLanguageCommands(registry),
     registerExportCommands(registry),
     registerViewerCommands(registry),
+    registerEditPolicyCommands(registry),
     registerToolCommands(registry),
     registerConvertCommands(registry),
     registerOcrCommands(registry),

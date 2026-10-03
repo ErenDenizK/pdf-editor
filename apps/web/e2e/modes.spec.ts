@@ -122,3 +122,126 @@ test('form fields are read-only in Read: a click shows "Switch to Edit to fill" 
   await expect(editor).toBeVisible();
   await expect(editor).toHaveValue('Alice Example');
 });
+
+// ---------------------------------------------------------------------------
+// The Edit policy (craft spec §3.5): double-click to edit text, the pen never opens it
+// ---------------------------------------------------------------------------
+
+const FOX = 'The quick brown fox jumps over the lazy dog';
+
+/** The text layer's span of the first (Helvetica) line of text-edit-fonts.pdf. */
+const foxLine = (page: Page) =>
+  page.locator('[data-page-index="0"] [data-testid="text-layer"] span', { hasText: FOX }).first();
+
+async function openFontsFixture(page: Page): Promise<{ x: number; y: number }> {
+  await openFixtures(page, ['text-edit-fonts.pdf']);
+  await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
+    timeout: 20_000,
+  });
+  await expect(foxLine(page)).toBeAttached({ timeout: 20_000 });
+  const box = await foxLine(page).boundingBox();
+  if (!box) throw new Error('line not laid out');
+  // On "fox" (a word, not the space after it).
+  return { x: box.x + box.width * 0.4, y: box.y + box.height / 2 };
+}
+
+test('double-click on text opens the editor in Edit, not in Read', async ({ page }) => {
+  const at = await openFontsFixture(page);
+  // The line editor, or the paragraph editor where the line is part of a paragraph (T6).
+  const editor = page.getByRole('textbox', { name: /^(Line text|Paragraph on page 1)$/ });
+
+  // Read: the double-click selects a word, as on any page; no editor.
+  await page.mouse.dblclick(at.x, at.y);
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString().trim() ?? ''))
+    .not.toBe('');
+  await page.waitForTimeout(400);
+  await expect(editor).toHaveCount(0);
+
+  // Edit, with Select: the editor opens with the caret at the point.
+  await enterEdit(page);
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.dblclick(at.x, at.y);
+  await expect(editor).toBeFocused({ timeout: 20_000 });
+  // A caret at the point, nothing selected (the field's own selection, or the document's
+  // inside the paragraph editor's mirror).
+  const [start, end] = await editor.evaluate((el) => {
+    if (el instanceof HTMLInputElement) return [el.selectionStart ?? -1, el.selectionEnd ?? -1];
+    const range = window.getSelection()?.getRangeAt(0);
+    return range ? [range.startOffset, range.collapsed ? range.startOffset : -1] : [-1, -2];
+  });
+  expect(end).toBe(start);
+  if ((await editor.getAttribute('aria-label')) === 'Line text') {
+    await expect(editor).toHaveValue(FOX);
+    expect(start).toBeGreaterThan(FOX.length * 0.25);
+    expect(start).toBeLessThan(FOX.length * 0.65);
+  }
+  // The Select tool stays armed; Esc leaves without a change.
+  await expect(page.locator('[data-annotation-layer="0"]')).toHaveAttribute('data-tool', 'select');
+  await editor.press('Escape');
+  await expect(editor).toHaveCount(0);
+  await expect(foxLine(page)).toHaveText(FOX);
+});
+
+test('a pen stroke over text never opens the editor', async ({ page }) => {
+  const at = await openFontsFixture(page);
+  await enterEdit(page);
+  const editor = page.getByRole('textbox', { name: /^(Line text|Paragraph on page 1)$/ });
+  const layer = page.locator('[data-annotation-layer="0"]');
+
+  // A pen (synthetic pointer events: Playwright has no pen): it hovers, which turns
+  // "Pen draws in Edit" on, then writes across the line, then taps twice on it.
+  await page.evaluate(
+    async ({ x, y }) => {
+      const pen = (type: string, px: number, init: PointerEventInit = {}) =>
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          pointerType: 'pen',
+          pointerId: 7,
+          isPrimary: true,
+          clientX: px,
+          clientY: y,
+          pressure: 0.5,
+          button: 0,
+          buttons: 1,
+          ...init,
+        });
+      const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      const under = () => document.elementFromPoint(x, y) ?? document.body;
+      under().dispatchEvent(pen('pointermove', x, { buttons: 0, pressure: 0 }));
+      await pause(200);
+      under().dispatchEvent(pen('pointerdown', x - 60));
+      for (let i = 1; i <= 12; i++) {
+        window.dispatchEvent(pen('pointermove', x - 60 + i * 10));
+        await pause(10);
+      }
+      window.dispatchEvent(pen('pointerup', x + 60, { buttons: 0, pressure: 0 }));
+      await pause(100);
+      for (let i = 0; i < 2; i++) {
+        under().dispatchEvent(pen('pointerdown', x));
+        window.dispatchEvent(pen('pointerup', x, { buttons: 0, pressure: 0 }));
+      }
+      under().dispatchEvent(
+        new MouseEvent('dblclick', {
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+          detail: 2,
+        }),
+      );
+    },
+    { x: at.x, y: at.y },
+  );
+
+  // The pen wrote ink; the text never took the press.
+  await expect(layer.locator('[data-annotation-kind="ink"]')).not.toHaveCount(0, {
+    timeout: 20_000,
+  });
+  await page.waitForTimeout(400);
+  await expect(editor).toHaveCount(0);
+  expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
+  await expect(layer).toHaveAttribute('data-tool', 'select');
+});

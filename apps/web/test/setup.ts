@@ -16,6 +16,11 @@ import { POSITIONS_KEY } from '../src/viewer/navigation';
 
 beforeEach(() => {
   localStorage.removeItem(POSITIONS_KEY);
+  // Per-device settings written by a test (pen seen, presets, appearance) must not leak
+  // into the next file either.
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith('pdf-editor:')) localStorage.removeItem(key);
+  }
 });
 
 afterEach(() => {

@@ -15,7 +15,7 @@ import { PDFDocument, StandardFonts } from '@cantoo/pdf-lib';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import redactUrl from '../../../../test/fixtures/redact-text-runs.pdf?url';
-import { fixtureFile } from '../../test/store-harness';
+import { enterEditMode, fixtureFile } from '../../test/store-harness';
 import {
   type PageTarget,
   resetAnnotationStore,
@@ -215,6 +215,9 @@ describe('redaction marks through the engine', () => {
         context: TOKEN,
       })),
     });
+    // Marks are page edits: nothing in Read (ADR-0019 §3).
+    expect(await markSearchHits()).toBe(0);
+    enterEditMode();
     expect(await markSearchHits()).toBe(3);
     expect(labels()).toContain('Mark 3 search matches for redaction');
   });

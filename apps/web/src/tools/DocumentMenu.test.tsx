@@ -3,8 +3,8 @@
  * headings in order, Merge files…, Split…, Compare with… and Rotate pages in "Combine and
  * split", no disabled "Remove …" twins (an item that removes appears only when there is
  * something to remove), unnamed Document commands join the last section, Rotate pages
- * turns every page when none is selected, and the Appearance group toggles Glass panels and
- * Reduce transparency (craft spec §7).
+ * turns every page when none is selected, and the Appearance group toggles Glass panels,
+ * Reduce transparency (craft spec §7) and Pen draws in Edit (§3.5).
  */
 import '../styles/tokens.css';
 import '../styles/reset.css';
@@ -17,6 +17,7 @@ import { page, userEvent } from 'vitest/browser';
 
 import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
 import { fixtureFile } from '../../test/store-harness';
+import { resetPenSession } from '../annotations/pen/ink-input';
 import { registerAppCommands } from '../commands/app-commands';
 import { type Command, commandRegistry } from '../commands/registry';
 import { registerDocumentCommands } from '../document/document-commands';
@@ -25,6 +26,7 @@ import { registerOutlineCommands } from '../outline/outline-commands';
 import { registerSignatureCommands } from '../signatures/signature-commands';
 import { registerArrangeCommands } from '../stage/arrange-commands';
 import { DEFAULT_APPEARANCE, useAppearanceStore } from '../state/appearance-store';
+import { resetEditPolicyStore, useEditPolicyStore } from '../state/edit-policy-store';
 import { useSelectionStore } from '../state/selection-store';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { DocumentMenu, shownDocumentMenu } from './DocumentMenu';
@@ -142,6 +144,8 @@ describe('Document menu', () => {
   });
   it('toggles the appearance settings from checkbox items, keeping the menu open', async () => {
     useAppearanceStore.setState(DEFAULT_APPEARANCE);
+    resetPenSession();
+    resetEditPolicyStore();
     try {
       render(<DocumentMenu visible />);
       await userEvent.click(screen.getByTestId('document-menu'));
@@ -167,8 +171,18 @@ describe('Document menu', () => {
       expect(screen.getByRole('menuitemcheckbox', { name: 'Glass panels' })).toBeInTheDocument();
       await userEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Glass panels' }));
       expect(useAppearanceStore.getState().glassPanels).toBe(false);
+
+      // "Pen draws in Edit" (craft spec §3.5): "auto" before any pen shows off; a click chooses.
+      const pen = screen.getByRole('menuitemcheckbox', { name: 'Pen draws in Edit' });
+      expect(pen).toHaveAttribute('aria-checked', 'false');
+      await userEvent.click(pen);
+      expect(useEditPolicyStore.getState().penDrawsInEdit).toBe(true);
+      await waitFor(() => expect(pen).toHaveAttribute('aria-checked', 'true'));
+      await userEvent.click(pen);
+      expect(useEditPolicyStore.getState().penDrawsInEdit).toBe(false);
     } finally {
       useAppearanceStore.setState(DEFAULT_APPEARANCE);
+      resetEditPolicyStore();
     }
   });
 });

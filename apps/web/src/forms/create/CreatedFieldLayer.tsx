@@ -322,7 +322,10 @@ export function CreatedFieldLayer(props: PageOverlayProps) {
     focusPlaced.current = addField(kind, pageId, rect) ?? null;
   };
 
-  /** The kind's default size, upright, in the centre of the page's part in the viewport. */
+  /**
+   * The kind's default size, upright, in the centre of the page's part in the free rectangle
+   * of the viewport (inside its scroll padding: the stage runs under the docked panels).
+   */
   const centredRect = (kind: CreatedFieldKind): Rect => {
     const s = frame.scale;
     // The displayed page, CSS px from its top left, and its part inside the scroll view.
@@ -332,7 +335,7 @@ export function CreatedFieldLayer(props: PageOverlayProps) {
     let cx = width / 2;
     let cy = height / 2;
     const origin = layerRef.current?.getBoundingClientRect();
-    const view = layerRef.current?.closest('[data-read-viewport]')?.getBoundingClientRect();
+    const view = freeRect(layerRef.current?.closest('[data-read-viewport]'));
     if (origin && view) {
       const left = Math.max(0, view.left - origin.left);
       const right = Math.min(width, view.right - origin.left);
@@ -827,4 +830,26 @@ function FieldLook({
       {content}
     </div>
   );
+}
+
+/**
+ * The viewport's free rectangle in viewport coordinates: its box less its scroll padding,
+ * which the full-bleed stage sets to the panels that cover it (craft spec §7).
+ */
+function freeRect(
+  viewport: Element | null | undefined,
+): { left: number; right: number; top: number; bottom: number } | undefined {
+  if (!viewport) return undefined;
+  const box = viewport.getBoundingClientRect();
+  const style = getComputedStyle(viewport);
+  const inset = (value: string) => {
+    const px = Number.parseFloat(value);
+    return Number.isFinite(px) ? px : 0;
+  };
+  return {
+    left: box.left + inset(style.scrollPaddingLeft),
+    right: box.right - inset(style.scrollPaddingRight),
+    top: box.top + inset(style.scrollPaddingTop),
+    bottom: box.bottom - inset(style.scrollPaddingBottom),
+  };
 }

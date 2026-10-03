@@ -152,7 +152,9 @@ test.describe('pen', () => {
     await page.waitForTimeout(300);
     await expect(ink).toHaveCount(1);
     expect(await sentInkWidths(page)).toHaveLength(1);
-    await expect(layer(page).locator('[data-settling]')).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.locator('[data-dry-ink]').first()).toHaveAttribute('data-strokes', '0', {
+      timeout: 10_000,
+    });
   });
 });
 
@@ -245,7 +247,7 @@ test.describe('pen presets and bursts', () => {
   }) => {
     await openSimple(page);
     const bar = page.getByRole('toolbar', { name: 'Tools' });
-    await bar.getByRole('button', { name: 'Draw', exact: true }).click();
+    await bar.getByRole('button', { name: 'Write', exact: true }).click();
     const presets = bar.getByRole('radiogroup', { name: 'Pen presets' });
     await expect(presets.getByRole('radio')).toHaveCount(4);
     await expect(presets.getByRole('radio', { name: 'Black pen, 1.5 pt' })).toBeVisible();
@@ -432,6 +434,69 @@ test.describe('lasso', () => {
     await expect(bar).toHaveCount(0);
     await expect(layer(page)).toHaveAttribute('data-tool', 'lasso');
   });
+
+  test('a corner handle grows two lassoed strokes about the opposite corner', async ({ page }) => {
+    await openSimple(page);
+    await page.locator('body').press('p');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    await mouseStroke(page, [0.25, 0.5], [0.4, 0.51]);
+    await mouseStroke(page, [0.25, 0.56], [0.4, 0.57]);
+    await expect(layer(page).locator('[data-annotation-kind="ink"] polyline')).toHaveCount(2, {
+      timeout: 10_000,
+    });
+    await expect(page.locator('[data-dry-ink]').first()).toHaveAttribute('data-strokes', '0', {
+      timeout: 10_000,
+    });
+    // What the strokes span on the page (CSS px of the layer).
+    const span = async () => {
+      const points = (await inkPoints(page)).flat();
+      const xs = points.map(([x = 0]) => x);
+      const ys = points.map(([, y = 0]) => y);
+      const left = Math.min(...xs);
+      const top = Math.min(...ys);
+      return { left, top, width: Math.max(...xs) - left, height: Math.max(...ys) - top };
+    };
+    const before = await span();
+
+    await page.locator('body').press('q');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'lasso');
+    const box = await layer(page).boundingBox();
+    if (!box) throw new Error('page not rendered');
+    const x0 = box.x + before.left - 20;
+    const y0 = box.y + before.top - 20;
+    const x1 = box.x + before.left + before.width + 20;
+    const y1 = box.y + before.top + before.height + 20;
+    await page.mouse.move(x0, y0);
+    await page.mouse.down();
+    for (const [x, y] of [
+      [x1, y0],
+      [x1, y1],
+      [x0, y1],
+      [x0, y0 + 4],
+    ] as const) {
+      await page.mouse.move(x, y, { steps: 8 });
+    }
+    await page.mouse.up();
+    await expect(page.locator('[data-lasso-bar]')).toContainText('2 strokes');
+
+    // The bottom-right handle, dragged 60 px right and 30 px down.
+    const handle = await layer(page).locator('[data-lasso-handle="se"]').boundingBox();
+    if (!handle) throw new Error('no handle');
+    const hx = handle.x + handle.width / 2;
+    const hy = handle.y + handle.height / 2;
+    await page.mouse.move(hx, hy);
+    await page.mouse.down();
+    await page.mouse.move(hx + 60, hy + 30, { steps: 10 });
+    await page.mouse.up();
+    await expect
+      .poll(async () => (await span()).width, { timeout: 10_000 })
+      .toBeGreaterThan(before.width + 50);
+    const after = await span();
+    expect(after.height).toBeGreaterThan(before.height + 20);
+    // The opposite (top-left) corner stays where it was.
+    expect(Math.abs(after.left - before.left)).toBeLessThan(1.5);
+    expect(Math.abs(after.top - before.top)).toBeLessThan(1.5);
+  });
 });
 
 /** Points (CSS px) of every ink path on the first page, as the layer draws them. */
@@ -503,7 +568,9 @@ test.describe('pen: width changes, zoom, Draw, lines and undo', () => {
     await mouseStroke(page, [0.37, 0.55], [0.5, 0.56]);
     await expect(ink.locator('polyline')).toHaveCount(2, { timeout: 10_000 });
     await expect(ink).toHaveCount(1);
-    await expect(layer(page).locator('[data-settling]')).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.locator('[data-dry-ink]').first()).toHaveAttribute('data-strokes', '0', {
+      timeout: 10_000,
+    });
     const before = await inkPoints(page);
     const widthsBefore = (await sentInkWidths(page)).at(-1) ?? [];
     expect(widthsBefore).toHaveLength(2);
@@ -655,7 +722,7 @@ test.describe('pen: width changes, zoom, Draw, lines and undo', () => {
   test('picking Draw arms the pen: the first stroke draws', async ({ page }) => {
     await openSimple(page);
     const bar = page.getByRole('toolbar', { name: 'Tools' });
-    await bar.getByRole('button', { name: 'Draw', exact: true }).click();
+    await bar.getByRole('button', { name: 'Write', exact: true }).click();
     await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
     const black = bar.getByRole('radio', { name: 'Black pen, 1.5 pt' });
     await expect(black).toHaveAttribute('data-armed', '');

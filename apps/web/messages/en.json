@@ -219,8 +219,6 @@
   "tool_text": "Text",
   "tool_shapes": "Shapes",
   "tool_note": "Note",
-  "action_rotate_pages": "Rotate pages",
-  "action_delete_pages": "Delete pages",
   "action_extract_pages": "Extract pages",
   "action_coming_soon": "Coming in M1",
   "action_coming_soon_tooltip": "{label} · Coming in M1",
@@ -1388,6 +1386,27 @@
   "history_text_edit_substituted": "Text edited (font substituted: {family})",
   "history_text_edit_fell_back": "Text edited (fell back, font substituted: {family})",
   "history_text_edit_moved_out_of_form": "Text edited (moved out of form)",
+  "paragraph_editor_label": "Paragraph on page {page}",
+  "paragraph_panel_label": "Paragraph editing",
+  "paragraph_honesty_one": "{char} uses {family} because the original font in this file does not include it.",
+  "paragraph_honesty_many": "{chars} use {family} because the original font in this file does not include them.",
+  "paragraph_tightened": "Spacing tightened by {percent}",
+  "paragraph_overflow": "The paragraph now runs into the content below it",
+  "paragraph_ragged": "Some lines could not stay justified",
+  "paragraph_unsupported": "No available font has {chars}",
+  "paragraph_info_label": "About paragraph editing",
+  "paragraph_info_text": "Recto rewraps the text inside this paragraph using the paragraph's own font, size, colour and spacing. Lines you did not change keep their exact spacing, and move up or down only if the paragraph gains or loses a line. Recto never moves other content on the page and never moves text to another page: a PDF stores finished pages, not a flowing document. If you type a character that the font in this file does not contain, Recto shows it in a different font and tells you which one.",
+  "paragraph_join": "Join with next",
+  "paragraph_split": "Split here",
+  "paragraph_hint_unavailable": "Not available yet: paragraph boundaries cannot be corrected in this version",
+  "paragraph_hint": "Esc or click outside to apply",
+  "paragraph_loading": "Preparing the paragraph…",
+  "paragraph_refused": "Paragraph editing is not available here: {reason}",
+  "paragraph_reason_drop_cap": "a large initial letter spans several lines",
+  "paragraph_reason_shared_object": "a text object of this paragraph also draws other text",
+  "history_paragraph_edit_same_font": "Paragraph edited (same font)",
+  "history_paragraph_edit_same_font_not_embedded": "Paragraph edited (same font, not embedded)",
+  "history_paragraph_edit_substituted": "Paragraph edited (some characters in {family})",
   "announce_tool": "{tool} tool",
   "cmd_stamp": "Stamp: {name}",
   "cmd_stamp_image": "Stamp an image…",
@@ -1731,6 +1750,33 @@
   "lasso_history_font_items": "Change font size of {items}",
   "lasso_history_move_items": "Move {items}",
   "lasso_history_delete_items": "Delete {items}",
+  "lasso_history_resize": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Resize {count} stroke",
+        "countPlural=*": "Resize {count} strokes"
+      }
+    }
+  ],
+  "lasso_history_rotate": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Rotate {count} stroke",
+        "countPlural=*": "Rotate {count} strokes"
+      }
+    }
+  ],
+  "lasso_history_resize_items": "Resize {items}",
+  "lasso_history_rotate_items": "Rotate {items}",
+  "lasso_box_label": "Selection: {items}. Arrow keys move it, Shift and arrows resize it, Alt and arrows rotate it",
+  "lasso_resized": "Resized to {width} × {height} pt",
+  "lasso_rotated_cw": "Rotated {angle}° clockwise",
+  "lasso_rotated_ccw": "Rotated {angle}° counterclockwise",
+  "lasso_stamps_keep_orientation": "Stamps keep their orientation",
   "pen_name_strokes": [
     {
       "declarations": ["input count", "local countPlural = count: plural"],
@@ -3527,43 +3573,26 @@
       }
     }
   ],
-  "bar_group_read": "Read",
-  "bar_group_markup": "Mark up",
-  "bar_group_draw": "Draw",
   "bar_group_fill": "Fill & sign",
-  "bar_group_pages": "Pages",
   "bar_group_redact": "Redact",
+  "bar_group_select": "Select",
+  "bar_group_write": "Write",
+  "bar_group_text": "Text",
+  "page_menu_label": "Page {number}",
+  "page_menu_edit_text": "Edit text here",
+  "page_menu_rotate_left": "Rotate page {number} left",
+  "page_menu_rotate_right": "Rotate page {number} right",
+  "page_menu_delete": "Delete page {number}",
+  "page_menu_crop": "Crop…",
+  "page_menu_rotated_left": "Rotated page {number} left",
+  "page_menu_rotated_right": "Rotated page {number} right",
+  "page_menu_deleted": "Deleted page {number}. Undo with {shortcut}",
+  "selection_comment": "Comment",
+  "selection_comment_tooltip": "Add a note at the selection",
   "bar_group_tools": "{group} tools",
   "bar_group_back": "{group}: back to all groups",
   "bar_back_tooltip": "Back to all groups",
   "bar_options": "{tool} options",
-  "bar_find": "Find",
-  "bar_fit": "Fit",
-  "bar_crop": "Crop…",
-  "bar_rotate_page": "Rotate page {number}",
-  "bar_rotate_selected": [
-    {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
-      "match": {
-        "countPlural=one": "Rotate {count} selected page",
-        "countPlural=*": "Rotate {count} selected pages"
-      }
-    }
-  ],
-  "bar_delete_page": "Delete page {number}",
-  "bar_delete_selected": [
-    {
-      "declarations": ["input count", "local countPlural = count: plural"],
-      "selectors": ["countPlural"],
-      "match": {
-        "countPlural=one": "Delete {count} selected page",
-        "countPlural=*": "Delete {count} selected pages"
-      }
-    }
-  ],
-  "bar_rotated_page": "Rotated page {number}",
-  "bar_deleted_page": "Deleted page {number}. Undo with {shortcut}",
   "bar_redact_mark": "Mark for redaction",
   "bar_mark_matches": "Mark search matches",
   "bar_mark_matches_none": "Find text first: there are no search matches to mark",
@@ -3682,5 +3711,10 @@
   "announce_glass_panels_off": "Glass panels off",
   "announce_reduce_transparency_on": "Reduced transparency on",
   "announce_reduce_transparency_off": "Reduced transparency off",
+  "edit_text_hint": "Double-click to edit text",
+  "pen_draws_in_edit": "Pen draws in Edit",
+  "cmd_view_pen_draws_in_edit": "Toggle pen draws in Edit",
+  "announce_pen_draws_in_edit_on": "Pen draws in Edit on",
+  "announce_pen_draws_in_edit_off": "Pen draws in Edit off",
   "cmd_help_about_page_keywords": "website, web page, about page, how it works"
 }

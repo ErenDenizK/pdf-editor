@@ -5,7 +5,7 @@
  */
 import type { CommandRegistry } from '../commands/registry';
 import { m } from '../i18n';
-import { isNavigatorShowing, isPageView, useUiStore } from '../state/ui-store';
+import { canEditActive, isNavigatorShowing, isPageView, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useSearchStore } from '../viewer/search';
 import { useToolStore } from '../viewer/tool-store';
@@ -80,7 +80,8 @@ export function registerRedactionCommands(registry: CommandRegistry): () => void
       title: m.cmd_redaction_mark_matches(),
       group: m.group_tools(),
       keywords: ['redact', 'search', 'find', 'mark all'],
-      when: () => readMode() && useSearchStore.getState().hits.length > 0,
+      // Marks are page edits: disabled in Read (ADR-0019 §3).
+      when: () => readMode() && canEditActive() && useSearchStore.getState().hits.length > 0,
       run: () => markSearchHits().then(() => undefined),
     }),
   ];
