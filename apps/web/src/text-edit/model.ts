@@ -1,18 +1,22 @@
 /**
  * The Edit text tool's pure logic (redaction-and-text-editing spec §2.2, §2.5): which runs
- * are editable, the range an edited line replaces, the honesty badge and fit choice shown
- * from `checkEditability`, and the history label from the applied result. No engine calls
- * and no DOM, so it is unit-tested directly.
+ * are editable, where a click puts the caret, the range an edited line replaces, the honesty
+ * badge and fit choice shown from `checkEditability` (or, between engine checks, estimated
+ * from the run's one-off analysis: craft spec §4.8), and the history label from the applied
+ * result. No engine calls and no DOM, so it is unit-tested directly.
  */
 import type { Rotation } from '@pdf-editor/document-model';
-import type {
-  LocatedRun,
-  TextEditability,
-  TextEditBlocker,
-  TextEditFailure,
-  TextEditResult,
-  TextRunFont,
-  TextTier2Refusal,
+import {
+  type LocatedRun,
+  TEXT_EDIT_SHRINK_FLOOR,
+  type TextEditability,
+  type TextEditBlocker,
+  type TextEditFailure,
+  type TextEditResult,
+  type TextFitOption,
+  type TextRunAnalysis,
+  type TextRunFont,
+  type TextTier2Refusal,
 } from '@pdf-editor/engine';
 
 import { formatPercent, getLocale, m } from '../i18n';
@@ -159,6 +163,54 @@ export function glyphSelection(
     return { start: run.text.length, end: run.text.length };
   }
   return { start: bounds[index] ?? 0, end: bounds[index + 1] ?? run.text.length };
+}
+
+/** Distance of `point` from the run's first glyph origin along its writing direction. */
+function alongRun(
+  run: Pick<LocatedRun, 'glyphs' | 'direction'>,
+  point: { readonly x: number; readonly y: number },
+): number {
+  const origin = run.glyphs[0]?.origin ?? { x: 0, y: 0 };
+  return (point.x - origin.x) * run.direction.x + (point.y - origin.y) * run.direction.y;
+}
+
+/**
+ * Where a click at a user-space point puts the caret (craft spec §4.2: a caret at the click,
+ * never a glyph selection): before the glyph under the point when the point is on its first
+ * half along the line, after it otherwise. UTF-16 offset in `run.text`.
+ */
+export function caretOffset(
+  run: Pick<LocatedRun, 'glyphs' | 'text' | 'direction'>,
+  point: { readonly x: number; readonly y: number },
+): number {
+  const index = glyphIndexAt(run, point);
+  const bounds = glyphBoundaries(run);
+  const glyph = run.glyphs[index];
+  if (!glyph) return run.text.length;
+  const r = glyph.rect;
+  const middle = alongRun(run, { x: r.x + r.width / 2, y: r.y + r.height / 2 });
+  const after = alongRun(run, point) > middle;
+  return bounds[after ? index + 1 : index] ?? run.text.length;
+}
+
+/**
+ * The word around a caret offset (double-click): the letters and digits on both sides of
+ * it; a caret between spaces takes the spaces. UTF-16 offsets in `text`.
+ */
+export function wordAt(
+  text: string,
+  offset: number,
+): { readonly start: number; readonly end: number } {
+  const blank = (ch: string | undefined) => ch === undefined || SPACE.test(ch);
+  let at = Math.max(0, Math.min(offset, text.length));
+  // At the end of a word, the word before the caret.
+  if (blank(text[at]) && !blank(text[at - 1])) at -= 1;
+  const kind = blank(text[at]);
+  let start = at;
+  let end = at;
+  while (start > 0 && blank(text[start - 1]) === kind) start -= 1;
+  while (end < text.length && blank(text[end]) === kind) end += 1;
+  return { start, end };
 }
 
 /** The line as typed in the editor: one line, no control characters. */
@@ -397,6 +449,114 @@ export function resolveFit(
 export function fitSummary(state: FitState): string {
   const over = state.available > 0 ? state.needed / state.available - 1 : 1;
   return m.text_edit_fit_too_wide({ percent: formatPercent(Math.max(0.01, over)) });
+}
+
+// ---------------------------------------------------------------------------
+// Estimate between engine checks (craft spec §4.8)
+// ---------------------------------------------------------------------------
+
+/** `checkEditability`'s slack when comparing widths (`POSITION_TOLERANCE`), points. */
+const FIT_TOLERANCE = 0.01;
+
+/** The engine's `fitOption` (editability.ts), as arithmetic on measured widths. */
+function fitOption(width: number, available: number, spacing = 0): TextFitOption {
+  const fits = width <= available + FIT_TOLERANCE;
+  const scalable = width - spacing;
+  const shrink = fits || scalable <= 0 ? 1 : Math.max(0, (available - spacing) / scalable);
+  return { width, shrink, fits, canShrink: shrink >= TEXT_EDIT_SHRINK_FLOOR };
+}
+
+/** Which tier-2 refusal the engine reports first when several characters are refused. */
+const REFUSAL_ORDER: readonly TextTier2Refusal[] = [
+  'outside-winansi',
+  'missing-glyphs',
+  'ambiguous-encoding',
+];
+
+/**
+ * The editability of `text` in the run's editor, estimated from the run's analysis with
+ * arithmetic only (no engine call): the replaced range and its free space from the run's
+ * glyph origins and the analysed line end, widths from the measured advances. Undefined
+ * when a character of the replacement is unknown to the analysis (the engine's check then
+ * decides). The engine's check stays the authority: it also verifies by read-back and the
+ * clip, which the estimate cannot.
+ */
+export function estimateEditability(
+  analysis: TextRunAnalysis,
+  run: Pick<LocatedRun, 'glyphs' | 'text' | 'direction'>,
+  text: string,
+): TextEditability | undefined {
+  const range = editRange(run, text) ?? { start: 0, end: run.text.length, replacement: run.text };
+  const bounds = glyphBoundaries(run);
+  const count = run.glyphs.length;
+  const g0 = Math.min(bounds.indexOf(range.start), count);
+  const g1 = Math.min(bounds.indexOf(range.end), count);
+  if (g0 < 0 || g1 < 0) return undefined;
+  const at = (g: number) => {
+    const glyph = run.glyphs[g];
+    return glyph ? alongRun(run, glyph.origin) : analysis.runEnd;
+  };
+  const replaced = Math.max(0, at(g1) - at(g0));
+  const toLineEnd = g1 >= count;
+  const fitBase = {
+    available: toLineEnd ? Math.max(0, analysis.lineEnd - at(g0)) : replaced,
+    boundedByGlyph: toLineEnd ? analysis.lineBound === 'glyph' : true,
+    boundedBy: toLineEnd ? analysis.lineBound : ('glyph' as const),
+    replaced,
+  };
+  if (analysis.blocker) {
+    return {
+      tier2: { ok: false, reason: 'blocked', missing: [] },
+      tier1: { ok: false, reason: analysis.blocker },
+      honesty: 'not-editable',
+      fit: fitBase,
+    };
+  }
+  const chars = Array.from(range.replacement);
+  const unique = [...new Set(chars)];
+
+  let tier2: TextEditability['tier2'] | undefined;
+  let tier2Fit: TextFitOption | undefined;
+  const { refusal, advances, refused } = analysis.tier2;
+  const reason = REFUSAL_ORDER.find((r) => unique.some((c) => refused[c] === r));
+  if (refusal) {
+    tier2 = { ok: false, reason: refusal, missing: [] };
+  } else if (reason) {
+    tier2 = { ok: false, reason, missing: unique.filter((c) => refused[c] === reason) };
+  } else if (chars.every((c) => advances[c] !== undefined)) {
+    let width = 0;
+    let spacing = 0;
+    for (const c of chars) {
+      const advance = advances[c];
+      width += advance?.spaced ?? 0;
+      spacing += (advance?.spaced ?? 0) - (advance?.plain ?? 0);
+    }
+    tier2 = { ok: true };
+    tier2Fit = fitOption(width, fitBase.available, spacing);
+  }
+  if (!tier2) return undefined;
+
+  const face = analysis.tier1;
+  let tier1Fit: TextFitOption | undefined;
+  if (face && chars.every((c) => face.advances[c] !== undefined)) {
+    const width = chars.reduce((sum, c) => sum + (face.advances[c] ?? 0), 0);
+    tier1Fit = fitOption(width, fitBase.available);
+  }
+  if (!tier2.ok && !tier1Fit) return undefined;
+  const tier = tier2.ok ? 2 : 1;
+  return {
+    tier2,
+    tier1: face
+      ? { ok: true, substitute: face.substitute, family: face.family }
+      : { ok: false, reason: 'unsupported-chars', missing: [] },
+    tier,
+    honesty: tier === 2 ? analysis.honesty.tier2 : analysis.honesty.tier1,
+    fit: {
+      ...fitBase,
+      ...(tier2Fit ? { tier2: tier2Fit } : {}),
+      ...(tier1Fit ? { tier1: tier1Fit } : {}),
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -5,9 +5,10 @@
  * on one line) becomes a target over its line box. Hovering the page outlines the editable
  * runs and fills the one under the pointer; runs that cannot be edited (Type3, invisible,
  * vertical, nested forms) are hatched and say why in a tooltip. A click opens the inline
- * editor over the run with the clicked character selected; Enter or Space on a focused run
- * opens it with the whole line selected. Runs are located again for every page revision,
- * since references go stale after any edit (spec §2.5).
+ * editor over the run with the caret where it was clicked (craft spec §4.2), a double-click
+ * with the clicked word selected; Enter or Space on a focused run opens it with the whole
+ * line selected. Runs are located again for every page revision, since references go stale
+ * after any edit (spec §2.5).
  *
  * When Enter or Esc closes the editor, the focus goes back to the run's target; after a
  * commit the runs are new, so it goes to the run on the same line nearest to where the
@@ -29,14 +30,7 @@ import type { PageOverlayProps } from '../stage/page-overlays';
 import { Tooltip } from '../ui/Tooltip';
 import { pageFrame } from '../viewer/page-frame';
 import { useToolStore } from '../viewer/tool-store';
-import {
-  blockerLabel,
-  blockerOfRun,
-  focusReturnRun,
-  glyphIndexAt,
-  glyphSelection,
-  runKey,
-} from './model';
+import { blockerLabel, blockerOfRun, caretOffset, focusReturnRun, runKey, wordAt } from './model';
 import { usePageRevision, usePageRuns } from './runs';
 import styles from './TextEdit.module.css';
 import { TextEditor } from './TextEditor';
@@ -156,15 +150,16 @@ function RunTarget({
 
   const onPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
-    // Keep the press from starting a selection or reaching the page; open on the glyph.
+    // Keep the press from starting a selection or reaching the page; open with the caret
+    // at the click (a second press of a double-click: the clicked word selected).
     event.preventDefault();
     event.stopPropagation();
     const layer = event.currentTarget.parentElement?.getBoundingClientRect();
     const local = layer
       ? { x: event.clientX - layer.left, y: event.clientY - layer.top }
       : { x: 0, y: 0 };
-    const glyph = glyphIndexAt(run, cssPointToUser(frame, local));
-    onOpen(run, glyphSelection(run, glyph));
+    const caret = caretOffset(run, cssPointToUser(frame, local));
+    onOpen(run, event.detail >= 2 ? wordAt(run.text, caret) : { start: caret, end: caret });
   };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {

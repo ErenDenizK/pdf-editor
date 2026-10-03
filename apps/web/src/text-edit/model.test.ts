@@ -7,6 +7,7 @@ import type {
   TextEditability,
   TextEditResult,
   TextFitOption,
+  TextRunAnalysis,
 } from '@pdf-editor/engine';
 import { describe, expect, it } from 'vitest';
 
@@ -14,7 +15,9 @@ import { m } from '../i18n';
 import type { PageFrame } from '../viewer/geometry';
 import {
   blockerOfRun,
+  caretOffset,
   editRange,
+  estimateEditability,
   familyOfFace,
   fitStateOf,
   fitSummary,
@@ -27,6 +30,7 @@ import {
   resolveFit,
   screenAngle,
   singleLine,
+  wordAt,
 } from './model';
 
 const LINE = 'The quick brown fox jumps';
@@ -294,6 +298,36 @@ describe('runs', () => {
     expect(glyphSelection(r, -1)).toEqual({ start: LINE.length, end: LINE.length });
   });
 
+  it('puts the caret at the click: before the glyph on its first half, after it on its second', () => {
+    const r = run();
+    // Glyph 16 ("f" of "fox") spans x 170–179, its middle at 174.5.
+    expect(caretOffset(r, { x: 172, y: 104 })).toBe(16);
+    expect(caretOffset(r, { x: 177, y: 104 })).toBe(17);
+    // Past the end of the line: after the last glyph; before the start: before the first.
+    expect(caretOffset(r, { x: 1000, y: 104 })).toBe(LINE.length);
+    expect(caretOffset(r, { x: 0, y: 104 })).toBe(0);
+    // A line running right to left on the page (direction -x): "after" is to the left.
+    const back = run(LINE, {
+      direction: { x: -1, y: 0 },
+      glyphs: r.glyphs.map((g, i) => ({
+        ...g,
+        rect: { ...g.rect, x: 300 - i * 10 },
+        origin: { x: 309 - i * 10, y: 100 },
+      })),
+    });
+    expect(caretOffset(back, { x: 300 - 16 * 10 + 1, y: 104 })).toBe(17);
+    expect(caretOffset(back, { x: 300 - 16 * 10 + 8, y: 104 })).toBe(16);
+  });
+
+  it('selects the word around the caret on double-click', () => {
+    expect(wordAt(LINE, 17)).toEqual({ start: 16, end: 19 }); // inside "fox"
+    expect(wordAt(LINE, 16)).toEqual({ start: 16, end: 19 }); // at its start
+    expect(wordAt(LINE, 19)).toEqual({ start: 16, end: 19 }); // at its end
+    expect(wordAt(LINE, 0)).toEqual({ start: 0, end: 3 });
+    expect(wordAt(LINE, LINE.length)).toEqual({ start: 20, end: 25 });
+    expect(wordAt('a   b', 2)).toEqual({ start: 1, end: 4 }); // between spaces: the spaces
+  });
+
   it('turns the editor with the line on screen', () => {
     const frame = (rotation: 0 | 90 | 180 | 270): PageFrame => ({
       size: { width: 612, height: 792 },
@@ -388,5 +422,114 @@ describe('focus after the editor closes', () => {
     // Same key but on another line (object indices shifted): not the edited line.
     const shifted = at('Moved', 10, 40, 0, 0);
     expect(focusReturnRun([other, invisible, shifted], before)).toBeUndefined();
+  });
+});
+
+describe('estimate from the analysis (no engine call)', () => {
+  const r = run();
+  /** Every glyph 10 pt: the run ends at 250 pt from its origin; the line at 400. */
+  function analysis(patch: Partial<TextRunAnalysis> = {}): TextRunAnalysis {
+    const letters = 'abcdefghijklmnopqrstuvwxyzT ';
+    return {
+      run: r,
+      honesty: { tier2: 'same-font-not-embedded', tier1: 'font-substituted' },
+      tier2: {
+        advances: Object.fromEntries(
+          Array.from(letters, (c) => [
+            c,
+            { spaced: c === ' ' ? 6 : 10, plain: c === ' ' ? 4 : 10 },
+          ]),
+        ),
+        refused: { ğ: 'outside-winansi', '\u2603': 'missing-glyphs' },
+      },
+      tier1: {
+        substitute: 'Inter-Regular',
+        family: 'Inter',
+        advances: Object.fromEntries(Array.from(`${letters}ğ`, (c) => [c, 12])),
+      },
+      runEnd: 250,
+      lineEnd: 400,
+      lineBound: 'column',
+      ...patch,
+    };
+  }
+
+  it('a word inside the line: free space is the replaced word, widths from the advances', () => {
+    const estimate = estimateEditability(analysis(), r, LINE.replace('fox', 'wolf'));
+    expect(estimate).toMatchObject({
+      tier: 2,
+      honesty: 'same-font-not-embedded',
+      tier2: { ok: true },
+      fit: {
+        available: 30,
+        replaced: 30,
+        boundedByGlyph: true,
+        tier2: { width: 40, fits: false, canShrink: true, shrink: 0.75 },
+        tier1: { width: 48, fits: false },
+      },
+    });
+    const state = fitStateOf(estimate!);
+    expect(resolveFit(state, null)).toBeNull();
+    expect(resolveFit(state, 'shrink')).toBe('shrink');
+  });
+
+  it('the end of the line: free space to the analysed line end (the column)', () => {
+    const estimate = estimateEditability(analysis(), r, `${LINE} over`);
+    // "jumps" (from x 200) is replaced by "jumps over": 50 + 6 + 40 wide, 400 − 200 free.
+    expect(estimate?.fit).toMatchObject({
+      available: 200,
+      replaced: 50,
+      boundedByGlyph: false,
+      boundedBy: 'column',
+      tier2: { width: 96, fits: true },
+    });
+    // Spacing (Tc/Tw) does not shrink with the size.
+    const tight = estimateEditability(analysis({ lineEnd: 260 }), r, `${LINE} over`);
+    expect(tight?.fit.tier2?.shrink).toBeCloseTo((60 - 2) / (96 - 2), 6);
+  });
+
+  it('characters the font refuses: tier 1 with the reason; unknown characters wait for the engine', () => {
+    const estimate = estimateEditability(analysis(), r, LINE.replace('fox', 'ğox'));
+    expect(estimate).toMatchObject({
+      tier: 1,
+      honesty: 'font-substituted',
+      tier2: { ok: false, reason: 'outside-winansi', missing: ['ğ'] },
+      tier1: { ok: true, family: 'Inter' },
+    });
+    expect(honestyBadge(estimate!).fellBack).toBeDefined();
+    // "€" is in neither table: unknown until the engine checks.
+    expect(estimateEditability(analysis(), r, LINE.replace('fox', '€'))).toBeUndefined();
+    // Refused by the original font and not in the substitute either: unknown too.
+    expect(estimateEditability(analysis(), r, LINE.replace('fox', '\u2603'))).toBeUndefined();
+  });
+
+  it('a blocked run is not editable, whatever the text', () => {
+    const { tier1: _tier1, ...unblocked } = analysis();
+    const estimate = estimateEditability(
+      { ...unblocked, blocker: 'invisible' },
+      r,
+      LINE.replace('fox', 'cat'),
+    );
+    expect(estimate).toMatchObject({
+      honesty: 'not-editable',
+      tier1: { ok: false, reason: 'invisible' },
+    });
+    expect(estimate?.tier).toBeUndefined();
+  });
+
+  it('a font that takes no replacement at all: the substitute', () => {
+    const estimate = estimateEditability(
+      analysis({ tier2: { refusal: 'in-form', advances: {}, refused: {} } }),
+      r,
+      LINE.replace('fox', 'cat'),
+    );
+    expect(estimate).toMatchObject({ tier: 1, tier2: { ok: false, reason: 'in-form' } });
+    expect(estimate?.fit.tier1?.width).toBe(36);
+  });
+
+  it('the unchanged line estimates the whole line in place', () => {
+    const estimate = estimateEditability(analysis(), r, LINE);
+    expect(estimate?.fit).toMatchObject({ available: 400, replaced: 250 });
+    expect(estimate?.tier).toBe(2);
   });
 });

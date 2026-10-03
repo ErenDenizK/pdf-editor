@@ -2,12 +2,16 @@
  * The inline text editor (redaction-and-text-editing spec §2.2, §2.5): a one-line field
  * over the run's line box (turned with the line on rotated pages), pre-filled with the run
  * text, and a header with the font, the honesty badge and, when the new text is wider than
- * the free space, the fit choice. The badge follows `checkEditability` for the current
- * text (debounced); Enter commits one history entry through the edit runner, Esc cancels.
- * Either way the focus goes back to the run's target on the page (TextEditLayer), so the
- * keyboard continues where it was.
+ * the free space, the fit choice. Enter commits one history entry through the edit runner,
+ * Esc cancels. Either way the focus goes back to the run's target on the page
+ * (TextEditLayer), so the keyboard continues where it was. Double-click selects a word.
+ *
+ * Engine traffic (craft spec §4.8): opening the editor asks for the run's analysis once
+ * (cached per page revision, `runAnalysis`); each keystroke updates the badge and the fit
+ * from it with arithmetic (`estimateEditability`); `checkEditability`, the engine's dry run,
+ * follows a 300 ms pause and runs again on commit when the text changed since.
  */
-import type { TextEditability } from '@pdf-editor/engine';
+import type { TextEditability, TextRunAnalysis } from '@pdf-editor/engine';
 import { Ban, Check, CircleDashed, Info, type LucideIcon, TriangleAlert } from 'lucide-react';
 import {
   type KeyboardEvent,
@@ -15,6 +19,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -28,6 +33,7 @@ import { commitTextEdit } from './actions';
 import {
   type BadgeTone,
   editRange,
+  estimateEditability,
   failureMessage,
   type FitChoice,
   fitStateOf,
@@ -37,12 +43,13 @@ import {
   resolveFit,
   screenAngle,
   singleLine,
+  wordAt,
 } from './model';
 import styles from './TextEdit.module.css';
-import { type TextEditSession, useTextEditStore } from './text-edit-store';
+import { runAnalysis, type TextEditSession, useTextEditStore } from './text-edit-store';
 
-/** Wait after the last keystroke before asking the engine again. */
-const CHECK_DELAY_MS = 200;
+/** Pause after the last keystroke before the engine's dry run (craft spec §4.8). */
+const CHECK_DELAY_MS = 300;
 /** Space kept around the line box inside the field, CSS pixels. */
 const FIELD_PADDING = 3;
 /** Gap between the line and the header, CSS pixels. */
@@ -51,6 +58,12 @@ const HEADER_GAP = 8;
 type Check =
   | { readonly text: string; readonly result: TextEditability }
   | { readonly text: string; readonly error: string };
+
+/** The run's analysis (or why there is none) for the session it was asked for. */
+type Analysis = { readonly session: TextEditSession } & (
+  | { readonly value: TextRunAnalysis }
+  | { readonly error: string }
+);
 
 const TONE_ICONS: Record<BadgeTone | 'pending', LucideIcon> = {
   same: Check,
@@ -82,6 +95,8 @@ export function TextEditor({
   const { run } = session;
   const [text, setText] = useState(run.text);
   const [check, setCheck] = useState<Check | null>(null);
+  const [analyzed, setAnalyzed] = useState<Analysis | null>(null);
+  const analysis = analyzed?.session === session ? analyzed : null;
   const [choice, setChoice] = useState<FitChoice | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,18 +134,33 @@ export function TextEditor({
     [session],
   );
 
-  // Ask the engine about the current text, debounced; the first check runs at once.
-  const first = useRef(true);
+  // The run's analysis, once per run and page revision: keystrokes are checked against it.
   useEffect(() => {
+    let live = true;
+    runAnalysis(session).then(
+      (value) => {
+        if (live) setAnalyzed({ session, value });
+      },
+      async (caught: unknown) => {
+        const { textEditFailureReason } = await import('@pdf-editor/engine');
+        if (live) setAnalyzed({ session, error: failureMessage(textEditFailureReason(caught)) });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [session]);
+
+  // The engine's dry run of a changed text, after a pause in typing.
+  useEffect(() => {
+    if (text === run.text) return;
     const controller = new AbortController();
-    const delay = first.current ? 0 : CHECK_DELAY_MS;
-    first.current = false;
-    const timer = window.setTimeout(() => void runCheck(text, controller.signal), delay);
+    const timer = window.setTimeout(() => void runCheck(text, controller.signal), CHECK_DELAY_MS);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [text, runCheck]);
+  }, [text, run.text, runCheck]);
 
   // The page changed under the editor (undo, another edit): the run is stale.
   useEffect(() => {
@@ -160,7 +190,7 @@ export function TextEditor({
     const nextShift = Math.min(overhang, Math.max(0, panel.offsetLeft + shift));
     if (Math.abs(nextShift - shift) > 0.5) setShift(nextShift);
     // The header's size follows the check (fit block, error), the geometry the zoom.
-  }, [side, shift, check, error, busy, frame]);
+  }, [side, shift, check, analysis, text, error, busy, frame]);
 
   const commit = async () => {
     if (busy) return;
@@ -227,9 +257,21 @@ export function TextEditor({
     `translate(${-FIELD_PADDING}px, ${-FIELD_PADDING}px)`,
   ];
 
-  const result = check && 'result' in check ? check.result : undefined;
-  const checkError = check && 'error' in check ? check.error : undefined;
-  const pending = check?.text !== text;
+  // The engine's check of this text, else the estimate from the analysis, else the last check.
+  const exact = check?.text === text && 'result' in check ? check.result : undefined;
+  const estimate = useMemo(
+    () =>
+      analysis && 'value' in analysis ? estimateEditability(analysis.value, run, text) : undefined,
+    [analysis, run, text],
+  );
+  const result = exact ?? estimate ?? (check && 'result' in check ? check.result : undefined);
+  const checkError =
+    check && 'error' in check
+      ? check.error
+      : analysis && 'error' in analysis
+        ? analysis.error
+        : undefined;
+  const pending = !exact && (text !== run.text || !estimate);
   const badge = result ? honestyBadge(result) : undefined;
   const tone: BadgeTone | 'pending' = badge?.tone ?? 'pending';
   const Icon = TONE_ICONS[tone];
@@ -269,6 +311,11 @@ export function TextEditor({
         }}
         onKeyDown={onKeyDown}
         onPointerDown={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => {
+          const input = event.currentTarget;
+          const word = wordAt(input.value, input.selectionStart ?? 0);
+          input.setSelectionRange(word.start, word.end);
+        }}
       />
       <div
         id={panelId}

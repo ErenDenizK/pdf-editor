@@ -89,10 +89,13 @@ test('replace a word in the Helvetica line, export, re-open: the edited line rea
   const editor = page.getByRole('textbox', { name: 'Line text' });
   await expect(editor).toBeFocused();
   await expect(editor).toHaveValue(FOX);
-  // The clicked character is selected.
-  expect(
-    await editor.evaluate((el: HTMLInputElement) => el.selectionEnd! - el.selectionStart!),
-  ).toBe(1);
+  // The caret is at the click (craft spec §4.2), inside or next to "fox"; nothing is selected.
+  const caret = await editor.evaluate((el: HTMLInputElement) => [
+    el.selectionStart!,
+    el.selectionEnd!,
+  ]);
+  expect(caret[1]).toBe(caret[0]);
+  expect(Math.abs(caret[0]! - FOX.indexOf('fox') - 1)).toBeLessThanOrEqual(1);
   const badge = page.getByTestId('text-edit-badge');
   await expect(page.getByTestId('text-edit-font')).toHaveText('Helvetica · not embedded');
   await expect(badge).toHaveText('Same font (not embedded)');
