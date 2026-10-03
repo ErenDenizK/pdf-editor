@@ -23,6 +23,8 @@
  */
 import { inkOutlineOps } from '@pdf-editor/engine/ink-outline';
 
+import { inkStats } from './ink-stats';
+
 /** A stroke as the preview reads it: CSS pixels of the page, full width per point. */
 export interface PreviewPath {
   readonly length: number;
@@ -348,7 +350,16 @@ export class InkPreview {
     }
     this.host.appendChild(element);
     this.clear();
-    return { element, release: () => element.remove() };
+    // Ink statistics: pointer-up to committed stroke visible ends when this is released.
+    const stats = inkStats();
+    const ended = stats?.takeEnded() ?? null;
+    return {
+      element,
+      release: () => {
+        element.remove();
+        if (stats && ended) stats.visible(ended);
+      },
+    };
   }
 
   /** Drops the live stroke without keeping it. */

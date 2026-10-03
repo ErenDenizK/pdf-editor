@@ -19,6 +19,7 @@
  *   sees the touches because they bubble on to it. Rejected touches stop here.
  */
 import type { InkPreview, PreviewPath, PreviewPoint } from './ink-preview';
+import { inkStats } from './ink-stats';
 
 /** Touch is ignored for this long after a pen leaves the surface (ms). */
 export const TOUCH_AFTER_PEN_MS = 300;
@@ -370,8 +371,15 @@ export function attachInkInput(options: InkInputOptions): () => void {
     frame = 0;
     const s = stroke;
     if (!s) return;
+    const stats = inkStats();
+    const start = stats ? performance.now() : 0;
     preview.draw(view(s), s.straight ? [] : s.predicted, s.restart);
     s.restart = false;
+    if (stats) {
+      // Event-to-draw: the newest sample's event time to the end of this draw.
+      const last = s.samples.length - 1;
+      stats.frame(start, performance.now(), s.startTime + s.samples.time(last), last + 1);
+    }
   };
 
   const schedule = () => {
@@ -437,6 +445,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
     penUp(s);
     releaseCapture(s.pointerId);
     preview.cancel();
+    inkStats()?.strokeCancel();
     stopListening();
   };
 
@@ -505,6 +514,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
       restart: false,
     };
     stroke = s;
+    inkStats()?.strokeBegin(e.pointerType);
     preview.begin({ color: context.color, opacity: context.opacity });
     const p = local(e, rect);
     addSample(s, p.x, p.y, e.pressure, e.timeStamp);
@@ -549,6 +559,8 @@ export function attachInkInput(options: InkInputOptions): () => void {
   const onUp = (e: PointerEvent) => {
     const s = stroke;
     if (s?.pointerId === e.pointerId) {
+      const stats = inkStats();
+      const upAt = stats ? performance.now() : 0;
       const rect = element.getBoundingClientRect();
       measure(s, rect);
       const p = local(e, rect);
@@ -562,7 +574,9 @@ export function attachInkInput(options: InkInputOptions): () => void {
       s.straight = e.shiftKey;
       s.predicted = [];
       cancelFrame();
+      const drawStart = stats ? performance.now() : 0;
       preview.draw(view(s), [], true);
+      stats?.strokeEnd(upAt, drawStart, performance.now(), s.samples.length);
       stroke = null;
       penUp(s);
       releaseCapture(s.pointerId);
@@ -583,7 +597,10 @@ export function attachInkInput(options: InkInputOptions): () => void {
       try {
         options.onStroke(input, settle);
       } finally {
-        if (!settled) preview.cancel();
+        if (!settled) {
+          preview.cancel();
+          inkStats()?.strokeCancel();
+        }
       }
       return;
     }
