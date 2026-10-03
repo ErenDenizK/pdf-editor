@@ -24,6 +24,7 @@ import { page } from 'vitest/browser';
 import simpleUrl from '../../../../../test/fixtures/simple-text.pdf?url';
 import { enterEditMode, fixtureFile } from '../../../test/store-harness';
 import { displaySize } from '../../pages/page-geometry';
+import { useEditPolicyStore } from '../../state/edit-policy-store';
 import { resetWorkspace, useWorkspaceStore } from '../../state/workspace-store';
 import { useToolStore } from '../../viewer/tool-store';
 import { AnnotationLayer } from '../AnnotationLayer';
@@ -219,6 +220,8 @@ describe('pen on the annotation layer', () => {
     await waitFor(async () =>
       expect((await readAnnotations(source, 0)).filter((a) => a.kind === 'ink')).toHaveLength(1),
     );
+    // "Pen draws in Edit" off (the pen just seen turned it on): the pen in Select only points.
+    useEditPolicyStore.getState().setPenDrawsInEdit(false);
     useToolStore.getState().setMode('select');
     await waitFor(() => expect(layer).toHaveAttribute('data-tool', 'select'));
     expect(layer.querySelector('canvas[data-ink-preview="live"]')).toBeNull();

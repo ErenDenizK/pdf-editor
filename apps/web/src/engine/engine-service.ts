@@ -16,6 +16,11 @@
  * - Page labels and /Lang are read by the assembly worker (`assembler-client.ts`), which
  *   the PDFium worker reaches through this thread as the adapter's inspector.
  *
+ * - Clipped repaints (craft spec §5.3 item 9): a change confined to a box (a committed pen
+ *   stroke) re-renders only that box, at every cached scale of the page, and composites it
+ *   into the cached bitmaps instead of dropping them (`requestClippedRepaint`; the edit path
+ *   announces such a change with `noteClippedChange` before its `invalidatePage`).
+ *
  * Render timings are recorded in development with `performance.mark`/`measure` only
  * (entries named `render …`, `open …`).
  */
@@ -32,7 +37,11 @@ import {
 } from '@pdf-editor/document-model';
 import type {
   AnalysisProxy,
+  decideOverflow,
+  EngineCallOptions,
   EngineErrorCode,
+  GlyphOutlineSegment,
+  layoutParagraph,
   OcrPackStore,
   OcrRecognizer,
   OpenedDocument,
@@ -43,6 +52,13 @@ import type {
   PdfRenderer,
   PdfTextEditor,
   PdfVerifier,
+  ParagraphBlock,
+  ParagraphEdit,
+  ParagraphEditOptions,
+  ParagraphEditResult,
+  ParagraphLayoutAnalysis,
+  ParagraphPreview,
+  ParagraphRef,
   SaveOptions,
   SearchHit,
   SignatureProxy,
@@ -51,6 +67,7 @@ import type {
   VerificationResult,
 } from '@pdf-editor/engine';
 
+import { displayedSize, displayRectToUser, userRectToCss } from '../viewer/geometry';
 import { getAssembler } from './assembler-client';
 
 import { BitmapCache, type CachedBitmap, bitmapKey, pageKey } from './bitmap-cache';
@@ -275,6 +292,83 @@ interface Job {
   stale: boolean;
 }
 
+/** What a clipped repaint needs of a page: its unrotated CropBox size, /Rotate and origin. */
+interface PageShape {
+  readonly size: { readonly width: number; readonly height: number };
+  readonly rotation: Rotation;
+  readonly originX: number;
+  readonly originY: number;
+}
+
+/** A bitmap the service cached, as it was requested (for clipped repaints). */
+interface RenderedEntry {
+  readonly key: string;
+  /** The cache's page identity (`BitmapCache.set`). */
+  readonly page: string;
+  readonly rotation: Rotation;
+  readonly bucket: number;
+  readonly clip?: Rect;
+  readonly tile?: string;
+}
+
+/** Whole-page bitmaps of one page a clipped repaint patches (the most recent); older go. */
+export const MAX_CLIPPED_REPAINTS = 4;
+
+/**
+ * Where a clipped repaint of `rect` (user space) lands in a cached page bitmap of
+ * `width` × `height` px rendered with `rotation` on top of the page's /Rotate: the box in
+ * whole bitmap pixels that covers it, and the user-space clip that renders exactly that box.
+ * Undefined when the rect misses the page.
+ */
+export function clippedRepaintBox(
+  shape: PageShape,
+  rotation: Rotation,
+  rect: Rect,
+  width: number,
+  height: number,
+): { left: number; top: number; width: number; height: number; clip: Rect } | undefined {
+  const frame = {
+    size: shape.size,
+    originX: shape.originX,
+    originY: shape.originY,
+    rotation: ((shape.rotation + rotation) % 360) as Rotation,
+    scale: 1,
+  };
+  const shown = displayedSize(frame);
+  if (!(shown.width > 0 && shown.height > 0 && width > 0 && height > 0)) return undefined;
+  // The bitmap's own pixels per point on each axis (EmbedPDF rounds its size).
+  const sx = width / shown.width;
+  const sy = height / shown.height;
+  const box = userRectToCss(frame, rect);
+  const left = Math.max(0, Math.floor(box.left * sx));
+  const top = Math.max(0, Math.floor(box.top * sy));
+  const right = Math.min(width, Math.ceil((box.left + box.width) * sx));
+  const bottom = Math.min(height, Math.ceil((box.top + box.height) * sy));
+  if (right <= left || bottom <= top) return undefined;
+  const clip = displayRectToUser(frame, {
+    left: left / sx,
+    top: top / sy,
+    width: (right - left) / sx,
+    height: (bottom - top) / sy,
+  });
+  return { left, top, width: right - left, height: bottom - top, clip };
+}
+
+function intersects(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+function unionRect(a: Rect, b: Rect): Rect {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    width: Math.max(a.x + a.width, b.x + b.width) - x,
+    height: Math.max(a.y + a.height, b.y + b.height) - y,
+  };
+}
+
 export type PasswordPrompt = (request: {
   readonly fileName: string;
   /** True when a password was already tried and rejected. */
@@ -355,6 +449,18 @@ export class EngineService {
   private readonly revisions = new Map<string, number>();
   private readonly revisionListeners = new Set<() => void>();
   private readonly closeListeners = new Set<(sourceId: SourceId) => void>();
+  /** Per `${sourceId}:${index}`: the box the next `invalidatePage` changes (`noteClippedChange`). */
+  private readonly clipNotes = new Map<string, Rect>();
+  /** Per `${sourceId}:${index}`: the bitmaps this service cached for it, oldest first. */
+  private readonly rendered = new Map<string, Map<string, RenderedEntry>>();
+  /** Per `${sourceId}:${index}`: the clipped repaint running (one page's run in order). */
+  private readonly repaints = new Map<string, Promise<void>>();
+  /** Cache keys being repainted: `peek` misses them and `renderPage` waits for them. */
+  private readonly repainting = new Map<string, Promise<void>>();
+  /** Per `${sourceId}:${index}`: bumped by a full `invalidatePage` (a repaint then stops). */
+  private readonly generations = new Map<string, number>();
+  /** Page shapes of every open source (clipped repaints map user space to bitmap pixels). */
+  private readonly shapes = new Map<SourceId, readonly PageShape[]>();
 
   constructor(options: EngineServiceOptions) {
     this.createRenderer = options.createRenderer;
@@ -399,6 +505,80 @@ export class EngineService {
     const engine = await this.engine();
     if (!isTextEditor(engine)) throw new Error('The rendering engine has no text editor');
     return engine;
+  }
+
+  // -------------------------------------------------------------------------
+  // Paragraph editing (craft spec §4, ADR-0020): the worker's `PdfParagraphEditor`. Reads
+  // run at the lower raw-task priority; a committed edit goes through the edit runner
+  // (`text.editParagraph`, text-edit/actions.ts), the dry run and its preview come here.
+  // -------------------------------------------------------------------------
+
+  /** The page's detected paragraphs (cached by the engine per page state). */
+  async analyzeParagraphs(
+    source: SourceId,
+    pageIndex: number,
+    options?: EngineCallOptions,
+  ): Promise<readonly ParagraphBlock[]> {
+    return (await this.textEditor()).analyzeParagraphs(source, pageIndex, options);
+  }
+
+  /** What the editor lays keystrokes out with: the layout input, overflow facts, styles. */
+  async analyzeParagraphLayout(
+    ref: ParagraphRef,
+    options?: EngineCallOptions,
+  ): Promise<ParagraphLayoutAnalysis> {
+    return (await this.textEditor()).analyzeParagraphLayout(ref, options);
+  }
+
+  /** Em-unit outlines of `chars` in the page's font `fontId` (the editor's canvas). */
+  async glyphPaths(
+    source: SourceId,
+    pageIndex: number,
+    fontId: number,
+    chars: readonly string[],
+    options?: EngineCallOptions,
+  ): Promise<Readonly<Record<string, readonly GlyphOutlineSegment[] | null>>> {
+    return (await this.textEditor()).glyphPaths(source, pageIndex, fontId, chars, options);
+  }
+
+  /** A dry run (`commit: false`) of a paragraph edit; commits go through the edit runner. */
+  async applyParagraphEdit(
+    source: SourceId,
+    pageIndex: number,
+    edit: ParagraphEdit,
+    options: ParagraphEditOptions,
+  ): Promise<ParagraphEditResult> {
+    return (await this.textEditor()).applyParagraphEdit(source, pageIndex, edit, options);
+  }
+
+  /** The dry run's paragraph area rendered at `scale` (device pixels per point). */
+  async renderParagraphPreview(
+    source: SourceId,
+    pageIndex: number,
+    edit: ParagraphEdit,
+    scale: number,
+    options?: EngineCallOptions,
+  ): Promise<ParagraphPreview> {
+    return (await this.textEditor()).renderParagraphPreview(
+      source,
+      pageIndex,
+      edit,
+      scale,
+      options,
+    );
+  }
+
+  /**
+   * The pure paragraph layout (`layoutParagraph`, `decideOverflow`) for the main thread: the
+   * editor re-lays the paragraph on every keystroke without a worker round trip (spec §4.8).
+   * Loaded with the engine chunk.
+   */
+  async paragraphLayout(): Promise<{
+    readonly layoutParagraph: typeof layoutParagraph;
+    readonly decideOverflow: typeof decideOverflow;
+  }> {
+    const engine = await import('@pdf-editor/engine');
+    return { layoutParagraph: engine.layoutParagraph, decideOverflow: engine.decideOverflow };
   }
 
   /**
@@ -485,6 +665,7 @@ export class EngineService {
         this.retained.set(id, retained);
         if (attempt !== undefined) this.passwords.set(id, attempt);
         this.cropBoxes.set(id, readCropBoxes(document));
+        this.shapes.set(id, readShapes(document));
         this.measure(`open ${file.name}`, started);
         return ok({
           id,
@@ -525,6 +706,8 @@ export class EngineService {
     this.retained.delete(sourceId);
     this.passwords.delete(sourceId);
     this.cropBoxes.delete(sourceId);
+    this.shapes.delete(sourceId);
+    this.forgetRendered(prefix);
     for (const key of [...this.texts.keys()]) {
       if (key.startsWith(prefix)) this.texts.delete(key);
     }
@@ -577,10 +760,15 @@ export class EngineService {
         if (this.jobs.get(job.key) === job) this.jobs.delete(job.key);
       }
       this.cache.removeSource(sourceId);
+      this.forgetRendered(prefix);
       for (const key of [...this.texts.keys()]) {
         if (key.startsWith(prefix)) this.texts.delete(key);
       }
       const pages = this.cropBoxes.get(sourceId)?.length ?? 0;
+      for (let index = 0; index < pages; index++) {
+        const key = `${sourceId}:${index}`;
+        this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
+      }
       for (let index = 0; index < pages; index++) {
         const key = `${sourceId}:${index}`;
         this.revisions.set(key, (this.revisions.get(key) ?? 0) + 1);
@@ -737,7 +925,18 @@ export class EngineService {
    * and bumps the page's revision so mounted canvases request a fresh render.
    */
   invalidatePage(sourceId: SourceId, index: number): void {
+    const noted = this.clipNotes.get(`${sourceId}:${index}`);
+    if (noted !== undefined) {
+      this.clipNotes.delete(`${sourceId}:${index}`);
+      this.requestClippedRepaint(sourceId, index, noted);
+      return;
+    }
     const prefix = `${sourceId}:${index}:`;
+    this.generations.set(
+      `${sourceId}:${index}`,
+      (this.generations.get(`${sourceId}:${index}`) ?? 0) + 1,
+    );
+    this.forgetRendered(prefix);
     this.cache.removePrefix(prefix);
     for (const job of [...this.jobs.values()]) {
       if (!job.key.startsWith(prefix)) continue;
@@ -755,6 +954,152 @@ export class EngineService {
     const key = `${sourceId}:${index}`;
     this.revisions.set(key, (this.revisions.get(key) ?? 0) + 1);
     for (const listener of this.revisionListeners) listener();
+  }
+
+  /**
+   * Announces that the next `invalidatePage` of this page changes only `rect` (user space,
+   * with the stroke's width and anti-aliasing margin): that invalidation then repaints the
+   * rect into the cached bitmaps (`requestClippedRepaint`) instead of dropping them. Notes on
+   * one page before its invalidation are united. The pen burst append notes the new path's box
+   * right after its engine edit (craft spec §5.3 item 9).
+   */
+  noteClippedChange(sourceId: SourceId, index: number, rect: Rect): void {
+    const key = `${sourceId}:${index}`;
+    const previous = this.clipNotes.get(key);
+    this.clipNotes.set(key, previous === undefined ? rect : unionRect(previous, rect));
+  }
+
+  /**
+   * Repaints only `rectInPage` (user space) of a page whose content changed inside it, at
+   * every scale the cache holds: each of the page's most recent whole-page bitmaps (at most
+   * `MAX_CLIPPED_REPAINTS`) gets the rect rendered through `renderPage` with `clip`, aligned to
+   * its pixels, and composited into a new bitmap in its place; tiles the rect touches are
+   * dropped and render again; untouched tiles stay. Renders of the page in flight are
+   * discarded (they began before the change). The page's revision bumps at once, as with
+   * `invalidatePage`; until a bitmap is patched, `peek` misses it and `renderPage` waits for
+   * it, so a view never shows the old pixels as the new revision. Repaints of one page run in
+   * order. Full re-renders stay for zoom (another scale) and for every other edit.
+   */
+  requestClippedRepaint(sourceId: SourceId, index: number, rectInPage: Rect): void {
+    const pageId = `${sourceId}:${index}`;
+    const prefix = `${pageId}:`;
+    for (const job of [...this.jobs.values()]) {
+      if (!job.key.startsWith(prefix) || !job.running) continue;
+      job.stale = true;
+      if (this.jobs.get(job.key) === job) this.jobs.delete(job.key);
+    }
+    const tracked = this.rendered.get(pageId);
+    const pages: RenderedEntry[] = [];
+    for (const [key, entry] of tracked ?? []) {
+      if (!this.cache.has(key)) {
+        tracked?.delete(key);
+      } else if (entry.tile === undefined) {
+        pages.push(entry);
+      } else if (entry.clip === undefined || intersects(entry.clip, rectInPage)) {
+        tracked?.delete(key);
+        this.cache.remove(key);
+      }
+    }
+    // The most recent scales are patched; older ones go (a full render if shown again).
+    const patched = pages.slice(-MAX_CLIPPED_REPAINTS).reverse();
+    for (const entry of pages.slice(0, -MAX_CLIPPED_REPAINTS)) {
+      tracked?.delete(entry.key);
+      this.cache.remove(entry.key);
+    }
+    const generation = this.generations.get(pageId) ?? 0;
+    const waits = patched.map((entry) => {
+      let done: (() => void) | undefined;
+      const wait = new Promise<void>((resolve) => {
+        done = resolve;
+      });
+      this.repainting.set(entry.key, wait);
+      return { entry, wait, done: () => done?.() };
+    });
+    const run = (this.repaints.get(pageId) ?? Promise.resolve()).then(async () => {
+      for (const { entry, wait, done } of waits) {
+        try {
+          if ((this.generations.get(pageId) ?? 0) === generation) {
+            await this.patchBitmap(sourceId, index, entry, rectInPage, generation);
+          }
+        } finally {
+          if (this.repainting.get(entry.key) === wait) this.repainting.delete(entry.key);
+          done();
+        }
+      }
+    });
+    this.repaints.set(pageId, run);
+    void run.finally(() => {
+      if (this.repaints.get(pageId) === run) this.repaints.delete(pageId);
+    });
+    this.revisions.set(pageId, (this.revisions.get(pageId) ?? 0) + 1);
+    for (const listener of this.revisionListeners) listener();
+  }
+
+  /** Renders `rect` of one cached bitmap's page at its scale and composites it in its place. */
+  private async patchBitmap(
+    sourceId: SourceId,
+    index: number,
+    entry: RenderedEntry,
+    rect: Rect,
+    generation: number,
+  ): Promise<void> {
+    const pageId = `${sourceId}:${index}`;
+    const base = this.cache.get(entry.key);
+    const shape = this.shapes.get(sourceId)?.[index];
+    if (base === undefined || base.bitmap.width === 0) return;
+    const box =
+      shape === undefined
+        ? undefined
+        : clippedRepaintBox(shape, entry.rotation, rect, base.width, base.height);
+    if (box === undefined) {
+      // Nothing of the page's shape is known (or the rect misses it): render it again whole.
+      if (shape === undefined) this.cache.remove(entry.key);
+      return;
+    }
+    const started = this.mark(`render-start:${entry.key}#clip`);
+    let piece: ImageBitmap | undefined;
+    try {
+      piece = (
+        await (
+          await this.engine()
+        ).renderPage(sourceId, index, {
+          scale: entry.bucket,
+          rotation: entry.rotation,
+          clip: box.clip,
+        })
+      ).bitmap;
+      // The page changed again meanwhile (another edit, a close), or a newer render replaced
+      // the bitmap: nothing to patch.
+      if (
+        this.cache.get(entry.key) !== base ||
+        (this.generations.get(pageId) ?? 0) !== generation
+      ) {
+        return;
+      }
+      const canvas = new OffscreenCanvas(base.width, base.height);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('No 2D canvas for a clipped repaint');
+      ctx.drawImage(base.bitmap, 0, 0);
+      ctx.clearRect(box.left, box.top, box.width, box.height);
+      ctx.drawImage(piece, box.left, box.top, box.width, box.height);
+      this.cache.set(entry.page, { ...base, bitmap: canvas.transferToImageBitmap() });
+      this.measure(`render ${entry.key}#clip`, started);
+    } catch {
+      // A failed piece: the bitmap goes, and the page renders again whole when shown.
+      if (this.cache.get(entry.key) === base) this.cache.remove(entry.key);
+    } finally {
+      piece?.close();
+    }
+  }
+
+  /** Forgets the bitmaps tracked for clipped repaints under `prefix` (`${source}:` or a page). */
+  private forgetRendered(prefix: string): void {
+    for (const pageId of [...this.rendered.keys()]) {
+      if (`${pageId}:`.startsWith(prefix)) this.rendered.delete(pageId);
+    }
+    for (const pageId of [...this.clipNotes.keys()]) {
+      if (`${pageId}:`.startsWith(prefix)) this.clipNotes.delete(pageId);
+    }
   }
 
   /**
@@ -791,7 +1136,10 @@ export class EngineService {
 
   /** A cached bitmap at exactly this scale, if any (marks it recently used). */
   peek(sourceId: SourceId, index: number, rotation: Rotation, bucket: number) {
-    return this.cache.get(bitmapKey(sourceId, index, rotation, bucket));
+    const key = bitmapKey(sourceId, index, rotation, bucket);
+    // Being repainted (`requestClippedRepaint`): the bitmap still shows the old content.
+    if (this.repainting.has(key)) return undefined;
+    return this.cache.get(key);
   }
 
   /**
@@ -823,6 +1171,8 @@ export class EngineService {
   renderPage(request: RenderRequest): Promise<EngineResult<CachedBitmap>> {
     const { sourceId, index, rotation, bucket, signal } = request;
     const key = tileAwareKey(pageKey(sourceId, index, rotation), request.tile, bucket);
+    const repainting = this.repainting.get(key);
+    if (repainting !== undefined) return repainting.then(() => this.renderPage(request));
     const hit = this.cache.get(key);
     if (hit !== undefined) return Promise.resolve(ok(hit));
     if (signal?.aborted) return Promise.resolve(fail('aborted', 'Render aborted'));
@@ -926,6 +1276,7 @@ export class EngineService {
       } else {
         // Cache even when nobody waits any more: scrolling back is common.
         this.cache.set(job.page, entry);
+        this.track(job, entry);
         this.measure(`render ${job.key}`, started);
         result = ok(entry);
       }
@@ -935,6 +1286,23 @@ export class EngineService {
     if (this.jobs.get(job.key) === job) this.jobs.delete(job.key);
     for (const s of job.subscribers) s.resolve(result);
     job.subscribers.clear();
+  }
+
+  /** Remembers a cached bitmap for clipped repaints of its page (most recent last). */
+  private track(job: Job, entry: CachedBitmap): void {
+    const { sourceId, index, rotation, bucket, clip, tile } = job.request;
+    const pageId = `${sourceId}:${index}`;
+    const list = this.rendered.get(pageId) ?? new Map<string, RenderedEntry>();
+    list.delete(entry.key);
+    list.set(entry.key, {
+      key: entry.key,
+      page: job.page,
+      rotation,
+      bucket,
+      ...(clip === undefined ? {} : { clip }),
+      ...(tile === undefined ? {} : { tile }),
+    });
+    this.rendered.set(pageId, list);
   }
 
   // -------------------------------------------------------------------------
@@ -1000,6 +1368,17 @@ function readCropBoxes(document: OpenedDocument): readonly (Rect | undefined)[] 
       ? cropBox
       : undefined,
   );
+}
+
+/** Per-page shapes for clipped repaints (unrotated CropBox size, /Rotate, CropBox origin). */
+function readShapes(document: OpenedDocument): readonly PageShape[] {
+  const pages: OpenedDocument['pages'] = Array.isArray(document.pages) ? document.pages : [];
+  return pages.map(({ size, rotation, cropBox }) => ({
+    size,
+    rotation,
+    originX: cropBox?.x ?? 0,
+    originY: cropBox?.y ?? 0,
+  }));
 }
 
 let instance: EngineService | undefined;

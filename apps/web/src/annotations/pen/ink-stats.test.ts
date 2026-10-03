@@ -63,6 +63,30 @@ describe('the collector', () => {
     expect(summary.drawMsByPoints.from4000.count).toBe(0);
   });
 
+  it('dry-layer strokes: committed visible, then bitmap settled (the first report counts)', () => {
+    stats.strokeBegin('pen', 0);
+    stats.strokeEnd(100, 100, 101, 5);
+    const ended = stats.takeEnded();
+    if (!ended) throw new Error('no stroke');
+    stats.heldDry(ended);
+    stats.visible(ended, 116);
+    expect(stats.summary().unsettled).toBe(1);
+    expect(stats.summary().bitmapSettledMs.count).toBe(0);
+    stats.settled(ended, 400);
+    stats.settled(ended, 900);
+    const summary = stats.summary();
+    expect(summary.unsettled).toBe(0);
+    expect(summary.commitVisibleMs.p50).toBe(16);
+    expect(summary.bitmapSettledMs).toEqual({ count: 1, p50: 300, p95: 300, max: 300 });
+    // A stroke without the dry layer is never "unsettled".
+    stats.strokeBegin('pen', 1000);
+    stats.strokeEnd(1100, 1100, 1101, 5);
+    const plain = stats.takeEnded();
+    if (plain) stats.visible(plain, 1300);
+    expect(stats.summary().unsettled).toBe(0);
+    expect(stats.summary().bitmapSettledMs.count).toBe(1);
+  });
+
   it('buckets draw times by the samples drawn', () => {
     stats.strokeBegin('mouse', 0);
     stats.frame(0, 1, 0, 10);

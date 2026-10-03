@@ -38,6 +38,12 @@
  * once ("Pen: 5 strokes on page 1", spec §10); single strokes are announced by their create.
  * A stroke whose append was still queued when the history moved (an undo right after it) is
  * not saved and does not start a burst of its own: the layer says "Stroke not saved".
+ *
+ * **Cheaper appends** (craft spec §5.3 item 8). The open burst keeps its ink as the engine
+ * last wrote it (`KnownInk`, from the create and from each append), so an append does not list
+ * the page while that copy is current; the engine appends the path in place, the annotation
+ * store takes the written ink without reloading, and the page repaints only the new path's
+ * box (`actions.appendInkPath`). One burst lists the page once, for its create.
  */
 import type { Rect } from '@pdf-editor/document-model';
 import type { NewAnnotation } from '@pdf-editor/engine';
@@ -48,7 +54,7 @@ import { m } from '../../i18n';
 import { announce } from '../../shell/announcer';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { useToolStore } from '../../viewer/tool-store';
-import { appendInkPath, createAnnotations, removeLastInkPath } from '../actions';
+import { appendInkPath, createAnnotations, type KnownInk, removeLastInkPath } from '../actions';
 import { type PageTarget, type ToolStyle, useAnnotationStore } from '../annotation-store';
 import { roundRect } from '../geometry';
 import { boundsOf, type Point } from '../ink';
@@ -211,6 +217,8 @@ interface OpenBurst {
   moved: boolean;
   /** Widths of the paths as sent, parallel to the Ink's paths. */
   readonly widths: (readonly number[])[];
+  /** The ink as the engine last wrote it (its create, then each append or removal). */
+  known: KnownInk | undefined;
 }
 
 let open: OpenBurst | null = null;
@@ -300,12 +308,18 @@ async function startBurst(stroke: PenStroke, candidate: BurstStroke, pauseMs: nu
       coalesceKey,
     },
     id: creating.then(
-      (created) => created?.[0]?.id,
+      (created) => {
+        const first = created?.[0];
+        // Set before the id resolves, so the first append (waiting for the id) can use it.
+        if (first?.kind === 'ink') entry.known = { ink: first };
+        return first?.id;
+      },
       () => undefined,
     ),
     committed: false,
     moved: false,
     widths: [stroke.widths],
+    known: undefined,
   };
   open = entry;
   startTimer(entry, pauseMs);
@@ -361,6 +375,10 @@ export async function commitPenStroke(stroke: PenStroke): Promise<boolean> {
             coalesceKey: entry.burst.coalesceKey,
             coalesceWindowMs: BURST_HISTORY_WINDOW_MS,
             knownWidths,
+            known: () => entry.known,
+            onWritten: (known) => {
+              entry.known = known;
+            },
           },
         )) !== undefined;
     } catch (error) {
@@ -407,6 +425,9 @@ export function undoBurstStroke(): boolean {
     label: (paths) => burstLabel(position, paths),
     coalesceKey: entry.burst.coalesceKey,
     coalesceWindowMs: BURST_HISTORY_WINDOW_MS,
+    onWritten: (known) => {
+      entry.known = known;
+    },
   })
     .catch((error: unknown) => {
       console.warn('Removing the stroke failed', error);

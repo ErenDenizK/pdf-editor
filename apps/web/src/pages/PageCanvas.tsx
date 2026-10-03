@@ -31,6 +31,12 @@
  *   An `exact` (Read mode) canvas reports each revision it has drawn at its final scale to
  *   `notePagePainted` (viewer/read-controller.ts), so the ink preview can stay until the
  *   committed stroke is on screen (experience-redesign spec §6.1, `whenPainted`).
+ * - Dry ink (craft spec §5.3 item 7): a Read canvas reports every bitmap it draws (a
+ *   stretched preview too, `notePageBitmap`) in the task that drew it, so the dry ink layer
+ *   clears the strokes that bitmap contains in the same frame. Its re-render after an edit
+ *   goes through `deferPageRender`: it waits while the dry layer holds fresh ink of the page
+ *   (until the burst closes or idle time comes with no pointer down). Thumbnails and the
+ *   other pages wait while a pen is down (`whenPenUp`).
  *
  * The canvas exposes `data-state`: placeholder | preview | rendered | error ("rendered"
  * only while it shows a bitmap at the requested scale; a stretched one is a "preview") and
@@ -47,7 +53,12 @@ import {
   getEngineService,
 } from '../engine/engine-service';
 import { useWorkspaceStore } from '../state/workspace-store';
-import { notePagePainted } from '../viewer/read-controller';
+import {
+  deferPageRender,
+  notePageBitmap,
+  notePagePainted,
+  whenPenUp,
+} from '../viewer/read-controller';
 import styles from './PageCanvas.module.css';
 
 /** A thumbnail's repaint after an edit waits for idle time at most this long (ms). */
@@ -231,8 +242,11 @@ export function PageCanvas({
       canvas.dataset.bucket = '0';
       canvas.dataset.revision = revisionKey;
     }
+    // A canvas of the Read view: its bitmaps hand dry ink over (craft spec §5.3 item 7).
+    const inRead = exact || canvas.closest('[data-read-viewport]') !== null;
     const painted = () => {
       if (exact) notePagePainted(sourceId, index, revision);
+      else if (inRead) notePageBitmap(sourceId, index, revision);
     };
     const hit = service.peek(sourceId, index, rotation, bucket);
     if (hit && draw(canvas, hit, 'rendered')) {
@@ -243,7 +257,8 @@ export function PageCanvas({
     const shownBucket = Number(canvas.dataset.bucket ?? 0);
     const preview = service.preview(sourceId, index, rotation, bucket);
     if (preview && canvas.dataset.state !== 'rendered' && preview.bucket > shownBucket) {
-      draw(canvas, preview, 'preview');
+      // The cache holds only bitmaps of the current revision (`invalidatePage` drops the rest).
+      if (draw(canvas, preview, 'preview') && inRead) notePageBitmap(sourceId, index, revision);
     }
 
     const controller = new AbortController();
@@ -261,17 +276,29 @@ export function PageCanvas({
           }
         });
     };
-    // Debounce only a scale change while something is shown (zooming); an edit repaints at
-    // once (a thumbnail when idle); the first paint is immediate.
+    // Debounce only a scale change while something is shown (zooming); an edit repaints by
+    // the deferral policy (a thumbnail when idle); the first paint is immediate. Thumbnails
+    // and other pages wait while a pen is down.
     const showing = canvas.dataset.state === 'preview' || canvas.dataset.state === 'rendered';
     let cancelWait: (() => void) | undefined;
     if (showing && delayMs > 0 && scaleChanged) {
       const timer = window.setTimeout(request, delayMs);
       cancelWait = () => window.clearTimeout(timer);
-    } else if (showing && revised && !exact) {
-      cancelWait = whenIdle(request);
+    } else if (showing && revised && exact) {
+      cancelWait = deferPageRender(sourceId, index, request);
+    } else if (showing && revised) {
+      let cancelPen: (() => void) | undefined;
+      const cancelIdle = whenIdle(() => {
+        cancelPen = whenPenUp(request);
+      });
+      cancelWait = () => {
+        cancelIdle();
+        cancelPen?.();
+      };
+    } else if (exact) {
+      cancelWait = whenPenUp(request, sourceId, index);
     } else {
-      request();
+      cancelWait = whenPenUp(request);
     }
     return () => {
       cancelled = true;

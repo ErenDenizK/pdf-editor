@@ -4,7 +4,9 @@
  * new annotations get, the pending stamp and the author name.
  *
  * Content lives in the engine; this is a cache. Pages reload after every engine edit that
- * touches them (edit-runner `onPagesChanged`).
+ * touches them (edit-runner `onPagesChanged`), except where the edit told the store what it
+ * wrote (`patchAfterEdit`, a pen burst append: craft spec §5.3 item 8): the annotation is then
+ * replaced in place, without listing the page again.
  *
  * Tool styles follow one rule (experience-redesign spec §6.3): `applyStyle` edits the
  * selection when there is one, else the armed tool's style (`setStyle`), which persists
@@ -26,7 +28,7 @@ import { useToolStore } from '../viewer/tool-store';
 import { updateAnnotations } from './actions';
 import { hasStrokeWidth, normalizeHex, withColor } from './colors';
 import { toolStyleGroup } from './drafts';
-import { onPagesChanged, readAnnotations } from './edit-runner';
+import { appliedEdits, onPagesChanged, readAnnotations } from './edit-runner';
 import { styleLassoSelection } from './lasso/edits';
 import { restyleInk } from './lasso/split';
 import { INK, migrateLegacyColor, TINT } from './palette';
@@ -293,6 +295,67 @@ function readAuthor(): string {
 
 /** Load tokens: a slower, older load never overwrites a newer one. */
 const loads = new Map<string, number>();
+/** Pages whose load is running: the token of that load. */
+const running = new Map<string, number>();
+/**
+ * What edits wrote while a page's load was running (`patchAfterEdit`), laid over that load's
+ * result by id: the load may have been sent before the edit ran.
+ */
+const overlays = new Map<
+  string,
+  { readonly token: number; readonly byId: Map<string, Annotation> }
+>();
+/** Per page: the annotation the next change notification puts in place (`patchAfterEdit`). */
+const patches = new Map<string, { readonly annotation: Annotation; readonly editId: string }>();
+
+/**
+ * Tells the store what an edit wrote (craft spec §5.3 item 8): when the page's change
+ * notification for it comes, `annotation` (with the id the UI uses) replaces the one with its
+ * id in the page's list instead of a reload, provided the edit `editId` was committed (it is
+ * among the engine's applied edits). A reverted edit, or a page that does not list the
+ * annotation, reloads as usual. Call it inside the queued action, after the edit ran.
+ */
+export function patchAfterEdit(
+  source: SourceId,
+  pageIndex: number,
+  annotation: Annotation,
+  editId: string,
+): void {
+  patches.set(pageKey(source, pageIndex), { annotation, editId });
+}
+
+function committed(source: SourceId, editId: string): boolean {
+  const edits = appliedEdits(source);
+  for (let i = edits.length - 1; i >= 0; i--) if (edits[i]?.id === editId) return true;
+  return false;
+}
+
+/** Puts a committed edit's annotation in place; false when the page must reload instead. */
+function applyPatch(
+  source: SourceId,
+  pageIndex: number,
+  patch: { readonly annotation: Annotation; readonly editId: string },
+): boolean {
+  if (!committed(source, patch.editId)) return false;
+  const key = pageKey(source, pageIndex);
+  const { annotation } = patch;
+  const token = running.get(key);
+  if (token !== undefined) {
+    const overlay = overlays.get(key);
+    const byId = overlay?.token === token ? overlay.byId : new Map<string, Annotation>();
+    byId.set(annotation.id, annotation);
+    overlays.set(key, { token, byId });
+  }
+  const entry = useAnnotationStore.getState().pages[key];
+  if (!entry?.annotations.some((a) => a.id === annotation.id)) return token !== undefined;
+  useAnnotationStore.setState((s) => {
+    const current = s.pages[key];
+    if (!current) return s;
+    const annotations = current.annotations.map((a) => (a.id === annotation.id ? annotation : a));
+    return { pages: { ...s.pages, [key]: { ...current, annotations } } };
+  });
+  return true;
+}
 
 const initialPen = readPenSettings();
 
@@ -317,6 +380,7 @@ export const useAnnotationStore = create<AnnotationState>()((set, get) => ({
     const key = pageKey(source, pageIndex);
     const token = (loads.get(key) ?? 0) + 1;
     loads.set(key, token);
+    running.set(key, token);
     let annotations: readonly Annotation[];
     try {
       annotations = await readAnnotations(source, pageIndex);
@@ -325,6 +389,12 @@ export const useAnnotationStore = create<AnnotationState>()((set, get) => ({
       annotations = [];
     }
     if (loads.get(key) !== token) return;
+    running.delete(key);
+    const overlay = overlays.get(key);
+    overlays.delete(key);
+    if (overlay?.token === token) {
+      annotations = annotations.map((a) => overlay.byId.get(a.id) ?? a);
+    }
     set((s) => {
       const pages = { ...s.pages, [key]: { annotations, loaded: true } };
       // Drop selected ids that no longer exist on that page (undo of a create).
@@ -609,6 +679,9 @@ export function selectedAnnotations(
  */
 export function resetAnnotationStore(): void {
   loads.clear();
+  running.clear();
+  overlays.clear();
+  patches.clear();
   pendingStyle.clear();
   const pen = readPenSettings();
   useAnnotationStore.setState({
@@ -626,7 +699,9 @@ export function resetAnnotationStore(): void {
 // A closed source's pages go (and the selection or editor on them).
 getEngineService().onSourceClosed((source) => {
   const prefix = `${source}:`;
-  for (const key of [...loads.keys()]) if (key.startsWith(prefix)) loads.delete(key);
+  for (const map of [loads, running, overlays, patches]) {
+    for (const key of [...map.keys()]) if (key.startsWith(prefix)) map.delete(key);
+  }
   useAnnotationStore.setState((s) => {
     const keys = Object.keys(s.pages).filter((key) => key.startsWith(prefix));
     const selectionGone = s.selection?.source === source;
@@ -642,11 +717,16 @@ getEngineService().onSourceClosed((source) => {
   });
 });
 
-// Pages touched by engine edits (created, undone, redone) reload when they are cached.
+// Pages touched by engine edits (created, undone, redone) reload when they are cached, or
+// take what a committed edit wrote (`patchAfterEdit`).
 onPagesChanged((pages) => {
   const state = useAnnotationStore.getState();
   for (const { source, pageIndex } of pages) {
     const key = pageKey(source, pageIndex);
-    if (state.pages[key] !== undefined || loads.has(key)) void state.reloadPage(source, pageIndex);
+    const patch = patches.get(key);
+    patches.delete(key);
+    if (state.pages[key] === undefined && !loads.has(key)) continue;
+    if (patch && applyPatch(source, pageIndex, patch)) continue;
+    void state.reloadPage(source, pageIndex);
   }
 });

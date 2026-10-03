@@ -27,11 +27,9 @@
 import type { PageId, Rect } from '@pdf-editor/document-model';
 import type { TextRun } from '@pdf-editor/engine';
 
-import { getEngineService } from '../../engine/engine-service';
 import { m } from '../../i18n';
 import { announce } from '../../shell/announcer';
 import { canEditActive } from '../../state/ui-store';
-import { whenPainted } from '../../viewer/read-controller';
 import { useToolStore } from '../../viewer/tool-store';
 import { createAnnotations } from '../actions';
 import { type PageTarget, useAnnotationStore } from '../annotation-store';
@@ -44,6 +42,7 @@ import { type GlyphRef, quadsForGlyphs, type TextLine, textLines } from '../quad
 import { hasTextSelection, markupFromSelection } from '../selection-markup';
 import { type ToolDefinition, toolDefinition } from '../tools';
 import { closeBurst, commitPenStroke } from './bursts';
+import { inkCommitted } from './dry-ink';
 import type { InkStrokeInput, SettleInk } from './ink-input';
 import {
   InkPreview,
@@ -554,8 +553,8 @@ export function commitHighlighterStroke(
       console.warn('Saving the stroke failed', error);
     }
     if (committed) {
-      const generation = getEngineService().pageRevision(target.source, target.pageIndex);
-      await whenPainted(target.source, target.pageIndex, generation);
+      // The dry ink layer hands the stroke to the page bitmap (craft spec §5.3 item 7).
+      await inkCommitted(release, target.source, target.pageIndex);
     } else {
       // A loss the person did not see happen: said at once.
       announce(m.annot_stroke_not_saved(), { politeness: 'assertive' });

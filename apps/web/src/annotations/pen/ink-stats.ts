@@ -9,8 +9,12 @@
  * - **Per stroke**: the sample count; per animation frame, the preview draw time
  *   (`performance.now()` around `InkPreview.draw`) and the event-to-draw latency (the newest
  *   drawn sample's `event.timeStamp` to the end of that draw, both on the
- *   `performance.now()` clock); the full redraw at release; and pointer-up to committed
- *   stroke visible (the settling preview released once the page has painted the stroke).
+ *   `performance.now()` clock); the full redraw at release; pointer-up to committed stroke
+ *   visible; and, for strokes the dry ink layer holds (craft spec §5.3 item 7), pointer-up
+ *   to bitmap settled. "Committed visible" is the frame that presents the committed shape:
+ *   the dry layer's draw (`pen/dry-ink.ts`), or without one the settling preview's release
+ *   once the page has painted the stroke. "Bitmap settled" is the frame after the page
+ *   bitmap that contains the stroke took over from the dry layer.
  * - **Long tasks**: `long-animation-frame` and `longtask` entries (where the browser has
  *   them) over 50 ms are kept, and a stroke counts as janked when one overlaps its window,
  *   from the press to its committed stroke being visible (the commit is part of it).
@@ -50,8 +54,12 @@ export interface InkStrokeStats {
   finalDrawMs: number;
   /** Pointer-up handled, `performance.now()` clock (NaN before it). */
   upAt: number;
-  /** Settling preview released: the committed stroke is on the page (NaN before it). */
+  /** The committed shape is on screen (dry layer drawn, or settling preview released). */
   visibleAt: number;
+  /** Held by the dry ink layer, so `settledAt` follows. */
+  dry: boolean;
+  /** The page bitmap with the stroke took over from the dry layer (NaN before it). */
+  settledAt: number;
   /** Dropped without a commit (pointer cancel, detach). */
   cancelled: boolean;
 }
@@ -69,6 +77,8 @@ export interface InkStatsSummary {
   readonly cancelled: number;
   /** Ended strokes whose committed stroke is not visible yet. */
   readonly pending: number;
+  /** Dry-layer strokes visible whose page bitmap has not taken over yet. */
+  readonly unsettled: number;
   /** Samples per stroke. */
   readonly samples: InkStatsPercentiles;
   /** Preview draw per frame, ms, over every frame of every stroke. */
@@ -85,6 +95,8 @@ export interface InkStatsSummary {
   readonly finalDrawMs: InkStatsPercentiles;
   /** Pointer-up to committed stroke visible, ms. */
   readonly commitVisibleMs: InkStatsPercentiles;
+  /** Pointer-up to the page bitmap showing the stroke (dry-layer strokes), ms. */
+  readonly bitmapSettledMs: InkStatsPercentiles;
   readonly longTasks: {
     /** Which entry types the browser reports. */
     readonly observed: readonly InkLongEntry['type'][];
@@ -128,6 +140,8 @@ function newStroke(pointerType: string, startedAt: number): InkStrokeStats {
     finalDrawMs: Number.NaN,
     upAt: Number.NaN,
     visibleAt: Number.NaN,
+    dry: false,
+    settledAt: Number.NaN,
     cancelled: false,
   };
 }
@@ -212,8 +226,9 @@ export class InkStatsCollector {
   }
 
   /**
-   * The settling preview of the stroke just released was created: returns the record whose
-   * `visible` the release reports, or null when no stroke is waiting.
+   * The settling preview (or the dry layer's stroke) of the stroke just released was
+   * created: returns the record whose `visible` the release reports, or null when no stroke
+   * is waiting. A taken record is no longer cancelled by `strokeCancel`.
    */
   takeEnded(): InkStrokeStats | null {
     const s = this.ended;
@@ -224,6 +239,19 @@ export class InkStatsCollector {
   /** The committed stroke of `stroke` is on screen (the first report counts). */
   visible(stroke: InkStrokeStats, at: number = performance.now()): void {
     if (Number.isNaN(stroke.visibleAt)) stroke.visibleAt = at;
+  }
+
+  /** The dry ink layer holds `stroke`: a `settled` report follows. */
+  heldDry(stroke: InkStrokeStats): void {
+    stroke.dry = true;
+  }
+
+  /**
+   * The page bitmap containing `stroke` took over from the dry layer, or the dry stroke was
+   * dropped (the first report counts).
+   */
+  settled(stroke: InkStrokeStats, at: number = performance.now()): void {
+    if (Number.isNaN(stroke.settledAt)) stroke.settledAt = at;
   }
 
   /** Records a long task or animation frame (the observers call this). */
@@ -258,7 +286,9 @@ export class InkStatsCollector {
     const latency: number[] = [];
     const finals: number[] = [];
     const visible: number[] = [];
+    const settled: number[] = [];
     let pending = 0;
+    let unsettled = 0;
     const overlapping = new Set<InkLongEntry>();
     let janked = 0;
     for (const s of done) {
@@ -272,6 +302,10 @@ export class InkStatsCollector {
       if (!Number.isNaN(s.upAt)) {
         if (Number.isNaN(s.visibleAt)) pending++;
         else visible.push(s.visibleAt - s.upAt);
+        if (s.dry) {
+          if (Number.isNaN(s.settledAt)) unsettled++;
+          else settled.push(s.settledAt - s.upAt);
+        }
       }
       const end = Number.isNaN(s.visibleAt)
         ? Number.isNaN(s.upAt)
@@ -293,6 +327,7 @@ export class InkStatsCollector {
       strokes: this.list.length,
       cancelled: this.list.length - done.length,
       pending,
+      unsettled,
       samples: percentiles(done.map((s) => s.samples)),
       drawMs: percentiles(draws),
       drawMsByPoints: {
@@ -303,6 +338,7 @@ export class InkStatsCollector {
       eventToDrawMs: percentiles(latency),
       finalDrawMs: percentiles(finals),
       commitVisibleMs: percentiles(visible),
+      bitmapSettledMs: percentiles(settled),
       longTasks: {
         observed: this.observed,
         strokesWithLongTask: janked,

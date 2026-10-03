@@ -7,9 +7,10 @@
  * Three runs: a long cursive pen line at 240 Hz (5,000 samples, force and tilt), a burst of
  * 64 short pen strokes at 240 Hz on one line (one Ink of 64 paths), and a mouse run at
  * 125 Hz. Each records the preview draw per frame, event-to-draw, pointer-up to committed
- * stroke visible and long tasks, prints them, and adds them to the test's annotations next
- * to the §5.1 targets. The expectations are soft and generous so the suite is green today;
- * the pen work (P7) tightens them to the targets.
+ * stroke visible (the dry ink layer's draw), pointer-up to bitmap settled (the page bitmap
+ * taking the stroke over) and long tasks, prints them, and adds them to the test's
+ * annotations next to the §5.1 targets. The expectations are soft, with margin for a loaded
+ * machine.
  *
  * Headless timing is noisy and the event times are synthetic: the numbers are a trend
  * between builds on one machine, not a photon latency (research 12 §8, M6).
@@ -35,6 +36,7 @@ interface Summary {
   readonly strokes: number;
   readonly cancelled: number;
   readonly pending: number;
+  readonly unsettled: number;
   readonly samples: Percentiles;
   readonly drawMs: Percentiles;
   readonly drawMsByPoints: {
@@ -45,6 +47,7 @@ interface Summary {
   readonly eventToDrawMs: Percentiles;
   readonly finalDrawMs: Percentiles;
   readonly commitVisibleMs: Percentiles;
+  readonly bitmapSettledMs: Percentiles;
   readonly longTasks: {
     readonly observed: readonly string[];
     readonly strokesWithLongTask: number;
@@ -246,14 +249,17 @@ async function openDemoArmed(page: Page): Promise<Box> {
   return box;
 }
 
-/** Waits until every committed stroke is visible, then reads the summary. */
+/**
+ * Waits until every committed stroke is visible and the page bitmap has taken every dry-ink
+ * stroke over, then reads the summary.
+ */
 async function settledSummary(page: Page, strokes: number): Promise<Summary> {
   await expect
     .poll(
       () =>
         page.evaluate(() => {
           const s = (window as InkStatsWindow).__inkStats?.summary();
-          return s ? s.strokes - s.cancelled - s.pending : -1;
+          return s ? s.strokes - s.cancelled - s.pending - s.unsettled : -1;
         }),
       { timeout: 60_000 },
     )
@@ -292,6 +298,10 @@ function report(name: string, summary: Summary, played: Played, skew: number): v
     ['full redraw at release', pair(summary.finalDrawMs)],
     ['pointer-up to committed visible (target ≤ 50 ms)', pair(summary.commitVisibleMs)],
     [
+      'pointer-up to bitmap settled (dry ink handed over)',
+      `${pair(summary.bitmapSettledMs)}, ${summary.bitmapSettledMs.count} strokes`,
+    ],
+    [
       'long tasks > 50 ms (target none)',
       `${summary.longTasks.count} (strokes hit ${summary.longTasks.strokesWithLongTask}, max ${ms(summary.longTasks.maxMs)}; observed: ${summary.longTasks.observed.join(', ') || 'none'})`,
     ],
@@ -311,6 +321,7 @@ function report(name: string, summary: Summary, played: Played, skew: number): v
       type: 'committed visible p95 (target ≤ 50 ms)',
       description: ms(summary.commitVisibleMs.p95),
     },
+    { type: 'bitmap settled p95', description: ms(summary.bitmapSettledMs.p95) },
     {
       type: 'long tasks > 50 ms (target none)',
       description: `${summary.longTasks.count} (max ${ms(summary.longTasks.maxMs)})`,
@@ -323,12 +334,15 @@ function report(name: string, summary: Summary, played: Played, skew: number): v
 }
 
 /**
- * Soft ceilings. `commitVisibleMs` is the ceiling for pointer-up to committed stroke visible
- * (p95), set per run from the measurements after P7 (`docs/qa/ink-latency-baseline.md`)
- * with about 2.5 times the worst value seen on a loaded machine (load average 10–12 on 4
- * cores). The §5.1 targets (≤ 50 ms) need the dry ink layer and cheaper bursts (§5.3).
+ * Soft ceilings, per run (p95), from the measurements after P8
+ * (`docs/qa/ink-latency-baseline.md`). `commitVisibleMs`: pointer-up to the committed stroke
+ * on screen, which the dry ink layer draws in the frame after pointer-up (§5.3 item 7); the
+ * §5.1 target is 50 ms, and 100 ms is about three times the worst value seen on a machine
+ * at load average 10 on 4 cores. `settledMs`: pointer-up to the page bitmap taking the
+ * stroke over, generous (the re-render waits for idle time with no pointer down). Every
+ * stroke must go through the dry layer.
  */
-function softExpectations(summary: Summary, commitVisibleMs: number): void {
+function softExpectations(summary: Summary, commitVisibleMs: number, settledMs: number): void {
   expect.soft(summary.drawMs.count, 'frames were drawn').toBeGreaterThan(0);
   expect.soft(summary.drawMs.p95, 'preview draw p95 (ms)').toBeLessThanOrEqual(4);
   expect.soft(summary.eventToDrawMs.count, 'event-to-draw reported').toBeGreaterThan(0);
@@ -336,6 +350,12 @@ function softExpectations(summary: Summary, commitVisibleMs: number): void {
   expect
     .soft(summary.commitVisibleMs.p95, 'committed visible p95 (ms)')
     .toBeLessThanOrEqual(commitVisibleMs);
+  expect
+    .soft(summary.bitmapSettledMs.count, 'every stroke went through the dry ink layer')
+    .toBe(summary.strokes - summary.cancelled);
+  expect
+    .soft(summary.bitmapSettledMs.p95, 'bitmap settled p95 (ms)')
+    .toBeLessThanOrEqual(settledMs);
 }
 
 test.describe('ink latency', () => {
@@ -373,9 +393,9 @@ test.describe('ink latency', () => {
       await clockSkew(page, played),
     );
     expect(summary.samples.max).toBeGreaterThan(4_000);
-    // After P7 425–600 ms loaded (350 ms before P7 on a quiet machine): the 5,000-sample
-    // stroke is simplified, written and repainted in full.
-    softExpectations(summary, 1_500);
+    // After P8 165–230 ms (load 9–15), 670 ms at load 27: the committed shape of a 5,000-sample
+    // stroke waits for its smoothing and simplification in the release task, not for PDFium.
+    softExpectations(summary, 1_500, 3_000);
   });
 
   test('a burst of 64 short pen strokes at 240 Hz', async ({ page }) => {
@@ -385,9 +405,9 @@ test.describe('ink latency', () => {
     const played = await play(cdp, shortBurst(box), 'pen');
     const summary = await settledSummary(page, 64);
     report('64 short pen strokes, 240 Hz', summary, played, await clockSkew(page, played));
-    // After P7 p95 0.23–1.15 s loaded (0.9–3.9 s before): edits no longer wait for the zoom
-    // debounce; what remains is the queue of appends and full-page renders (§5.3).
-    softExpectations(summary, 3_000);
+    // After P8 p95 21–39 ms (load 9–15), 180 ms at load 27 (after P7 0.22–1.15 s): the dry
+    // layer draws each stroke at release; PDFium re-renders between strokes.
+    softExpectations(summary, 100, 8_000);
   });
 
   test('a mouse run at 125 Hz', async ({ page }) => {
@@ -397,7 +417,8 @@ test.describe('ink latency', () => {
     const played = await play(cdp, mouseRun(box), 'mouse');
     const summary = await settledSummary(page, 12);
     report('mouse, 125 Hz, 12 strokes', summary, played, await clockSkew(page, played));
-    // After P7 p50 77–140 ms, p95 120–295 ms loaded (p95 245–640 ms before).
-    softExpectations(summary, 600);
+    // After P8 p50 11–17 ms, p95 26–34 ms (load 9–15), 165 ms at load 27 (after P7 p95
+    // 120–295 ms).
+    softExpectations(summary, 100, 4_000);
   });
 });

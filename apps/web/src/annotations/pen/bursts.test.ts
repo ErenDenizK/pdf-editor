@@ -7,15 +7,17 @@
 import type { Rect } from '@pdf-editor/document-model';
 import { getActiveDocument } from '@pdf-editor/document-model';
 import type { Annotation, InkAnnotation } from '@pdf-editor/engine';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import simpleUrl from '../../../../../test/fixtures/simple-text.pdf?url';
 import { enterEditMode, fixtureFile } from '../../../test/store-harness';
 import { currentPlatform } from '../../commands/shortcuts';
+import { getEngineService } from '../../engine/engine-service';
 import { useAnnouncer } from '../../shell/announcer';
 import { resetWorkspace, useWorkspaceStore } from '../../state/workspace-store';
 import { resetToolStore, useToolStore } from '../../viewer/tool-store';
 import {
+  pageKey,
   type PageTarget,
   resetAnnotationStore,
   TOOL_STYLES_STORAGE_KEY,
@@ -201,7 +203,7 @@ const model = () => useWorkspaceStore.getState();
 async function openSimple(): Promise<PageTarget[]> {
   const report = await model().openFiles([await fixtureFile(simpleUrl, 'simple.pdf')]);
   enterEditMode();
-  expect(report.skipped).toEqual([]);
+  expect(report.skipped.map((s) => JSON.stringify(s))).toEqual([]);
   const doc = getActiveDocument(model().workspace);
   return (doc?.pages ?? []).map((page, i) => {
     if (page.ref.kind !== 'source') throw new Error('no source page');
@@ -409,7 +411,7 @@ describe('bursts on the engine', () => {
     useToolStore.getState().setMode('ink');
 
     await open();
-    useToolStore.getState().showGroup('markup');
+    useToolStore.getState().showGroup('text');
     expect(currentBurst()).toBeNull();
 
     await open();
@@ -444,5 +446,101 @@ describe('bursts on the engine', () => {
     expect(currentBurst()).toBeNull();
     expect(useAnnouncer.getState().message).toBe('Pen: 2 strokes on page 1');
     closeBurst();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cheaper bursts (craft spec §5.3 item 8)
+// ---------------------------------------------------------------------------
+
+describe('cheaper bursts on the engine', () => {
+  beforeEach(() => {
+    localStorage.removeItem(TOOL_STYLES_STORAGE_KEY);
+    localStorage.removeItem(PEN_PRESETS_STORAGE_KEY);
+    resetWorkspace();
+    resetEditRunner();
+    resetAnnotationStore();
+    resetToolStore();
+    resetBursts();
+    useToolStore.getState().setMode('ink');
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await whenIdle();
+    resetBursts();
+    resetToolStore();
+    resetAnnotationStore();
+    resetWorkspace();
+  });
+
+  /** The store's inks of a page once it has loaded them. */
+  function storeInks(target: PageTarget): InkAnnotation[] {
+    const entry = useAnnotationStore.getState().pages[pageKey(target.source, target.pageIndex)];
+    return (entry?.annotations ?? []).filter((a): a is InkAnnotation => a.kind === 'ink');
+  }
+
+  it('[p9] a 12-stroke burst lists the page at most twice; the store is patched in place', async () => {
+    const [page1] = await openSimple();
+    if (!page1) throw new Error('no page');
+    // The page is shown: the store holds its annotations, as the Read view's layer loads them.
+    useAnnotationStore.getState().ensurePage(page1.source, page1.pageIndex);
+    await vi.waitFor(() => {
+      expect(
+        useAnnotationStore.getState().pages[pageKey(page1.source, page1.pageIndex)]?.loaded,
+      ).toBe(true);
+    });
+    const editor = await getEngineService().editor();
+    const list = vi.spyOn(editor, 'listAnnotations');
+    let t = 1000;
+    // Written as a hand writes: each stroke after the previous one is saved.
+    for (let k = 0; k < 12; k++) {
+      expect(await stroke(page1, 100 + k * 12, 600, (t += 200))).toBe(true);
+    }
+    await whenIdle();
+    await vi.waitFor(() => {
+      expect(storeInks(page1).map((a) => a.paths.length)).toEqual([12]);
+    });
+    const lists = list.mock.calls.length;
+    // eslint-disable-next-line no-console -- the [p9] numbers of docs/qa/ink-latency-baseline.md
+    console.info(`[p9] listAnnotations through the engine service for a 12-stroke burst: ${lists}`);
+    expect(lists).toBeLessThanOrEqual(2);
+    // The patched entry is what the engine has.
+    list.mockRestore();
+    const [engineInk] = await inks(page1);
+    const [stored] = storeInks(page1);
+    expect(stored?.paths).toHaveLength(12);
+    expect(stored?.widths?.map((w) => w.length)).toEqual(engineInk?.widths?.map((w) => w.length));
+    expect(stored?.id).toBe(engineInk?.id);
+  });
+
+  it('an undo in the middle of a burst reloads the page, so the store follows the engine', async () => {
+    const [page1] = await openSimple();
+    if (!page1) throw new Error('no page');
+    useAnnotationStore.getState().ensurePage(page1.source, page1.pageIndex);
+    await stroke(page1, 100, 600, 1000);
+    await stroke(page1, 150, 600, 1400);
+    await stroke(page1, 200, 600, 1800);
+    await whenIdle();
+    await vi.waitFor(() => {
+      expect(storeInks(page1).map((a) => a.paths.length)).toEqual([3]);
+    });
+    model().undo();
+    await whenIdle();
+    await vi.waitFor(() => {
+      expect(storeInks(page1)).toEqual([]);
+    });
+    model().redo();
+    await whenIdle();
+    await vi.waitFor(() => {
+      expect(storeInks(page1).map((a) => a.paths.length)).toEqual([3]);
+    });
+    // A new burst after the redo appends from the engine's state.
+    await stroke(page1, 100, 600, 9000);
+    await stroke(page1, 150, 600, 9300);
+    await whenIdle();
+    expect((await inks(page1)).map((a) => a.paths.length)).toEqual([3, 2]);
+    await vi.waitFor(() => {
+      expect(storeInks(page1).map((a) => a.paths.length)).toEqual([3, 2]);
+    });
   });
 });

@@ -221,36 +221,33 @@ describe('writing is never interrupted', () => {
     );
   });
 
-  it('keeps the preview until the page canvas has painted the committed stroke', async () => {
+  it('keeps the stroke on the dry ink layer until the page canvas has painted it', async () => {
     const { container, layer, canvas, target } = await mountRead();
     await armInk(layer);
-    let removedWith: { state: string | undefined; revision: string | undefined } | undefined;
-    const observer = new MutationObserver((records) => {
-      for (const record of records) {
-        for (const node of record.removedNodes) {
-          if (node instanceof Element && node.matches('[data-settling]')) {
-            removedWith = { state: canvas.dataset.state, revision: canvas.dataset.revision };
-          }
-        }
+    const dry = container.querySelector<HTMLElement>('[data-dry-ink]');
+    if (!dry) throw new Error('no dry ink layer');
+    // The dry layer empties in the task that draws the bitmap (craft spec §5.3 item 7).
+    let clearedWith: { state: string | undefined; revision: string | undefined } | undefined;
+    const observer = new MutationObserver(() => {
+      if (dry.dataset.strokes === '0' && clearedWith === undefined) {
+        clearedWith = { state: canvas.dataset.state, revision: canvas.dataset.revision };
       }
     });
-    observer.observe(layer, { childList: true, subtree: true });
     const release = press(layer, [0.2, 0.5], [0.6, 0.55]);
     release();
-    // The frame after pointer-up still shows the stroke as the preview.
+    // Held at pointer-up, in place of a settling preview per stroke.
+    expect(dry.dataset.strokes).toBe('1');
+    expect(container.querySelector('[data-settling]')).toBeNull();
+    observer.observe(dry, { attributes: true, attributeFilter: ['data-strokes'] });
     await frame();
-    expect(
-      container.querySelector('[data-testid="annotation-preview"][data-settling]'),
-    ).not.toBeNull();
-    await waitFor(() => expect(container.querySelector('[data-settling]')).toBeNull(), {
-      timeout: 10_000,
-    });
+    expect(dry.dataset.strokes).toBe('1');
+    await waitFor(() => expect(dry.dataset.strokes).toBe('0'), { timeout: 10_000 });
     observer.disconnect();
     const generation = getEngineService().pageRevision(target.source, 0);
     expect(generation).toBeGreaterThan(0);
-    // When the preview went, the canvas already showed the committing generation.
-    expect(removedWith?.state).toBe('rendered');
-    expect(removedWith?.revision).toBe(`${target.source}:0:0@${generation}`);
+    // When the dry stroke went, the canvas already showed the committing generation.
+    expect(clearedWith?.state).toBe('rendered');
+    expect(clearedWith?.revision).toBe(`${target.source}:0:0@${generation}`);
     expect(await inkOnPage(target)).toHaveLength(1);
   });
 
@@ -263,6 +260,8 @@ describe('writing is never interrupted', () => {
     stroke(layer, [0.2, 0.6], [0.5, 0.62]);
     await waitFor(() => expect(useAnnouncer.getState().alert).toBe(m.annot_stroke_not_saved()));
     await waitFor(() => expect(container.querySelector('[data-settling]')).toBeNull());
+    // Dropped from the dry ink layer at once, not left for a repaint.
+    expect(container.querySelector('[data-dry-ink]')?.getAttribute('data-strokes')).toBe('0');
     expect(await inkOnPage(target)).toHaveLength(0);
   });
 
