@@ -65,6 +65,7 @@
     "comlink": "^4.4.2",
     "diff": "9.0.0",
     "fflate": "0.8.3",
+    "linebreak": "1.1.0",
     "pixelmatch": "7.2.0",
     "pkijs": "3.4.1",
     "tesseract.js": "7.0.0",

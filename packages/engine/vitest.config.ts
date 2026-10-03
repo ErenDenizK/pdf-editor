@@ -91,6 +91,7 @@ export default defineConfig({
       'asn1js',
       'diff',
       'pixelmatch',
+      'linebreak',
       'tesseract.js',
       'pdfjs-dist/legacy/build/pdf.mjs',
     ],

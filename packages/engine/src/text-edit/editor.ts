@@ -29,6 +29,7 @@ import type { HostedEngine, RawAccess } from '../pdfium/host/hosted-engine';
 import type {
   EngineCallOptions,
   LocatedRun,
+  ParagraphBlock,
   PdfTextEditor,
   TextAdvance,
   TextEditability,
@@ -58,6 +59,7 @@ import {
   sequenceOf,
   tier2Advance,
 } from './apply';
+import { analyzePageParagraphs, ParagraphCache } from './blocks';
 import {
   blockerOf,
   fitOption,
@@ -183,6 +185,8 @@ function notEditable(blocker: TextEditBlocker): Error {
 /** The text editor of a hosted engine. */
 export class HostedTextEditor implements PdfTextEditor {
   private readonly faces: FaceCache;
+  /** `analyzeParagraphs` per page, reused while the page is unchanged (craft spec §4.1). */
+  private readonly paragraphs = new ParagraphCache();
   private readonly skipPrecheck: boolean;
 
   constructor(
@@ -207,6 +211,26 @@ export class HostedTextEditor implements PdfTextEditor {
           return raw.withTextPage(page.pagePtr, (textPage) =>
             locatePage(raw, page.pagePtr, textPage, source, pageIndex),
           );
+        } finally {
+          page.release();
+        }
+      },
+      options,
+    );
+  }
+
+  analyzeParagraphs(
+    source: SourceId,
+    pageIndex: number,
+    options?: EngineCallOptions,
+  ): Promise<readonly ParagraphBlock[]> {
+    return this.read(
+      source,
+      (access) => {
+        const raw = new RawText(access.module, access.memory);
+        const page = access.doc.acquirePage(pageIndex);
+        try {
+          return analyzePageParagraphs(raw, page.pagePtr, source, pageIndex, this.paragraphs);
         } finally {
           page.release();
         }

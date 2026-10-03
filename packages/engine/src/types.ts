@@ -240,6 +240,14 @@ export interface InkAnnotation extends AnnotationBase {
    * scales the paths, not the widths (like `strokeWidth`).
    */
   readonly widths?: readonly (readonly number[])[];
+  /**
+   * `multiply`: the ink darkens what is under it instead of covering it (the free
+   * Highlighter, craft spec §5.4). EmbedPDF generates its appearance with `/BM /Multiply`
+   * (`EPDFAnnot_GenerateAppearanceWithBlend`) and lists it back from that appearance. Such an
+   * ink is constant width (`strokeWidth`): the variable-width appearance cannot carry a blend
+   * mode, so the adapter writes no `widths` for it. Absent: normal blending.
+   */
+  readonly blendMode?: 'multiply';
 }
 
 /** Line ending styles (/LE, ISO 32000-2 Table 179). An arrow is a line with `open-arrow`. */
@@ -1217,6 +1225,142 @@ export interface TextRunAnalysis {
   readonly lineBound: TextSpaceBound;
 }
 
+// Paragraph detection (spec craft §4.1–§4.2, §8; ADR-0020 §2; research 11 §3). Data only: the
+// rules live in `text-edit/blocks.ts`, the rewrap in `text-edit/linebreak.ts`.
+//
+// Text space: coordinates in the paragraph's own frame, so rotated text reads like horizontal
+// text. With `d` its unit writing direction (unrotated user space), a user-space point `p` has
+// `x = p.x·d.x + p.y·d.y` (along the line) and `y = −p.x·d.y + p.y·d.x` (across it, upwards;
+// the same projection as `LocatedRun.baseline`). For unrotated horizontal text both are the
+// user-space coordinates. Distances are points.
+
+/** Identifies a detected paragraph at one page state. */
+export interface ParagraphRef {
+  readonly source: SourceId;
+  readonly pageIndex: number;
+  /** Position of the paragraph in the page's analysis (reading order). */
+  readonly index: number;
+  /**
+   * Every run the paragraph takes glyphs from, in reading order: the identity an edit
+   * re-checks (`stale-run` when the page differs). A run cut by a wide gap (a table row drawn
+   * by one object) may belong to several paragraphs.
+   */
+  readonly runs: readonly TextRunRef[];
+}
+
+/** A slice of one run inside a paragraph line, with its style. */
+export interface ParagraphSpan {
+  /** Index into `ParagraphRef.runs`. */
+  readonly run: number;
+  /** Glyph range `[glyphStart, glyphEnd)` of the run (`LocatedRun.glyphs` indices). */
+  readonly glyphStart: number;
+  readonly glyphEnd: number;
+  /** The slice's text as the text page reads it (a line-end hyphen reads `-`). */
+  readonly text: string;
+  /** The run's `FPDF_FONT` number (`LocatedRun.fontId`): equal ids are one font. */
+  readonly fontId?: number;
+  readonly font: TextRunFont;
+  /** Font size (Tf). */
+  readonly fontSize: number;
+  /** Size on the page: `fontSize` times the matrix's scale across the line. */
+  readonly size: number;
+  /** The run's object matrix in page space (`LocatedRun.matrix`). */
+  readonly matrix: TextMatrix;
+  /** Effective matrix of the run's first character (`LocatedRun.textMatrix`). */
+  readonly textMatrix?: TextMatrix;
+  /** Fill colour, RGBA 0–255. */
+  readonly fill?: readonly [number, number, number, number];
+  /** Text render mode (Tr). */
+  readonly renderMode: number;
+  readonly mcid?: number;
+  /** Text-space x of the slice's first glyph origin and of the end of its last glyph. */
+  readonly x0: number;
+  readonly x1: number;
+}
+
+/** How a paragraph line continues into the next one in `ParagraphBlock.text`. */
+export type ParagraphLineEnd =
+  /** A space joins it to the next line. */
+  | 'space'
+  /** Its line-end hyphen is dropped and the word continues on the next line (`exam-`/`ple`). */
+  | 'joined'
+  /** It ends in a hyphen that is kept, with nothing added (`Jean-`/`Paul`). */
+  | 'hyphen'
+  /** The paragraph's last line. */
+  | 'end';
+
+export interface ParagraphLine {
+  /** The line's slices in visual order along the line. */
+  readonly spans: readonly ParagraphSpan[];
+  /** Text-space y of the baseline. */
+  readonly baseline: number;
+  /**
+   * Text-space x of the line's left edge (its first glyph's origin) and right edge (where its
+   * last glyph's advance ends, or its ink when that is unknown).
+   */
+  readonly x0: number;
+  readonly x1: number;
+  /** Dominant size on the page (by characters), points. */
+  readonly size: number;
+  /** The line as shown: spans joined, a space where a gap between glyphs stands for one. */
+  readonly text: string;
+  /** Offset of the line's first character in `ParagraphBlock.text` (UTF-16). */
+  readonly start: number;
+  readonly end: ParagraphLineEnd;
+  /** The line ends in a hyphen the text page flags as a line-end hyphen (`FPDFText_IsHyphen`). */
+  readonly endsWithHyphen: boolean;
+}
+
+export type ParagraphAlign = 'left' | 'right' | 'center' | 'justify';
+
+/**
+ * Why paragraph mode is not offered for a block (it stays editable per line where the run
+ * allows it): a run blocker (`TextEditBlocker`: Type 3, text without a font drawn as paths,
+ * invisible, vertical, nested forms), or a drop cap (a large initial spanning several lines).
+ */
+export type ParagraphRefusal =
+  | Extract<TextEditBlocker, 'type3' | 'paths' | 'invisible' | 'vertical' | 'nested-form'>
+  | 'drop-cap';
+
+/** One detected paragraph (or heading, list item, table cell) of a page. */
+export interface ParagraphBlock {
+  readonly ref: ParagraphRef;
+  /** Lines from top to bottom. */
+  readonly lines: readonly ParagraphLine[];
+  readonly align: ParagraphAlign;
+  /**
+   * Baseline-to-baseline distance, points: the median of the paragraph's line pitches; for a
+   * single line, the median pitch of same-size lines on the page, else 1.2 × the size.
+   */
+  readonly leading: number;
+  /** `tags`: one structure element; `geometry`: the layout heuristics. */
+  readonly source: 'tags' | 'geometry';
+  readonly kind: 'paragraph' | 'heading' | 'list-item' | 'cell';
+  /** The structure type, for `source: 'tags'` (`P`, `LI`, `H2`…). */
+  readonly tag?: string;
+  /** Unit writing direction in unrotated user space (defines text space). */
+  readonly direction: { readonly x: number; readonly y: number };
+  /** The box's left and right edges along the line (text-space x): the measure. */
+  readonly measure: { readonly left: number; readonly right: number };
+  /** First line's left edge minus `measure.left` (positive: first-line indent). */
+  readonly indent: number;
+  /** Dominant size on the page, points. */
+  readonly size: number;
+  /** The list marker that starts the first line (`•`, `1.`, `a)`), when there is one. */
+  readonly marker?: string;
+  /** A drop cap in front of the first lines (also in `text`); `refusal` is `drop-cap`. */
+  readonly dropCap?: ParagraphSpan;
+  /**
+   * The paragraph's text, de-hyphenated: a flagged line-end hyphen before a lower-case start
+   * joins the word, another line-end hyphen stays with no space, other lines join with a space.
+   */
+  readonly text: string;
+  /** Union of the glyph boxes, unrotated user space. */
+  readonly box: Rect;
+  /** Set when paragraph mode is not offered for this block. */
+  readonly refusal?: ParagraphRefusal;
+}
+
 /** A replacement of `run.text.slice(start, end)` (UTF-16 offsets on glyph boundaries). */
 export interface TextEditQuery {
   readonly run: TextRunRef;
@@ -1283,6 +1427,15 @@ export interface PdfTextEditor {
    * the free space at the end of its line. Read-only; run once when the editor opens.
    */
   analyzeRun(run: TextRunRef, options?: EngineCallOptions): Promise<TextRunAnalysis>;
+  /**
+   * The page's paragraphs (craft spec §4.1): structure tree first, then geometry. Read-only,
+   * at the lower raw-task priority, cached per page state by the engine.
+   */
+  analyzeParagraphs(
+    source: SourceId,
+    pageIndex: number,
+    options?: EngineCallOptions,
+  ): Promise<readonly ParagraphBlock[]>;
   /** Tier 2 / tier 1 availability, honesty and fit for a replacement (no change made). */
   checkEditability(query: TextEditQuery, options?: EngineCallOptions): Promise<TextEditability>;
   /** Applies the edit, verified by read-back, and regenerates the page content. */
@@ -2593,3 +2746,147 @@ export interface OcrReport {
   readonly recognizeMs: number;
   readonly totalMs?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Paragraph layout: rewrap, justification and overflow (spec craft §4.3, §4.5, §4.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * One word of a rewritten line (a run of characters between word gaps), placed along the
+ * baseline. On justified lines the writer emits one object per word: `Tw` does nothing for
+ * two-byte fonts and PDFium cannot write `TJ`.
+ */
+export interface LayoutWord {
+  /** UTF-16 offsets in `ParagraphLayout.text`. */
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+  /** Origin of the first glyph, paragraph text space (the measure's units), and the width. */
+  readonly x: number;
+  readonly width: number;
+}
+
+/**
+ * A stretch of a rewritten line set in one style and one font. On lines that are not
+ * justified it spans the line (word gaps included) unless the style or font changes, or the
+ * style has no space glyph; on justified lines it is one word, or the part of a word in one
+ * style and font.
+ */
+export interface LayoutRun {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+  /** Style id of the input. */
+  readonly style: string;
+  /** The substitute face setting these characters; absent for the original font. */
+  readonly font?: string;
+  readonly x: number;
+  readonly width: number;
+  /**
+   * One entry per character (code point) of `text`: the displacement, in points along the
+   * baseline, added after that character's advance: harvested kerning where the pair recurs,
+   * and at a word gap the difference between the gap and the space glyph's advance.
+   */
+  readonly kerning: readonly number[];
+}
+
+/** How a line of the new layout relates to the original paragraph. */
+export type LayoutLineStatus =
+  /** Before the edit: byte-identical, the writer leaves it alone. */
+  | 'kept'
+  /** Set anew from the paragraph's text. */
+  | 'rewritten'
+  /** After the rewrap converged: the original line, moved down by `dy`. */
+  | 'reused';
+
+export interface LayoutLine {
+  readonly status: LayoutLineStatus;
+  /** Index of the original line (kept and reused lines). */
+  readonly source?: number;
+  /** UTF-16 offsets in `ParagraphLayout.text`: first character, end of the last visible one, next line's start. */
+  readonly start: number;
+  readonly end: number;
+  readonly next: number;
+  /** The visible text (`text.slice(start, end)`). */
+  readonly text: string;
+  /** Baseline, distance below the first line's baseline (points, positive downward). */
+  readonly y: number;
+  /** Reused lines: the vertical move from their original baseline (positive downward). */
+  readonly dy: number;
+  /** Rewritten lines: start and width of the set text (with the hyphen, if any). */
+  readonly x: number;
+  readonly width: number;
+  /** The line is justified to the measure. */
+  readonly justified: boolean;
+  /** A justified paragraph's line left ragged: its gaps would pass 1.5 × the natural space. */
+  readonly ragged: boolean;
+  /** One word wider than the measure. */
+  readonly overfull: boolean;
+  /** The line ends at a line break the user typed. */
+  readonly forced: boolean;
+  /** The original line-end hyphen kept at this unchanged line end: where it goes, in which style. */
+  readonly hyphen?: { readonly x: number; readonly style: string };
+  /** Rewritten lines only (empty otherwise). */
+  readonly words: readonly LayoutWord[];
+  readonly runs: readonly LayoutRun[];
+}
+
+/** A character the original font lacks, set in a bundled substitute (the honesty line). */
+export interface LayoutSubstitution {
+  readonly char: string;
+  readonly font: string;
+}
+
+/** The paragraph after an edit, laid out (pure arithmetic: no engine call). */
+export interface ParagraphLayout {
+  /** The paragraph's text after the edit. */
+  readonly text: string;
+  readonly lines: readonly LayoutLine[];
+  /** New line count minus the original one. */
+  readonly lineDelta: number;
+  /** Index of the first rewritten line, -1 when none is. */
+  readonly firstRewritten: number;
+  /** Some justified line had to stay ragged; the editor says so. */
+  readonly ragged: boolean;
+  /** Characters set in a substitute, one entry per character. */
+  readonly substituted: readonly LayoutSubstitution[];
+  /** Characters neither the original font nor its substitute has (the edit is refused). */
+  readonly unsupported: readonly string[];
+  /** Last baseline below the first, after and before the edit (points). */
+  readonly height: number;
+  readonly originalHeight: number;
+  /** Factors applied to the natural word gap and to the leading of rewritten lines (1 = none). */
+  readonly wordSpacing: number;
+  readonly leading: number;
+}
+
+/**
+ * What to do with a paragraph that changed height (spec craft §4.6), in order: commit,
+ * grow into the gap below, tighten word spacing then leading, or run over with a warning.
+ * Moving text to the next page is never an outcome, and the glyph size never changes.
+ */
+export type OverflowDecision =
+  /** Same or fewer lines. */
+  | { readonly kind: 'commit'; readonly layout: ParagraphLayout }
+  /** The growth fits the empty space below while keeping the original gap to the next block. */
+  | { readonly kind: 'grow'; readonly layout: ParagraphLayout; readonly growth: number }
+  | {
+      readonly kind: 'tighten';
+      /** The layout with the factors applied. */
+      readonly layout: ParagraphLayout;
+      /** Factor on the natural word gap (≥ 0.85) and on the rewritten lines' leading (≥ 0.95). */
+      readonly wordSpacing: number;
+      readonly leading: number;
+      /** For "Spacing tightened by N %": the larger of the two reductions, whole percent (≥ 1). */
+      readonly percent: number;
+      readonly growth: number;
+    }
+  | {
+      readonly kind: 'overflow';
+      /** The untightened layout, as it will run over. */
+      readonly layout: ParagraphLayout;
+      readonly growth: number;
+      /** Height beyond what the gap allows (growth − room), and the part overlapping the next block. */
+      readonly excess: number;
+      readonly overlap: number;
+    };

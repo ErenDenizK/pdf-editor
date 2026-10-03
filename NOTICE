@@ -70,6 +70,14 @@ and are reproduced in the application's "About and licenses" view.
   fflate (MIT, Copyright Arjun Barrett) are bundled with it.
   License: MIT.
 
+- linebreak (v1.1.0), the Unicode line breaking algorithm (UAX #14)
+  Copyright (c) 2014-present Devon Govett.
+  Its dependencies unicode-trie (MIT, Copyright 2018 Devon Govett), tiny-inflate (MIT,
+  Copyright (c) 2015-present Devon Govett), pako (MIT, Copyright (C) 2014-2016 Vitaly
+  Puzrin) and base64-js (MIT) are bundled with it.
+  License: MIT.
+  Used by the paragraph editor to find where lines may break.
+
 - Fonts embedded in exported PDFs (page numbers, headers, footers, Bates numbers,
   watermarks) and used by the live preview, bundled as subset static TTFs under
   packages/engine/assets/fonts (see LICENSES.md and OFL.txt there):

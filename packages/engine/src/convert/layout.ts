@@ -94,7 +94,8 @@ const BOLD = /bold|black|heavy|semibold|demi/i;
 /** A gap wider than this many font sizes splits a line into segments. */
 const SEGMENT_GAP = 1.8;
 
-function dominant<T>(values: readonly T[]): T | undefined {
+/** The most frequent value (the first to reach the top count on a tie). */
+export function dominant<T>(values: readonly T[]): T | undefined {
   const counts = new Map<T, number>();
   let best: T | undefined;
   let bestCount = 0;
@@ -109,7 +110,8 @@ function dominant<T>(values: readonly T[]): T | undefined {
   return best;
 }
 
-const roundSize = (size: number) => Math.round(size * 2) / 2;
+/** A font size rounded to the nearest half point. */
+export const roundSize = (size: number) => Math.round(size * 2) / 2;
 
 function makeSegment(units: Unit[], hyphen: Segment['hyphen']): Segment | undefined {
   // Trim generated or blank units at both ends.
@@ -410,14 +412,27 @@ export interface ImageBlock {
 
 export type Block = TextBlock | ImageBlock;
 
-function median(values: readonly number[]): number | undefined {
+/** The upper median (the middle element of the sorted values); undefined when empty. */
+export function median(values: readonly number[]): number | undefined {
   if (values.length === 0) return undefined;
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
 }
 
-const sameStyle = (a: Line, b: Line) =>
-  a.bold === b.bold && Math.abs(a.size - b.size) <= 0.1 * Math.max(a.size, b.size);
+/** Same weight and a size within 10 %: a change of either starts a new block. */
+export const sameStyle = (
+  a: { readonly bold: boolean; readonly size: number },
+  b: { readonly bold: boolean; readonly size: number },
+) => a.bold === b.bold && Math.abs(a.size - b.size) <= 0.1 * Math.max(a.size, b.size);
+
+/**
+ * The white space between two lines above which a new block starts: more than the column's
+ * usual gap `leading` (capped: a document whose lines are all far apart still breaks
+ * paragraphs at 1.3 × the font size), and never below 0.6 × the size.
+ */
+export function blockBreakGap(size: number, leading: number): number {
+  return Math.max(0.6 * size, Math.min(1.5 * leading + 1, 1.3 * size));
+}
 
 /** Splits the flow into blocks (paragraphs, list items, headings, images). */
 export function toBlocks(flow: readonly Flow[]): Block[] {
@@ -459,10 +474,8 @@ export function toBlocks(flow: readonly Flow[]): Block[] {
       const leading = median(gaps.get(line.column) ?? []) ?? 0.3 * size;
       const gap = line.box.y0 - prev.box.y1;
       if (!sameStyle(prev, line)) breakBefore = true;
-      // More than the column's usual leading (capped: a document whose lines are all far
-      // apart still breaks paragraphs at 1.3 × the font size).
-      else if (gap > Math.max(0.6 * size, Math.min(1.5 * leading + 1, 1.3 * size)))
-        breakBefore = true;
+      // More than the column's usual leading (see `blockBreakGap`).
+      else if (gap > blockBreakGap(size, leading)) breakBefore = true;
       else if (gap < -0.5 * size) breakBefore = true;
       else {
         const first = block.lines[0] as Line;
@@ -491,13 +504,20 @@ export function toBlocks(flow: readonly Flow[]): Block[] {
   return blocks;
 }
 
+/** What `tableRows` needs of a segment: its box (display space, y down) and font size. */
+export interface Boxed {
+  readonly box: Box;
+  readonly size: number;
+}
+
 /**
  * Groups of at least three consecutive rows with three or more segments each, two of whose
- * left edges line up: laid out like a table (only counted; their text keeps reading order).
+ * left edges line up: laid out like a table. Rows are segments sharing a baseline (box
+ * bottoms within 0.3 × the size) anywhere on the page, in order of their bottoms; each group
+ * lists its rows.
  */
-export function suspectedTables(segments: readonly Segment[]): number {
-  // Rows: segments sharing a baseline anywhere on the page.
-  const rows: Segment[][] = [];
+export function tableRows<T extends Boxed>(segments: readonly T[]): T[][][] {
+  const rows: T[][] = [];
   for (const s of [...segments].sort((a, b) => a.box.y1 - b.box.y1)) {
     const row = rows[rows.length - 1];
     const first = row?.[0];
@@ -505,23 +525,31 @@ export function suspectedTables(segments: readonly Segment[]): number {
       row.push(s);
     else rows.push([s]);
   }
-  let tables = 0;
-  let run: number[][] = [];
+  const tables: T[][][] = [];
+  let run: T[][] = [];
   const close = () => {
     if (run.length >= 3) {
       // At least two cell starts line up across the rows.
-      const starts = run.map((xs) => new Set(xs.map((x) => Math.round(x / 2))));
+      const starts = run.map((row) => new Set(row.map((s) => Math.round(s.box.x0 / 2))));
       const common = [...(starts[0] ?? [])].filter((x) => starts.every((set) => set.has(x)));
-      if (common.length >= 2) tables++;
+      if (common.length >= 2) tables.push(run);
     }
     run = [];
   };
   for (const row of rows) {
-    if (row.length >= 3) run.push(row.map((s) => s.box.x0));
+    if (row.length >= 3) run.push(row);
     else close();
   }
   close();
   return tables;
+}
+
+/**
+ * How many groups of the page's segments are laid out like a table (`tableRows`; only
+ * counted: their text keeps reading order).
+ */
+export function suspectedTables(segments: readonly Segment[]): number {
+  return tableRows(segments).length;
 }
 
 /** Marks units whose box centre lies in a link rect (display space). */

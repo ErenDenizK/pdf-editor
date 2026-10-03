@@ -358,6 +358,12 @@ export function createPdfiumProxy(worker: Worker, options: PdfiumProxyOptions): 
         remote.analyzeRun(run, wire, withPort(port, port)),
       );
     },
+    analyzeParagraphs(id, pageIndex, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke('analyzeParagraphs', signal, (port) =>
+        remote.analyzeParagraphs(id, pageIndex, wire, withPort(port, port)),
+      );
+    },
     checkEditability(query, callOptions) {
       const { signal, wire } = split(callOptions);
       return invoke('checkEditability', signal, (port) =>

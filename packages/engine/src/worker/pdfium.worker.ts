@@ -363,6 +363,11 @@ const api: PdfiumWorkerApi = {
       (await getTextEditor()).analyzeRun(run, withSignal(options, signal)),
     );
   },
+  analyzeParagraphs(id, pageIndex, options, abortPort) {
+    return call(abortPort, async (signal) =>
+      (await getTextEditor()).analyzeParagraphs(id, pageIndex, withSignal(options, signal)),
+    );
+  },
   checkEditability(query, options, abortPort) {
     return call(abortPort, async (signal) =>
       (await getTextEditor()).checkEditability(query, withSignal(options, signal)),

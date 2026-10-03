@@ -33,6 +33,7 @@ import type {
   OcrRaster,
   OpenedDocument,
   OpenOptions,
+  ParagraphBlock,
   RedactionPlan,
   RenderForOcrOptions,
   RenderOptions,
@@ -212,6 +213,12 @@ export interface PdfiumWorkerApi {
     options: WireCallOptions,
     abortPort?: MessagePort,
   ): Promise<Wire<TextRunAnalysis>>;
+  analyzeParagraphs(
+    id: SourceId,
+    pageIndex: number,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<readonly ParagraphBlock[]>>;
   checkEditability(
     query: TextEditQuery,
     options: WireCallOptions,
