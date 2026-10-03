@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { PDFDocument } from '@cantoo/pdf-lib';
 import { expect, type Page, test } from '@playwright/test';
 
-import { openFixtures, useFileInputPicker } from './helpers';
+import { enterEdit, openFixtures, useFileInputPicker } from './helpers';
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'Download flow is verified on Chromium');
 
@@ -168,7 +168,8 @@ test('a rotated, resized page lines up in Read mode: text selects, annotations c
     'PAGE 1 OF annotations',
   );
 
-  // Clicking the square selects it.
+  // Clicking the square selects it (in Edit: Read is locked, ADR-0019 §3).
+  await enterEdit(page);
   await page.mouse.click(0, 0);
   const square = sheet.locator('[data-annotation-id="fixture-annot-square-1"]');
   const squareBox = await square.boundingBox();

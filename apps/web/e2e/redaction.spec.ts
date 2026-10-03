@@ -364,6 +364,7 @@ test('keeping attachments: the self-check sees the token in the attachment and n
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['redact-metadata.pdf']);
+  await enterEdit(page);
   await showInspector(page);
   await selectText(page, TOKEN);
   await page.keyboard.press('x');
@@ -415,6 +416,7 @@ test('Esc and the backdrop while applying: the dialog stays and the blocked outc
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['redact-metadata.pdf']);
+  await enterEdit(page);
   await showInspector(page);
   await selectText(page, TOKEN);
   await page.keyboard.press('x');

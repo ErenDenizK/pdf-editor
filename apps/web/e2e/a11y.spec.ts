@@ -97,6 +97,7 @@ test.describe('keyboard', () => {
     page,
   }) => {
     await openSimple(page);
+    await enterEdit(page);
     await showInspector(page);
     // An armed tool with options: the tier sits by the bar, but F6 lands on the bar. (U: H
     // arms the Highlighter preset of the pen, whose tier is empty, craft spec §5.4.)
@@ -107,7 +108,7 @@ test.describe('keyboard', () => {
     const title = page.getByRole('tablist', { name: 'Open documents' });
     const navigator = page.getByRole('tablist', { name: 'Navigator views' });
     const inspector = page.locator('#right-panel');
-    const highlight = bar(page).getByRole('button', { name: 'Underline' });
+    const highlight = bar(page).getByRole('button', { name: 'Underline', exact: true });
 
     await page.keyboard.press('F6');
     await expect(title.getByRole('tab', { selected: true })).toBeFocused();
@@ -308,6 +309,7 @@ test.describe('keyboard', () => {
     page,
   }) => {
     await openSimple(page);
+    await enterEdit(page);
     await bar(page).locator('button[tabindex="0"]').focus();
     await page.keyboard.press('Home');
     await page.keyboard.press('ArrowRight');
@@ -637,6 +639,7 @@ const NONE_MS = 0.01;
 test.describe('reduced motion', () => {
   test('without it, the morph moves (so the check below is meaningful)', async ({ page }) => {
     await openSimple(page);
+    await enterEdit(page);
     await recordScripted(page);
     await bar(page).getByRole('button', { name: 'Draw', exact: true }).click();
     expect(await longestScripted(page)).toBeGreaterThanOrEqual(100);
@@ -645,6 +648,7 @@ test.describe('reduced motion', () => {
   test('with it, the morph, the rise-in and the transitions are off', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openSimple(page);
+    await enterEdit(page);
     const draw = bar(page).getByRole('button', { name: 'Draw', exact: true });
     expect(await longestDuration(draw)).toBeLessThanOrEqual(NONE_MS);
     await recordScripted(page);
@@ -682,6 +686,7 @@ test('the focus ring tokens apply to the new controls', async ({ page }) => {
   await page.goto('./?lang=en');
   await openFixtures(page, ['simple-text.pdf', 'annotations.pdf']);
   await page.getByRole('tab', { name: 'annotations' }).click();
+  await enterEdit(page);
   const expectRing = async (name: string, target: Locator) => {
     // After a key press, so :focus-visible applies to a scripted focus.
     await page.keyboard.press('Shift');
@@ -726,6 +731,7 @@ test('the focus ring tokens apply to the new controls', async ({ page }) => {
     timeout: 20_000,
   });
   await expectRing('page viewport', viewport(page));
+  await enterEdit(page);
   await expectRing('bar group', bar(page).getByRole('button', { name: 'Draw', exact: true }));
   await bar(page).getByRole('button', { name: 'Draw', exact: true }).click();
   await expectRing('ink dot', page.getByRole('radio', { name: 'Blue pen, 1.5 pt' }));
