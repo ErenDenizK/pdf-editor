@@ -44,6 +44,8 @@ export default mergeConfig(
         '@pdf-editor/engine > @cantoo/fontkit',
         '@pdf-editor/engine > @cantoo/pdf-lib',
         '@pdf-editor/engine > comlink',
+        // The paragraph layout (main thread, text-edit/ParagraphEditor.tsx); CommonJS.
+        '@pdf-editor/engine > linebreak',
         'zustand',
         '@tanstack/react-virtual',
         '@atlaskit/pragmatic-drag-and-drop-hitbox/list-item',

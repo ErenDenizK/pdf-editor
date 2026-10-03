@@ -441,6 +441,7 @@ function changesContent(edit: EngineEdit): boolean {
 function contentPagesOf(edit: EngineEdit): readonly number[] | undefined {
   switch (edit.kind) {
     case 'text.edit':
+    case 'text.editParagraph':
       return [edit.pageIndex];
     case 'image.transform':
     case 'image.remove':
@@ -509,6 +510,8 @@ function annotationEdits(ws: Workspace): Map<SourceId, EngineEdit[]> {
       !edit.kind.startsWith('annotation.') &&
       edit.kind !== 'form.set-value' &&
       edit.kind !== 'text.edit' &&
+      // Paragraph edits (text-edit/actions.ts, craft spec §4.4): replay-required likewise.
+      edit.kind !== 'text.editParagraph' &&
       // Applied redactions (redaction/apply.ts): replay-required like text edits.
       edit.kind !== 'redaction.apply' &&
       // Image objects (image-objects/actions.ts): removal and replacement are replay-required.
@@ -541,6 +544,7 @@ async function tryEdit(ctx: EngineContext, edit: EngineEdit | undefined): Promis
 async function needsReopen(edits: readonly EngineEdit[]): Promise<boolean> {
   const replayKinds = [
     'text.edit',
+    'text.editParagraph',
     'redaction.apply',
     'image.remove',
     'image.replace',

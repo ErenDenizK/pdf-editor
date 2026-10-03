@@ -65,15 +65,26 @@ function renderEditor(
 }
 
 /** Types `keys` one by one, `gap` ms apart; resolves to the mean time between keystrokes. */
-async function typeSlowly(keys: string, gap: number): Promise<number> {
+/** The editor's pause before its dry run (`TextEditor.tsx`, `CHECK_DELAY_MS`). */
+const PAUSE_MS = 300;
+
+/**
+ * Types `keys` with `gap` ms between them and returns the measured mean gap and how many
+ * gaps reached the editor's pause. A loaded machine can stretch a gap past the pause, and
+ * then a dry run between those keys is correct behaviour, not a per-keystroke call.
+ */
+async function typeSlowly(keys: string, gap: number): Promise<{ mean: number; pauses: number }> {
   const times: number[] = [];
+  let first = true;
   for (const key of keys) {
+    if (!first) await sleep(gap);
+    first = false;
     times.push(performance.now());
     await userEvent.keyboard(key);
-    await sleep(gap);
   }
   const intervals = times.slice(1).map((t, k) => t - (times[k] ?? t));
-  return intervals.reduce((sum, t) => sum + t, 0) / Math.max(1, intervals.length);
+  const mean = intervals.reduce((sum, t) => sum + t, 0) / Math.max(1, intervals.length);
+  return { mean, pauses: intervals.filter((t) => t >= PAUSE_MS).length };
 }
 
 /** Counts the text editor's engine calls (the real ones still run). */
@@ -118,36 +129,41 @@ describe('engine calls while typing', () => {
     await sleep(400);
     const atOpen = { ...counts };
 
-    // Steady typing, under the 300 ms pause (and over the old 200 ms debounce when the
-    // keystrokes themselves take long enough).
-    const slowGap = await typeSlowly(' slow', 150);
-    const slow = { ...counts };
-    await sleep(450);
-    const slowSettled = { ...counts };
-
-    // Fast typing: 40 ms between keys.
-    const fastGap = await typeSlowly(' fast', 40);
-    const fast = { ...counts };
-    await sleep(450);
-    const fastSettled = { ...counts };
+    // Each burst of typing is followed by one dry run after the pause. The machine's load
+    // decides the real gaps, so a gap that reached the pause may add one dry run mid-burst;
+    // a re-analysis or a dry run per keystroke never happens.
+    const burst = async (keys: string, gap: number) => {
+      const before = { ...counts };
+      const typing = await typeSlowly(keys, gap);
+      await waitFor(
+        () => expect(counts.checkEditability).toBeGreaterThan(before.checkEditability ?? 0),
+        {
+          timeout: 5_000,
+        },
+      );
+      await sleep(PAUSE_MS + 200);
+      return { typing, calls: diff({ ...counts }, before) };
+    };
+    const slow = await burst(' slow', 150);
+    const fast = await burst(' fast', 40);
     expect(input).toHaveValue(`${FOX} slow fast`);
 
     const report = {
-      gapsMs: { slow: Math.round(slowGap), fast: Math.round(fastGap) },
+      gapsMs: { slow: Math.round(slow.typing.mean), fast: Math.round(fast.typing.mean) },
+      pausesWhileTyping: { slow: slow.typing.pauses, fast: fast.typing.pauses },
       atOpen,
-      slowTyping5Keys: diff(slow, atOpen),
-      slowAfterPause: diff(slowSettled, slow),
-      fastTyping5Keys: diff(fast, slowSettled),
-      fastAfterPause: diff(fastSettled, fast),
+      slow: slow.calls,
+      fast: fast.calls,
     };
     // Measurements for the report (warn: the only level the lint allows in tests).
     console.warn('text-edit engine calls', JSON.stringify(report));
 
     expect(atOpen).toEqual({ checkEditability: 0, analyzeRun: 1 });
-    expect(report.slowTyping5Keys).toEqual({ checkEditability: 0, analyzeRun: 0 });
-    expect(report.slowAfterPause).toEqual({ checkEditability: 1, analyzeRun: 0 });
-    expect(report.fastTyping5Keys).toEqual({ checkEditability: 0, analyzeRun: 0 });
-    expect(report.fastAfterPause).toEqual({ checkEditability: 1, analyzeRun: 0 });
+    for (const { typing, calls } of [slow, fast]) {
+      expect(calls.analyzeRun).toBe(0);
+      expect(calls.checkEditability).toBeGreaterThanOrEqual(1);
+      expect(calls.checkEditability).toBeLessThanOrEqual(1 + typing.pauses);
+    }
   });
 });
 

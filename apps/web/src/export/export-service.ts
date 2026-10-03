@@ -476,6 +476,7 @@ export function ocrWordsExpectation(
 function isContentEdit(edit: EngineEdit): boolean {
   return (
     edit.kind === 'text.edit' ||
+    edit.kind === 'text.editParagraph' ||
     edit.kind === 'redaction.apply' ||
     edit.kind.startsWith('image.') ||
     // OCR runs (spec recognize-and-compare §1.3): the layer replaced the source's document.
@@ -671,7 +672,9 @@ async function prepareExportNow(
       const source = ws.sources[sourceId];
       const name = source?.name ?? m.unknown_file();
       const encrypted = source?.flags.encrypted === true;
-      const textEdits = heldOf(sourceId).filter((e) => e.kind === 'text.edit');
+      const textEdits = heldOf(sourceId).filter(
+        (e) => e.kind === 'text.edit' || e.kind === 'text.editParagraph',
+      );
       const edits = textEdits.length;
       // Redacted and text-edited sources: the engine's document, never the bytes kept at
       // open (they would bring the removed content or the old text back).

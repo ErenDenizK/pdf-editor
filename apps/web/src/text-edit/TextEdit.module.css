@@ -1,17 +1,16 @@
 /*
- * Edit text tool (redaction-and-text-editing spec §2.2). The layer takes the page while the
- * tool is active (like a drawing tool, above the annotation layer's hit targets). Only the
- * line under the pointer (or with keyboard focus) is marked: an editable one gets an accent
- * fill and ring, one that cannot be edited is hatched (design audit D6). The rest of the page
- * stays unmarked. The inline editor matches the free-text editor (dashed accent frame on an
- * opaque page-white field, so the original glyphs never show through); its header is a glass
- * popover like the note popup.
+ * Edit text tool (redaction-and-text-editing spec §2.2). The layer never takes the page
+ * (craft spec §3.5, viewer/hit-order.ts): its root lets the pointer through and only the run
+ * targets, the editor and its header are live; its stacking comes from `HIT_LAYER_Z`. The
+ * idle hover outline is the text layer's (after 400 ms, from a mouse or a hovering pen); a
+ * run marks itself only with keyboard focus or while edited, and one that cannot be edited
+ * is hatched on hover (design audit D6). The rest of the page stays unmarked. The inline
+ * editor matches the free-text editor (dashed accent frame on an opaque page-white field,
+ * so the original glyphs never show through); its header is a glass popover like the note
+ * popup.
  */
 .layer {
-  z-index: 2;
-  pointer-events: auto;
-  touch-action: none;
-  cursor: default;
+  pointer-events: none;
 }
 
 /* The layer holds the focus after a commit while the page's runs are located again. */
@@ -32,6 +31,9 @@
   border-radius: var(--radius-page);
   background: transparent;
   cursor: text;
+  pointer-events: auto;
+  /* Fingers still scroll and zoom over text; a tap or a long press opens (TextEditLayer). */
+  touch-action: manipulation;
   transition:
     background-color var(--duration-fast) var(--ease-out),
     box-shadow var(--duration-fast) var(--ease-out);
@@ -40,13 +42,6 @@
 .run:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
-}
-
-@media (hover: hover) {
-  .run[data-editable]:hover {
-    background: var(--accent-muted);
-    box-shadow: 0 0 0 1px var(--accent);
-  }
 }
 
 .run[data-editable]:focus-visible,

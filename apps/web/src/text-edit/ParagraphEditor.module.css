@@ -1,0 +1,176 @@
+/*
+ * The paragraph editor (craft spec §4.7): a canvas over the paragraph that looks like the
+ * page (glyphs from the PDF font on a page-white plate, our caret and selection), the
+ * dry run's bitmap under it once typing pauses, a hidden mirror that holds the focus, and a
+ * glass header with the honesty and overflow lines. The page is never themed (DESIGN.md §3):
+ * the canvas draws page colours whatever the chrome's theme.
+ */
+.layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.canvas,
+.preview {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.canvas {
+  z-index: 2;
+  cursor: text;
+  touch-action: none;
+}
+
+.preview {
+  z-index: 1;
+  pointer-events: none;
+}
+
+/*
+ * The mirror: present for the keyboard, IME and assistive technology, invisible on screen.
+ * It sits over the paragraph so the IME's candidate window opens near the text.
+ */
+.mirror {
+  position: absolute;
+  z-index: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: transparent;
+  caret-color: transparent;
+  line-height: 1.2;
+  white-space: pre-wrap;
+  opacity: 0;
+  outline: none;
+  pointer-events: none;
+  user-select: text;
+}
+
+.mirror::selection {
+  background: transparent;
+}
+
+.header {
+  composes: glass from global;
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  gap: var(--space-2);
+  width: max-content;
+  min-width: 220px;
+  max-width: 340px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  pointer-events: auto;
+  cursor: default;
+}
+
+.header[data-side='above'] {
+  transform: translateY(-100%);
+}
+
+.lines {
+  display: grid;
+  gap: 2px;
+}
+
+.lines p {
+  margin: 0;
+}
+
+.honesty {
+  color: var(--text-primary);
+}
+
+.overflow {
+  color: var(--text-secondary);
+}
+
+.overflow[data-kind='overflow'] {
+  color: var(--warning);
+  font-weight: 500;
+}
+
+.note {
+  color: var(--text-secondary);
+}
+
+.error {
+  color: var(--danger);
+}
+
+.hint {
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-hairline);
+}
+
+.action {
+  min-width: 24px;
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.action[aria-disabled='true'] {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.info {
+  display: inline-grid;
+  width: var(--control-height);
+  min-width: 24px;
+  height: var(--control-height);
+  margin-left: auto;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-2);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.info svg {
+  width: 16px;
+  height: 16px;
+}
+
+@media (hover: hover) {
+  .info:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.action:focus-visible,
+.info:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
