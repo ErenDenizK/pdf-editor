@@ -4,6 +4,7 @@
  */
 import type { Rect } from '@pdf-editor/document-model';
 
+import { canEditActive } from '../state/ui-store';
 import { useAnnotationStore } from './annotation-store';
 import { createAnnotations } from './actions';
 import { markupDraft, styleGroupOf } from './drafts';
@@ -32,13 +33,19 @@ export function hasTextSelection(): boolean {
 
 /**
  * Creates `kind` over the selected text on every page it spans. Resolves to whether an
- * annotation was created; the selection is cleared when one was.
+ * annotation was created; the selection is cleared when one was. Never in Read (ADR-0019
+ * §3): the selection stays for a second press in Edit.
  */
-export async function markupFromSelection(kind: MarkupMode): Promise<boolean> {
+export async function markupFromSelection(
+  kind: MarkupMode,
+  /** The Highlighter's tint for Highlight (H) (craft spec §5.4); else the tool's style. */
+  style: { readonly color: string; readonly opacity: number } = useAnnotationStore.getState()
+    .styles[styleGroupOf(kind)],
+): Promise<boolean> {
+  if (!canEditActive()) return false;
   const selection = globalThis.getSelection?.() ?? null;
   const rects = selectionRects(selection);
   if (rects.length === 0) return false;
-  const style = useAnnotationStore.getState().styles[styleGroupOf(kind)];
   let created = false;
   // A snapshot: layers re-register (re-render) while the creations below run.
   for (const layer of [...mountedLayers.values()]) {

@@ -53,7 +53,8 @@ export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
   // Read
   { mode: 'select', title: m.tool_select, shortcut: 'V', Icon: MousePointer2, group: 'read' },
   // Mark up
-  { mode: 'highlight', title: m.tool_highlight, shortcut: 'H', Icon: Highlighter, group: 'markup' },
+  // H arms the Highlighter preset instead (craft spec §5.4, `tool.highlighter`).
+  { mode: 'highlight', title: m.tool_highlight, Icon: Highlighter, group: 'markup' },
   { mode: 'underline', title: m.tool_underline, shortcut: 'U', Icon: Underline, group: 'markup' },
   {
     mode: 'strikeout',

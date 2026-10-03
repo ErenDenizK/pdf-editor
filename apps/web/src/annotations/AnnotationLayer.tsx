@@ -10,7 +10,8 @@
  * /Rect on /Rotate pages: `displayRect` and `dragAnnotation` (geometry.ts) handle it.
  *
  * With the Select tool the layer lets pointer events through (to the text layer) except
- * on annotations; with a drawing tool it captures the whole page.
+ * on annotations; with a drawing tool it captures the whole page. In Read (ADR-0019 §3) it
+ * is inert: no hit targets, no drawing, no bar, no editor, no handles (`useCanEdit`).
  *
  * Writing is never interrupted (experience-redesign spec §6.1): what a drawing tool creates
  * is not selected (no contextual bar, no inspector change), its preview stays until the
@@ -37,6 +38,7 @@ import { getEngineService } from '../engine/engine-service';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import type { PageOverlayProps } from '../stage/page-overlays';
+import { useCanEdit } from '../state/ui-store';
 import { pageFrame } from '../viewer/page-frame';
 import { whenPainted } from '../viewer/read-controller';
 import { type ToolMode, useToolStore } from '../viewer/tool-store';
@@ -80,7 +82,8 @@ import { LassoHighlight } from './lasso/LassoSelection';
 import { mountedLayers } from './layer-registry';
 import { commitPenStroke, noteBurstPress } from './pen/bursts';
 import { attachInkInput, type InkStrokeInput, type SettleInk } from './pen/ink-input';
-import { InkPreview, previewPath } from './pen/ink-preview';
+import { commitHighlighterStroke, createPenPreview } from './pen/highlighter';
+import { previewPath } from './pen/ink-preview';
 import { pageText } from './page-text';
 import { glyphIndexAt, quadsForRange } from './quads';
 import styles from './AnnotationLayer.module.css';
@@ -155,6 +158,8 @@ const DRAWING_TOOLS = new Set<ToolMode>([
 export function AnnotationLayer(props: PageOverlayProps) {
   const { sourceId, sourceIndex, pageId, pageIndex, visible } = props;
   const mode = useToolStore((s) => s.mode);
+  // The Read lock: every press below fails closed while the document is not in Edit.
+  const editable = useCanEdit();
   const annotations = usePageAnnotations(sourceId, sourceIndex);
   const selection = useAnnotationStore((s) =>
     s.selection?.pageId === pageId ? s.selection : null,
@@ -187,12 +192,13 @@ export function AnnotationLayer(props: PageOverlayProps) {
 
   // The pen: native input while armed (spec §6.6). Style, zoom and target are read at the
   // press from the store and the layer registry, so nothing re-attaches per render.
-  const penArmed = mode === 'ink' && sourceId !== undefined;
+  const penArmed = editable && mode === 'ink' && sourceId !== undefined;
   useEffect(() => {
     const element = rootRef.current;
     const host = inkHostRef.current;
     if (!penArmed || !element || !host) return;
-    const preview = new InkPreview(host);
+    // The Highlighter's profile (constant width, Multiply) applies when it is armed.
+    const preview = createPenPreview(host, element, pageId);
     // The press of the stroke in progress (`performance.now()` clock, as event time stamps).
     let downAt = 0;
     const detach = attachInkInput({
@@ -230,7 +236,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
   }, [penArmed, pageId]);
 
   // The lasso: native input while armed, like the pen (spec §6.5, lasso/lasso-input.ts).
-  const lassoArmed = mode === 'lasso' && sourceId !== undefined;
+  const lassoArmed = editable && mode === 'lasso' && sourceId !== undefined;
   useEffect(() => {
     const element = rootRef.current;
     if (!lassoArmed || !element) return;
@@ -249,7 +255,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
     pageId,
     position: pageIndex + 1,
   };
-  const drawing = DRAWING_TOOLS.has(mode);
+  const drawing = editable && DRAWING_TOOLS.has(mode);
 
   const update = (next: Gesture | null) => {
     gestureRef.current = next;
@@ -391,7 +397,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
   // -------------------------------------------------------------------------
 
   const onAnnotationPointerDown = (event: ReactPointerEvent, a: Annotation) => {
-    if (drawing || event.button !== 0) return;
+    if (!editable || drawing || event.button !== 0) return;
     event.stopPropagation();
     event.preventDefault();
     const store = useAnnotationStore.getState();
@@ -434,7 +440,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
   };
 
   const onHandlePointerDown = (event: ReactPointerEvent, a: Annotation, handle: Handle) => {
-    if (event.button !== 0) return;
+    if (!editable || event.button !== 0) return;
     event.stopPropagation();
     event.preventDefault();
     const start = localPoint(event);
@@ -459,7 +465,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
   };
 
   const onAnnotationDoubleClick = (a: Annotation) => {
-    if (drawing || a.flags?.locked) return;
+    if (!editable || drawing || a.flags?.locked) return;
     const store = useAnnotationStore.getState();
     if (a.kind === 'free-text') {
       store.setEditor({
@@ -480,7 +486,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
   // -------------------------------------------------------------------------
 
   const selected = selection ? annotations.filter((a) => selection.ids.includes(a.id)) : [];
-  const hitsEnabled = !drawing;
+  const hitsEnabled = editable && !drawing;
   return (
     <div
       ref={rootRef}
@@ -524,7 +530,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
             annotation={a}
             frame={frame}
             gesture={gesture}
-            single={selected.length === 1}
+            single={editable && selected.length === 1}
             onHandle={onHandlePointerDown}
           />
         ))}
@@ -536,7 +542,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
       </svg>
       {/* The pen's canvases (pen/ink-preview.ts); React never renders into it. */}
       <div ref={inkHostRef} className={styles.inkPreview} aria-hidden="true" />
-      {selected.length > 0 && gesture === null && editor === null ? (
+      {editable && selected.length > 0 && gesture === null && editor === null ? (
         <AnnotationBar
           target={target}
           annotations={selected}
@@ -544,7 +550,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
           {...(lassoPaths ? { paths: lassoPaths } : {})}
         />
       ) : null}
-      {editor ? <InlineEditorView editor={editor} frame={frame} /> : null}
+      {editable && editor ? <InlineEditorView editor={editor} frame={frame} /> : null}
     </div>
   );
 }
@@ -559,7 +565,8 @@ AnnotationLayer.displayName = 'AnnotationLayer';
  */
 function beginDrawingPress(): boolean {
   const store = useAnnotationStore.getState();
-  store.select(null);
+  // Skipped when nothing is selected: a store write per stroke is a render per stroke.
+  if (store.selection !== null || store.pathSelection !== null) store.select(null);
   if (!store.editor) return false;
   if (!commitOpenEditor() && document.activeElement instanceof HTMLElement) {
     document.activeElement.blur();
@@ -1235,6 +1242,9 @@ async function commitInkStroke(
   target: PageTarget,
   times: { readonly downAt: number; readonly upAt: number },
 ): Promise<void> {
+  // The Highlighter: a Highlight over text, else free Multiply ink (craft spec §5.4).
+  const highlighter = commitHighlighterStroke(stroke, settle, frame, target, times);
+  if (highlighter) return highlighter;
   const style = useAnnotationStore.getState().styles.ink;
   const ink = inkCommit(stroke, frame, style.strokeWidth);
   if (!ink) return;

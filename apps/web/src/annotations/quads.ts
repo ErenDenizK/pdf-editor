@@ -34,7 +34,8 @@ function union(a: Rect | undefined, b: Rect): Rect {
   };
 }
 
-function direction(run: Pick<TextRun, 'glyphs'>): 'h' | 'v' {
+/** A run's reading direction: horizontal unless its glyphs advance mostly vertically. */
+export function runDirection(run: Pick<TextRun, 'glyphs'>): 'h' | 'v' {
   const first = run.glyphs[0];
   const last = run.glyphs[run.glyphs.length - 1];
   if (!first || !last || first === last) return 'h';
@@ -108,6 +109,47 @@ export function mergeLineQuads(
   return merged.map((q) => q.rect);
 }
 
+/** A printed line: runs of one reading direction whose bands overlap, however far apart. */
+export interface TextLine {
+  readonly dir: 'h' | 'v';
+  /** Indices of its runs, in engine (reading) order. */
+  readonly runs: readonly number[];
+  /** The union of its glyph boxes. */
+  readonly box: Rect;
+}
+
+/**
+ * The page's lines (the Highlighter's snapping, craft spec §5.4): every run with glyphs
+ * joins the first line of its direction whose band (y range for horizontal text, x range
+ * for vertical) overlaps its own by at least half the smaller one, else starts a line. Runs
+ * side by side in two columns share a line; a superscript joins its line.
+ */
+export function textLines(runs: readonly TextRun[]): TextLine[] {
+  const lines: { dir: 'h' | 'v'; runs: number[]; box: Rect }[] = [];
+  runs.forEach((run, r) => {
+    let box: Rect | undefined;
+    for (const glyph of run.glyphs) if (hasArea(glyph.rect)) box = union(box, glyph.rect);
+    if (!box) return;
+    const dir = runDirection(run);
+    const band = (b: Rect): [number, number] =>
+      dir === 'h' ? [b.y, b.y + b.height] : [b.x, b.x + b.width];
+    const [lo, hi] = band(box);
+    const line = lines.find((l) => {
+      if (l.dir !== dir) return false;
+      const [a0, a1] = band(l.box);
+      const overlap = Math.min(a1, hi) - Math.max(a0, lo);
+      return overlap > 0 && overlap >= 0.5 * Math.min(a1 - a0, hi - lo);
+    });
+    if (line) {
+      line.runs.push(r);
+      line.box = union(line.box, box);
+    } else {
+      lines.push({ dir, runs: [r], box });
+    }
+  });
+  return lines;
+}
+
 /** Quads (one per line) for a set of selected glyphs, in reading order. */
 export function quadsForGlyphs(runs: readonly TextRun[], selected: readonly GlyphRef[]): Rect[] {
   const perRun = new Map<number, Rect>();
@@ -118,7 +160,7 @@ export function quadsForGlyphs(runs: readonly TextRun[], selected: readonly Glyp
   }
   const ordered = [...perRun.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([run, rect]) => ({ rect, dir: direction(runs[run] as TextRun) }));
+    .map(([run, rect]) => ({ rect, dir: runDirection(runs[run] as TextRun) }));
   return mergeLineQuads(ordered);
 }
 

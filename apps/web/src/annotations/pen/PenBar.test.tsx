@@ -85,7 +85,8 @@ describe('pen bar', () => {
       'rgb(26, 26, 26)',
       'rgb(23, 96, 238)',
       'rgb(219, 28, 34)',
-      'rgba(255, 234, 0, 0.4)',
+      // The Highlighter: its tint at full opacity (craft spec §5.4).
+      'rgb(255, 234, 0)',
     ]);
     expect(marks.map((mark) => Math.round(mark.getBoundingClientRect().height))).toEqual([
       13, 13, 13, 9,
@@ -197,7 +198,18 @@ describe('pen bar', () => {
     );
     await userEvent.click(within(highlighter).getByRole('radio', { name: 'Pink' }));
     expect(store().pen.presets[3]).toEqual({ ...DEFAULT_PRESETS[3], color: TINT.pink });
-    expect(await screen.findByRole('dialog', { name: 'Edit Pink highlighter' })).toBeVisible();
+    const pink = await screen.findByRole('dialog', { name: 'Edit Pink highlighter' });
+    expect(pink).toBeVisible();
+    // The Highlighter (craft spec §5.4): widths 6–18 pt, no opacity (always opaque).
+    expect(
+      within(within(pink).getByRole('radiogroup', { name: 'Width' }))
+        .getAllByRole('radio')
+        .map((r) => r.textContent),
+    ).toEqual(['6', '8', '10', '12', '15', '18']);
+    const exact = within(pink).getByRole('slider', { name: 'Exact width' });
+    expect(exact).toHaveAttribute('min', '6');
+    expect(exact).toHaveAttribute('max', '18');
+    expect(within(pink).queryByRole('slider', { name: 'Opacity' })).toBeNull();
   });
 
   it('keyboard: arrows move, Enter arms, Enter on the armed opens, Shift+Enter edits', async () => {
@@ -271,16 +283,17 @@ describe('pen bar', () => {
         ).toBeGreaterThanOrEqual(DOT_CONTRAST_MIN);
       }
     }
-    // Black, blue, red and the 40 % yellow have the ring; it is drawn in the ring colour.
-    // So does every ink of the palette.
+    // Black, blue and red have the ring; it is drawn in the ring colour. So does every ink of
+    // the palette. The opaque Highlighter tint does not need it.
     expect(
       PEN_SWATCHES.filter((s) => !needsDotRing({ color: s.color, width: 1.5, opacity: 1 })),
     ).toEqual([]);
-    expect(DEFAULT_PRESETS.map((p) => needsDotRing(p))).toEqual([true, true, true, true]);
+    expect(DEFAULT_PRESETS.map((p) => needsDotRing(p))).toEqual([true, true, true, false]);
     const marks = within(presets())
       .getAllByRole('radio')
       .map((r) => r.querySelector<HTMLElement>('span') as HTMLElement);
-    for (const mark of marks) {
+    expect(marks[3]).not.toHaveAttribute('data-ring');
+    for (const mark of marks.slice(0, 3)) {
       expect(mark).toHaveAttribute('data-ring');
       expect(getComputedStyle(mark).borderTopColor).toBe(`rgb(${ring.join(', ')})`);
     }

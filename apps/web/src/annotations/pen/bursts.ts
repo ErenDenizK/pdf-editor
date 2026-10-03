@@ -258,6 +258,8 @@ export interface PenStroke {
   readonly widths: readonly number[];
   /** The pen's style (the armed preset's). */
   readonly style: ToolStyle;
+  /** The free Highlighter's blend (`highlighter.ts`); its widths are not written. */
+  readonly blendMode?: 'multiply';
   readonly downAt: number;
   readonly upAt: number;
 }
@@ -274,6 +276,7 @@ function inkDraft(stroke: PenStroke): NewAnnotation {
     rect: roundRect(boundsOf([path], widest / 2 + 1)),
     color: style.color,
     strokeWidth: style.strokeWidth,
+    ...(stroke.blendMode ? { blendMode: stroke.blendMode } : {}),
   };
 }
 

@@ -2,8 +2,9 @@
  * The pen's presets in the Draw group (experience-redesign spec §6.2, §7.4, §10), plugged into
  * the tool bar through `registerPenSlots` (PenBar.register.ts).
  *
- * Four ink dots of their real colour: the dot's size hints the width (10, 13 or 16 px), a
- * preset below full opacity is an 18 × 9 px capsule (a highlighter), and the armed preset has
+ * Four ink dots of their real colour: the dot's size hints the width (10, 13 or 16 px), the
+ * Highlighter is an 18 × 9 px capsule (its editor offers the four tints, 6–18 pt and no
+ * opacity: it is always opaque, craft spec §5.4), and the armed preset has
  * a 2 px accent ring, not a fill, so its colour shows. The four sit in one quiet well so they
  * read as one control. These dots are the only colour that enters the chrome through content
  * (DESIGN.md §3).
@@ -47,12 +48,12 @@ import {
   needsDotRing,
   type PenPreset,
   PRESET_INDICES,
-  PRESET_LIMITS,
   type PresetIndex,
   presetLabel,
   presetName,
   presetSwatches,
-  WIDTH_STOPS,
+  presetWidthLimits,
+  presetWidthStops,
   widthText,
 } from './presets';
 import styles from './PenBar.module.css';
@@ -229,7 +230,11 @@ function PresetEditor({
   const swatchChosen = swatches.some((swatch) => swatch.color === preset.color);
   // A colour that is none of the swatches shows in the custom control (then the chosen one).
   const custom = !swatchChosen;
-  const stopChosen = WIDTH_STOPS.some((stop) => stop === preset.width);
+  // The Highlighter: its own width range (6–18 pt) and no opacity (craft spec §5.4).
+  const highlighter = isHighlighter(preset);
+  const stops = presetWidthStops(preset);
+  const limits = presetWidthLimits(preset);
+  const stopChosen = stops.some((stop) => stop === preset.width);
 
   return (
     <Popover.Root
@@ -304,7 +309,7 @@ function PresetEditor({
                 {m.pen_editor_width()}
               </span>
               <div role="radiogroup" aria-labelledby={`pen-width-${i}`} className={styles.stops}>
-                {WIDTH_STOPS.map((stop, n) => (
+                {stops.map((stop, n) => (
                   <button
                     key={stop}
                     type="button"
@@ -326,8 +331,8 @@ function PresetEditor({
               <Range
                 className={styles.range}
                 aria-label={m.pen_editor_width_exact()}
-                min={PRESET_LIMITS.width.min}
-                max={PRESET_LIMITS.width.max}
+                min={limits.min}
+                max={limits.max}
                 step={0.25}
                 value={preset.width}
                 aria-valuetext={widthText(preset.width)}
@@ -335,20 +340,22 @@ function PresetEditor({
               />
               <span className={styles.value}>{widthText(preset.width)}</span>
             </label>
-            <label className={styles.slider}>
-              <span className={styles.rowLabel}>{m.annot_opacity()}</span>
-              <Range
-                className={styles.range}
-                aria-label={m.annot_opacity()}
-                min={10}
-                max={100}
-                step={5}
-                value={Math.round(preset.opacity * 100)}
-                aria-valuetext={formatPercent(preset.opacity)}
-                onChange={(e) => edit({ opacity: Number(e.target.value) / 100 })}
-              />
-              <span className={styles.value}>{formatPercent(preset.opacity)}</span>
-            </label>
+            {highlighter ? null : (
+              <label className={styles.slider}>
+                <span className={styles.rowLabel}>{m.annot_opacity()}</span>
+                <Range
+                  className={styles.range}
+                  aria-label={m.annot_opacity()}
+                  min={10}
+                  max={100}
+                  step={5}
+                  value={Math.round(preset.opacity * 100)}
+                  aria-valuetext={formatPercent(preset.opacity)}
+                  onChange={(e) => edit({ opacity: Number(e.target.value) / 100 })}
+                />
+                <span className={styles.value}>{formatPercent(preset.opacity)}</span>
+              </label>
+            )}
 
             <button
               type="button"

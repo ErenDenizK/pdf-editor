@@ -216,6 +216,8 @@ export function fromEmbedPdf(a: PdfAnnotationObject, g: PageGeometry): Annotatio
         kind: 'ink',
         strokeWidth: ink.strokeWidth,
         paths: ink.inkList.map((stroke) => stroke.points.map((p) => deviceToUserPoint(g, p))),
+        // Read from the appearance's ExtGState: the free Highlighter (craft spec §5.4).
+        ...(ink.blendMode === PdfBlendMode.Multiply ? { blendMode: 'multiply' as const } : {}),
       };
     }
     case PdfAnnotationSubtype.SQUARE:
@@ -465,7 +467,8 @@ export function toEmbedPdf(a: NewAnnotation, id: string, g: PageGeometry): PdfAn
         strikeout: PdfAnnotationSubtype.STRIKEOUT,
         squiggly: PdfAnnotationSubtype.SQUIGGLY,
       }[a.kind];
-      const color = a.color ?? (a.kind === 'highlight' ? '#FFEB3B' : '#E53935');
+      // Defaults from the app's palette (craft spec §6): the yellow tint, the red ink.
+      const color = a.color ?? (a.kind === 'highlight' ? '#FFEA00' : '#DB1C22');
       return {
         ...base,
         type,
@@ -502,6 +505,8 @@ export function toEmbedPdf(a: NewAnnotation, id: string, g: PageGeometry): PdfAn
         strokeColor: color,
         opacity,
         strokeWidth: a.strokeWidth,
+        // EmbedPDF generates a blended appearance for any annotation with `blendMode`.
+        ...(a.blendMode === 'multiply' ? { blendMode: PdfBlendMode.Multiply } : {}),
       };
       return ink;
     }
@@ -583,7 +588,7 @@ export function toEmbedPdf(a: NewAnnotation, id: string, g: PageGeometry): PdfAn
         ...base,
         type: PdfAnnotationSubtype.TEXT,
         contents: a.contents ?? '',
-        strokeColor: a.color ?? '#FFEB3B',
+        strokeColor: a.color ?? '#FFEA00',
         opacity,
         name: icon,
       };

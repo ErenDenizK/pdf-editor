@@ -807,7 +807,8 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
   ): Promise<boolean> {
     const rawTask = this.rawTask;
     if (!rawTask) return false;
-    const write = inkAppearance(ink);
+    // A Multiply ink keeps EmbedPDF's blended constant-width appearance (craft spec §5.4).
+    const write = ink.blendMode === 'multiply' ? undefined : inkAppearance(ink);
     if (!write) {
       if (clear) {
         await rawTask(id, (raw) => clearAnnotationString(raw, ink.pageIndex, nm, INK_WIDTHS_KEY));
@@ -1018,6 +1019,7 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
     const ours =
       next.kind === 'ink' &&
       this.rawTask !== undefined &&
+      next.blendMode !== 'multiply' &&
       storedInkWidths(next.paths, next.widths) !== undefined;
     const regenerateAppearance = !ours || INK_UPDATE_REGENERATES;
     await this.run(

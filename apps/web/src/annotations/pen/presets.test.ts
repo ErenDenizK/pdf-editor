@@ -20,7 +20,10 @@ import {
   DEFAULT_PEN_SETTINGS,
   DEFAULT_PRESETS,
   dotSize,
+  HIGHLIGHTER_LIMITS,
   HIGHLIGHTER_SWATCHES,
+  HIGHLIGHTER_WIDTH_STOPS,
+  isHighlighter,
   LEGACY_PEN_PRESETS_STORAGE_KEY,
   migratePreset,
   parsePenSettings,
@@ -29,7 +32,11 @@ import {
   presetLabel,
   presetName,
   presetSwatches,
+  presetWidthLimits,
+  presetWidthStops,
+  samePreset,
   validPreset,
+  WIDTH_STOPS,
 } from './presets';
 
 const store = () => useAnnotationStore.getState();
@@ -61,7 +68,7 @@ describe('pen presets', () => {
       { color: INK.black, width: 1.5, opacity: 1 },
       { color: INK.blue, width: 1.5, opacity: 1 },
       { color: INK.red, width: 2, opacity: 1 },
-      { color: TINT.yellow, width: 12, opacity: 0.4 },
+      { color: TINT.yellow, width: 12, opacity: 1, kind: 'highlighter' },
     ]);
     expect(INK.black).toBe('#1A1A1A');
     expect(TINT.yellow).toBe('#FFEA00');
@@ -80,10 +87,14 @@ describe('pen presets', () => {
     ]);
     // A colour that is not a swatch is never named as one.
     expect(presetName(2, { color: '#123456', width: 1, opacity: 1 })).toBe('Pen 3');
-    expect(presetName(3, { color: '#123456', width: 9, opacity: 0.5 })).toBe('Highlighter 4');
+    expect(presetName(3, { color: '#123456', width: 9, opacity: 1, kind: 'highlighter' })).toBe(
+      'Highlighter 4',
+    );
     // Every ink and tint names its preset.
     expect(presetName(0, { color: INK.cyan, width: 1, opacity: 1 })).toBe('Cyan pen');
-    expect(presetName(3, { color: TINT.pink, width: 12, opacity: 0.4 })).toBe('Pink highlighter');
+    expect(presetName(3, { color: TINT.pink, width: 12, opacity: 1, kind: 'highlighter' })).toBe(
+      'Pink highlighter',
+    );
     expect([0.25, 1, 1.5, 3, 3.25, 24].map(dotSize)).toEqual([10, 10, 13, 13, 16, 16]);
   });
 
@@ -154,8 +165,13 @@ describe('pen presets', () => {
     store().armPreset(3);
     useToolStore.getState().setMode('ink');
     store().applyStyle({ color: TINT.green, strokeWidth: 8 });
-    expect(store().pen.presets[3]).toEqual({ color: TINT.green, width: 8, opacity: 0.4 });
-    expect(store().styles.ink).toMatchObject({ color: TINT.green, strokeWidth: 8, opacity: 0.4 });
+    expect(store().pen.presets[3]).toEqual({
+      color: TINT.green,
+      width: 8,
+      opacity: 1,
+      kind: 'highlighter',
+    });
+    expect(store().styles.ink).toMatchObject({ color: TINT.green, strokeWidth: 8, opacity: 1 });
 
     useToolStore.getState().setMode('rectangle');
     store().applyStyle({ color: INK.green });
@@ -184,6 +200,64 @@ describe('pen presets', () => {
     for (const preset of DEFAULT_PRESETS) {
       expect(presetSwatches(preset).map((s) => s.color)).toContain(preset.color);
     }
+  });
+});
+
+describe('the Highlighter profile (craft spec §5.4)', () => {
+  const highlighter = DEFAULT_PRESETS[3];
+
+  it('is the fourth preset: yellow tint, 12 pt, opaque', () => {
+    expect(highlighter).toEqual({ color: TINT.yellow, width: 12, opacity: 1, kind: 'highlighter' });
+    expect(DEFAULT_PRESETS.map(isHighlighter)).toEqual([false, false, false, true]);
+  });
+
+  it('keeps full opacity and a width of 6–18 pt whatever is asked', () => {
+    expect(validPreset(highlighter, { opacity: 0.4 }).opacity).toBe(1);
+    expect(validPreset(highlighter, { width: 2 }).width).toBe(HIGHLIGHTER_LIMITS.width.min);
+    expect(validPreset(highlighter, { width: 24 }).width).toBe(HIGHLIGHTER_LIMITS.width.max);
+    expect(validPreset(highlighter, { width: 9.3 }).width).toBe(9.25);
+    expect(validPreset(highlighter, { color: TINT.blue }).kind).toBe('highlighter');
+    // A pen keeps its own range and opacity.
+    expect(validPreset(DEFAULT_PRESETS[0], { width: 0.5, opacity: 0.4 })).toEqual({
+      color: INK.black,
+      width: 0.5,
+      opacity: 0.4,
+    });
+  });
+
+  it('offers its own width stops and range in the editor', () => {
+    expect(presetWidthStops(highlighter)).toBe(HIGHLIGHTER_WIDTH_STOPS);
+    expect(presetWidthStops(DEFAULT_PRESETS[0])).toBe(WIDTH_STOPS);
+    expect(presetWidthLimits(highlighter)).toEqual({ min: 6, max: 18 });
+    expect(presetWidthLimits(DEFAULT_PRESETS[1])).toEqual({ min: 0.25, max: 24 });
+    for (const stop of HIGHLIGHTER_WIDTH_STOPS) {
+      expect(stop).toBeGreaterThanOrEqual(6);
+      expect(stop).toBeLessThanOrEqual(18);
+    }
+  });
+
+  it('stays the Highlighter when stored settings are read again (version 2)', () => {
+    const parsed = parsePenSettings({
+      v: 2,
+      active: 3,
+      presets: [
+        DEFAULT_PRESETS[0],
+        DEFAULT_PRESETS[1],
+        { color: INK.red, width: 2, opacity: 0.5 },
+        // Written before the Highlighter had a kind: translucent, no kind.
+        { color: TINT.green, width: 10, opacity: 0.4 },
+      ],
+    });
+    expect(parsed.presets[3]).toEqual({
+      color: TINT.green,
+      width: 10,
+      opacity: 1,
+      kind: 'highlighter',
+    });
+    // A translucent pen stays a pen.
+    expect(parsed.presets[2]).toEqual({ color: INK.red, width: 2, opacity: 0.5 });
+    const { kind: _kind, ...asPen } = highlighter;
+    expect(samePreset(highlighter, asPen)).toBe(false);
   });
 });
 
@@ -237,8 +311,11 @@ describe('pen presets: migration of version 1 (craft spec §6)', () => {
     expect(migratePreset({ color: '#FFD400', width: 12, opacity: 0.4 })).toEqual({
       color: TINT.yellow,
       width: 12,
-      opacity: 0.4,
+      opacity: 1,
+      kind: 'highlighter',
     });
+    // Its width comes into the Highlighter's range.
+    expect(migratePreset({ color: '#FFD400', width: 3, opacity: 0.4 }).width).toBe(6);
     expect(migratePreset({ color: '#43A047', width: 8, opacity: 0.5 }).color).toBe(TINT.green);
     expect(migratePreset({ color: '#1E5BD8', width: 8, opacity: 0.5 }).color).toBe(TINT.blue);
     expect(migratePreset({ color: '#D81B60', width: 8, opacity: 0.5 }).color).toBe(TINT.pink);

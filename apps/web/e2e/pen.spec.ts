@@ -8,7 +8,13 @@
  */
 import { type CDPSession, expect, type Page, test } from '@playwright/test';
 
-import { openFixtures, recordInkWidths, sentInkWidths, useFileInputPicker } from './helpers';
+import {
+  enterEdit,
+  openFixtures,
+  recordInkWidths,
+  sentInkWidths,
+  useFileInputPicker,
+} from './helpers';
 
 function layer(page: Page, index = 0) {
   return page.locator(`[data-annotation-layer="${index}"]`);
@@ -88,6 +94,7 @@ test.describe('pen', () => {
     test.skip(browserName !== 'chromium', 'Pen and touch input through CDP (Chromium)');
     await page.goto('./');
     await openFixtures(page, ['simple-text.pdf']);
+    await enterEdit(page);
     await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
       timeout: 20_000,
     });
@@ -155,7 +162,7 @@ test.describe('pen', () => {
  */
 async function recordInkStyles(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const found: { color: string; strokeWidth: number; paths: number }[] = [];
+    const found: { color: string; strokeWidth: number; paths: number; blendMode?: string }[] = [];
     (window as unknown as { __inkStyles: typeof found }).__inkStyles = found;
     const collect = (value: unknown, depth: number): void => {
       if (typeof value !== 'object' || value === null || depth > 8) return;
@@ -174,6 +181,7 @@ async function recordInkStyles(page: Page): Promise<void> {
           color: record.color.toUpperCase(),
           strokeWidth: Number(record.strokeWidth),
           paths: record.paths.length,
+          ...(typeof record.blendMode === 'string' ? { blendMode: record.blendMode } : {}),
         });
         return;
       }
@@ -197,7 +205,9 @@ async function recordInkStyles(page: Page): Promise<void> {
 async function lastInkStyle(page: Page) {
   return page.evaluate(() =>
     (
-      window as unknown as { __inkStyles?: { color: string; strokeWidth: number; paths: number }[] }
+      window as unknown as {
+        __inkStyles?: { color: string; strokeWidth: number; paths: number; blendMode?: string }[];
+      }
     ).__inkStyles?.at(-1),
   );
 }
@@ -216,6 +226,7 @@ async function mouseStroke(page: Page, from: [number, number], to: [number, numb
 async function openSimple(page: Page): Promise<void> {
   await page.goto('./');
   await openFixtures(page, ['simple-text.pdf']);
+  await enterEdit(page);
   await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
     timeout: 20_000,
   });
@@ -303,6 +314,69 @@ test.describe('pen presets and bursts', () => {
     await expect(ink).toHaveCount(2, { timeout: 10_000 });
     await expect(rows).toHaveCount(2);
   });
+
+  test('the Highlighter (H): along a line it becomes a Highlight; on paper it stays Pen', async ({
+    browserName,
+    page,
+  }) => {
+    test.skip(browserName !== 'chromium', 'Multiply preview checked in Chromium');
+    await openSimple(page);
+    await page.locator('body').press('h');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    const highlighter = page
+      .getByRole('radiogroup', { name: 'Pen presets' })
+      .getByRole('radio', { name: 'Yellow highlighter, 12 pt' });
+    await expect(highlighter).toHaveAttribute('aria-checked', 'true');
+
+    // The longest line of the page's text, as the text layer places it.
+    const rows = page.getByTestId('text-layer').first().locator('span[data-row]');
+    await expect(rows.first()).toBeAttached({ timeout: 10_000 });
+    const boxes = (await rows.evaluateAll((spans) =>
+      spans.map((span) => {
+        const r = span.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      }),
+    )) as { x: number; y: number; width: number; height: number }[];
+    const longest = boxes.reduce((a, b) => (b.width > a.width ? b : a));
+    const lowest = Math.max(...boxes.map((b) => b.y + b.height));
+    const y = longest.y + longest.height / 2;
+    await page.mouse.move(longest.x + 3, y);
+    await page.mouse.down();
+    await page.mouse.move(longest.x + longest.width - 3, y, { steps: 20 });
+    // The preview blends with Multiply: the text stays visible under the tint.
+    await expect(layer(page)).toHaveCSS('mix-blend-mode', 'multiply');
+    await page.mouse.up();
+
+    const highlight = layer(page).locator('[data-annotation-kind="highlight"]');
+    await expect(highlight).toHaveCount(1, { timeout: 10_000 });
+    await expect(layer(page).locator('[data-annotation-kind="ink"]')).toHaveCount(0);
+    const review = page.getByRole('tab', { name: /^Review/ });
+    if ((await review.getAttribute('aria-selected')) !== 'true') await review.click();
+    const reviewRows = page.locator('[data-review-panel] [data-annotation-row]');
+    await expect(reviewRows).toHaveCount(1);
+    await expect(reviewRows.first()).toContainText('Highlight');
+    // The blend ends once the page shows the highlight.
+    await expect(layer(page)).not.toHaveCSS('mix-blend-mode', 'multiply', { timeout: 10_000 });
+
+    // On paper, below the text: free ink with Multiply, the Highlighter's tint and width.
+    const box = await layer(page).boundingBox();
+    if (!box) throw new Error('page not rendered');
+    const paperY = Math.min(lowest + 80, box.y + Math.min(box.height, 800) - 40);
+    await page.mouse.move(box.x + box.width * 0.2, paperY);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.5, paperY + 4, { steps: 12 });
+    await page.mouse.up();
+    const ink = layer(page).locator('[data-annotation-kind="ink"]');
+    await expect(ink).toHaveCount(1, { timeout: 10_000 });
+    await expect(highlight).toHaveCount(1);
+    expect(await lastInkStyle(page)).toMatchObject({
+      color: '#FFEA00',
+      strokeWidth: 12,
+      blendMode: 'multiply',
+    });
+    await expect(reviewRows).toHaveCount(2);
+    await expect(reviewRows.filter({ hasText: 'Pen' })).toHaveCount(1);
+  });
 });
 
 test.describe('lasso', () => {
@@ -315,6 +389,7 @@ test.describe('lasso', () => {
   test('Q, a lasso around a stroke, the bar, Delete removes it', async ({ page }) => {
     await page.goto('./');
     await openFixtures(page, ['simple-text.pdf']);
+    await enterEdit(page);
     await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
       timeout: 20_000,
     });

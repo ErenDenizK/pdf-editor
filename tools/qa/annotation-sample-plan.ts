@@ -244,6 +244,13 @@ const INK_PATH: readonly Point[] = [
   { x: 130, y: 530 },
   { x: 160, y: 585 },
 ];
+/** The free Highlighter (craft spec §5.4): a 12 pt Multiply stroke over a line of text. */
+const MULTIPLY_INK: readonly Point[] = [
+  { x: 72, y: 206 },
+  { x: 152, y: 206.5 },
+  { x: 232, y: 206 },
+];
+const MULTIPLY_TEXT = 'text under the highlighter';
 const SQUARE: Rect = { x: 200, y: 520, width: 80, height: 60 };
 const CIRCLE: Rect = { x: 320, y: 520, width: 80, height: 60 };
 const LINE: readonly Point[] = [
@@ -383,6 +390,33 @@ export const PLAN: readonly PlanEntry[] = [
       color: '#6A1B9A',
     },
     appearance: { region: bbox(INK_PATH, 2), placement: 'rect', colour: '#6A1B9A', span: 'both' },
+  },
+  {
+    key: 'ink-multiply',
+    label: 'ink, Multiply (free highlighter)',
+    at: [260, 203],
+    underlay: { text: MULTIPLY_TEXT, at: [78, 202] },
+    subtype: 'Ink',
+    geometry: bbox(MULTIPLY_INK, 0),
+    annotation: {
+      ...common,
+      id: id('ink-multiply'),
+      kind: 'ink',
+      pageIndex: 0,
+      rect: ZERO,
+      paths: [MULTIPLY_INK],
+      strokeWidth: 12,
+      color: '#FFEA00',
+      blendMode: 'multiply',
+    },
+    appearance: {
+      region: bbox(MULTIPLY_INK, 6),
+      placement: 'rect',
+      colour: '#FFEA00',
+      span: 'both',
+      // The bold underlay's x-height band: black under the tint stays black.
+      textVisible: { x: 80, y: 203, width: 110, height: 4 },
+    },
   },
   {
     key: 'square',
@@ -649,6 +683,11 @@ export const ROWS: readonly MatrixRow[] = [
   { title: 'Strikeout', key: 'strikeout', aspects: ['appearance', 'data'] },
   { title: 'Squiggly', key: 'squiggly', aspects: ['appearance', 'data'] },
   { title: 'Ink', key: 'ink', aspects: ['appearance', 'data'] },
+  {
+    title: 'Ink, Multiply (free highlighter): tint at full opacity, text under it stays readable',
+    key: 'ink-multiply',
+    aspects: ['appearance', 'data'],
+  },
   {
     title: 'Square (50% opacity, interior colour, text under the fill visible)',
     key: 'square',

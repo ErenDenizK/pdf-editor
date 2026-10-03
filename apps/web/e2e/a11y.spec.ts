@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 
 import { expect, type Locator, type Page, test } from '@playwright/test';
 
-import { openFixtures, showInspector, useFileInputPicker } from './helpers';
+import { enterEdit, openFixtures, showInspector, useFileInputPicker } from './helpers';
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'One engine for axe and the keys');
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -98,15 +98,16 @@ test.describe('keyboard', () => {
   }) => {
     await openSimple(page);
     await showInspector(page);
-    // An armed tool with options: the tier sits by the bar, but F6 lands on the bar.
-    await page.locator('body').press('h');
+    // An armed tool with options: the tier sits by the bar, but F6 lands on the bar. (U: H
+    // arms the Highlighter preset of the pen, whose tier is empty, craft spec §5.4.)
+    await page.locator('body').press('u');
     await expect(page.getByTestId('options-tier')).toBeVisible();
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
     const title = page.getByRole('tablist', { name: 'Open documents' });
     const navigator = page.getByRole('tablist', { name: 'Navigator views' });
     const inspector = page.locator('#right-panel');
-    const highlight = bar(page).getByRole('button', { name: 'Highlight' });
+    const highlight = bar(page).getByRole('button', { name: 'Underline' });
 
     await page.keyboard.press('F6');
     await expect(title.getByRole('tab', { selected: true })).toBeFocused();
@@ -255,6 +256,7 @@ test.describe('keyboard', () => {
 
   test('the tool bar: groups, a tool, its options tier by Tab, Esc', async ({ page }) => {
     await openSimple(page);
+    await enterEdit(page);
     await expect(bar(page).locator('button[tabindex="0"]')).toHaveCount(1);
     await bar(page).locator('button[tabindex="0"]').focus();
     await page.keyboard.press('Home');
@@ -525,6 +527,7 @@ test.describe('axe', () => {
 
   test('Read with the bar open on each group, and an options tier', async ({ page }) => {
     await openSimple(page);
+    await enterEdit(page);
     await axe(page, 'Read, the groups');
     for (const group of ['Read', 'Mark up', 'Draw', 'Fill & sign', 'Pages', 'Redact']) {
       await bar(page).getByRole('button', { name: group, exact: true }).click();
@@ -533,9 +536,9 @@ test.describe('axe', () => {
       await axe(page, `Read, ${group}`);
       await chip.click();
     }
-    await page.locator('body').press('h');
+    await page.locator('body').press('u');
     await expect(page.getByTestId('options-tier')).toBeVisible();
-    await axe(page, 'Read, Highlight options');
+    await axe(page, 'Read, Underline options');
   });
 
   test('the Review tab, the Document info sheet and the export dialog', async ({ page }) => {
@@ -663,7 +666,7 @@ test.describe('reduced motion', () => {
     expect(await longestAnimation(page)).toBeLessThanOrEqual(NONE_MS);
     await page.keyboard.press('Escape');
     // So does the options tier.
-    await page.locator('body').press('h');
+    await page.locator('body').press('u');
     const tier = page.getByTestId('options-tier');
     await expect(tier).toBeVisible();
     expect(await longestDuration(tier)).toBeLessThanOrEqual(NONE_MS);

@@ -1,6 +1,7 @@
 /**
  * Pen presets (experience-redesign spec §6.2, §9): four inks in the Draw group, each a colour,
- * a nominal width and an opacity. One preset is armed at a time; the pen draws with it. Edits
+ * a nominal width and an opacity; the fourth is the Highlighter (craft spec §5.4, `kind`).
+ * One preset is armed at a time; the pen draws with it. Edits
  * change that preset and persist per device under `PEN_PRESETS_STORAGE_KEY`; anything
  * unreadable falls back to the defaults field by field (like `parseToolStyles`).
  *
@@ -38,8 +39,14 @@ export interface PenPreset {
   readonly color: string;
   /** Nominal width, points. */
   readonly width: number;
-  /** 0.1–1. */
+  /** 0.1–1 (always 1 for the Highlighter). */
   readonly opacity: number;
+  /**
+   * `highlighter`: the Highlighter profile (craft spec §5.4, `highlighter.ts`): constant
+   * width of `HIGHLIGHTER_LIMITS.width`, a tint at full opacity drawn with Multiply, and on
+   * release a Highlight when the stroke runs along text. Absent: a pen.
+   */
+  readonly kind?: 'highlighter';
 }
 
 export type PresetIndex = 0 | 1 | 2 | 3;
@@ -60,14 +67,14 @@ export interface PenSettings {
 export const PRESET_INDICES: readonly PresetIndex[] = [0, 1, 2, 3];
 
 /**
- * Black and blue 1.5 pt, red 2 pt, the yellow highlighter tint 12 pt at 40 % (craft spec §6;
- * the Highlighter's blend and opacity change with spec §5.4).
+ * Black and blue 1.5 pt, red 2 pt, and the Highlighter in the yellow tint, 12 pt, at full
+ * opacity (craft spec §5.4, §6).
  */
 export const DEFAULT_PRESETS: PenPresets = [
   { color: INK.black, width: 1.5, opacity: 1 },
   { color: INK.blue, width: 1.5, opacity: 1 },
   { color: INK.red, width: 2, opacity: 1 },
-  { color: TINT.yellow, width: 12, opacity: 0.4 },
+  { color: TINT.yellow, width: 12, opacity: 1, kind: 'highlighter' },
 ];
 
 export const DEFAULT_PEN_SETTINGS: PenSettings = { v: 2, active: 0, presets: DEFAULT_PRESETS };
@@ -79,8 +86,26 @@ export const PRESET_LIMITS = {
   burstGapPt: { min: 6, max: 144 },
 } as const;
 
+/** The Highlighter's range (craft spec §5.4): constant width, 6–18 pt, opaque. */
+export const HIGHLIGHTER_LIMITS = {
+  width: { min: 6, max: 18 },
+} as const;
+
 /** The editor's width stops, points (spec §6.2). */
 export const WIDTH_STOPS = [0.5, 1, 1.5, 2, 3, 5, 8, 12] as const;
+
+/** The editor's width stops for the Highlighter, points. */
+export const HIGHLIGHTER_WIDTH_STOPS = [6, 8, 10, 12, 15, 18] as const;
+
+/** The width stops the editor offers for a preset. */
+export function presetWidthStops(p: PenPreset): readonly number[] {
+  return isHighlighter(p) ? HIGHLIGHTER_WIDTH_STOPS : WIDTH_STOPS;
+}
+
+/** The width range the editor's slider offers for a preset, points. */
+export function presetWidthLimits(p: PenPreset): { readonly min: number; readonly max: number } {
+  return isHighlighter(p) ? HIGHLIGHTER_LIMITS.width : PRESET_LIMITS.width;
+}
 
 export interface PenSwatch {
   readonly color: string;
@@ -115,17 +140,28 @@ function clamp(x: unknown, range: Range): number | undefined {
     : undefined;
 }
 
-/** `current` with the valid fields of `patch` applied (colour #RRGGBB, numbers clamped). */
+/**
+ * `current` with the valid fields of `patch` applied (colour #RRGGBB, numbers clamped). The
+ * kind stays unless `patch` names one; the Highlighter keeps its profile (craft spec §5.4):
+ * width within `HIGHLIGHTER_LIMITS`, full opacity.
+ */
 export function validPreset(current: PenPreset, patch: unknown): PenPreset {
   if (typeof patch !== 'object' || patch === null) return current;
   const p = patch as Record<string, unknown>;
+  const highlighter =
+    p.kind === 'highlighter' || (p.kind !== 'pen' && current.kind === 'highlighter');
+  const widthRange = highlighter ? HIGHLIGHTER_LIMITS.width : PRESET_LIMITS.width;
+  const color =
+    typeof p.color === 'string' && /^#[0-9a-f]{6}$/i.test(p.color)
+      ? p.color.toUpperCase()
+      : current.color;
+  // Widths on a quarter point, opacities on a hundredth: what the controls can set.
+  const width =
+    Math.round((clamp(p.width, widthRange) ?? clamp(current.width, widthRange) ?? 0) * 4) / 4;
+  if (highlighter) return { color, width, opacity: 1, kind: 'highlighter' };
   return {
-    color:
-      typeof p.color === 'string' && /^#[0-9a-f]{6}$/i.test(p.color)
-        ? p.color.toUpperCase()
-        : current.color,
-    // Widths on a quarter point, opacities on a hundredth: what the controls can set.
-    width: Math.round((clamp(p.width, PRESET_LIMITS.width) ?? current.width) * 4) / 4,
+    color,
+    width,
     opacity: Math.round((clamp(p.opacity, PRESET_LIMITS.opacity) ?? current.opacity) * 100) / 100,
   };
 }
@@ -135,12 +171,16 @@ function isPresetIndex(x: unknown): x is PresetIndex {
 }
 
 /**
- * A version 1 preset in the palette (craft spec §6): a translucent preset becomes the
- * highlighter with the nearest tint; an old default or swatch colour becomes the ink of its
- * role; a custom colour stays. Width and opacity stay.
+ * A version 1 preset in the palette (craft spec §5.4, §6): a translucent preset becomes the
+ * Highlighter with the nearest tint (full opacity, its width within the Highlighter's
+ * range); an old default or swatch colour becomes the ink of its role; a custom colour
+ * stays. A pen's width and opacity stay.
  */
 export function migratePreset(p: PenPreset): PenPreset {
-  const color = isHighlighter(p) ? nearestTint(p.color).hex : migrateLegacyColor(p.color, 'ink');
+  if (isHighlighter(p) || p.opacity < 1) {
+    return validPreset(p, { color: nearestTint(p.color).hex, kind: 'highlighter' });
+  }
+  const color = migrateLegacyColor(p.color, 'ink');
   return color === p.color ? p : { ...p, color };
 }
 
@@ -157,8 +197,12 @@ export function parsePenSettings(value: unknown): PenSettings {
   const legacy = v.v === 1;
   const stored = Array.isArray(v.presets) ? (v.presets as unknown[]) : [];
   const presets = DEFAULT_PRESETS.map((preset, i) => {
-    const parsed = validPreset(preset, stored[i]);
-    return legacy ? migratePreset(parsed) : parsed;
+    const raw = stored[i];
+    if (!legacy) return validPreset(preset, raw);
+    // Version 1 had no kinds: a stored preset is read as a pen and its opacity decides.
+    if (typeof raw !== 'object' || raw === null) return preset;
+    const { kind: _kind, ...pen } = preset;
+    return migratePreset(validPreset(pen, raw));
   }) as [PenPreset, PenPreset, PenPreset, PenPreset];
   const pause = clamp(v.burstPauseMs, PRESET_LIMITS.burstPauseMs);
   const gap = clamp(v.burstGapPt, PRESET_LIMITS.burstGapPt);
@@ -187,7 +231,7 @@ export function withPreset(
 }
 
 export function samePreset(a: PenPreset, b: PenPreset): boolean {
-  return a.color === b.color && a.width === b.width && a.opacity === b.opacity;
+  return a.color === b.color && a.width === b.width && a.opacity === b.opacity && a.kind === b.kind;
 }
 
 /** The tool style fields a preset sets (the pen's `styles.ink`). */
@@ -222,9 +266,9 @@ export function dotSize(width: number): 10 | 13 | 16 {
   return 16;
 }
 
-/** A preset below full opacity is a highlighter (drawn as a short capsule in the bar). */
+/** The Highlighter (craft spec §5.4; drawn as a short capsule in the bar). */
 export function isHighlighter(p: PenPreset): boolean {
-  return p.opacity < 1;
+  return p.kind === 'highlighter';
 }
 
 /**

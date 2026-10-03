@@ -10,7 +10,7 @@ import type { Annotation, InkAnnotation } from '@pdf-editor/engine';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import simpleUrl from '../../../../../test/fixtures/simple-text.pdf?url';
-import { fixtureFile } from '../../../test/store-harness';
+import { enterEditMode, fixtureFile } from '../../../test/store-harness';
 import { currentPlatform } from '../../commands/shortcuts';
 import { useAnnouncer } from '../../shell/announcer';
 import { resetWorkspace, useWorkspaceStore } from '../../state/workspace-store';
@@ -200,6 +200,7 @@ const model = () => useWorkspaceStore.getState();
 
 async function openSimple(): Promise<PageTarget[]> {
   const report = await model().openFiles([await fixtureFile(simpleUrl, 'simple.pdf')]);
+  enterEditMode();
   expect(report.skipped).toEqual([]);
   const doc = getActiveDocument(model().workspace);
   return (doc?.pages ?? []).map((page, i) => {

@@ -69,6 +69,7 @@ rewritten on every run; the versions in its header are the ones that ran.
 | Strikeout | ok | ok |
 | Squiggly | ok | ok |
 | Ink | ok | ok |
+| Ink, Multiply (free highlighter): tint at full opacity, text under it stays readable | ok | ok |
 | Square (50% opacity, interior colour, text under the fill visible) | ok | ok |
 | Circle | ok | ok |
 | Line with open arrow | ok | ok |
@@ -88,7 +89,7 @@ rewritten on every run; the versions in its header are the ones that ran.
 | Ink, variable width (appearance) | ok | ok |
 | Ink `/BS /W` equals the nominal width | ok | ok |
 
-45 ok, 1 differs, 0 fail (of 46). Contact sheets: [pdfium](samples/annotations-matrix-pdfium.png), [pdfjs](samples/annotations-matrix-pdfjs.png).
+47 ok, 1 differs, 0 fail (of 48). Contact sheets: [pdfium](samples/annotations-matrix-pdfium.png), [pdfjs](samples/annotations-matrix-pdfjs.png).
 <!-- matrix:auto:end -->
 
 Contact sheets (each checked region outlined: green ok, amber differs, red fail):
