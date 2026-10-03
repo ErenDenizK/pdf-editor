@@ -4,12 +4,13 @@
  * `public/icons/glyph.svg` and `public/icons/app-icon.svg`.
  *
  * In the title bar the glyph is the Home button (experience-redesign §3): it shows Home,
- * like `0` and the palette's "Home".
+ * like `0` and the palette's "Show Home".
  */
 import { commandRegistry } from '../commands/registry';
 import { currentPlatform, toAriaKeyShortcut } from '../commands/shortcuts';
 import { m } from '../i18n';
 import { useUiStore } from '../state/ui-store';
+import { useHasDocuments } from '../state/workspace-store';
 import { Tooltip } from '../ui/Tooltip';
 import styles from './AppGlyph.module.css';
 import { useCommandShortcut } from './use-command-shortcut';
@@ -27,7 +28,9 @@ export function AppGlyph({ size = 16 }: { readonly size?: number }) {
 
 /** The title bar's glyph as the Home button; `className` places it in the bar. */
 export function HomeButton({ className }: { readonly className?: string | undefined }) {
-  const onHome = useUiStore((s) => s.viewMode === 'home');
+  // Home is current while it shows, also as the empty state (no document open).
+  const destinationHome = useUiStore((s) => s.destination === 'home');
+  const onHome = !useHasDocuments() || destinationHome;
   const shortcut = useCommandShortcut('view.home');
   return (
     <div className={className}>

@@ -16,7 +16,7 @@ import type { SearchHit } from '@pdf-editor/engine';
 import { create } from 'zustand';
 
 import { getEngineService } from '../engine/engine-service';
-import { type LeftPanelView, useUiStore } from '../state/ui-store';
+import { isPageView, type LeftPanelView, useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 
 export interface DocumentHit {
@@ -389,7 +389,7 @@ export function requestSearchFocus(): void {
 export function revealHit(hit: DocumentHit | undefined): void {
   if (!hit) return;
   const ui = useUiStore.getState();
-  if (ui.viewMode !== 'read') ui.setViewMode('read');
+  if (!isPageView(ui)) ui.setViewMode('read');
   const bounds = hitBounds(hit);
   useViewStore
     .getState()

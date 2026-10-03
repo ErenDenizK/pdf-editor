@@ -213,7 +213,7 @@ test('screenshots of the shell, Home and Document info (design review)', async (
   await expect(sheet).toHaveCount(0);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
-  await page.locator('body').press('2');
+  await page.locator('body').press('3');
   await expect(page.locator('[role="grid"]').first()).toBeVisible();
   await expect(page.locator('[role="grid"] canvas[data-state="rendered"]').first()).toBeVisible({
     timeout: 20_000,
@@ -238,7 +238,7 @@ test('screenshots of the shell, Home and Document info (design review)', async (
   await expect(rendered.first()).toBeVisible({ timeout: 20_000 });
   await page.waitForTimeout(400);
   await shot('m0-integration-read-1440.png');
-  await page.locator('body').press('2');
+  await page.locator('body').press('3');
   await expect(page.locator('[role="grid"] canvas[data-state="rendered"]').first()).toBeVisible({
     timeout: 20_000,
   });

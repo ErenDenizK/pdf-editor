@@ -1,8 +1,11 @@
+import type { DocumentId } from '@pdf-editor/document-model';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_LAYOUT,
+  documentModeOf,
   isNavigatorShowing,
+  isPageView,
   LAYOUT_STORAGE_KEY,
   LEFT_PANEL_WIDTH,
   LEGACY_LAYOUT_STORAGE_KEY,
@@ -13,6 +16,7 @@ import {
   nextZoomLevel,
   parseLayout,
   RIGHT_PANEL_WIDTH,
+  stageView,
   useUiStore,
 } from './ui-store';
 
@@ -173,6 +177,89 @@ describe('navigator state', () => {
       reviewFilter: 'fields',
     });
     localStorage.removeItem(LAYOUT_STORAGE_KEY);
+  });
+});
+
+describe('Home, views and document modes (ADR-0019 §1–§2)', () => {
+  const a = 'doc-a' as DocumentId;
+  const b = 'doc-b' as DocumentId;
+  afterEach(() => {
+    useUiStore.setState({
+      destination: 'document',
+      viewMode: 'read',
+      documentMode: {},
+      lastView: {},
+    });
+  });
+
+  it('starts on the document view, every document in Read', () => {
+    const state = useUiStore.getState();
+    expect(state.destination).toBe('document');
+    expect(state.viewMode).toBe('read');
+    expect(documentModeOf(state, a)).toBe('read');
+    expect(documentModeOf(state, null)).toBe('read');
+    expect(isPageView(state)).toBe(true);
+    expect(stageView(state)).toBe('read');
+  });
+
+  it('shows Home without forgetting the view, and leaves it by setting a view', () => {
+    useUiStore.getState().setViewMode('arrange');
+    useUiStore.getState().showHome();
+    let state = useUiStore.getState();
+    expect(state.destination).toBe('home');
+    expect(state.viewMode).toBe('arrange');
+    expect(stageView(state)).toBe('home');
+    expect(isPageView(state)).toBe(false);
+    // A view set from Home (a command, a panel row) shows that view.
+    useUiStore.getState().setViewMode('read');
+    state = useUiStore.getState();
+    expect(stageView(state)).toBe('read');
+    expect(isPageView(state)).toBe(true);
+  });
+
+  it('leaves Home for a document in its last view, Read the first time', () => {
+    useUiStore.getState().rememberView(a, 'arrange');
+    useUiStore.getState().showHome();
+    useUiStore.getState().showDocument(a);
+    expect(stageView(useUiStore.getState())).toBe('arrange');
+    useUiStore.getState().showHome();
+    useUiStore.getState().showDocument(b);
+    expect(stageView(useUiStore.getState())).toBe('read');
+    expect(useUiStore.getState().lastView).toEqual({ [a]: 'arrange' });
+  });
+
+  it('keeps Read or Edit per document; the view is shared', () => {
+    useUiStore.getState().setDocumentMode(a, 'edit');
+    const state = useUiStore.getState();
+    expect(documentModeOf(state, a)).toBe('edit');
+    expect(documentModeOf(state, b)).toBe('read');
+    expect(state.viewMode).toBe('read');
+    // Setting the same mode again changes nothing (no new state for subscribers).
+    const before = useUiStore.getState().documentMode;
+    useUiStore.getState().setDocumentMode(a, 'edit');
+    expect(useUiStore.getState().documentMode).toBe(before);
+    useUiStore.getState().setDocumentMode(a, 'read');
+    expect(documentModeOf(useUiStore.getState(), a)).toBe('read');
+  });
+
+  it('never persists the destination, views or modes; a stored stray view is ignored', () => {
+    localStorage.setItem(
+      LAYOUT_STORAGE_KEY,
+      JSON.stringify({ ...DEFAULT_LAYOUT, viewMode: 'home', destination: 'home' }),
+    );
+    expect(loadLayout()).toEqual(DEFAULT_LAYOUT);
+    useUiStore.getState().showHome();
+    useUiStore.getState().setDocumentMode(a, 'edit');
+    useUiStore.getState().setReviewFilter('comments');
+    const stored = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) ?? 'null') as object;
+    expect(Object.keys(stored).sort()).toEqual(Object.keys(DEFAULT_LAYOUT).sort());
+    localStorage.removeItem(LAYOUT_STORAGE_KEY);
+    useUiStore.setState({ ...DEFAULT_LAYOUT });
+  });
+
+  it('no longer carries the placeholder tool state', () => {
+    expect('tool' in useUiStore.getState()).toBe(false);
+    expect('setTool' in useUiStore.getState()).toBe(false);
   });
 });
 

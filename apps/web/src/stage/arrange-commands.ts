@@ -20,7 +20,7 @@ import { pickFiles } from '../files/open-files';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { useSelectionStore } from '../state/selection-store';
-import { useUiStore } from '../state/ui-store';
+import { stageView, useUiStore } from '../state/ui-store';
 import { tabItems, useWorkspaceStore } from '../state/workspace-store';
 import {
   copyPages,
@@ -49,7 +49,7 @@ import {
 
 const ui = () => useUiStore.getState();
 const model = () => useWorkspaceStore.getState();
-const inArrange = () => ui().viewMode === 'arrange';
+const inArrange = () => stageView(ui()) === 'arrange';
 const hasTargets = () => targetPages().length > 0;
 const hasClipboard = () => (useSelectionStore.getState().clipboard?.pageIds.length ?? 0) > 0;
 /** The section a section command acts on: the invoking section, else the active tab. */

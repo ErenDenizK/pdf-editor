@@ -18,7 +18,7 @@ import { type CreatedFieldKind, getActiveDocument } from '@pdf-editor/document-m
 import type { CommandRegistry } from '../../commands/registry';
 import { m } from '../../i18n';
 import { announce } from '../../shell/announcer';
-import { useUiStore } from '../../state/ui-store';
+import { isPageView, stageView, useUiStore } from '../../state/ui-store';
 import { useViewStore } from '../../state/view-store';
 import { useWorkspaceStore } from '../../state/workspace-store';
 import { useToolStore } from '../../viewer/tool-store';
@@ -104,7 +104,7 @@ function returnPlacingFocus(): void {
 export function startPlacing(kind: CreatedFieldKind): void {
   if (!getActiveDocument(useWorkspaceStore.getState().workspace)) return;
   const ui = useUiStore.getState();
-  if (ui.viewMode !== 'read') ui.setViewMode('read');
+  if (!isPageView(ui)) ui.setViewMode('read');
   useToolStore.getState().setMode('select');
   useFormStore.getState().setActive(null);
   const store = useCreateStore.getState();
@@ -127,7 +127,7 @@ export function setDesign(on: boolean): void {
   if (store.design === on) return;
   if (on) {
     const ui = useUiStore.getState();
-    if (ui.viewMode !== 'read') ui.setViewMode('read');
+    if (!isPageView(ui)) ui.setViewMode('read');
     useToolStore.getState().setMode('select');
     useFormStore.getState().setActive(null);
   }
@@ -142,7 +142,7 @@ const stop = () => {
 };
 
 useUiStore.subscribe((state, previous) => {
-  if (state.viewMode !== previous.viewMode) stop();
+  if (stageView(state) !== stageView(previous)) stop();
 });
 // Placing ended (placed, cancelled, stopped): forget the invoker.
 useCreateStore.subscribe((state, previous) => {

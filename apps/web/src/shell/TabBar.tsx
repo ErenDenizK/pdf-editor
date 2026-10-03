@@ -6,6 +6,9 @@
  * is a pointer affordance and is hidden from assistive tech because it would otherwise
  * be an interactive element nested in a tab; keyboard and screen-reader users close with
  * Delete (announced through `aria-keyshortcuts`) or the "Close tab" command.
+ *
+ * On Home no tab is selected (the glyph is current); the arrows still move between tabs,
+ * and a click, Enter or Space shows the tab's document in its last view and mode.
  */
 import type { DocumentId } from '@pdf-editor/document-model';
 import { Download, PanelRight, Plus, Search, X } from 'lucide-react';
@@ -15,6 +18,7 @@ import { openFilesFromPicker } from '../commands/app-commands';
 import { commandRegistry } from '../commands/registry';
 import { currentPlatform, toAriaKeyShortcut } from '../commands/shortcuts';
 import { FurnitureDialogs } from '../furniture';
+import { showTab } from '../home/home-actions';
 import { m } from '../i18n';
 import { InlineTitleEditor } from '../stage/InlineTitleEditor';
 import { startRename } from '../stage/section-operations';
@@ -42,6 +46,8 @@ export function TabBar() {
   const setActiveTab = useWorkspaceStore((s) => s.setActive);
   const closeDocument = useWorkspaceStore((s) => s.closeDocument);
   const rightPanelOpen = useUiStore((s) => s.rightPanelOpen);
+  // On Home no tab is selected: the stage shows the open files, not a document (ADR-0019 §1).
+  const onHome = useUiStore((s) => s.destination === 'home');
   const renamingTab = useUiStore((s) =>
     s.renaming?.surface === 'tab' ? s.renaming.documentId : null,
   );
@@ -106,7 +112,8 @@ export function TabBar() {
         {documents.length > 0 ? (
           <div role="tablist" aria-label={m.tabs_label()} className={styles.tablist}>
             {documents.map((doc) => {
-              const selected = doc.id === activeTabId;
+              const active = doc.id === activeTabId;
+              const selected = active && !onHome;
               if (doc.id === renamingTab) {
                 return (
                   <div
@@ -139,10 +146,11 @@ export function TabBar() {
                       aria-selected={selected}
                       aria-controls={STAGE_ID}
                       aria-keyshortcuts="Delete F2"
-                      tabIndex={selected ? 0 : -1}
+                      tabIndex={active ? 0 : -1}
                       className={styles.tab}
                       onKeyDown={onKeyDown}
-                      onClick={() => setActiveTab(doc.id)}
+                      // On Home, the document in the view and mode it was last shown in.
+                      onClick={() => showTab(doc.id)}
                       onDoubleClick={() => startRename(doc.id, 'tab')}
                       onMouseDown={(event) => {
                         // Middle click closes, as in browsers.

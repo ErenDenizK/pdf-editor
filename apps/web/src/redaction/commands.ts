@@ -5,14 +5,14 @@
  */
 import type { CommandRegistry } from '../commands/registry';
 import { m } from '../i18n';
-import { isNavigatorShowing, useUiStore } from '../state/ui-store';
+import { isNavigatorShowing, isPageView, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useSearchStore } from '../viewer/search';
 import { useToolStore } from '../viewer/tool-store';
 import { currentMarks, findSensitiveData, markSearchHits, stepMark } from './review';
 
 const readMode = () =>
-  useUiStore.getState().viewMode === 'read' &&
+  isPageView(useUiStore.getState()) &&
   useWorkspaceStore.getState().workspace.documentOrder.length > 0;
 
 /** Opens the Redactions panel in the left rail. */

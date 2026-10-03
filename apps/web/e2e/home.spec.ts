@@ -120,7 +120,9 @@ test('a new user merges two files opened with "Open files" in under five actions
   await expect(page.getByTestId('home')).toBeVisible();
   await expect(cards(page)).toHaveCount(2);
   await expect(cards(page).and(page.getByRole('option', { selected: true }))).toHaveCount(2);
-  await expect(page.getByRole('radio', { name: 'Home' })).toBeChecked();
+  // Home is a view of the files: no mode control, the glyph current (ADR-0019 §1).
+  await expect(page.getByRole('radiogroup', { name: 'View mode' })).toHaveCount(0);
+  await expect(page.getByTestId('home-button')).toHaveAttribute('aria-current', 'page');
 
   // 3. Combine. 4. Confirm the dialog's default.
   await user.click(page.getByRole('button', { name: 'Combine 2 files' }));
@@ -141,10 +143,12 @@ test('the Files tab shares Home’s selection, combines and leads to Home', asyn
   await openFixtures(page, ['simple-text.pdf', 'rotated-pages.pdf', 'mixed-sizes.pdf']);
   await expect(page.getByTestId('home')).toBeVisible();
 
-  // Read keeps the Home segment: a labelled way back.
-  await page.getByRole('radio', { name: 'Read' }).click();
+  // On Home no tab is selected; a tab click leaves Home for that document, in Read.
+  await expect(documentTabs(page).and(page.getByRole('tab', { selected: true }))).toHaveCount(0);
+  await documentTabs(page).first().click();
   await expect(page.getByTestId('home')).toHaveCount(0);
-  await expect(page.getByRole('radio', { name: 'Home' })).not.toBeChecked();
+  await expect(page.getByRole('radio', { name: 'Read, locked' })).toBeChecked();
+  await expect(page.getByTestId('home-button')).not.toHaveAttribute('aria-current', 'page');
 
   await page.getByRole('tab', { name: /^Files/ }).click();
   const panel = page.locator('#left-panel');
@@ -246,7 +250,8 @@ test('the keyboard path: Tab to the cards, arrows, Space and Enter', async ({ pa
   await openFixtures(page, ['simple-text.pdf', 'rotated-pages.pdf', 'mixed-sizes.pdf']);
   // Opened together on an empty app: Home, the new cards selected.
   await expect(page.getByTestId('home')).toBeVisible();
-  await expect(page.getByRole('radio', { name: 'Home' })).toBeChecked();
+  await expect(page.getByRole('radiogroup', { name: 'View mode' })).toHaveCount(0);
+  await expect(page.getByTestId('home-button')).toHaveAttribute('aria-current', 'page');
   await expect(cards(page).and(page.getByRole('option', { selected: true }))).toHaveCount(3);
 
   // Tab from the last toolbar button into the cards: one card is in the tab order.
@@ -274,8 +279,8 @@ test('the keyboard path: Tab to the cards, arrows, Space and Enter', async ({ pa
   await expect(
     documentTabs(page).and(page.getByRole('tab', { selected: true })),
   ).toHaveAccessibleName(/mixed-sizes/);
-  await expect(page.getByRole('radio', { name: 'Read' })).toBeChecked();
-  await expect(page.getByRole('radio', { name: 'Home' })).not.toBeChecked();
+  await expect(page.getByRole('radio', { name: 'Read, locked' })).toBeChecked();
+  await expect(page.getByTestId('home-button')).not.toHaveAttribute('aria-current', 'page');
 
   // The app glyph leads back to Home.
   await page.getByTestId('home-button').click();

@@ -13,7 +13,7 @@ import { PrivacyIndicator } from '../privacy/PrivacyIndicator';
 import { SignatureStatusBadge } from '../signatures/SignatureBadge';
 import { useShownSections } from '../stage/arrange-data';
 import { useSelectionStore } from '../state/selection-store';
-import { MAX_ZOOM, MIN_ZOOM, useUiStore } from '../state/ui-store';
+import { MAX_ZOOM, MIN_ZOOM, stageView, useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 import { useActiveDocument, useHasDocuments, useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
@@ -85,7 +85,8 @@ export function StatusBar() {
   const hasDocuments = useHasDocuments();
   const doc = useActiveDocument();
   const opening = useWorkspaceStore((s) => s.opening);
-  const viewMode = useUiStore((s) => s.viewMode);
+  // Home shows the page count, as Arrange does; only a document view has a current page.
+  const viewMode = useUiStore(stageView);
   const currentPage = useViewStore((s) => s.currentPage);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const selection = useSelectionSummary();

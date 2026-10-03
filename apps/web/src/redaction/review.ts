@@ -16,7 +16,7 @@ import { type PageTarget, useAnnotationStore } from '../annotations/annotation-s
 import { pageText } from '../annotations/page-text';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
-import { useUiStore } from '../state/ui-store';
+import { isPageView, useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useSearchStore } from '../viewer/search';
@@ -59,7 +59,7 @@ export function revealMark(entry: MarkEntry): void {
     workspace.setActive(entry.documentId);
   }
   const ui = useUiStore.getState();
-  if (ui.viewMode !== 'read') ui.setViewMode('read');
+  if (!isPageView(ui)) ui.setViewMode('read');
   useViewStore.getState().scrollToPage(entry.pageId, { reveal: markBounds(entry.mark.quads) });
   useAnnotationStore.getState().select({ ...targetOf(entry), ids: [entry.mark.id] });
   useRedactionStore.getState().setCurrent(entry.key);

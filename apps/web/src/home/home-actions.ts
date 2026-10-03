@@ -1,6 +1,7 @@
 /**
- * What Home's cards and buttons do (experience-redesign §3). Combining always goes through
- * the merge dialog, card drops included (§13 decision 2): nothing merges without it.
+ * What Home's cards and buttons do (experience-redesign §3), and how the shell moves between
+ * Home and a document (ADR-0019 §1–§2). Combining always goes through the merge dialog, card
+ * drops included (§13 decision 2): nothing merges without it.
  */
 import {
   closeDocument,
@@ -14,7 +15,7 @@ import { useCompareStore } from '../compare/compare-store';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { openOperationDialog } from '../stage/operation-dialogs-store';
-import { useUiStore } from '../state/ui-store';
+import { type DocumentMode, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { liveSelection } from './home-model';
 
@@ -22,9 +23,72 @@ const ui = () => useUiStore.getState();
 const model = () => useWorkspaceStore.getState();
 const order = () => model().workspace.documentOrder;
 
-/** Shows Home (`0`, the app glyph, the palette). */
+/** Shows Home (`0`, the app glyph, the palette, "Show Home"). */
 export function showHome(): void {
-  ui().setViewMode('home');
+  ui().showHome();
+}
+
+/**
+ * Makes a document the active tab (its tab, its Files row). On Home this leaves Home for the
+ * document in the view and mode it was last shown in (ADR-0019 §1); elsewhere the view stays.
+ */
+export function showTab(id: DocumentId): void {
+  if (model().workspace.documents[id] === undefined) return;
+  model().setActive(id);
+  if (ui().destination === 'home') ui().showDocument(id);
+}
+
+/**
+ * Read (locked) or Edit for the active document (`1`, `2`, the mode control): the page view
+ * in both, so switching never moves the page (ADR-0019 §2). Announced.
+ */
+export function showDocumentMode(mode: DocumentMode): void {
+  const id = model().workspace.activeDocument;
+  if (id === undefined) return;
+  ui().setDocumentMode(id, mode);
+  ui().setViewMode('read');
+  announce(mode === 'read' ? m.read_locked_announce() : m.mode_edit_long());
+}
+
+/**
+ * Keeps the shell in step with the open documents: remembers the view each document is
+ * shown in (for leaving Home by its tab) and, once the last document closes, starts over as
+ * on a fresh start, so Home's empty state shows and the next file opens in Read.
+ */
+export function watchDestination(): () => void {
+  const remember = () => {
+    const state = ui();
+    const id = model().workspace.activeDocument;
+    // Compare is entered with its own command; a tab click never lands in it.
+    if (state.destination !== 'document' || id === undefined || state.viewMode === 'compare') {
+      return;
+    }
+    state.rememberView(id, state.viewMode);
+  };
+  const offUi = useUiStore.subscribe((state, previous) => {
+    if (state.viewMode !== previous.viewMode || state.destination !== previous.destination) {
+      remember();
+    }
+  });
+  const offWorkspace = useWorkspaceStore.subscribe((state, previous) => {
+    if (state.workspace === previous.workspace) return;
+    if (state.workspace.documentOrder.length === 0) {
+      if (previous.workspace.documentOrder.length > 0) {
+        useUiStore.setState({
+          destination: 'document',
+          viewMode: 'read',
+          documentMode: {},
+          lastView: {},
+        });
+      }
+      return;
+    }
+    if (state.workspace.activeDocument !== previous.workspace.activeDocument) remember();
+  });
+  return () => {
+    offUi();
+    offWorkspace();
+  };
 }
 
 /** Selects cards on Home and says how many are selected. */
@@ -43,13 +107,13 @@ export function showOpened(
   context: { readonly wasEmpty: boolean },
 ): void {
   if (ids.length === 0) return;
-  const onHome = ui().viewMode === 'home';
+  const onHome = ui().destination === 'home';
   if (context.wasEmpty && ids.length === 1) {
     if (onHome) ui().setViewMode('read');
     return;
   }
   if (onHome || context.wasEmpty) {
-    ui().setViewMode('home');
+    ui().showHome();
     selectOnHome(ids);
   }
 }

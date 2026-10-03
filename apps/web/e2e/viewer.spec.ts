@@ -213,8 +213,13 @@ test('the status bar keeps page, privacy and zoom; the view switch lives over th
   await expect(status.getByRole('button', { name: 'Zoom in' })).toBeVisible();
   await expect(status.getByRole('button', { name: 'Read mode' })).toHaveCount(0);
   await expect(status.getByRole('button', { name: 'Arrange pages' })).toHaveCount(0);
+  // Read (locked) · Edit · Arrange; Home is the app glyph, not a segment (ADR-0019 §1–§2).
   const modes = page.getByRole('radiogroup', { name: 'View mode' }).getByRole('radio');
-  await expect(modes).toHaveText(['Home', 'Read', 'Arrange']);
+  await expect(modes).toHaveText(['Read', 'Edit', 'Arrange']);
+  await expect(modes.first()).toHaveAccessibleName('Read, locked');
+  for (const [index, key] of ['1', '2', '3'].entries()) {
+    await expect(modes.nth(index)).toHaveAttribute('aria-keyshortcuts', key);
+  }
 });
 
 /** A PDF with 500 annotations, 50 on each of 10 pages: notes, squares and pen strokes. */
@@ -314,7 +319,7 @@ const readBitmap = (page: Page) =>
 // stayed blank until something (a window resize) re-rendered it.
 test('Read mode renders pages after Arrange without a resize', async ({ page }) => {
   await expect(readBitmap(page)).toBeVisible();
-  await page.keyboard.press('2');
+  await page.keyboard.press('3');
   await expect(page.locator('[data-read-viewport]')).toHaveCount(0);
   await page.keyboard.press('1');
   await expect(page.locator('[data-read-viewport] [data-page-index="0"]')).toBeVisible();

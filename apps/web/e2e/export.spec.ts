@@ -34,7 +34,7 @@ test('drop two files, rotate a page, export and download a verified PDF', async 
   await expect(documentTabs).toHaveCount(2);
 
   // Arrange mode, select the first page of the active document, rotate it right.
-  await page.keyboard.press('2');
+  await page.keyboard.press('3');
   const cell = page.locator('[role="gridcell"][data-page-id]').first();
   await expect(cell).toBeVisible();
   await cell.click();

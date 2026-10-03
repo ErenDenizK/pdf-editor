@@ -19,7 +19,7 @@ import { type KeyboardEvent, lazy, Suspense, useRef, useState } from 'react';
 import { commandRegistry } from '../commands/registry';
 import { currentPlatform, toAriaKeyShortcut } from '../commands/shortcuts';
 import { formatNumber, m } from '../i18n';
-import { LEFT_PANEL_WIDTH, type LeftPanelView, useUiStore } from '../state/ui-store';
+import { LEFT_PANEL_WIDTH, type LeftPanelView, stageView, useUiStore } from '../state/ui-store';
 import { useActiveDocument, useHasDocuments, useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
 import { ResizeHandle } from '../ui/ResizeHandle';
@@ -93,7 +93,7 @@ export function LeftRail() {
   const toggleShortcut = useCommandShortcut('view.toggleLeftPanel');
   const shortcutsShortcut = useCommandShortcut('help.shortcuts');
   const railRef = useRef<HTMLDivElement>(null);
-  const comparing = useUiStore((s) => s.viewMode === 'compare');
+  const comparing = useUiStore((s) => stageView(s) === 'compare');
   const tabs = comparing ? [...TABS, CHANGES_TAB] : TABS;
   const counts = useTabCounts();
 

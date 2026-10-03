@@ -45,23 +45,25 @@ test('compare-a against compare-b: the seeded changes, the heat map and the repo
   page,
 }) => {
   await setUp(page);
-  // Two files opened together land on Home (experience-redesign §3); Read is one segment on.
+  // Two files opened together land on Home (experience-redesign §3), which has no mode
+  // control (ADR-0019 §1); 1 shows the active document in Read.
   const compareSegment = page.getByRole('radio', { name: 'Compare', exact: true });
-  await expect(page.getByRole('radio', { name: 'Home', exact: true })).toBeChecked();
-  await page.getByRole('radio', { name: 'Read', exact: true }).click();
-  await expect(page.getByRole('radio', { name: 'Read', exact: true })).toBeChecked();
-  // No comparison open: the view switch (Home · Read · Arrange) has no Compare segment and
-  // its arrows skip it.
+  const read = page.getByRole('radio', { name: 'Read, locked' });
+  await expect(page.getByRole('radiogroup', { name: 'View mode' })).toHaveCount(0);
+  await page.keyboard.press('1');
+  await expect(read).toBeChecked();
+  // No comparison open: the control (Read · Edit · Arrange) has no Compare segment and its
+  // arrows skip it.
   await expect(compareSegment).toHaveCount(0);
-  await page.getByRole('radio', { name: 'Read', exact: true }).focus();
+  await read.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('radio', { name: 'Edit', exact: true })).toBeChecked();
   await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('radio', { name: 'Arrange', exact: true })).toBeChecked();
   await page.keyboard.press('ArrowRight');
-  await expect(page.getByRole('radio', { name: 'Home', exact: true })).toBeChecked();
-  await page.keyboard.press('ArrowRight');
-  await expect(page.getByRole('radio', { name: 'Read', exact: true })).toBeChecked();
-  // 3 switches to the Compare view; the Changes panel opens in the left rail.
-  await page.keyboard.press('3');
+  await expect(read).toBeChecked();
+  // 4 switches to the Compare view; the Changes panel opens in the left rail.
+  await page.keyboard.press('4');
   await expect(compareSegment).toBeChecked();
   const setup = page.getByTestId('compare-setup');
   await expect(setup).toBeVisible();
@@ -143,11 +145,11 @@ test('compare-a against compare-b: the seeded changes, the heat map and the repo
   // Esc leaves the view; the (read-only) result is kept and its segment returns to it.
   await page.locator('[data-compare-viewport]').focus();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('radio', { name: 'Read', exact: true })).toBeChecked();
+  await expect(read).toBeChecked();
   await expect(compareSegment).toBeVisible();
 
   // A page command on a compared document: the result is marked out of date.
-  await page.keyboard.press('2');
+  await page.keyboard.press('3');
   const cell = page.locator('[role="gridcell"][data-page-id]').first();
   await expect(cell).toBeVisible();
   await cell.click();
@@ -169,7 +171,7 @@ test('compare-a against compare-b: the seeded changes, the heat map and the repo
   // New comparison releases it: once the view is left, the segment is gone.
   await view.getByRole('button', { name: 'New comparison' }).click();
   await expect(page.getByTestId('compare-setup')).toBeVisible();
-  await page.getByRole('radio', { name: 'Read', exact: true }).click();
-  await expect(page.getByRole('radio', { name: 'Read', exact: true })).toBeChecked();
+  await read.click();
+  await expect(read).toBeChecked();
   await expect(compareSegment).toHaveCount(0);
 });

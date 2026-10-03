@@ -1,6 +1,7 @@
 /**
- * UI state: panels, view mode, zoom, light-table cell size, overlays, recents. Document
- * content (including the active tab) is not here; see `workspace-store.ts`.
+ * UI state: panels, Home or a document, view mode, document modes (Read or Edit), zoom,
+ * light-table cell size, overlays, recents. Document content (including the active tab) is
+ * not here; see `workspace-store.ts`.
  *
  * Panel layout is persisted to localStorage (see `safe-storage.ts`); everything else is
  * per session.
@@ -11,10 +12,20 @@ import { create } from 'zustand';
 import { readJson, writeJson } from './safe-storage';
 
 /**
- * `compare`: the Compare view (spec recognize-and-compare §2.2), a third stage view.
- * `home`: the open files as cards (experience-redesign §3), also the empty state.
+ * The view of the open documents (ADR-0019 §2): `read`, the page view (shown in Read or Edit,
+ * see `DocumentMode`); `arrange`, the light table; `compare`, the Compare view (spec
+ * recognize-and-compare §2.2). Home is not a view of a document; see `Destination`.
  */
-export type ViewMode = 'home' | 'read' | 'arrange' | 'compare';
+export type ViewMode = 'read' | 'arrange' | 'compare';
+/**
+ * Where the shell is (ADR-0019 §1): `home`, the open files as cards (experience-redesign §3),
+ * without a mode control; `document`, the active document in `viewMode`.
+ */
+export type Destination = 'home' | 'document';
+/** Whether a document may change (ADR-0019 §2): Read is locked, Edit is not. */
+export type DocumentMode = 'read' | 'edit';
+/** What the stage shows: Home, or a view of the active document. */
+export type StageView = 'home' | ViewMode;
 /**
  * The navigator's tabs (experience-redesign §4.1). `changes` is the Compare view's Changes
  * list, shown only in Compare; not persisted (a comparison lives for the session).
@@ -29,9 +40,6 @@ export type LegacyLeftPanelView = 'outline' | 'search' | 'comments' | 'redaction
 export type PagesView = 'thumbnails' | 'bookmarks';
 /** The Review tab's filter chips (experience-redesign §4.1). Remembered. */
 export type ReviewFilter = 'all' | 'comments' | 'redactions' | 'fields';
-/** Placeholder tool ids; the tool state machine (ARCHITECTURE.md §6) will own these. */
-export type ToolId = 'select' | 'highlight' | 'ink' | 'text' | 'shapes' | 'note';
-
 export const LEFT_PANEL_WIDTH = { min: 200, max: 420, default: 248 } as const;
 export const RIGHT_PANEL_WIDTH = { min: 240, max: 440, default: 280 } as const;
 
@@ -197,8 +205,40 @@ export function loadLayout(): PersistedLayout {
   return layout;
 }
 
+/** What the stage shows: Home, or the document view (whatever `viewMode` holds). */
+export function stageView(state: Pick<UiState, 'destination' | 'viewMode'>): StageView {
+  return state.destination === 'home' ? 'home' : state.viewMode;
+}
+
+/**
+ * Whether the page view (Read or Edit) shows: what `viewMode === 'read'` meant while Home
+ * was a view. `viewMode` keeps its value on Home, so a reader that must be false there asks
+ * this instead.
+ */
+export function isPageView(state: Pick<UiState, 'destination' | 'viewMode'>): boolean {
+  return stageView(state) === 'read';
+}
+
+/** A document's mode: Read (locked) unless it was put in Edit this session. */
+export function documentModeOf(
+  state: Pick<UiState, 'documentMode'>,
+  id: DocumentId | null | undefined,
+): DocumentMode {
+  return (id != null ? state.documentMode[id] : undefined) ?? 'read';
+}
+
 export interface UiState extends PersistedLayout {
+  /** Home or a document (ADR-0019 §1). Session only. */
+  destination: Destination;
+  /** The view of the documents; kept while Home shows, so leaving Home returns to it. */
   viewMode: ViewMode;
+  /**
+   * Read (locked) or Edit, per document (ADR-0019 §2). Session only; a document without an
+   * entry is in Read. Read and Edit share the page view, so switching never moves the page.
+   */
+  documentMode: Readonly<Record<DocumentId, DocumentMode>>;
+  /** The view each document was last shown in, for leaving Home by its tab. Session only. */
+  lastView: Readonly<Record<DocumentId, ViewMode>>;
   zoom: number;
   /** While set, the stage keeps zoom fitted (to width or whole page) as it resizes. */
   fitMode: FitMode | null;
@@ -208,7 +248,6 @@ export interface UiState extends PersistedLayout {
   shortcutsOpen: boolean;
   /** Command ids, most recent first. In memory only. */
   recents: readonly string[];
-  tool: ToolId;
   /**
    * Documents pinned into the light table as sections, besides the active one (spec §1).
    * Session only; ids of closed documents are ignored by readers and pruned on unpin.
@@ -242,7 +281,15 @@ export interface UiState extends PersistedLayout {
   setLeftPanelWidth: (width: number) => void;
   toggleRightPanel: () => void;
   setRightPanelWidth: (width: number) => void;
+  /** Shows the documents in `mode`, leaving Home. */
   setViewMode: (mode: ViewMode) => void;
+  /** Shows Home (`0`, the app glyph, "Show Home"); the views stay as they were. */
+  showHome: () => void;
+  /** Leaves Home for a document in the view it was last shown in (Read the first time). */
+  showDocument: (id: DocumentId) => void;
+  setDocumentMode: (id: DocumentId, mode: DocumentMode) => void;
+  /** Remembers the view a document is shown in (`lastView`). */
+  rememberView: (id: DocumentId, view: ViewMode) => void;
   setZoom: (zoom: number) => void;
   zoomIn: () => void;
   zoomOut: () => void;
@@ -258,7 +305,6 @@ export interface UiState extends PersistedLayout {
   setPaletteOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   pushRecent: (commandId: string) => void;
-  setTool: (tool: ToolId) => void;
   /**
    * Pins documents into the light table. `alsoKeep` (the active document) is pinned too,
    * so switching tabs later never drops a section the user was looking at.
@@ -283,14 +329,16 @@ function withIds(
 
 const store = create<UiState>()((set, get) => ({
   ...loadLayout(),
+  destination: 'document',
   viewMode: 'read',
+  documentMode: {},
+  lastView: {},
   zoom: 1,
   fitMode: 'width',
   arrangeSize: DEFAULT_ARRANGE_SIZE,
   paletteOpen: false,
   shortcutsOpen: false,
   recents: [],
-  tool: 'select',
   arrangePinned: [],
   arrangeHidden: [],
   arrangeCollapsed: [],
@@ -315,7 +363,16 @@ const store = create<UiState>()((set, get) => ({
     set({
       rightPanelWidth: clamp(Math.round(width), RIGHT_PANEL_WIDTH.min, RIGHT_PANEL_WIDTH.max),
     }),
-  setViewMode: (viewMode) => set({ viewMode }),
+  setViewMode: (viewMode) => set({ viewMode, destination: 'document' }),
+  showHome: () => set({ destination: 'home' }),
+  showDocument: (id) =>
+    set((s) => ({ destination: 'document', viewMode: s.lastView[id] ?? 'read' })),
+  setDocumentMode: (id, mode) =>
+    set((s) =>
+      s.documentMode[id] === mode ? s : { documentMode: { ...s.documentMode, [id]: mode } },
+    ),
+  rememberView: (id, view) =>
+    set((s) => (s.lastView[id] === view ? s : { lastView: { ...s.lastView, [id]: view } })),
   setZoom: (zoom) => set({ zoom: clamp(zoom, MIN_ZOOM, MAX_ZOOM), fitMode: null }),
   zoomIn: () => set((s) => ({ zoom: nextZoomLevel(s.zoom, 1), fitMode: null })),
   zoomOut: () => set((s) => ({ zoom: nextZoomLevel(s.zoom, -1), fitMode: null })),
@@ -337,7 +394,6 @@ const store = create<UiState>()((set, get) => ({
     set(shortcutsOpen ? { shortcutsOpen, paletteOpen: false } : { shortcutsOpen }),
   pushRecent: (id) =>
     set((s) => ({ recents: [id, ...s.recents.filter((r) => r !== id)].slice(0, MAX_RECENTS) })),
-  setTool: (tool) => set({ tool }),
   pinToArrange: (ids, alsoKeep) =>
     set((s) => {
       const arrangePinned = withIds(s.arrangePinned, [alsoKeep, ...ids]);

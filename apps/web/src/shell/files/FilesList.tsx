@@ -7,7 +7,7 @@
  */
 import { useMemo } from 'react';
 
-import { combine, selectOnHome, showHome } from '../../home/home-actions';
+import { combine, selectOnHome, showHome, showTab } from '../../home/home-actions';
 import { combineScope, liveSelection, toggleSelection } from '../../home/home-model';
 import { m } from '../../i18n';
 import { useUiStore } from '../../state/ui-store';
@@ -52,11 +52,7 @@ export function FilesList() {
               const next = toggleSelection(order, { selection, anchor }, doc.id);
               selectOnHome(next.selection, next.anchor);
             }}
-            onOpen={() => {
-              useWorkspaceStore.getState().setActive(doc.id);
-              const ui = useUiStore.getState();
-              if (ui.viewMode === 'home') ui.setViewMode('read');
-            }}
+            onOpen={() => showTab(doc.id)}
             onClose={() => {
               useWorkspaceStore.getState().closeDocument(doc.id);
               announce(m.announce_closed({ name: doc.title }));

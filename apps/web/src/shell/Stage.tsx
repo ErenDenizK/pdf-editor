@@ -1,21 +1,25 @@
 /**
- * The centre pane. Empty: Home's empty variant, the onboarding drop target. With a
- * document: the Read / Arrange mode switch over the active document (`stage/ReadView`,
- * `stage/ArrangeView`), plus the floating tool bar. Both views are keyed by document so
- * switching tabs starts fresh. The third view, Compare (`compare/CompareView`, loaded on
- * first use), brings its own bar; its segment in the mode switch shows only while a
- * comparison is open (being set up, running or kept after leaving the view; spec
- * recognize-and-compare §2.2). Home (`home/HomeView`, experience-redesign §3) shows the
- * open files as cards; its segment is always first (Home · Read · Arrange · Compare).
+ * The centre pane. Empty: Home's empty variant, the onboarding drop target. Home
+ * (`home/HomeView`, experience-redesign §3, ADR-0019 §1): the open files as cards, with no
+ * mode control. With a document: the Read · Edit · Arrange control (ADR-0019 §2) over the
+ * active document (`stage/ReadView`, `stage/ArrangeView`), plus the floating tool bar. Read
+ * and Edit are the same page view with the document locked or not, so switching between
+ * them never moves the page. The page view is keyed by document so switching tabs starts
+ * fresh. The fourth view, Compare (`compare/CompareView`, loaded on first use), brings its
+ * own bar; its segment shows only while a comparison is open (being set up, running or kept
+ * after leaving the view; spec recognize-and-compare §2.2).
  */
+import { Lock } from 'lucide-react';
 import { type KeyboardEvent, lazy, Suspense, useRef } from 'react';
 
+import { commandRegistry } from '../commands/registry';
+import { currentPlatform, type ParsedShortcut, toAriaKeyShortcut } from '../commands/shortcuts';
 import { comparisonOpen, useCompareStore } from '../compare/compare-store';
 import { HomeView } from '../home/HomeView';
 import { m } from '../i18n';
 import { ArrangeView } from '../stage/ArrangeView';
 import { ReadView } from '../stage/ReadView';
-import { useUiStore, type ViewMode } from '../state/ui-store';
+import { documentModeOf, useUiStore, type ViewMode } from '../state/ui-store';
 import { useActiveDocument, useHasDocuments, useWorkspaceStore } from '../state/workspace-store';
 import { Tooltip } from '../ui/Tooltip';
 import { LayoutSwitch } from '../viewer/LayoutSwitch';
@@ -33,6 +37,7 @@ export function Stage({ dragging }: { readonly dragging: boolean }) {
   const opening = useWorkspaceStore((s) => s.opening);
   const doc = useActiveDocument();
   const viewMode = useUiStore((s) => s.viewMode);
+  const onHome = useUiStore((s) => s.destination === 'home');
 
   if (!hasDocuments) {
     return (
@@ -47,7 +52,8 @@ export function Stage({ dragging }: { readonly dragging: boolean }) {
     );
   }
 
-  if (viewMode === 'home') {
+  if (onHome) {
+    // Home is a view of the open files, not of a document: no mode control (ADR-0019 §1).
     return (
       <main
         id={STAGE_ID}
@@ -56,9 +62,6 @@ export function Stage({ dragging }: { readonly dragging: boolean }) {
         aria-busy={opening > 0}
       >
         <h1 className="visually-hidden">{m.home_long()}</h1>
-        <div className={styles.header}>
-          <ModeSwitch />
-        </div>
         <HomeView dragging={dragging} />
       </main>
     );
@@ -110,67 +113,94 @@ export function Stage({ dragging }: { readonly dragging: boolean }) {
 
 /** The stage's heading, for screen readers: the view's long name. */
 const VIEW_HEADINGS: Readonly<Record<ViewMode, () => string>> = {
-  home: m.home_long,
   read: m.mode_read_long,
   arrange: m.mode_arrange_long,
   compare: m.compare_mode_long,
 };
 
-const MODES: readonly {
-  id: ViewMode;
+/** A segment of the mode control: Read and Edit are the page view, locked or not. */
+export type ModeSegment = 'read' | 'edit' | 'arrange' | 'compare';
+
+const SEGMENTS: readonly {
+  id: ModeSegment;
   label: () => string;
+  /** The accessible name when the visible label alone would not say it (the lock). */
+  name?: () => string;
   tooltip: () => string;
   command: string;
 }[] = [
-  { id: 'home', label: m.home_label, tooltip: m.home_long, command: 'view.home' },
-  { id: 'read', label: m.mode_read, tooltip: m.mode_read_long, command: 'mode.read' },
+  {
+    id: 'read',
+    label: m.mode_read,
+    name: m.mode_read_label,
+    tooltip: m.mode_read_long,
+    command: 'mode.read',
+  },
+  { id: 'edit', label: m.mode_edit, tooltip: m.mode_edit_long, command: 'mode.edit' },
   { id: 'arrange', label: m.mode_arrange, tooltip: m.mode_arrange_long, command: 'mode.arrange' },
   { id: 'compare', label: m.compare_mode, tooltip: m.compare_mode_long, command: 'mode.compare' },
 ];
 
-/** Segmented control, APG radio group: arrows move and select. */
-function ModeSwitch() {
-  const viewMode = useUiStore((s) => s.viewMode);
-  const setViewMode = useUiStore((s) => s.setViewMode);
-  const compareOpen = useCompareStore((s) => comparisonOpen(viewMode === 'compare', s.status));
-  // Compare is entered with its command (3, the palette); the segment returns to it.
-  // Home's segment is always there, a labelled way back besides 0 and the app glyph.
-  const modes = MODES.filter((mode) => mode.id !== 'compare' || compareOpen);
-  const shortcuts = {
-    home: useCommandShortcut('view.home'),
+/**
+ * Read · Edit · Arrange (· Compare): a segmented control, APG radio group; arrows move and
+ * select. Each segment runs its command (1–4), which also announces the change.
+ */
+export function ModeSwitch() {
+  const active = useWorkspaceStore((s) => s.workspace.activeDocument);
+  const segment = useUiStore(
+    (s): ModeSegment => (s.viewMode === 'read' ? documentModeOf(s, active) : s.viewMode),
+  );
+  const compareOpen = useCompareStore((s) => comparisonOpen(segment === 'compare', s.status));
+  // Compare is entered with its command (4, the palette); the segment returns to it.
+  const segments = SEGMENTS.filter((item) => item.id !== 'compare' || compareOpen);
+  const shortcuts: Readonly<Record<ModeSegment, ParsedShortcut | undefined>> = {
     read: useCommandShortcut('mode.read'),
+    edit: useCommandShortcut('mode.edit'),
     arrange: useCommandShortcut('mode.arrange'),
     compare: useCommandShortcut('mode.compare'),
   };
   const ref = useRef<HTMLDivElement>(null);
 
+  const choose = (id: ModeSegment) => {
+    const command = SEGMENTS.find((item) => item.id === id)?.command;
+    if (command !== undefined) void commandRegistry.execute(command);
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
     event.preventDefault();
-    const index = modes.findIndex((mode) => mode.id === viewMode);
+    const index = segments.findIndex((item) => item.id === segment);
     const step = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
-    const next: ViewMode = modes[(index + step + modes.length) % modes.length]?.id ?? 'read';
-    setViewMode(next);
+    const next = segments[(index + step + segments.length) % segments.length]?.id ?? 'read';
+    choose(next);
     ref.current?.querySelector<HTMLElement>(`[data-mode="${next}"]`)?.focus();
   };
 
   return (
     <div ref={ref} role="radiogroup" aria-label={m.view_mode_label()} className={styles.segmented}>
-      {modes.map((mode) => {
-        const checked = viewMode === mode.id;
+      {segments.map((item) => {
+        const checked = segment === item.id;
+        const shortcut = shortcuts[item.id];
         return (
-          <Tooltip key={mode.id} label={mode.tooltip()} shortcut={shortcuts[mode.id]}>
+          <Tooltip key={item.id} label={item.tooltip()} shortcut={shortcut}>
             <button
               type="button"
               role="radio"
               aria-checked={checked}
+              aria-label={item.name?.()}
+              aria-keyshortcuts={
+                shortcut ? toAriaKeyShortcut(shortcut, currentPlatform) : undefined
+              }
               tabIndex={checked ? 0 : -1}
-              data-mode={mode.id}
+              data-mode={item.id}
               className={styles.segment}
               onKeyDown={onKeyDown}
-              onClick={() => setViewMode(mode.id)}
+              onClick={() => choose(item.id)}
             >
-              {mode.label()}
+              {item.id === 'read' ? (
+                <Lock className={styles.segmentIcon} aria-hidden="true" data-testid="read-lock" />
+              ) : null}
+              {item.label()}
             </button>
           </Tooltip>
         );

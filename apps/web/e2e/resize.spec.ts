@@ -26,7 +26,7 @@ test('resize all pages to A4 (fit), export and download a verified PDF', async (
   await openFixtures(page, ['mixed-sizes.pdf']);
 
   // Arrange mode, then "Resize pages…" from the section menu.
-  await page.keyboard.press('2');
+  await page.keyboard.press('3');
   await expect(page.locator('[role="gridcell"][data-page-id]').first()).toBeVisible();
   await page.getByRole('button', { name: 'mixed-sizes actions' }).click();
   await page.getByRole('menuitem', { name: 'Resize pages…' }).click();
@@ -118,7 +118,7 @@ test('a rotated, resized page lines up in Read mode: text selects, annotations c
   await openFixtures(page, ['annotations.pdf']);
 
   // Arrange: turn page 1 a quarter, then resize it to A4 (Fit), anchored top-left.
-  await page.keyboard.press('2');
+  await page.keyboard.press('3');
   const cell = page.locator('[role="gridcell"][data-page-id]').first();
   await cell.click();
   await page.keyboard.press('r');

@@ -483,7 +483,7 @@ function MergeAllDialog({ order: given }: { readonly order?: readonly DocumentId
       return;
     closeOperationDialog();
     // Combined from Home: the new document opens in Read (experience-redesign §3).
-    if (useUiStore.getState().viewMode === 'home') useUiStore.getState().setViewMode('read');
+    if (useUiStore.getState().destination === 'home') useUiStore.getState().setViewMode('read');
   };
 
   const dialogTitle =

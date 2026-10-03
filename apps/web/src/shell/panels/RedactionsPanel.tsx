@@ -34,7 +34,7 @@ import {
   useRedactionStore,
 } from '../../redaction/redaction-store';
 import { textUnderQuads } from '../../redaction/text-index';
-import { useUiStore } from '../../state/ui-store';
+import { isPageView, useUiStore } from '../../state/ui-store';
 import { useViewStore } from '../../state/view-store';
 import { useActiveDocument, useWorkspaceStore } from '../../state/workspace-store';
 import { IconButton } from '../../ui/IconButton';
@@ -296,7 +296,7 @@ export function MarkRow({
 
 function revealMatch(match: FinderMatch): void {
   const ui = useUiStore.getState();
-  if (ui.viewMode !== 'read') ui.setViewMode('read');
+  if (!isPageView(ui)) ui.setViewMode('read');
   const first = match.quads[0];
   useViewStore.getState().scrollToPage(match.pageId, first ? { reveal: first } : undefined);
 }

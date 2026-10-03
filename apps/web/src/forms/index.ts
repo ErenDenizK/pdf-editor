@@ -10,7 +10,7 @@ import type { CommandRegistry } from '../commands/registry';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { registerPageOverlay } from '../stage/page-overlays';
-import { useUiStore } from '../state/ui-store';
+import { stageView, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { useToolStore } from '../viewer/tool-store';
 import { clearAllFields } from './actions';
@@ -31,7 +31,7 @@ const close = () => {
 };
 
 useUiStore.subscribe((state, previous) => {
-  if (state.viewMode !== previous.viewMode) close();
+  if (stageView(state) !== stageView(previous)) close();
 });
 useToolStore.subscribe((state, previous) => {
   if (state.mode !== previous.mode && state.mode !== 'select') close();

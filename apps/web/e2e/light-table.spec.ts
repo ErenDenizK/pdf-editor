@@ -18,11 +18,12 @@ const capture = Boolean(process.env.CAPTURE_SCREENSHOTS);
 
 /** Switches to Arrange, which shows every open document (experience-redesign §8). */
 async function showAllInArrange(page: Page, count = 2): Promise<void> {
+  // The active tab, the tab list's Tab stop (on Home no tab is selected): a click shows it.
   await page
     .getByRole('tablist', { name: /^(Open documents|Açık belgeler)$/ })
-    .getByRole('tab', { selected: true })
+    .locator('[role="tab"][tabindex="0"]')
     .click();
-  await page.keyboard.press('2');
+  await page.keyboard.press('3');
   await expect(page.getByRole('grid')).toHaveCount(count);
 }
 

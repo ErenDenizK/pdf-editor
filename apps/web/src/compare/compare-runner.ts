@@ -21,7 +21,7 @@ import { type AnalysisLease, getAnalysisWorkers } from '../engine/engine-service
 import { exportFileName } from '../export/filename';
 import { getLocale, m } from '../i18n';
 import { announce } from '../shell/announcer';
-import { useUiStore } from '../state/ui-store';
+import { stageView, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { deliverFile } from '../tools/deliver-file';
 import { toolSourceBytes } from '../tools/tool-source';
@@ -231,7 +231,7 @@ export async function startCompare(): Promise<void> {
     // The Changes panel lists the result (in the view; a run finishing after the user left
     // waits there for their return).
     const ui = useUiStore.getState();
-    if (ui.viewMode === 'compare' && (!ui.leftPanelOpen || ui.leftPanelView !== 'changes')) {
+    if (stageView(ui) === 'compare' && (!ui.leftPanelOpen || ui.leftPanelView !== 'changes')) {
       useUiStore.setState({ leftPanelOpen: true, leftPanelView: 'changes' });
     }
   } catch (error) {

@@ -1,5 +1,5 @@
 /**
- * Compare commands (spec recognize-and-compare §2.2): the Compare view (3), J / K through
+ * Compare commands (spec recognize-and-compare §2.2): the Compare view (4), J / K through
  * the Changes list, Esc back to the previous view, run, and the two exports. Registered
  * from `app-commands.ts`. The view's code and the analysis worker load on first use.
  *
@@ -14,16 +14,18 @@ import type { DocumentId } from '@pdf-editor/document-model';
 import type { CommandRegistry } from '../commands/registry';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
-import { type LeftPanelView, useUiStore, type ViewMode } from '../state/ui-store';
+import { type LeftPanelView, type StageView, stageView, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { buildChangeList, buildPartialChangeList, type ChangeItem, stepChange } from './changes';
 import { refreshCompareStale, requestReveal, useCompareStore } from './compare-store';
 
 const runner = () => import('./compare-runner');
 
+/** The Compare view shows (not Home, where the view is only remembered). */
+const comparing = () => stageView(useUiStore.getState()) === 'compare';
+
 const inCompare = () =>
-  useUiStore.getState().viewMode === 'compare' &&
-  useWorkspaceStore.getState().workspace.documentOrder.length > 0;
+  comparing() && useWorkspaceStore.getState().workspace.documentOrder.length > 0;
 
 /** The Changes list as it stands (partial while the run is in progress). */
 export function currentChangeList() {
@@ -60,20 +62,21 @@ export function defaultPair(): { a: DocumentId | null; b: DocumentId | null } {
   return { a, b };
 }
 
-let previousMode: Exclude<ViewMode, 'compare'> = 'read';
+/** Where Esc returns to: the view Compare was entered from, Home included. */
+let previousMode: Exclude<StageView, 'compare'> = 'read';
 let previousPanel: { open: boolean; view: LeftPanelView } | null = null;
 
 /** Switches to the Compare view with the Changes panel open. */
 export function enterCompare(): void {
-  const ui = useUiStore.getState();
-  if (ui.viewMode === 'compare') return;
-  ui.setViewMode('compare');
+  if (comparing()) return;
+  useUiStore.getState().setViewMode('compare');
 }
 
 /** Back to the view the user came from. */
 export function leaveCompare(): void {
-  if (useUiStore.getState().viewMode !== 'compare') return;
-  useUiStore.getState().setViewMode(previousMode);
+  if (!comparing()) return;
+  if (previousMode === 'home') useUiStore.getState().showHome();
+  else useUiStore.getState().setViewMode(previousMode);
 }
 
 function onEnter(): void {
@@ -108,10 +111,12 @@ function onLeave(): void {
 /** Keeps the comparison in step with the view mode and the open tabs. */
 function watch(): () => void {
   const offUi = useUiStore.subscribe((state, prev) => {
-    if (state.viewMode === prev.viewMode) return;
-    if (prev.viewMode !== 'compare') previousMode = prev.viewMode;
-    if (state.viewMode === 'compare') onEnter();
-    else if (prev.viewMode === 'compare') onLeave();
+    const shown = stageView(state);
+    const before = stageView(prev);
+    if (shown === before) return;
+    if (before !== 'compare') previousMode = before;
+    if (shown === 'compare') onEnter();
+    else if (before === 'compare') onLeave();
   });
   const offWs = useWorkspaceStore.subscribe((state, prev) => {
     if (state.workspace === prev.workspace) return;
@@ -129,12 +134,7 @@ function watch(): () => void {
       a: gone(a) ? pair.a : a,
       b: gone(b) ? (pair.b !== (gone(a) ? pair.a : a) ? pair.b : null) : b,
     });
-    if (
-      state.workspace.documentOrder.length === 0 &&
-      useUiStore.getState().viewMode === 'compare'
-    ) {
-      leaveCompare();
-    }
+    if (state.workspace.documentOrder.length === 0 && comparing()) leaveCompare();
   });
   return () => {
     offUi();
@@ -153,7 +153,7 @@ export function registerCompareCommands(registry: CommandRegistry): () => void {
       id: 'mode.compare',
       title: m.cmd_compare_mode(),
       group: m.group_view(),
-      shortcut: '3',
+      shortcut: '4',
       keywords: ['compare', 'diff', 'difference', 'changes', 'versions', 'revision'],
       when: () => useWorkspaceStore.getState().workspace.documentOrder.length > 0,
       run: () => {
@@ -167,7 +167,7 @@ export function registerCompareCommands(registry: CommandRegistry): () => void {
       group: m.group_view(),
       shortcut: 'Escape',
       hiddenInPalette: true,
-      when: () => useUiStore.getState().viewMode === 'compare',
+      when: comparing,
       run: leaveCompare,
     }),
     registry.register({

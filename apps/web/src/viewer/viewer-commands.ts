@@ -10,7 +10,7 @@ import { getActiveDocument } from '@pdf-editor/document-model';
 import type { CommandRegistry } from '../commands/registry';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
-import { useUiStore } from '../state/ui-store';
+import { isPageView, useUiStore } from '../state/ui-store';
 import { READ_LAYOUTS, type ReadLayout, useViewStore } from '../state/view-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { openGoToPage } from './GoToPageDialog';
@@ -20,7 +20,7 @@ import { openSearchPanel, searchStep, useSearchStore } from './search';
 
 const activeDocument = () => getActiveDocument(useWorkspaceStore.getState().workspace);
 const hasPages = () => (activeDocument()?.pages.length ?? 0) > 0;
-const reading = () => useUiStore.getState().viewMode === 'read' && hasPages();
+const reading = () => isPageView(useUiStore.getState()) && hasPages();
 /** Read mode is shown and focus is on the pages (or nowhere). */
 const readingWithFocus = () => reading() && (readController()?.ownsFocus() ?? false);
 
@@ -80,7 +80,7 @@ export function registerViewerCommands(registry: CommandRegistry): () => void {
       keywords: ['jump', 'page number', 'label', 'go'],
       when: hasPages,
       run: () => {
-        if (useUiStore.getState().viewMode !== 'read') useUiStore.getState().setViewMode('read');
+        if (!isPageView(useUiStore.getState())) useUiStore.getState().setViewMode('read');
         openGoToPage();
       },
     }),

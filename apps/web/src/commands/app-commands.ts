@@ -28,7 +28,7 @@ import type { EngineFailure } from '../engine/engine-service';
 import { partitionFiles, pickFiles } from '../files/open-files';
 import { registerFurnitureCommands } from '../furniture';
 import { registerFormCommands } from '../forms';
-import { showHome, showOpened } from '../home/home-actions';
+import { showDocumentMode, showHome, showOpened, watchDestination } from '../home/home-actions';
 import { m } from '../i18n';
 import { registerLanguageCommands } from '../i18n/language-commands';
 import { registerOcrCommands } from '../ocr';
@@ -38,7 +38,7 @@ import { announce } from '../shell/announcer';
 import { useAuthorPrompt } from '../shell/comment-author';
 import { openImagesAsDocument } from '../stage/section-operations';
 import { selectAllOf, useSelectionStore } from '../state/selection-store';
-import { ARRANGE_SIZES, useUiStore } from '../state/ui-store';
+import { ARRANGE_SIZES, stageView, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { registerToolCommands } from '../tools/tool-commands';
 import { registerViewerCommands } from '../viewer/viewer-commands';
@@ -132,7 +132,7 @@ export function targetPages(): PageId[] {
     }
     return ordered;
   }
-  if (focused !== null && ui().viewMode === 'arrange') return [focused];
+  if (focused !== null && stageView(ui()) === 'arrange') return [focused];
   return [];
 }
 
@@ -220,6 +220,7 @@ export function arrangeSizeMessage(): string {
  */
 export function registerAppCommands(registry: CommandRegistry = commandRegistry): () => void {
   const disposers = [
+    watchDestination(),
     registry.register({
       id: 'file.open',
       title: m.cmd_open_files(),
@@ -430,6 +431,8 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
         run: () => useUiStore.setState({ leftPanelOpen: true, leftPanelView: view }),
       }),
     ),
+    // Home is a view of the open files; a document is in Read (locked) or Edit, and Arrange
+    // and Compare are views beside them (ADR-0019 §1–§2). Keys follow the control: 1–4.
     registry.register({
       id: 'view.home',
       title: m.cmd_view_home(),
@@ -445,17 +448,24 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
       title: m.cmd_mode_read(),
       group: m.group_view(),
       shortcut: '1',
-      keywords: ['mode', 'viewer', 'continuous'],
-      run: () => {
-        ui().setViewMode('read');
-        announce(m.mode_read_long());
-      },
+      keywords: ['mode', 'viewer', 'continuous', 'lock'],
+      when: () => activeDocument() !== undefined,
+      run: () => showDocumentMode('read'),
+    }),
+    registry.register({
+      id: 'mode.edit',
+      title: m.cmd_mode_edit(),
+      group: m.group_view(),
+      shortcut: '2',
+      keywords: ['mode', 'annotate', 'markup', 'write'],
+      when: () => activeDocument() !== undefined,
+      run: () => showDocumentMode('edit'),
     }),
     registry.register({
       id: 'mode.arrange',
       title: m.cmd_mode_arrange(),
       group: m.group_view(),
-      shortcut: '2',
+      shortcut: '3',
       keywords: ['mode', 'light table', 'grid', 'organize', 'reorder'],
       run: () => {
         ui().setViewMode('arrange');

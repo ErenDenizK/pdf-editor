@@ -167,7 +167,7 @@ describe('Navigator', () => {
     closeOperationDialog();
 
     await userEvent.click(screen.getByRole('button', { name: 'Show Home' }));
-    expect(useUiStore.getState().viewMode).toBe('home');
+    expect(useUiStore.getState().destination).toBe('home');
   });
 
   it('lists the open files with pages, size and the active one; × closes', async () => {

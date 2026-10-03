@@ -158,7 +158,7 @@ test('draw the crop area on the page in Read mode; Esc goes back unchanged', asy
   await showInspector(page);
 
   // Arrange: "Crop pages…" from the context menu of page 1.
-  await page.keyboard.press('2');
+  await page.keyboard.press('3');
   const cell = page.locator('[role="gridcell"][data-page-id]').first();
   await cell.click();
   await cell.click({ button: 'right' });

@@ -36,7 +36,7 @@ import {
   openOperationDialog,
   useOperationDialogStore,
 } from '../stage/operation-dialogs-store';
-import { useUiStore } from '../state/ui-store';
+import { isPageView, useUiStore } from '../state/ui-store';
 import { pagesPhrase, useWorkspaceStore } from '../state/workspace-store';
 import { goToPageIndex } from '../viewer/navigation';
 import { type CropDraft, type CropScope, isCropWorking, useCropStore } from './crop-store';
@@ -291,7 +291,7 @@ export function startCropDrawing(draft: CropDraft, firstPage: PageId | undefined
   listen(true);
   const ws = model().workspace;
   if (ws.activeDocument !== draft.documentId) model().setActive(draft.documentId);
-  const switching = useUiStore.getState().viewMode !== 'read';
+  const switching = !isPageView(useUiStore.getState());
   useUiStore.getState().setViewMode('read');
   const location = firstPage === undefined ? undefined : findPageLocation(ws, firstPage);
   const reveal = () => {

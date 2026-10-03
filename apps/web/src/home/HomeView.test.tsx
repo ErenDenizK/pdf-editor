@@ -24,7 +24,7 @@ import { currentPlatform } from '../commands/shortcuts';
 import { resetCompareStore, useCompareStore } from '../compare/compare-store';
 import { closeOperationDialog } from '../stage/operation-dialogs-store';
 import { useAnnouncer } from '../shell/announcer';
-import { useUiStore } from '../state/ui-store';
+import { stageView, useUiStore } from '../state/ui-store';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { HOME_CARD_TYPE } from './HomeView';
 
@@ -45,6 +45,8 @@ const FILES: Readonly<Record<string, string>> = {
 };
 
 const ws = () => useWorkspaceStore.getState().workspace;
+/** What the stage shows: Home or a document view. */
+const shown = () => stageView(useUiStore.getState());
 const titleOf = (id: DocumentId | undefined) =>
   id === undefined ? undefined : ws().documents[id]?.title;
 
@@ -54,7 +56,7 @@ async function openOnHome(...names: string[]): Promise<readonly DocumentId[]> {
   const ids = await openDocuments(
     await Promise.all(names.map((name) => fixture(FILES[name] ?? '', name))),
   );
-  useUiStore.getState().setViewMode('home');
+  useUiStore.getState().showHome();
   await screen.findByTestId('home');
   return ids;
 }
@@ -102,7 +104,10 @@ describe('Home', () => {
     resetCompareStore();
     closeOperationDialog();
     useUiStore.setState({
+      destination: 'document',
       viewMode: 'read',
+      documentMode: {},
+      lastView: {},
       homeSelection: [],
       homeAnchor: null,
       arrangePinned: [],
@@ -195,7 +200,7 @@ describe('Home', () => {
     // Confirming merges and opens the new document in Read.
     await userEvent.click(within(dialog).getByRole('button', { name: 'Merge' }));
     await waitFor(() => {
-      expect(useUiStore.getState().viewMode).toBe('read');
+      expect(shown()).toBe('read');
     });
     expect(
       ws()
@@ -257,7 +262,7 @@ describe('Home', () => {
     await userEvent.keyboard(`{/${MOD}}`);
     await userEvent.click(home().getByRole('button', { name: 'Compare' }));
     await waitFor(() => {
-      expect(useUiStore.getState().viewMode).toBe('compare');
+      expect(shown()).toBe('compare');
     });
     const { a, b } = useCompareStore.getState();
     expect([titleOf(a ?? undefined), titleOf(b ?? undefined)]).toEqual([
@@ -291,7 +296,7 @@ describe('Home', () => {
       within(screen.getByTestId('home')).getByRole('button', { name: 'Arrange pages' }),
     );
     await waitFor(() => {
-      expect(useUiStore.getState().viewMode).toBe('arrange');
+      expect(shown()).toBe('arrange');
     });
     expect(titleOf(ws().activeDocument ?? undefined)).toBe('mixed-sizes');
     expect(await screen.findAllByRole('grid')).toHaveLength(1);
@@ -317,38 +322,88 @@ describe('Home', () => {
 
     await userEvent.keyboard('{Home}{Enter}');
     await waitFor(() => {
-      expect(useUiStore.getState().viewMode).toBe('read');
+      expect(shown()).toBe('read');
     });
     expect(titleOf(ws().activeDocument ?? undefined)).toBe('simple-text');
   });
 
-  it('opens a card in Read on a double click; the segment keeps Home first', async () => {
+  it('opens a card in Read on a double click; Home has no mode control', async () => {
     await openOnHome('simple-text.pdf', 'rotated-pages.pdf');
     const segment = () => screen.getByRole('radiogroup', { name: 'View mode' });
-    expect(within(segment()).getByRole('radio', { name: 'Home' })).toBeChecked();
+    const glyph = () => screen.getByRole('button', { name: 'Home' });
+    // Home is a view of the open files (ADR-0019 §1): no Read · Edit · Arrange, no tab
+    // selected, the glyph current.
+    expect(screen.queryByRole('radiogroup', { name: 'View mode' })).toBeNull();
+    expect(glyph()).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(screen.getByRole('tablist', { name: 'Open documents' }))
+        .getAllByRole('tab')
+        .filter((tab) => tab.getAttribute('aria-selected') === 'true'),
+    ).toEqual([]);
     await userEvent.dblClick(card('rotated-pages'));
     await waitFor(() => {
-      expect(useUiStore.getState().viewMode).toBe('read');
+      expect(shown()).toBe('read');
     });
     expect(titleOf(ws().activeDocument ?? undefined)).toBe('rotated-pages');
-    // Home · Read · Arrange in Read too: a labelled way back.
     expect(
       within(segment())
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Home', 'Read', 'Arrange']);
-    expect(within(segment()).getByRole('radio', { name: 'Home' })).not.toBeChecked();
-    await userEvent.click(within(segment()).getByRole('radio', { name: 'Home' }));
-    expect(useUiStore.getState().viewMode).toBe('home');
-    useUiStore.getState().setViewMode('read');
+    ).toEqual(['Read', 'Edit', 'Arrange']);
+    expect(within(segment()).getByRole('radio', { name: 'Read, locked' })).toBeChecked();
+    expect(glyph()).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('tab', { name: 'rotated-pages', selected: true })).toBeVisible();
 
     // The app glyph and 0 lead back.
-    await userEvent.click(screen.getByRole('button', { name: 'Home' }));
-    expect(useUiStore.getState().viewMode).toBe('home');
+    await userEvent.click(glyph());
+    expect(shown()).toBe('home');
     useUiStore.getState().setViewMode('read');
     document.body.focus();
     await userEvent.keyboard('0');
-    expect(useUiStore.getState().viewMode).toBe('home');
+    expect(shown()).toBe('home');
+  });
+
+  it('leaves Home by a tab click for that document in its last view and mode', async () => {
+    const [simple, rotated] = await openOnHome('simple-text.pdf', 'rotated-pages.pdf');
+    if (simple === undefined || rotated === undefined) throw new Error('not opened');
+    // rotated-pages was last shown in Arrange, in Edit.
+    act(() => {
+      useWorkspaceStore.getState().setActive(rotated);
+      useUiStore.getState().setDocumentMode(rotated, 'edit');
+      useUiStore.getState().setViewMode('arrange');
+      useWorkspaceStore.getState().setActive(simple);
+      useUiStore.getState().setViewMode('read');
+      useUiStore.getState().showHome();
+    });
+    await userEvent.click(screen.getByRole('tab', { name: 'rotated-pages' }));
+    expect(shown()).toBe('arrange');
+    expect(titleOf(ws().activeDocument ?? undefined)).toBe('rotated-pages');
+    await userEvent.keyboard('0');
+    await userEvent.click(screen.getByRole('tab', { name: 'simple-text' }));
+    expect(shown()).toBe('read');
+    const segment = screen.getByRole('radiogroup', { name: 'View mode' });
+    expect(within(segment).getByRole('radio', { name: 'Read, locked' })).toBeChecked();
+    // The mode is per document: rotated-pages stays in Edit on the shared page view.
+    act(() => useWorkspaceStore.getState().setActive(rotated));
+    expect(within(segment).getByRole('radio', { name: 'Edit' })).toBeChecked();
+    await userEvent.keyboard('1');
+    expect(within(segment).getByRole('radio', { name: 'Read, locked' })).toBeChecked();
+    await userEvent.keyboard('2');
+    expect(within(segment).getByRole('radio', { name: 'Edit' })).toBeChecked();
+  });
+
+  it('starts over after the last document closes: Home, then the next file in Read', async () => {
+    const ids = await openOnHome('simple-text.pdf');
+    act(() => {
+      for (const id of ids) useWorkspaceStore.getState().closeDocument(id);
+    });
+    expect(screen.getByTestId('home')).toHaveAttribute('data-variant', 'empty');
+    expect(screen.getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
+    expect(useUiStore.getState()).toMatchObject({
+      destination: 'document',
+      viewMode: 'read',
+      documentMode: {},
+    });
   });
 
   it('shows Home with the new cards selected after two files are dropped on an empty app', async () => {
@@ -369,7 +424,7 @@ describe('Home', () => {
       },
       { timeout: 20_000 },
     );
-    expect(useUiStore.getState().viewMode).toBe('home');
+    expect(shown()).toBe('home');
     expect(screen.getByTestId('home-combine')).toHaveTextContent('Combine 2 files');
 
     // A file dropped while Home shows joins the cards, selected.
@@ -404,7 +459,7 @@ describe('Home', () => {
         },
         { timeout: 20_000 },
       );
-      expect(useUiStore.getState().viewMode).toBe('home');
+      expect(shown()).toBe('home');
       expect(screen.getByTestId('home-combine')).toHaveTextContent('Combine 2 files');
     } finally {
       if (picker) Object.defineProperty(window, 'showOpenFilePicker', picker);
@@ -423,13 +478,13 @@ describe('Home', () => {
       },
       { timeout: 20_000 },
     );
-    expect(useUiStore.getState().viewMode).toBe('read');
+    expect(shown()).toBe('read');
     expect(screen.queryByTestId('home')).toBeNull();
   }, 45_000);
 
   it('is the empty state with no file open: the honest text, Open files and the shortcuts', async () => {
     render(<App />);
-    useUiStore.getState().setViewMode('home');
+    useUiStore.getState().showHome();
     const home = await screen.findByTestId('home');
     expect(home).toHaveAttribute('data-variant', 'empty');
     expect(within(home).getByRole('heading', { name: 'Drop PDFs to start' })).toBeVisible();
@@ -444,17 +499,17 @@ describe('Home', () => {
   it('is reached from the palette in both languages', async () => {
     render(<App />);
     const command = commandRegistry.list().find((c) => c.id === 'view.home');
-    expect(command?.title).toBe('Home');
+    expect(command?.title).toBe('Show Home');
     expect(command?.keywords).toEqual(expect.arrayContaining(['overview', 'ana ekran']));
     await userEvent.keyboard(`{${MOD}>}k{/${MOD}}`);
     const input = await screen.findByRole('combobox', { name: 'Search commands' });
     await userEvent.type(input, 'ana ekran');
     await waitFor(() => {
-      expect(screen.getAllByRole('option')[0]).toHaveTextContent('Home');
+      expect(screen.getAllByRole('option')[0]).toHaveTextContent('Show Home');
     });
     await userEvent.keyboard('{Enter}');
     await waitFor(() => {
-      expect(useUiStore.getState().viewMode).toBe('home');
+      expect(shown()).toBe('home');
     });
   });
 });
