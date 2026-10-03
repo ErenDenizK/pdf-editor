@@ -25,6 +25,14 @@
   touch-action: none;
 }
 
+/*
+ * The armed pen: a dot of the preset's colour and on-screen width with a 1 px ring, centred
+ * on the hot spot (craft spec §5.2 item 5). `--pen-cursor` is set by pen/ink-input.ts.
+ */
+.layer[data-drawing][data-tool='ink'] {
+  cursor: var(--pen-cursor, crosshair);
+}
+
 /* The pen's live and settling canvases (pen/ink-preview.ts), above the SVG feedback. */
 .inkPreview {
   position: absolute;

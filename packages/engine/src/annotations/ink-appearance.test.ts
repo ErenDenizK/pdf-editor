@@ -25,9 +25,9 @@ const WIDTHS = [
 ];
 
 describe('formatInkWidths / parseInkWidths', () => {
-  test('round trip: version 1, one group per path, parallel to the paths', () => {
+  test('round trip: the outline version, one group per path, parallel to the paths', () => {
     const value = formatInkWidths(PATHS, WIDTHS);
-    expect(value).toBe('1;1 2.5 4 6;0.5 0.75 1');
+    expect(value).toBe('2;1 2.5 4 6;0.5 0.75 1');
     expect(parseInkWidths(value, PATHS)).toEqual(WIDTHS);
     expect(INK_WIDTHS_KEY).toBe('PdfEditorInkWidths');
   });
@@ -35,7 +35,7 @@ describe('formatInkWidths / parseInkWidths', () => {
   test('two decimals, no trailing zeros; widths below 0.01 are stored as 0.01', () => {
     const paths = [line(5)];
     const value = formatInkWidths(paths, [[1.234567, 2.001, 3.1, 0.001, 7]]);
-    expect(value).toBe(`1;1.23 2 3.1 ${MIN_INK_WIDTH} 7`);
+    expect(value).toBe(`2;1.23 2 3.1 ${MIN_INK_WIDTH} 7`);
     // Every stored width parses back (a `0` would not).
     expect(parseInkWidths(value, paths)).toEqual([[1.23, 2, 3.1, 0.01, 7]]);
   });
@@ -57,7 +57,7 @@ describe('formatInkWidths / parseInkWidths', () => {
   test('absent, empty, other versions and malformed values read as no widths', () => {
     expect(parseInkWidths(undefined, PATHS)).toBeUndefined();
     expect(parseInkWidths('', PATHS)).toBeUndefined();
-    expect(parseInkWidths('2;1 2 3 4;1 2 3', PATHS)).toBeUndefined();
+    expect(parseInkWidths('3;1 2 3 4;1 2 3', PATHS)).toBeUndefined();
     expect(parseInkWidths('1;1 2 x 4;1 2 3', PATHS)).toBeUndefined();
     expect(parseInkWidths('1;1 2 0 4;1 2 3', PATHS)).toBeUndefined();
     expect(parseInkWidths('1;1 2 3 4', PATHS)).toBeUndefined();
@@ -74,7 +74,7 @@ describe('inkAppearance', () => {
     expect(write).toBeDefined();
     const stored = storedInkWidths(PATHS, widths) ?? [];
     expect(write?.stored).toEqual(stored);
-    expect(write?.widths).toBe('1;1 2.5 4 6;0.5 0.75 1');
+    expect(write?.widths).toBe('2;1 2.5 4 6;0.5 0.75 1');
     expect(write?.rect).toEqual(inkOutlineBounds(PATHS, stored));
     expect(write?.content).toBe(
       inkAppearanceContent({ paths: PATHS, widths: stored, color: '#1E5BD8', opacity: 1 }),

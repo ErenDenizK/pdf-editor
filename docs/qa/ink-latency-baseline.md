@@ -53,3 +53,43 @@ E2E_SKIP_BUILD=1 pnpm --filter @pdf-editor/web exec playwright test e2e/ink-late
   only in a pause, seconds later (§5.2 item 6, §5.3 items 7–9).
 - Long tasks over 50 ms occur during bursts and around the commit of a long stroke
   (smoothing 5,000 samples and repainting); on this loaded machine they hit most strokes.
+
+## After P7 (craft spec §5.2 items 1–6)
+
+Date: 2026-10-03. Build: `develop` at `7d8fd52` plus the P7 changes, in the shared checkout
+(other work packages' uncommitted changes included). Same harness, machine and command
+(`E2E_PORT=4403`). "Before" is a fresh run of the same harness at `7d8fd52` without P7 on a
+quiet machine (1-minute load average 2.3–2.6); "after" is three runs with P7 on a loaded
+machine (load average 9.8–16.6 on 4 cores), so the improvement is understated.
+
+| Run | Measure | Before P7 (quiet) | After P7 (loaded, range over 3 runs) |
+|---|---|---|---|
+| Mouse, 125 Hz, 12 strokes | committed visible p50 / p95 | 231 / 245 ms | 77–140 / 120–294 ms |
+| | event-to-draw p50 / p95 | 5.9 / 10.0 ms | 5.9–8.2 / 11–27 ms |
+| | preview draw p95 | 0.3 ms | 0.4–1.0 ms |
+| 64 pen strokes, 240 Hz (one burst) | committed visible p50 / p95 | 398 / 898 ms | 84–715 / 222–1,154 ms |
+| | event-to-draw p50 / p95 | 4.0 / 5.9 ms | 5.2–17 / 13–84 ms |
+| | long entries > 50 ms (strokes hit) | 0 (0) | 6–37 (8–57) |
+| Pen line, 5,000 samples, 240 Hz | committed visible | 350 ms | 425–772 ms |
+| | full redraw at release | 19.1 ms | 2.4–11 ms |
+| | preview draw p95 (frames ≥ 4,000 samples flat) | 0.5 ms | 0.6–1.4 ms |
+
+What changed and what it shows:
+
+- **Committed stroke visible** drops by about 150 ms for isolated strokes and bursts: an
+  annotation edit now requests its repaint at once instead of behind the 160 ms zoom
+  debounce, and a burst no longer restarts that debounce per stroke (item 6). The rest is the
+  engine round trips and the full-page render, which §5.3 (dry ink layer, cheaper bursts,
+  clip repaint) removes; the 50 ms target is not met yet. The 5,000-sample stroke is
+  dominated by the commit (simplification, write, full repaint) and by load.
+- **Release redraw**: the last frame now outlines only the stroke's end (the stable part is
+  already baked), 19 ms → 2–11 ms for 5,000 samples (items 2 and 5).
+- **Event-to-draw** and preview draw times are no better on this loaded machine; drawing still
+  waits for the next animation frame (§5.3 item 10). Our own prediction (item 3) closes the
+  visible gap between cursor and ink by up to one frame, which this measure does not count.
+- **Constant mouse width, one smoothed stroke model, round joins and the pen cursor**
+  (items 1, 2, 4, 5) are shape changes covered by unit tests rather than this harness: the
+  committed outline lies within 0.5 device px of the last preview frame for a recorded
+  mouse stroke (`ink-input.test.ts`).
+- The spec's soft ceilings for committed visible p95 are tightened to 1.5 s (line), 3 s
+  (burst) and 600 ms (mouse), about 2.5 times the worst value seen loaded.

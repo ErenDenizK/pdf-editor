@@ -7,17 +7,31 @@
  *   from `getCoalescedEvents()` when the browser has it. x and y are in CSS pixels of the
  *   page at the zoom the stroke started with: a sample taken after a zoom change is scaled
  *   back by the layer's size, so a zoom in the middle of a stroke does not bend it, and the
- *   finished stroke is handed over at the zoom of the release. `getPredictedEvents()` points
- *   are drawn for the current frame only, never committed.
+ *   finished stroke is handed over at the zoom of the release. The layer's position comes
+ *   from the press, a `ResizeObserver` and passive scroll and resize listeners, never from a
+ *   layout read per move.
+ * - **One stroke model** (craft spec §5.2 item 2, `InkStrokeModel` in `../ink.ts`): the
+ *   samples are deduped and smoothed as they arrive, exactly as the commit does; the preview
+ *   draws the smoothed, final part plus the raw tip, and the stroke handed over is the kept
+ *   points, so the shape does not move at release.
+ * - **Prediction** (§5.2 item 3): `getPredictedEvents()` points, or our own linear
+ *   prediction from the last samples when the browser gives none (`predictTip`), both capped
+ *   to one frame ahead and a few widths, tapered, drawn for the current frame only and never
+ *   committed.
  * - **Preview.** One `InkPreview` canvas per page, drawn once per animation frame.
- * - **Width.** Pen pressure, or speed when there is no pressure (mice, touch, pens whose
- *   browser reports the constant default); see `widthFromPressure` and `speedPressure`.
- *   The preset width is the nominal width: a pressure of 0.5, or a moderate speed, draws it.
+ * - **Width** (§5.2 item 1). A mouse draws the constant nominal width. Pens use pressure;
+ *   touch, and pens whose browser reports the constant default, follow speed within ±10 %
+ *   (`speedPressure`, a 20 ms time constant). The preset width is the nominal width: a
+ *   pressure of 0.5, or a moderate speed, draws it.
+ * - **Cursor** (§5.2 item 5). While armed the layer's `--pen-cursor` is a dot of the preset's
+ *   colour and on-screen width with a 1 px ring (`penCursor`), refreshed when the pointer
+ *   moves over the layer after a preset or zoom change.
  * - **Pointer types and palms.** See `pointerRole`. Once a pen has been seen in the
  *   session, one finger pans the stage (our own pan: the layer has `touch-action: none`;
  *   no inertia) and two fingers zoom through the Read view's anchored pinch zoom, which
  *   sees the touches because they bubble on to it. Rejected touches stop here.
  */
+import { inkDedupeDistance, InkStrokeModel, type WidthPoint } from '../ink';
 import type { InkPreview, PreviewPath, PreviewPoint } from './ink-preview';
 import { inkStats } from './ink-stats';
 
@@ -32,10 +46,22 @@ export const PALM_CONTACT_PX = 40;
 export const PRESSURE_THINNING = 0.5;
 /** Speed (CSS px per ms) at and above which a stroke without pressure is thinnest. */
 export const SPEED_FAST_PX_PER_MS = 2;
-/** Time constant (ms) of the smoothing of the speed-derived pressure. */
-export const SPEED_SMOOTHING_MS = 40;
-/** Speed-derived pressure: from this when still to `1 − SPEED_PRESSURE_STILL` when fast. */
-export const SPEED_PRESSURE_STILL = 0.75;
+/** Time constant (ms) of the smoothing of the speed-derived pressure (craft §5.2: ≤ 20). */
+export const SPEED_SMOOTHING_MS = 20;
+/**
+ * Speed-derived pressure: from this when still to `1 − SPEED_PRESSURE_STILL` when fast; 0.6
+ * keeps the width within ±10 % of the nominal (craft spec §5.2 item 1).
+ */
+export const SPEED_PRESSURE_STILL = 0.6;
+/** Prediction reaches at most this far ahead of the newest sample (ms). */
+export const PREDICT_HORIZON_MS = 16;
+/** Prediction reaches at most this far (CSS px), or `PREDICT_MAX_WIDTHS` widths if longer. */
+export const PREDICT_MAX_PX = 12;
+export const PREDICT_MAX_WIDTHS = 4;
+/** Below this speed (CSS px per ms) nothing is predicted. */
+export const PREDICT_MIN_SPEED = 0.05;
+/** The predicted tip narrows to this share of the newest sample's width. */
+export const PREDICT_TAPER = 0.8;
 
 // ---------------------------------------------------------------------------
 // Session and pointer rules
@@ -186,14 +212,14 @@ export class InkSamples {
 }
 
 /** Where the widths of a stroke come from. */
-export type WidthSource = 'pressure' | 'speed';
+export type WidthSource = 'pressure' | 'speed' | 'constant';
 
 /**
- * The widths of one stroke as samples arrive. Pens with real pressure use it; everything
- * else uses speed. A pen that has not reported real pressure yet starts with speed and
- * switches at its first real value, which then also stands for the samples before it
- * (`take` reports that earlier widths changed). With pressure, a sample that reports 0 (no
- * value yet) takes the previous pressure.
+ * The widths of one stroke as samples arrive. Pens with real pressure use it; a mouse draws
+ * the constant nominal width; touch uses speed (±10 %). A pen that has not reported real
+ * pressure yet starts with speed and switches at its first real value, which then also
+ * stands for the samples before it (`take` reports that earlier widths changed). With
+ * pressure, a sample that reports 0 (no value yet) takes the previous pressure.
  */
 export class StrokeWidths {
   source: WidthSource;
@@ -206,7 +232,12 @@ export class StrokeWidths {
     private readonly pointerType: string,
     pressureSeen: boolean,
   ) {
-    this.source = pointerType === 'pen' && pressureSeen ? 'pressure' : 'speed';
+    this.source =
+      pointerType === 'mouse'
+        ? 'constant'
+        : pointerType === 'pen' && pressureSeen
+          ? 'pressure'
+          : 'speed';
   }
 
   /** Width (pt) of a new sample; `rewrote` is true when earlier widths changed too. */
@@ -214,6 +245,7 @@ export class StrokeWidths {
     const samples = this.samples;
     const n = samples.length;
     let rewrote = false;
+    if (this.source === 'constant') return { width: this.nominal, rewrote };
     if (this.pointerType === 'pen' && this.source === 'speed' && !isDefaultPressure(pressure)) {
       this.source = 'pressure';
       rewrote = n > 0;
@@ -239,6 +271,122 @@ export class StrokeWidths {
     return { width: widthFromPressure(this.nominal, this.simulated), rewrote };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Prediction
+// ---------------------------------------------------------------------------
+
+/** A sample as prediction reads it: CSS px of the page now, time in ms. */
+export interface TimedPoint {
+  readonly x: number;
+  readonly y: number;
+  readonly t: number;
+}
+
+/** How far a prediction may reach from the newest sample (CSS px) for a stroke `width` wide. */
+export function predictionCap(width: number): number {
+  return Math.max(PREDICT_MAX_PX, PREDICT_MAX_WIDTHS * width);
+}
+
+/**
+ * Our own prediction when the browser gives none (craft spec §5.2 item 3): the newest
+ * sample moved on along the velocity of the last 3–4 samples (slowed to the newest
+ * segment's speed when the pointer decelerates) for `PREDICT_HORIZON_MS`, capped by
+ * `predictionCap`, its width tapered to `PREDICT_TAPER`. Nothing below `PREDICT_MIN_SPEED`
+ * or with fewer than 3 samples. `recent` is oldest first; `width` is the newest sample's
+ * width (CSS px).
+ */
+export function predictTip(recent: readonly TimedPoint[], width: number): PreviewPoint[] {
+  const n = recent.length;
+  if (n < 3) return [];
+  const last = recent[n - 1] as TimedPoint;
+  const first = recent[Math.max(0, n - 4)] as TimedPoint;
+  const before = recent[n - 2] as TimedPoint;
+  const dt = last.t - first.t;
+  if (!(dt > 0)) return [];
+  const vx = (last.x - first.x) / dt;
+  const vy = (last.y - first.y) / dt;
+  let speed = Math.hypot(vx, vy);
+  if (speed < PREDICT_MIN_SPEED) return [];
+  const dtLast = last.t - before.t;
+  if (dtLast > 0) {
+    const newest = Math.hypot(last.x - before.x, last.y - before.y) / dtLast;
+    if (newest < speed) speed = newest;
+  }
+  if (speed < PREDICT_MIN_SPEED) return [];
+  const length = Math.min(speed * PREDICT_HORIZON_MS, predictionCap(width));
+  const k = length / Math.hypot(vx, vy);
+  return [{ x: last.x + vx * k, y: last.y + vy * k, w: width * PREDICT_TAPER }];
+}
+
+/**
+ * The browser's predicted points, held to the same limits as ours: up to
+ * `PREDICT_HORIZON_MS` after the newest sample (when they carry times), within
+ * `predictionCap` of it, and tapered to `PREDICT_TAPER` of its width.
+ */
+export function capPrediction(
+  last: TimedPoint,
+  predicted: readonly TimedPoint[],
+  width: number,
+): PreviewPoint[] {
+  const cap = predictionCap(width);
+  const kept = predicted.filter(
+    (p) => !(p.t > 0 && last.t > 0 && p.t - last.t > PREDICT_HORIZON_MS),
+  );
+  return kept.map((p, i) => {
+    const dx = p.x - last.x;
+    const dy = p.y - last.y;
+    const d = Math.hypot(dx, dy);
+    const k = d > cap ? cap / d : 1;
+    const taper = 1 - ((1 - PREDICT_TAPER) * (i + 1)) / kept.length;
+    return { x: last.x + dx * k, y: last.y + dy * k, w: width * taper };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Cursor
+// ---------------------------------------------------------------------------
+
+/** On-screen dot diameter of the pen cursor (CSS px). */
+export const PEN_CURSOR_MIN_PX = 3;
+export const PEN_CURSOR_MAX_PX = 32;
+
+/** Relative luminance (WCAG) of `#rrggbb`; 0 for anything else. */
+function luminance(color: string): number {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+  if (!m) return 0;
+  const [r, g, b] = [m[1], m[2], m[3]].map((h) => {
+    const c = Number.parseInt(h ?? '0', 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * The armed pen's cursor (craft spec §5.2 item 5, research 12 §6): a dot of the preset's
+ * colour (and opacity) as wide as the stroke draws on screen, `diameter` CSS px clamped to
+ * 3–32, inside a 1 px ring that contrasts with the dot; an SVG data URI with its hot spot in
+ * the centre, `crosshair` as the fallback. A CSS `cursor` value.
+ */
+export function penCursor(color: string, opacity: number, diameter: number): string {
+  const d = Math.min(PEN_CURSOR_MAX_PX, Math.max(PEN_CURSOR_MIN_PX, diameter));
+  const size = Math.ceil(d) + 2;
+  const c = size / 2;
+  const fill = /^#[0-9a-f]{6}$/i.test(color) ? color : '#000000';
+  const ring = luminance(fill) > 0.4 ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.9)';
+  const alpha = Math.min(1, Math.max(0.2, opacity));
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" ` +
+    `viewBox="0 0 ${size} ${size}">` +
+    `<circle cx="${c}" cy="${c}" r="${d / 2}" fill="${fill}" fill-opacity="${alpha}"/>` +
+    `<circle cx="${c}" cy="${c}" r="${d / 2 + 0.5}" fill="none" stroke="${ring}"/>` +
+    '</svg>';
+  const hot = Math.floor(c);
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hot} ${hot}, crosshair`;
+}
+
+/** The custom property the layer's pen cursor rule reads (`AnnotationLayer.module.css`). */
+export const PEN_CURSOR_PROPERTY = '--pen-cursor';
 
 // ---------------------------------------------------------------------------
 // The input pipeline
@@ -293,6 +441,10 @@ interface ActiveStroke {
   readonly pointerType: string;
   readonly samples: InkSamples;
   readonly widths: StrokeWidths;
+  /** Dedupe and smoothing as the commit does them (CSS px at the starting zoom; pt widths). */
+  model: InkStrokeModel;
+  /** The model's dedupe distance (CSS px at the starting zoom). */
+  readonly minDistance: number;
   readonly nominal: number;
   /** CSS px per point when the stroke started. */
   readonly scale: number;
@@ -323,6 +475,15 @@ function scrollContainer(element: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/** The model of a stroke's samples so far (rebuilt when earlier widths change). */
+function buildModel(samples: InkSamples, minDistance: number): InkStrokeModel {
+  const model = new InkStrokeModel(minDistance);
+  for (let i = 0; i < samples.length; i++) {
+    model.add({ x: samples.x(i), y: samples.y(i), w: samples.width(i) });
+  }
+  return model;
+}
+
 /**
  * Attaches the pipeline to a page layer; returns the function that detaches it (a stroke
  * in progress is dropped).
@@ -336,25 +497,84 @@ export function attachInkInput(options: InkInputOptions): () => void {
   const pans = new Map<number, Pan>();
   let panBase: { x: number; y: number; left: number; top: number } | null = null;
   let listening = false;
+  /** The layer's box while a stroke is down; null when a resize or scroll moved it. */
+  let layerBox: DOMRect | null = null;
+  let cursorKey = '';
 
-  /** The stroke in CSS px of the page at the current zoom. */
-  const view = (s: ActiveStroke): PreviewPath => {
-    const { samples, zoom } = s;
-    const scale = s.scale * zoom;
-    if (s.straight && samples.length > 1) {
-      const last = samples.length - 1;
-      return {
-        length: 2,
-        x: (i) => samples.x(i === 0 ? 0 : last) * zoom,
-        y: (i) => samples.y(i === 0 ? 0 : last) * zoom,
-        w: () => s.nominal * scale,
-      };
-    }
+  const invalidateBox = () => {
+    layerBox = null;
+  };
+  const resizeObserver =
+    typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(invalidateBox);
+  /** The layer's box: measured at the press and again only after a resize or a scroll. */
+  const box = (): DOMRect => {
+    layerBox ??= element.getBoundingClientRect();
+    return layerBox;
+  };
+
+  /** The pen cursor for the armed preset at the current zoom (when it changed). */
+  const updateCursor = () => {
+    const context = options.context();
+    if (!context) return;
+    const diameter = context.width * context.scale;
+    const key = `${context.color}|${context.opacity}|${diameter.toFixed(1)}`;
+    if (key === cursorKey) return;
+    cursorKey = key;
+    element.style.setProperty(
+      PEN_CURSOR_PROPERTY,
+      penCursor(context.color, context.opacity, diameter),
+    );
+  };
+
+  /** A point of the stroke at the current zoom (CSS px of the page). */
+  const scaled = (s: ActiveStroke, p: WidthPoint): PreviewPoint => ({
+    x: p.x * s.zoom,
+    y: p.y * s.zoom,
+    w: p.w * s.scale * s.zoom,
+  });
+
+  /** A `PreviewPath` over points at the starting zoom (pt widths). */
+  const pathOf = (s: ActiveStroke, points: readonly WidthPoint[]): PreviewPath => {
+    const scale = s.scale * s.zoom;
     return {
-      length: samples.length,
-      x: (i) => samples.x(i) * zoom,
-      y: (i) => samples.y(i) * zoom,
-      w: (i) => samples.width(i) * scale,
+      length: points.length,
+      x: (i) => (points[i]?.x ?? 0) * s.zoom,
+      y: (i) => (points[i]?.y ?? 0) * s.zoom,
+      w: (i) => (points[i]?.w ?? s.nominal) * scale,
+    };
+  };
+
+  /** Shift: a straight line from the first sample to the newest, at the nominal width. */
+  const straightView = (s: ActiveStroke): PreviewPath => {
+    const { samples, zoom } = s;
+    const last = samples.length - 1;
+    return {
+      length: 2,
+      x: (i) => samples.x(i === 0 ? 0 : last) * zoom,
+      y: (i) => samples.y(i === 0 ? 0 : last) * zoom,
+      w: () => s.nominal * s.scale * zoom,
+    };
+  };
+
+  /**
+   * What the preview draws now: the model's final, smoothed points, then the raw tip; the
+   * joins of all but the last smoothed point are final.
+   */
+  const liveView = (s: ActiveStroke): { path: PreviewPath; settled: number } => {
+    if (s.straight && s.samples.length > 1) return { path: straightView(s), settled: 0 };
+    const { smooth } = s.model;
+    const tip = s.model.tip();
+    const scale = s.scale * s.zoom;
+    const n = smooth.length;
+    const at = (i: number) => (i < n ? smooth[i] : tip[i - n]);
+    return {
+      path: {
+        length: n + tip.length,
+        x: (i) => (at(i)?.x ?? 0) * s.zoom,
+        y: (i) => (at(i)?.y ?? 0) * s.zoom,
+        w: (i) => (at(i)?.w ?? s.nominal) * scale,
+      },
+      settled: Math.max(0, n - 1),
     };
   };
 
@@ -373,7 +593,8 @@ export function attachInkInput(options: InkInputOptions): () => void {
     if (!s) return;
     const stats = inkStats();
     const start = stats ? performance.now() : 0;
-    preview.draw(view(s), s.straight ? [] : s.predicted, s.restart);
+    const view = liveView(s);
+    preview.draw(view.path, s.straight ? [] : s.predicted, s.restart, view.settled);
     s.restart = false;
     if (stats) {
       // Event-to-draw: the newest sample's event time to the end of this draw.
@@ -403,7 +624,38 @@ export function attachInkInput(options: InkInputOptions): () => void {
     y /= s.zoom;
     const { width, rewrote } = s.widths.take(x, y, pressure, t);
     s.samples.push(x, y, pressure, t, width);
-    if (rewrote) s.restart = true;
+    if (rewrote) {
+      // Earlier widths changed (a pen's first real pressure): smooth them again.
+      s.model = buildModel(s.samples, s.minDistance);
+      s.restart = true;
+    } else {
+      const i = s.samples.length - 1;
+      s.model.add({ x: s.samples.x(i), y: s.samples.y(i), w: width });
+    }
+  };
+
+  /** The tip's prediction for this frame (CSS px at the current zoom); never committed. */
+  const predict = (s: ActiveStroke, e: PointerEvent, rect: DOMRect): PreviewPoint[] => {
+    const { samples, zoom } = s;
+    const last = samples.length - 1;
+    const width = samples.width(last) * s.scale * zoom;
+    const timed = (i: number): TimedPoint => ({
+      x: samples.x(i) * zoom,
+      y: samples.y(i) * zoom,
+      t: samples.time(i),
+    });
+    const newest = timed(last);
+    const browser = e.getPredictedEvents?.() ?? [];
+    if (browser.length > 0) {
+      return capPrediction(
+        newest,
+        browser.map((c) => ({ ...local(c, rect), t: c.timeStamp - s.startTime })),
+        width,
+      );
+    }
+    const recent: TimedPoint[] = [];
+    for (let i = Math.max(0, last - 3); i <= last; i++) recent.push(timed(i));
+    return predictTip(recent, width);
   };
 
   const startListening = () => {
@@ -412,6 +664,9 @@ export function attachInkInput(options: InkInputOptions): () => void {
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('scroll', invalidateBox, { capture: true, passive: true });
+    window.addEventListener('resize', invalidateBox, { passive: true });
+    resizeObserver?.observe(element);
   };
 
   const stopListening = () => {
@@ -420,6 +675,10 @@ export function attachInkInput(options: InkInputOptions): () => void {
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onCancel);
+    window.removeEventListener('scroll', invalidateBox, { capture: true });
+    window.removeEventListener('resize', invalidateBox);
+    resizeObserver?.disconnect();
+    layerBox = null;
   };
 
   const penUp = (s: ActiveStroke) => {
@@ -498,12 +757,17 @@ export function attachInkInput(options: InkInputOptions): () => void {
     }
     if (e.pointerType === 'pen') session.pensDown.add(e.pointerId);
     const samples = new InkSamples();
+    // The one layout read of the press; later only after a resize or a scroll.
     const rect = element.getBoundingClientRect();
+    layerBox = rect;
+    const minDistance = inkDedupeDistance(e.pointerType, context.scale);
     const s: ActiveStroke = {
       pointerId: e.pointerId,
       pointerType: e.pointerType,
       samples,
       widths: new StrokeWidths(samples, context.width, e.pointerType, session.pressureSeen),
+      model: new InkStrokeModel(minDistance),
+      minDistance,
       nominal: context.width,
       scale: context.scale,
       baseWidth: rect.width,
@@ -526,7 +790,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
   const onMove = (e: PointerEvent) => {
     const s = stroke;
     if (s?.pointerId === e.pointerId) {
-      const rect = element.getBoundingClientRect();
+      const rect = box();
       measure(s, rect);
       const coalesced = e.getCoalescedEvents?.() ?? [];
       for (const c of coalesced.length > 0 ? coalesced : [e]) {
@@ -538,9 +802,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
         s.straight = e.shiftKey;
         s.restart = true;
       }
-      const last = s.samples.length - 1;
-      const w = s.samples.width(last) * s.scale * s.zoom;
-      s.predicted = (e.getPredictedEvents?.() ?? []).map((c) => ({ ...local(c, rect), w }));
+      s.predicted = predict(s, e, rect);
       schedule();
       return;
     }
@@ -561,7 +823,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
     if (s?.pointerId === e.pointerId) {
       const stats = inkStats();
       const upAt = stats ? performance.now() : 0;
-      const rect = element.getBoundingClientRect();
+      const rect = box();
       measure(s, rect);
       const p = local(e, rect);
       const last = s.samples.length - 1;
@@ -571,23 +833,36 @@ export function attachInkInput(options: InkInputOptions): () => void {
       ) {
         addSample(s, p.x, p.y, e.pressure > 0 ? e.pressure : s.samples.pressure(last), e.timeStamp);
       }
-      s.straight = e.shiftKey;
+      const straight = e.shiftKey && s.samples.length > 1;
+      if (straight !== s.straight) s.restart = true;
+      s.straight = straight;
       s.predicted = [];
       cancelFrame();
       const drawStart = stats ? performance.now() : 0;
-      preview.draw(view(s), [], true);
+      // The last frame: the whole stroke smoothed as the commit smooths it. Its stable part
+      // is already drawn, so only the end and the tip's area are outlined again.
+      let points: PreviewPoint[];
+      if (straight) {
+        const v = straightView(s);
+        preview.draw(v, [], true);
+        points = [0, 1].map((i) => ({ x: v.x(i), y: v.y(i), w: v.w(i) }));
+      } else {
+        const final = [...s.model.smooth, ...s.model.finishTail()];
+        preview.draw(pathOf(s, final), [], s.restart, final.length);
+        points = s.model.handover().map((q) => scaled(s, q));
+      }
       stats?.strokeEnd(upAt, drawStart, performance.now(), s.samples.length);
       stroke = null;
       penUp(s);
       releaseCapture(s.pointerId);
       stopListening();
-      const v = view(s);
+      const toPt = s.scale * s.zoom;
       const input: InkStrokeInput = {
-        points: Array.from({ length: v.length }, (_, i) => ({ x: v.x(i), y: v.y(i) })),
-        widths: Array.from({ length: v.length }, (_, i) => v.w(i) / (s.scale * s.zoom)),
+        points: points.map((q) => ({ x: q.x, y: q.y })),
+        widths: points.map((q) => q.w / toPt),
         pointerType: s.pointerType,
         widthSource: s.widths.source,
-        straight: s.straight && s.samples.length > 1,
+        straight,
       };
       let settled = false;
       const settle: SettleInk = (final) => {
@@ -602,6 +877,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
           inkStats()?.strokeCancel();
         }
       }
+      updateCursor();
       return;
     }
     if (pans.delete(e.pointerId)) {
@@ -621,16 +897,19 @@ export function attachInkInput(options: InkInputOptions): () => void {
     }
   };
 
-  /** A hovering pen counts as seen: fingers pan from then on. */
+  /** A hovering pen counts as seen; the cursor follows preset and zoom changes. */
   const onHover = (e: PointerEvent) => {
     if (e.pointerType === 'pen') session.penSeen = true;
+    if (!stroke) updateCursor();
   };
 
   element.addEventListener('pointerdown', onPointerDown);
   element.addEventListener('pointermove', onHover, { passive: true });
+  updateCursor();
   return () => {
     element.removeEventListener('pointerdown', onPointerDown);
     element.removeEventListener('pointermove', onHover);
+    element.style.removeProperty(PEN_CURSOR_PROPERTY);
     dropStroke();
     pans.clear();
     stroke = null;

@@ -323,9 +323,10 @@ function report(name: string, summary: Summary, played: Played, skew: number): v
 }
 
 /**
- * Generous today; P7 tightens these to the §5.1 targets. `commitVisibleMs` is the ceiling
- * for pointer-up to committed stroke visible (p95), set per run from the baseline
- * (`docs/qa/ink-latency-baseline.md`) with room for a loaded machine.
+ * Soft ceilings. `commitVisibleMs` is the ceiling for pointer-up to committed stroke visible
+ * (p95), set per run from the measurements after P7 (`docs/qa/ink-latency-baseline.md`)
+ * with about 2.5 times the worst value seen on a loaded machine (load average 10–12 on 4
+ * cores). The §5.1 targets (≤ 50 ms) need the dry ink layer and cheaper bursts (§5.3).
  */
 function softExpectations(summary: Summary, commitVisibleMs: number): void {
   expect.soft(summary.drawMs.count, 'frames were drawn').toBeGreaterThan(0);
@@ -372,8 +373,9 @@ test.describe('ink latency', () => {
       await clockSkew(page, played),
     );
     expect(summary.samples.max).toBeGreaterThan(4_000);
-    // Today 520–940 ms: the whole 5,000-sample stroke is smoothed, written and repainted.
-    softExpectations(summary, 3_000);
+    // After P7 425–600 ms loaded (350 ms before P7 on a quiet machine): the 5,000-sample
+    // stroke is simplified, written and repainted in full.
+    softExpectations(summary, 1_500);
   });
 
   test('a burst of 64 short pen strokes at 240 Hz', async ({ page }) => {
@@ -383,9 +385,9 @@ test.describe('ink latency', () => {
     const played = await play(cdp, shortBurst(box), 'pen');
     const summary = await settledSummary(page, 64);
     report('64 short pen strokes, 240 Hz', summary, played, await clockSkew(page, played));
-    // Today p95 1.8–3.9 s: each stroke restarts the 160 ms repaint debounce, so a stroke
-    // becomes visible only in a pause, behind a growing queue of appends.
-    softExpectations(summary, 8_000);
+    // After P7 p95 0.23–1.15 s loaded (0.9–3.9 s before): edits no longer wait for the zoom
+    // debounce; what remains is the queue of appends and full-page renders (§5.3).
+    softExpectations(summary, 3_000);
   });
 
   test('a mouse run at 125 Hz', async ({ page }) => {
@@ -395,7 +397,7 @@ test.describe('ink latency', () => {
     const played = await play(cdp, mouseRun(box), 'mouse');
     const summary = await settledSummary(page, 12);
     report('mouse, 125 Hz, 12 strokes', summary, played, await clockSkew(page, played));
-    // Today p50 315–335 ms, p95 520–640 ms.
-    softExpectations(summary, 1_500);
+    // After P7 p50 77–140 ms, p95 120–295 ms loaded (p95 245–640 ms before).
+    softExpectations(summary, 600);
   });
 });

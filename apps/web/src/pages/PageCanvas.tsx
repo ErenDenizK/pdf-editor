@@ -14,8 +14,8 @@
  * - Exact cache hit: drawn synchronously on mount.
  * - Otherwise the best cached lower (or higher) scale is drawn at once, stretched by CSS,
  *   and the right scale is requested. `delayMs` debounces the request while a bitmap is
- *   already shown (zoom gestures), so only a settled zoom renders; an empty sheet requests
- *   at once.
+ *   already shown and the scale changed (zoom gestures), so only a settled zoom renders; an
+ *   empty sheet requests at once.
  * - Unmounting or changing page/scale aborts the request (after the replacement request
  *   has joined the same job, so a priority change never restarts a running render).
  *
@@ -23,7 +23,11 @@
  * on the page like the assembler places them, with the page rotation applied.
  *
  * - Content edits (annotations) bump the page's revision in the engine service
- *   (`invalidatePage`): the canvas keeps its current pixels and requests a fresh render.
+ *   (`invalidatePage`): the canvas keeps its current pixels and requests a fresh render at
+ *   once, never behind the zoom debounce (craft spec §5.2 item 6), so a committed stroke
+ *   shows within a render. Thumbnails (not `exact`) keep their pixels and repaint when the
+ *   main thread is idle (`requestIdleCallback`, at most `IDLE_REPAINT_TIMEOUT_MS` later, or
+ *   `IDLE_REPAINT_FALLBACK_MS` without it), so a burst of strokes repaints them once.
  *   An `exact` (Read mode) canvas reports each revision it has drawn at its final scale to
  *   `notePagePainted` (viewer/read-controller.ts), so the ink preview can stay until the
  *   committed stroke is on screen (experience-redesign spec §6.1, `whenPainted`).
@@ -45,6 +49,21 @@ import {
 import { useWorkspaceStore } from '../state/workspace-store';
 import { notePagePainted } from '../viewer/read-controller';
 import styles from './PageCanvas.module.css';
+
+/** A thumbnail's repaint after an edit waits for idle time at most this long (ms). */
+export const IDLE_REPAINT_TIMEOUT_MS = 1000;
+/** Without `requestIdleCallback`: the thumbnail repaints after this quiet time (ms). */
+export const IDLE_REPAINT_FALLBACK_MS = 500;
+
+/** Runs `run` when the main thread is idle; returns the function that cancels it. */
+function whenIdle(run: () => void): () => void {
+  if (typeof window.requestIdleCallback === 'function') {
+    const id = window.requestIdleCallback(run, { timeout: IDLE_REPAINT_TIMEOUT_MS });
+    return () => window.cancelIdleCallback(id);
+  }
+  const id = window.setTimeout(run, IDLE_REPAINT_FALLBACK_MS);
+  return () => window.clearTimeout(id);
+}
 
 /** Decoded image blobs, shared by every canvas that shows the same image page. */
 const imageBitmaps = new Map<BlobId, Promise<ImageBitmap>>();
@@ -148,6 +167,8 @@ export function PageCanvas({
   const ref = useRef<HTMLCanvasElement>(null);
   /** Which page (source:index:rotation) the canvas currently shows. */
   const shownRef = useRef<string>('');
+  /** The scale last drawn or requested: only a change of it is debounced (a zoom). */
+  const requestedBucketRef = useRef<number | null>(null);
   const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
   const bucket = exact
     ? chooseScale(exactScale(cssWidth, widthPt, dpr), widthPt, heightPt)
@@ -198,7 +219,13 @@ export function PageCanvas({
       delete canvas.dataset.bucket;
       shownRef.current = page;
     }
+    const contentChanged = canvas.dataset.revision !== undefined;
+    // Still true while a debounced zoom is pending, so an edit then does not cut it short.
+    const scaleChanged =
+      requestedBucketRef.current !== null && requestedBucketRef.current !== bucket;
+    let revised = false;
     if (canvas.dataset.revision !== revisionKey) {
+      revised = contentChanged;
       // Same page, new content: keep the old pixels until the fresh render arrives.
       if (canvas.dataset.state === 'rendered') canvas.dataset.state = 'preview';
       canvas.dataset.bucket = '0';
@@ -209,6 +236,7 @@ export function PageCanvas({
     };
     const hit = service.peek(sourceId, index, rotation, bucket);
     if (hit && draw(canvas, hit, 'rendered')) {
+      requestedBucketRef.current = bucket;
       painted();
       return;
     }
@@ -221,6 +249,7 @@ export function PageCanvas({
     const controller = new AbortController();
     let cancelled = false;
     const request = () => {
+      requestedBucketRef.current = bucket;
       void service
         .renderPage({ sourceId, index, rotation, bucket, priority, signal: controller.signal })
         .then((result) => {
@@ -232,13 +261,21 @@ export function PageCanvas({
           }
         });
     };
-    // Debounce only when something is already shown (zooming); first paint is immediate.
+    // Debounce only a scale change while something is shown (zooming); an edit repaints at
+    // once (a thumbnail when idle); the first paint is immediate.
     const showing = canvas.dataset.state === 'preview' || canvas.dataset.state === 'rendered';
-    const timer = delayMs > 0 && showing ? window.setTimeout(request, delayMs) : undefined;
-    if (timer === undefined) request();
+    let cancelWait: (() => void) | undefined;
+    if (showing && delayMs > 0 && scaleChanged) {
+      const timer = window.setTimeout(request, delayMs);
+      cancelWait = () => window.clearTimeout(timer);
+    } else if (showing && revised && !exact) {
+      cancelWait = whenIdle(request);
+    } else {
+      request();
+    }
     return () => {
       cancelled = true;
-      if (timer !== undefined) window.clearTimeout(timer);
+      cancelWait?.();
       // Abort after the next effect (if any) has subscribed to the same job.
       queueMicrotask(() => controller.abort());
     };

@@ -4,7 +4,7 @@
  * for one frame only, variable width, and settling to the committed outline.
  */
 import { inkOutlineOps } from '@pdf-editor/engine/ink-outline';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { InkPreview, outlinePath, type PreviewPath, previewPath } from './ink-preview';
 
@@ -87,6 +87,44 @@ describe('ink preview', () => {
     expect(alphaAt(canvas, 20 + 199 * 1.5, 100)).toBe(255);
     expect(alphaAt(canvas, 150, 110)).toBe(0);
     expect(alphaAt(canvas, 380, 100)).toBe(0);
+  });
+
+  it('bakes each stable piece once: a frame fills only the tail on the live canvas', () => {
+    preview.begin({ color: '#000000', opacity: 1 });
+    const canvas = preview.liveCanvas as HTMLCanvasElement;
+    const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+    const fills = vi.spyOn(ctx, 'fill');
+    const copies = vi.spyOn(ctx, 'drawImage');
+    for (let n = 1; n <= 120; n++) preview.draw(growing(n));
+    // One fill per frame (the tail); the pieces went to the backing canvas.
+    expect(fills).toHaveBeenCalledTimes(120);
+    expect(copies.mock.calls.length).toBeGreaterThan(100);
+    expect(alphaAt(canvas, 30, 100)).toBe(255);
+    expect(alphaAt(canvas, 150, 100)).toBe(255);
+    fills.mockRestore();
+    copies.mockRestore();
+  });
+
+  it('an opaque ink carries no CSS opacity, on the live or the settling canvas', () => {
+    preview.begin({ color: '#000000', opacity: 1 });
+    expect(preview.liveCanvas?.style.opacity).toBe('');
+    for (let n = 1; n <= 20; n++) preview.draw(growing(n));
+    const { element, release } = preview.settle();
+    expect(element.style.opacity).toBe('');
+    release();
+  });
+
+  it('bakes only the points the caller says are final', () => {
+    preview.begin({ color: '#000000', opacity: 1 });
+    const canvas = preview.liveCanvas as HTMLCanvasElement;
+    // 60 points, of which the first 10 are final: the rest is redrawn as the tail.
+    preview.draw(growing(60), [], false, 10);
+    expect(preview.stats.pieces).toBe(1);
+    expect(preview.stats.outlinedPoints).toBe(10 + 51);
+    // A shorter path with the same final part: the tail's old pixels are gone.
+    preview.draw(growing(12), [], false, 10);
+    expect(alphaAt(canvas, 20 + 30 * 1.5, 100)).toBe(0);
+    expect(alphaAt(canvas, 20 + 5 * 1.5, 100)).toBe(255);
   });
 
   it('draws predicted points for one frame only', () => {

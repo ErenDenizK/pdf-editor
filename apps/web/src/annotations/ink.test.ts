@@ -6,10 +6,17 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  catmullRom,
   finishInkStroke,
   finishStroke,
+  inkDedupeDistance,
+  INK_DEDUPE_PT,
+  INK_MOUSE_DEDUPE_CSS_PX,
   INK_OUTLINE_TOLERANCE_PT,
   INK_TOLERANCE_PT,
+  InkStrokeModel,
+  smoothPiece,
+  smoothStroke,
   type WidthPoint,
 } from './ink';
 
@@ -93,5 +100,89 @@ describe('finishInkStroke', () => {
     expect(done.points[done.points.length - 1]).toEqual({ x: 10.1, y: 0 });
     expect(done.widths[done.widths.length - 1]).toBe(4);
     expect(done.widths.every((w) => w >= 0.01)).toBe(true);
+  });
+});
+
+/** A cursive-like stroke with uneven spacing and varying width (CSS px, pt widths). */
+function cursive(n = 240): WidthPoint[] {
+  return Array.from({ length: n }, (_, i) => {
+    const t = i / (n - 1);
+    const s = t + 0.05 * Math.sin(t * 37);
+    return {
+      x: 30 + 300 * s + 20 * Math.sin(s * 19),
+      y: 100 + 40 * Math.cos(s * 13) + (i % 3) * 0.2,
+      w: 1 + Math.abs(Math.sin(t * 5)),
+    };
+  });
+}
+
+describe('one stroke model (craft spec §5.2 item 2)', () => {
+  it('dedupes at 0.5 pt, and at 1.5 CSS px or more for a mouse', () => {
+    expect(inkDedupeDistance('pen', 2)).toBeCloseTo(INK_DEDUPE_PT * 2, 2);
+    expect(inkDedupeDistance('pen', 2)).toBeGreaterThan(INK_DEDUPE_PT * 2);
+    expect(inkDedupeDistance('mouse', 4 / 3)).toBe(INK_MOUSE_DEDUPE_CSS_PX);
+    expect(inkDedupeDistance('mouse', 8)).toBeCloseTo(INK_DEDUPE_PT * 8, 2);
+  });
+
+  it('smooths all but the last two kept points as they arrive; that part never changes', () => {
+    const model = new InkStrokeModel(0.7);
+    const snapshots: WidthPoint[][] = [];
+    for (const p of cursive()) {
+      model.add(p);
+      snapshots.push([...model.smooth]);
+      const m = model.kept.length;
+      // The smoothed part ends at the last kept point but one.
+      if (m >= 2) expect(model.smooth.at(-1)).toEqual(model.kept[m - 2]);
+      // Then the raw tip: the last kept point and the newest sample.
+      expect(model.tip()[0]).toEqual(m >= 2 ? model.kept[m - 1] : undefined);
+    }
+    // Append-only: every earlier frame is a prefix of the last.
+    const final = model.smooth;
+    for (const snap of snapshots) expect(final.slice(0, snap.length)).toEqual(snap);
+    // Four points per segment.
+    expect(final.length).toBe(1 + 4 * (model.kept.length - 2));
+  });
+
+  it('finish() is what finishInkStroke smooths from the handover, before simplification', () => {
+    const model = new InkStrokeModel(inkDedupeDistance('pen', 1));
+    for (const p of cursive()) model.add(p);
+    const handover = model.handover();
+    expect(model.finish()).toEqual(smoothStroke(handover));
+    // In points (here 1 CSS px per pt), the commit's own dedupe keeps every handed point...
+    const done = finishInkStroke(handover);
+    // ...so every committed point lies on the smoothed curve (rounded to 0.01 pt).
+    const curve = model.finish();
+    for (const p of done.points) {
+      const near = curve.some((q) => Math.abs(q.x - p.x) <= 0.006 && Math.abs(q.y - p.y) <= 0.006);
+      expect(near).toBe(true);
+    }
+  });
+
+  it('is the same curve in CSS px and in points (a similarity apart)', () => {
+    const css = cursive(120);
+    const scale = 4 / 3;
+    const inPt = smoothStroke(css.map((p) => ({ x: p.x / scale, y: 800 - p.y / scale, w: p.w })));
+    const inCss = smoothStroke(css);
+    expect(inPt).toHaveLength(inCss.length);
+    inCss.forEach((p, i) => {
+      expect(inPt[i]?.x ?? 0).toBeCloseTo(p.x / scale, 9);
+      expect(inPt[i]?.y ?? 0).toBeCloseTo(800 - p.y / scale, 9);
+      expect(inPt[i]?.w ?? 0).toBeCloseTo(p.w, 9);
+    });
+  });
+
+  it('centripetal: no loop or overshoot where a short segment meets long ones', () => {
+    const kept: WidthPoint[] = [
+      { x: 0, y: 0, w: 1 },
+      { x: 100, y: 0, w: 1 },
+      { x: 101, y: 1, w: 1 },
+      { x: 101, y: 100, w: 1 },
+    ];
+    const curve = smoothPiece(kept, 0, 3, [kept[0] as WidthPoint]);
+    // Uniform Catmull-Rom swings well past the corner here; centripetal stays close.
+    const most = (ps: readonly { x: number; y: number }[]) => Math.max(...ps.map((p) => p.x));
+    expect(most(catmullRom(kept))).toBeGreaterThan(105);
+    expect(most(curve)).toBeLessThan(102.5);
+    for (const p of curve) expect(p.y).toBeGreaterThan(-2.5);
   });
 });

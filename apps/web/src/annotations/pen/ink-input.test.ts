@@ -2,25 +2,40 @@
  * The pen's input pipeline (experience-redesign spec §6.6), in a real browser: pointer
  * roles and palm rejection, the pressure and speed width mappings, and the native handlers
  * on a layer with synthetic pointer events (pen with pressure, touch pan after a pen,
- * touch ignored next to a pen, palms, fingers before any pen).
+ * touch ignored next to a pen, palms, fingers before any pen). Craft spec §5.2: a mouse
+ * draws the constant width and touch stays within ±10 %; one stroke model, so the committed
+ * outline lies on the last preview frame; prediction capped and tapered; no layout read per
+ * move; the pen cursor.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { inkOutlineOps } from '@pdf-editor/engine/ink-outline';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { finishInkStroke, INK_MOUSE_DEDUPE_CSS_PX } from '../ink';
 import {
   attachInkInput,
+  capPrediction,
   createPenSession,
+  type InkInputContext,
   InkSamples,
   type InkStrokeInput,
   PALM_CONTACT_PX,
+  PEN_CURSOR_PROPERTY,
   type PenSession,
+  penCursor,
+  PREDICT_HORIZON_MS,
+  PREDICT_MAX_PX,
+  PREDICT_TAPER,
+  predictionCap,
+  predictTip,
   pointerRole,
   SPEED_PRESSURE_STILL,
+  SPEED_SMOOTHING_MS,
   speedPressure,
   StrokeWidths,
   TOUCH_AFTER_PEN_MS,
   widthFromPressure,
 } from './ink-input';
-import { InkPreview } from './ink-preview';
+import { InkPreview, outlinePath, type PreviewPath, type PreviewPoint } from './ink-preview';
 
 describe('pointer roles', () => {
   it('pens and mice draw; touch draws until a pen has been seen, then pans', () => {
@@ -102,6 +117,29 @@ describe('width mapping', () => {
     }
     expect(speed.source).toBe('speed');
     expect(constant.width(9)).toBeLessThan(constant.width(0));
+  });
+
+  it('speed widths stay within ±10 % of the nominal, smoothed over at most 20 ms', () => {
+    expect(widthFromPressure(2, SPEED_PRESSURE_STILL)).toBeCloseTo(2.2);
+    expect(widthFromPressure(2, 1 - SPEED_PRESSURE_STILL)).toBeCloseTo(1.8);
+    expect(SPEED_SMOOTHING_MS).toBeLessThanOrEqual(20);
+    // After one time constant of stillness, 63 % of the way to the still width.
+    const p = speedPressure(0.5, 0, SPEED_SMOOTHING_MS);
+    expect(p - 0.5).toBeCloseTo((SPEED_PRESSURE_STILL - 0.5) * (1 - Math.exp(-1)), 5);
+  });
+
+  it('a mouse draws the constant nominal width whatever its speed', () => {
+    const samples = new InkSamples();
+    const widths = new StrokeWidths(samples, 2, 'mouse', true);
+    expect(widths.source).toBe('constant');
+    for (let i = 0; i < 30; i++) {
+      // Still, then fast, then still again.
+      const x = i < 10 ? 0 : i < 20 ? (i - 9) * 40 : 400;
+      const { width, rewrote } = widths.take(x, 0, 0.5, i * 8);
+      expect(width).toBe(2);
+      expect(rewrote).toBe(false);
+      samples.push(x, 0, 0.5, i * 8, width);
+    }
   });
 
   it('a pen switches to pressure at its first real value, which also stands for the samples before', () => {
@@ -196,6 +234,10 @@ function setup(): Rig {
   return r;
 }
 
+const frames = async (n: number) => {
+  for (let i = 0; i < n; i++) await new Promise((resolve) => requestAnimationFrame(resolve));
+};
+
 function pointer(
   type: string,
   init: {
@@ -276,7 +318,7 @@ describe('ink input on a layer', () => {
     expect(rig.session.lastPenUpAt).toBe(rig.clock);
   });
 
-  it('a zoom in the middle of a stroke keeps it straight; it is handed over at the new zoom', () => {
+  it('a zoom in the middle of a stroke keeps it straight; it is handed over at the new zoom', async () => {
     // A pen moving along y = 40 (CSS px at zoom 1) from x = 20 to 220; at half way the page
     // zooms to 150 %, so the same page points arrive at 1.5 times the CSS px.
     const pen = (type: string, x: number, zoom: number, pressure = 0.5) =>
@@ -287,6 +329,8 @@ describe('ink input on a layer', () => {
     for (let i = 1; i <= 10; i++) pen('pointermove', 20 + i * 10, 1);
     rig.layer.style.width = '1800px';
     rig.layer.style.height = '2400px';
+    // The layer's new size arrives through its ResizeObserver, before the next paint.
+    await frames(2);
     for (let i = 11; i <= 20; i++) pen('pointermove', 20 + i * 10, 1.5);
     pen('pointerup', 220, 1.5, 0);
     expect(rig.strokes).toHaveLength(1);
@@ -300,11 +344,42 @@ describe('ink input on a layer', () => {
     for (const w of rig.strokes[0]?.widths ?? []) expect(w).toBeGreaterThan(0.9);
   });
 
-  it('a mouse draws with speed-derived widths', () => {
+  it('a mouse draws the constant nominal width', () => {
     drag(rig.layer, 'mouse', 1, [20, 40], [300, 40], { steps: 30 });
     expect(rig.strokes).toHaveLength(1);
-    expect(rig.strokes[0]?.widthSource).toBe('speed');
+    expect(rig.strokes[0]?.widthSource).toBe('constant');
+    expect(new Set(rig.strokes[0]?.widths)).toEqual(new Set([2]));
     expect(rig.session.penSeen).toBe(false);
+  });
+
+  it('a mouse stroke is handed over deduped at 1.5 CSS px, its last point kept', () => {
+    rig.layer.dispatchEvent(pointer('pointerdown', { x: 20, y: 40, id: 1, kind: 'mouse' }));
+    // Integer jitter: 1 px steps, then a real move.
+    for (const x of [21, 22, 23, 24, 25, 26, 40, 41]) {
+      rig.layer.dispatchEvent(pointer('pointermove', { x, y: 40, id: 1, kind: 'mouse' }));
+    }
+    rig.layer.dispatchEvent(pointer('pointerup', { x: 41, y: 40, id: 1, kind: 'mouse' }));
+    const xs = rig.strokes[0]?.points.map((p) => p.x) ?? [];
+    expect(xs).toEqual([20, 22, 24, 26, 40, 41]);
+    for (let i = 1; i + 1 < xs.length; i++) {
+      expect((xs[i] ?? 0) - (xs[i - 1] ?? 0)).toBeGreaterThanOrEqual(INK_MOUSE_DEDUPE_CSS_PX);
+    }
+  });
+
+  it('measures the layer at the press and after a scroll, not on every move', () => {
+    const spy = vi.spyOn(rig.layer, 'getBoundingClientRect');
+    const at = (x: number) => ({ x, y: 60, id: 3, kind: 'pen' as const, pressure: 0.5 });
+    rig.layer.dispatchEvent(pointer('pointerdown', at(20)));
+    for (let i = 1; i <= 30; i++) rig.layer.dispatchEvent(pointer('pointermove', at(20 + i * 4)));
+    expect(spy).toHaveBeenCalledTimes(1);
+    rig.viewport.scrollTop = 40;
+    rig.viewport.dispatchEvent(new Event('scroll'));
+    for (let i = 31; i <= 40; i++) rig.layer.dispatchEvent(pointer('pointermove', at(20 + i * 4)));
+    expect(spy).toHaveBeenCalledTimes(2);
+    rig.layer.dispatchEvent(pointer('pointerup', at(180)));
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(rig.strokes).toHaveLength(1);
+    spy.mockRestore();
   });
 
   it('after a pen, one finger pans the stage and draws nothing; two reach the pinch zoom', () => {
@@ -357,6 +432,10 @@ describe('ink input on a layer', () => {
     drag(rig.layer, 'touch', 15, [30, 30], [200, 90], { size: 10 });
     expect(rig.strokes).toHaveLength(1);
     expect(rig.strokes[0]?.widthSource).toBe('speed');
+    for (const w of rig.strokes[0]?.widths ?? []) {
+      expect(w).toBeGreaterThanOrEqual(2 * 0.9 - 1e-6);
+      expect(w).toBeLessThanOrEqual(2 * 1.1 + 1e-6);
+    }
     const a = { x: 50, y: 50, id: 16, kind: 'touch' as const, size: 10 };
     const b = { x: 150, y: 150, id: 17, kind: 'touch' as const, size: 10 };
     rig.layer.dispatchEvent(pointer('pointerdown', a));
@@ -388,5 +467,354 @@ describe('ink input on a layer', () => {
     drag(rig.layer, 'pen', 6, [20, 40], [120, 40], { pressure: () => 0.7 });
     expect(rig.strokes).toHaveLength(0);
     rig = setup();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Prediction (craft spec §5.2 item 3)
+// ---------------------------------------------------------------------------
+
+describe('prediction', () => {
+  /** Samples moving along x at `speed` px/ms, one every 8 ms. */
+  const moving = (speed: number, n = 4) =>
+    Array.from({ length: n }, (_, i) => ({ x: 100 + i * 8 * speed, y: 50, t: i * 8 }));
+
+  it('extrapolates the last samples one frame ahead, tapered to 0.8 of the width', () => {
+    const [tip] = predictTip(moving(0.25), 4);
+    const last = 100 + 3 * 8 * 0.25;
+    expect(tip?.x).toBeCloseTo(last + 0.25 * PREDICT_HORIZON_MS, 5);
+    expect(tip?.y).toBeCloseTo(50, 5);
+    expect(tip?.w).toBeCloseTo(4 * PREDICT_TAPER, 5);
+  });
+
+  it('reaches at most 12 px, or 4 widths for a wide stroke', () => {
+    expect(predictionCap(2)).toBe(PREDICT_MAX_PX);
+    expect(predictionCap(10)).toBe(40);
+    const fast = moving(3);
+    const last = fast[3]?.x ?? 0;
+    expect((predictTip(fast, 2)[0]?.x ?? 0) - last).toBeCloseTo(12, 5);
+    expect((predictTip(fast, 10)[0]?.x ?? 0) - last).toBeCloseTo(40, 5);
+  });
+
+  it('predicts nothing when slow, with too few samples, or without time', () => {
+    expect(predictTip(moving(0.04), 4)).toEqual([]);
+    expect(predictTip(moving(1, 2), 4)).toEqual([]);
+    expect(
+      predictTip(
+        [
+          { x: 0, y: 0, t: 5 },
+          { x: 5, y: 0, t: 5 },
+          { x: 9, y: 0, t: 5 },
+        ],
+        4,
+      ),
+    ).toEqual([]);
+  });
+
+  it('shrinks as the pointer decelerates', () => {
+    const slowing = [
+      { x: 0, y: 0, t: 0 },
+      { x: 8, y: 0, t: 8 },
+      { x: 16, y: 0, t: 16 },
+      { x: 17, y: 0, t: 24 },
+    ];
+    const [tip] = predictTip(slowing, 4);
+    // The newest segment's speed (0.125 px/ms) for 16 ms, along the average direction.
+    expect((tip?.x ?? 0) - 17).toBeCloseTo(2, 5);
+  });
+
+  it('holds the browser’s predictions to the same horizon and cap, tapered', () => {
+    const last = { x: 100, y: 100, t: 50 };
+    const out = capPrediction(
+      last,
+      [
+        { x: 104, y: 100, t: 58 },
+        { x: 130, y: 100, t: 64 },
+        { x: 140, y: 100, t: 80 },
+      ],
+      2,
+    );
+    // The third is beyond 16 ms; the second is pulled back to 12 px.
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ x: 104, y: 100 });
+    expect(out[1]?.x).toBeCloseTo(112, 5);
+    expect(out[1]?.w).toBeCloseTo(2 * PREDICT_TAPER, 5);
+    expect(out[0]?.w).toBeGreaterThan(out[1]?.w ?? 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One stroke model: the commit lies on the last preview frame (craft spec §5.2 item 2)
+// ---------------------------------------------------------------------------
+
+/** Records what the preview drew (device-independent: CSS px of the page). */
+class RecordingPreview extends InkPreview {
+  frames: { points: PreviewPoint[]; predicted: readonly PreviewPoint[]; settled: number }[] = [];
+
+  override draw(
+    path: PreviewPath,
+    predicted: readonly PreviewPoint[] = [],
+    restart = false,
+    settled = path.length - 2,
+  ): void {
+    const points = Array.from({ length: path.length }, (_, i) => ({
+      x: path.x(i),
+      y: path.y(i),
+      w: path.w(i),
+    }));
+    this.frames.push({ points, predicted, settled });
+    super.draw(path, predicted, restart, settled);
+  }
+}
+
+/** The outline's boundary as a polyline (curves flattened). */
+function boundary(ops: string): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  const args: number[] = [];
+  for (const token of ops.split(/\s+/)) {
+    if (token === '') continue;
+    if (token === 'm' || token === 'l') out.push({ x: args[0] ?? 0, y: args[1] ?? 0 });
+    else if (token === 'c') {
+      const p0 = out[out.length - 1] ?? { x: 0, y: 0 };
+      const [x1 = 0, y1 = 0, x2 = 0, y2 = 0, x3 = 0, y3 = 0] = args;
+      for (let k = 1; k <= 8; k++) {
+        const t = k / 8;
+        const u = 1 - t;
+        out.push({
+          x: u * u * u * p0.x + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3,
+          y: u * u * u * p0.y + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3,
+        });
+      }
+    } else if (token !== 'h') {
+      args.push(Number(token));
+      continue;
+    }
+    args.length = 0;
+  }
+  return out;
+}
+
+function distanceToPolyline(p: { x: number; y: number }, line: { x: number; y: number }[]) {
+  let best = Infinity;
+  for (let i = 0; i < line.length; i++) {
+    const a = line[i] as { x: number; y: number };
+    const b = line[(i + 1) % line.length] as { x: number; y: number };
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
+    best = Math.min(best, Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy));
+  }
+  return best;
+}
+
+/** The boundary with its straight edges cut into pieces of at most `step` px. */
+function densify(line: { x: number; y: number }[], step = 0.25): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  for (let i = 0; i < line.length; i++) {
+    const a = line[i] as { x: number; y: number };
+    const b = line[(i + 1) % line.length] as { x: number; y: number };
+    const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / step));
+    for (let k = 0; k < n; k++)
+      out.push({ x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n });
+  }
+  return out;
+}
+
+/**
+ * Hausdorff distance between the two filled shapes (device px): how far a point of one lies
+ * outside the other. A point outside a shape is nearest to its true edge, which is part of
+ * its boundary polyline (the inner side of a round join runs inside the shape, never
+ * nearer), so the distance to the polyline is exact there.
+ */
+function outlineDistance(a: string, b: string): number {
+  const ctx = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D;
+  const one = (from: string, to: string) => {
+    const shape = outlinePath(to);
+    const edge = boundary(to);
+    let worst = 0;
+    for (const p of densify(boundary(from))) {
+      if (ctx.isPointInPath(shape, p.x, p.y, 'nonzero')) continue;
+      worst = Math.max(worst, distanceToPolyline(p, edge));
+    }
+    return worst;
+  };
+  return Math.max(one(a, b), one(b, a));
+}
+
+/**
+ * A recorded mouse stroke: handwriting ("lle") at 125 Hz, integer pixel positions, slowing
+ * at the tops of the loops (as recorded in the 2026-10 audit's slow-handwriting run).
+ */
+function recordedMouseStroke(): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  for (let i = 0; i <= 150; i++) {
+    const t = i / 150;
+    const s = t + 0.04 * Math.sin(t * Math.PI * 6);
+    const x = 40 + 260 * s + 18 * Math.sin(s * Math.PI * 6);
+    const y = 140 - 50 * Math.abs(Math.sin(s * Math.PI * 3)) + 6 * Math.cos(s * Math.PI * 6);
+    out.push({ x: Math.round(x), y: Math.round(y) });
+  }
+  return out;
+}
+
+describe('one stroke model', () => {
+  let host: HTMLDivElement;
+  let layer: HTMLDivElement;
+  let preview: RecordingPreview;
+  let detach: () => void;
+  let strokes: InkStrokeInput[];
+  let context: InkInputContext;
+
+  beforeEach(() => {
+    layer = document.createElement('div');
+    Object.assign(layer.style, {
+      position: 'fixed',
+      left: '0px',
+      top: '0px',
+      width: '400px',
+      height: '300px',
+    });
+    host = document.createElement('div');
+    Object.assign(host.style, { position: 'absolute', inset: '0px' });
+    layer.appendChild(host);
+    document.body.appendChild(layer);
+    preview = new RecordingPreview(host);
+    strokes = [];
+    // 100 % zoom: 4/3 CSS px per point.
+    context = { width: 1.5, color: '#1a1a1a', opacity: 1, scale: 4 / 3 };
+    detach = attachInkInput({
+      element: layer,
+      preview,
+      session: createPenSession(),
+      context: () => context,
+      onStroke: (stroke, settle) => {
+        strokes.push(stroke);
+        settle()();
+      },
+    });
+  });
+
+  afterEach(() => {
+    detach();
+    preview.destroy();
+    layer.remove();
+  });
+
+  it('smooths the stable part, draws the raw tip, and never commits the prediction', async () => {
+    const points = recordedMouseStroke();
+    const send = (type: string, p: { x: number; y: number }) =>
+      layer.dispatchEvent(pointer(type, { ...p, id: 1, kind: 'mouse' }));
+    send('pointerdown', points[0] as { x: number; y: number });
+    for (const [i, p] of points.slice(1, 60).entries()) {
+      send('pointermove', p);
+      if (i % 6 === 5) await frames(1);
+    }
+    await frames(1);
+    const frame = preview.frames.at(-1);
+    expect(frame).toBeDefined();
+    // Smoothed: 4 points per kept segment, many more than the samples before the tip.
+    expect(frame?.settled ?? 0).toBeGreaterThan(100);
+    // The tip ends at the newest sample (raw), and a prediction goes past it.
+    const last = points[59] as { x: number; y: number };
+    expect(frame?.points.at(-1)).toMatchObject({ x: last.x, y: last.y });
+    const predicted = preview.frames.flatMap((f) => f.predicted);
+    expect(predicted.length).toBeGreaterThan(0);
+    send('pointerup', last);
+    const committed = strokes[0]?.points ?? [];
+    for (const q of predicted) {
+      expect(committed.some((p) => p.x === q.x && p.y === q.y)).toBe(false);
+    }
+    expect(committed.at(-1)).toEqual({ x: last.x, y: last.y });
+  });
+
+  it('the committed outline lies within 0.5 device px of the last preview frame (no snap)', () => {
+    const points = recordedMouseStroke();
+    const send = (type: string, p: { x: number; y: number }) =>
+      layer.dispatchEvent(pointer(type, { ...p, id: 1, kind: 'mouse' }));
+    send('pointerdown', points[0] as { x: number; y: number });
+    for (const p of points.slice(1)) send('pointermove', p);
+    send('pointerup', points.at(-1) as { x: number; y: number });
+    const stroke = strokes[0];
+    expect(stroke).toBeDefined();
+    const last = preview.frames.at(-1);
+    if (!stroke || !last) return;
+    // The release frame is the whole stroke, final (nothing left in the tip).
+    expect(last.settled).toBe(last.points.length);
+    expect(last.predicted).toEqual([]);
+
+    // The commit as AnnotationLayer's `inkCommit` makes it: user space (pt), finishInkStroke.
+    const scale = context.scale;
+    const done = finishInkStroke(
+      stroke.points.map((p, i) => ({ x: p.x / scale, y: p.y / scale, w: stroke.widths[i] ?? 0 })),
+    );
+    const dpr = window.devicePixelRatio || 1;
+    const device = scale * dpr;
+    const committedCentre = done.points.map((p) => ({ x: p.x * device, y: p.y * device }));
+    const previewCentre = last.points.map((p) => ({ x: p.x * dpr, y: p.y * dpr }));
+    const committed = inkOutlineOps(
+      committedCentre,
+      done.widths.map((w) => w * device),
+    );
+    const previewed = inkOutlineOps(
+      previewCentre,
+      last.points.map((p) => p.w * dpr),
+    );
+    expect(done.points.length).toBeLessThan(last.points.length / 2);
+    expect(outlineDistance(committed, previewed)).toBeLessThan(0.5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The pen cursor (craft spec §5.2 item 5)
+// ---------------------------------------------------------------------------
+
+describe('pen cursor', () => {
+  const svgOf = (cursor: string) => {
+    const m = /^url\("data:image\/svg\+xml,(.*)"\) (\d+) (\d+), crosshair$/.exec(cursor);
+    expect(m).not.toBeNull();
+    return { svg: decodeURIComponent(m?.[1] ?? ''), x: Number(m?.[2]), y: Number(m?.[3]) };
+  };
+
+  it('is a dot of the colour and on-screen width, a 1 px ring, the hot spot centred', () => {
+    const { svg, x, y } = svgOf(penCursor('#1E5BD8', 1, 8));
+    expect(svg).toContain('width="10"');
+    expect(svg).toContain('r="4" fill="#1E5BD8"');
+    expect(svg).toContain('r="4.5" fill="none" stroke="rgba(255,255,255,0.9)"');
+    expect([x, y]).toEqual([5, 5]);
+    // A light ink gets a dark ring.
+    expect(svgOf(penCursor('#FFEA00', 1, 8)).svg).toContain('stroke="rgba(0,0,0,0.7)"');
+  });
+
+  it('clamps the dot to 3–32 px', () => {
+    expect(svgOf(penCursor('#000000', 1, 0.5)).svg).toContain('r="1.5"');
+    const big = svgOf(penCursor('#000000', 1, 90));
+    expect(big.svg).toContain('r="16"');
+    expect(big.svg).toContain('width="34"');
+    expect([big.x, big.y]).toEqual([17, 17]);
+  });
+
+  it('the armed layer carries it and follows preset and zoom changes; detaching removes it', () => {
+    const layer = document.createElement('div');
+    Object.assign(layer.style, { position: 'fixed', width: '200px', height: '200px' });
+    document.body.appendChild(layer);
+    const preview = new InkPreview(layer);
+    let context: InkInputContext = { width: 2, color: '#1a1a1a', opacity: 1, scale: 1.5 };
+    const detach = attachInkInput({
+      element: layer,
+      preview,
+      session: createPenSession(),
+      context: () => context,
+      onStroke: (_stroke, settle) => settle()(),
+    });
+    const cursor = () => layer.style.getPropertyValue(PEN_CURSOR_PROPERTY);
+    expect(cursor()).toBe(penCursor('#1a1a1a', 1, 3));
+    context = { ...context, color: '#e0301e', scale: 3 };
+    layer.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }));
+    expect(cursor()).toBe(penCursor('#e0301e', 1, 6));
+    detach();
+    preview.destroy();
+    expect(cursor()).toBe('');
+    layer.remove();
   });
 });

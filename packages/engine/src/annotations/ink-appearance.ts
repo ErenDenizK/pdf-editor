@@ -10,7 +10,7 @@
  *
  * - `inkAppearance`: what the adapter writes for an ink with widths (content, /Rect, the
  *   widths string), or `undefined` when its widths do not match its paths (constant width).
- * - `formatInkWidths` / `parseInkWidths`: the `/PdfEditorInkWidths` value (`1;w w …;w w …`,
+ * - `formatInkWidths` / `parseInkWidths`: the `/PdfEditorInkWidths` value (`2;w w …;w w …`,
  *   two decimals, one group per path) and back, checked against `/InkList` point for point.
  *
  * The appearance is built from the widths as stored (two decimals), so the stream written at

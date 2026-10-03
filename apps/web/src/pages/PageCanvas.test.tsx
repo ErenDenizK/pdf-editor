@@ -1,10 +1,12 @@
 /**
  * PageCanvas against the real engine service (PDFium in its worker): Read-mode pages
  * render at the exact device scale of their snapped sheet and are drawn 1:1, and a zoom
- * gesture renders only the settled zoom.
+ * gesture renders only the settled zoom. An edit (a revision) repaints at once, never behind
+ * the zoom debounce; a thumbnail keeps its pixels and repaints when idle (craft spec §5.2
+ * item 6).
  */
 import type { SourceId } from '@pdf-editor/document-model';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import fixtureUrl from '../../../../test/fixtures/simple-text.pdf?url';
@@ -108,6 +110,77 @@ describe('PageCanvas (exact)', () => {
       expect(canvas.dataset.state).toBe('rendered');
       expect(Number(canvas.dataset.bucket)).toBe(expectedScale(1));
       expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  }, 30_000);
+});
+
+describe('PageCanvas (edits)', () => {
+  it('an edit requests the repaint at once, not after the zoom debounce', async () => {
+    const service = getEngineService();
+    const { container } = render(<Sheet zoom={1} delayMs={160} />);
+    const canvas = canvasOf(container);
+    await waitFor(() => expect(canvas.dataset.state).toBe('rendered'), { timeout: 20_000 });
+    const spy = vi.spyOn(service, 'renderPage');
+    try {
+      act(() => service.invalidatePage(source, 0));
+      // Requested in the same task as the revision change, at the same scale.
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0]?.[0].bucket).toBe(expectedScale(1));
+      // The old pixels stay up until the fresh render arrives.
+      expect(canvas.width).toBeGreaterThan(0);
+      await waitFor(() => expect(canvas.dataset.state).toBe('rendered'), { timeout: 20_000 });
+    } finally {
+      spy.mockRestore();
+    }
+  }, 30_000);
+
+  it('a zoom still debounces, and an edit during it does not cut the debounce short', async () => {
+    const service = getEngineService();
+    const { container, rerender } = render(<Sheet zoom={1} delayMs={160} />);
+    const canvas = canvasOf(container);
+    await waitFor(() => expect(canvas.dataset.state).toBe('rendered'), { timeout: 20_000 });
+    const spy = vi.spyOn(service, 'renderPage');
+    try {
+      rerender(<Sheet zoom={1.17} delayMs={160} />);
+      act(() => service.invalidatePage(source, 0));
+      expect(spy).not.toHaveBeenCalled();
+      await waitFor(() => expect(spy).toHaveBeenCalledTimes(1), { timeout: 5_000 });
+      expect(spy.mock.calls[0]?.[0].bucket).toBe(expectedScale(1.17));
+      await waitFor(() => expect(canvas.dataset.state).toBe('rendered'), { timeout: 20_000 });
+    } finally {
+      spy.mockRestore();
+    }
+  }, 30_000);
+
+  it('a thumbnail keeps its pixels after an edit and repaints when idle', async () => {
+    const service = getEngineService();
+    const cssWidth = 120;
+    const { container } = render(
+      <div style={{ position: 'relative', width: cssWidth, height: 155 }}>
+        <PageCanvas
+          sourceId={source}
+          index={2}
+          rotation={0}
+          widthPt={WIDTH_PT}
+          heightPt={HEIGHT_PT}
+          cssWidth={cssWidth}
+          priority={RENDER_PRIORITY.visible}
+        />
+      </div>,
+    );
+    const canvas = canvasOf(container);
+    await waitFor(() => expect(canvas.dataset.state).toBe('rendered'), { timeout: 20_000 });
+    const width = canvas.width;
+    const spy = vi.spyOn(service, 'renderPage');
+    try {
+      act(() => service.invalidatePage(source, 2));
+      expect(spy).not.toHaveBeenCalled();
+      expect(canvas.width).toBe(width);
+      expect(canvas.dataset.state).toBe('preview');
+      await waitFor(() => expect(spy).toHaveBeenCalledTimes(1), { timeout: 5_000 });
+      await waitFor(() => expect(canvas.dataset.state).toBe('rendered'), { timeout: 20_000 });
     } finally {
       spy.mockRestore();
     }

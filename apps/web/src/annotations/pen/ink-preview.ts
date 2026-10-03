@@ -7,14 +7,19 @@
  * - **Device-pixel exact.** The canvas is sized in whole device pixels (CSS size ×
  *   `devicePixelRatio`, like the page canvas) and covers only the part of the page that is
  *   on screen, so a page at high zoom does not allocate a page-sized bitmap.
- * - **Incremental.** The outline of the points whose joins can no longer change (all but
- *   the last two) is appended to a cached `Path2D` piece by piece; each frame outlines only
- *   the new piece and the tail (the last points plus the predicted ones), and repaints only
- *   the box they touch. Pieces overlap by one point and end in round caps, so they join
- *   without seams; every outline has the same orientation, so the nonzero fill is a union.
- * - **Predicted points** (`getPredictedEvents`) are part of the tail of one frame only.
- * - **Opacity** is the canvas's CSS opacity: the outline is filled opaque, so overlapping
- *   pieces do not darken a translucent ink.
+ * - **Incremental, baked once** (craft spec §5.2 item 5). The points whose joins can no
+ *   longer change (the caller says how many; by default all but the last two) are outlined
+ *   piece by piece, and each piece is filled once into an off-DOM backing canvas. Each frame
+ *   outlines only the new piece and the tail (the last points plus the predicted ones), and
+ *   repaints only the box they touch: the backing canvas's pixels copied into it, then the
+ *   tail filled. Pieces overlap by one point and end in round caps, so they join without
+ *   seams; every outline has the same orientation, so the nonzero fill is a union.
+ * - **The stroke model.** The pen hands over its smoothed, final points plus the raw tip
+ *   (`InkStrokeModel`, `../ink.ts`), so what is baked is what the commit writes.
+ * - **Predicted points** are part of the tail of one frame only.
+ * - **Opacity** is the canvas's CSS opacity, set only for a translucent ink (an opaque one
+ *   keeps the canvas free of it, so a `desynchronized` canvas can be promoted to an overlay):
+ *   the outline is filled opaque, so overlapping pieces do not darken a translucent ink.
  * - **Settling.** `settle` moves the finished stroke to its own small canvas, marked
  *   `data-settling`, drawn from the final (simplified) centre line and widths when given:
  *   the shape the engine commits. The caller removes it with `release` once the page shows
@@ -149,7 +154,7 @@ function devicePoints(
     const width = w * scale;
     points.push(p);
     widths.push(width);
-    // A miter reaches at most one full width from the centre (limit 2 × half width).
+    // A round join or cap reaches half the width; a miter (≤ 45° turns) 8 % more.
     const r = width + 2;
     box = union(box, { x1: p.x - r, y1: p.y - r, x2: p.x + r, y2: p.y + r });
   };
@@ -160,6 +165,11 @@ function devicePoints(
 
 function outline(points: readonly { x: number; y: number }[], widths: readonly number[]): Path2D {
   return outlinePath(inkOutlineOps(points, widths));
+}
+
+/** A canvas's CSS opacity for an ink: none for an opaque one. */
+function cssOpacity(opacity: number): string {
+  return opacity < 1 ? String(opacity) : '';
 }
 
 function placeCanvas(
@@ -188,8 +198,10 @@ export class InkPreview {
   private originX = 0;
   private originY = 0;
   private style: InkPreviewStyle = { color: '#000000', opacity: 1 };
-  private stable = new Path2D();
-  /** Points [0, stableCount) are in `stable`. */
+  /** Off-DOM, the live canvas's size: the stable pieces, each filled once. */
+  private backing: HTMLCanvasElement | null = null;
+  private backingContext: CanvasRenderingContext2D | null = null;
+  /** Points [0, stableCount) are baked into `backing`. */
   private stableCount = 0;
   private tailBox: Box | null = null;
   /** Everything drawn since `begin`, for `settle` without a final shape. */
@@ -238,8 +250,19 @@ export class InkPreview {
       canvas.height = height;
     }
     placeCanvas(canvas, x1 / dpr, y1 / dpr, width / dpr, height / dpr);
-    canvas.style.opacity = String(style.opacity);
+    canvas.style.opacity = cssOpacity(style.opacity);
     this.context ??= canvas.getContext('2d', { desynchronized: true });
+    let backing = this.backing;
+    if (!backing) {
+      backing = document.createElement('canvas');
+      this.backing = backing;
+      this.backingContext = null;
+    }
+    if (backing.width !== width || backing.height !== height) {
+      backing.width = width;
+      backing.height = height;
+    }
+    this.backingContext ??= backing.getContext('2d');
     this.scale = dpr;
     this.originX = x1;
     this.originY = y1;
@@ -249,9 +272,16 @@ export class InkPreview {
 
   /**
    * Draws the stroke so far. `restart` when the points changed other than by appending
-   * (Shift straightened the stroke, widths were recomputed): the outline is rebuilt.
+   * (Shift straightened the stroke, widths were recomputed, the zoom changed): the outline
+   * is rebuilt. `settled`: how many leading points have final joins (they never move until a
+   * restart); by default all but the last two.
    */
-  draw(path: PreviewPath, predicted: readonly PreviewPoint[] = [], restart = false): void {
+  draw(
+    path: PreviewPath,
+    predicted: readonly PreviewPoint[] = [],
+    restart = false,
+    settled = path.length - 2,
+  ): void {
     const ctx = this.context;
     const canvas = this.canvas;
     if (!ctx || !canvas) return;
@@ -259,21 +289,26 @@ export class InkPreview {
     let dirty: Box | null = this.tailBox;
     if (restart) {
       this.reset();
+      this.backingContext?.clearRect(0, 0, canvas.width, canvas.height);
       dirty = { x1: 0, y1: 0, x2: canvas.width, y2: canvas.height };
     }
     const n = path.length;
     if (n === 0) return;
     const at = (from: number, to: number, extra: readonly PreviewPoint[] = []) =>
       devicePoints(path, from, to, extra, this.scale, this.originX, this.originY);
-    // Points whose joins are final: all but the last two.
-    const settled = n - 2;
     const pieceFrom = Math.max(0, this.stableCount - 1);
-    if (settled > this.stableCount && settled - pieceFrom >= 2) {
-      const piece = at(pieceFrom, settled);
-      outlinePath(inkOutlineOps(piece.points, piece.widths), this.stable);
+    const stableTo = Math.min(n, settled);
+    if (stableTo > this.stableCount && stableTo - pieceFrom >= 2) {
+      const piece = at(pieceFrom, stableTo);
+      // Baked once: later frames copy these pixels instead of filling the piece again.
+      const backing = this.backingContext;
+      if (backing) {
+        backing.fillStyle = this.style.color;
+        backing.fill(outline(piece.points, piece.widths));
+      }
       this.stats.pieces++;
       this.stats.outlinedPoints += piece.points.length;
-      this.stableCount = settled;
+      this.stableCount = stableTo;
       dirty = union(dirty, piece.box);
       this.drawnBox = union(this.drawnBox, piece.box);
     }
@@ -289,13 +324,15 @@ export class InkPreview {
     const x2 = Math.min(canvas.width, Math.ceil(dirty.x2));
     const y2 = Math.min(canvas.height, Math.ceil(dirty.y2));
     if (x2 <= x1 || y2 <= y1) return;
+    const w = x2 - x1;
+    const h = y2 - y1;
     ctx.save();
     ctx.beginPath();
-    ctx.rect(x1, y1, x2 - x1, y2 - y1);
+    ctx.rect(x1, y1, w, h);
     ctx.clip();
-    ctx.clearRect(x1, y1, x2 - x1, y2 - y1);
+    ctx.clearRect(x1, y1, w, h);
+    if (this.backing) ctx.drawImage(this.backing, x1, y1, w, h, x1, y1, w, h);
     ctx.fillStyle = this.style.color;
-    ctx.fill(this.stable);
     ctx.fill(tailPath);
     ctx.restore();
   }
@@ -342,7 +379,7 @@ export class InkPreview {
     element.width = width;
     element.height = height;
     placeCanvas(element, x1 / scale, y1 / scale, width / scale, height / scale);
-    element.style.opacity = String(this.style.opacity);
+    element.style.opacity = cssOpacity(this.style.opacity);
     const ctx = element.getContext('2d');
     if (ctx && draw) {
       ctx.translate(-x1, -y1);
@@ -372,17 +409,19 @@ export class InkPreview {
     this.canvas?.remove();
     this.canvas = null;
     this.context = null;
+    this.backing = null;
+    this.backingContext = null;
     this.reset();
   }
 
   private clear(): void {
     const canvas = this.canvas;
     this.context?.clearRect(0, 0, canvas?.width ?? 0, canvas?.height ?? 0);
+    this.backingContext?.clearRect(0, 0, canvas?.width ?? 0, canvas?.height ?? 0);
     this.reset();
   }
 
   private reset(): void {
-    this.stable = new Path2D();
     this.stableCount = 0;
     this.tailBox = null;
     this.drawnBox = null;
