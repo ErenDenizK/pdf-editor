@@ -75,6 +75,11 @@ test('the palette finds commands by keywords in both languages, without diacriti
 }) => {
   await page.goto('./?lang=en');
   const search = async (query: string) => {
+    // The shortcut is registered when the shell mounts; a press before that is lost.
+    await page
+      .getByRole('button', { name: /^(Search commands|Komut ara)/ })
+      .first()
+      .waitFor();
     await page.keyboard.press('ControlOrMeta+k');
     const input = page.getByRole('combobox', { name: /^(Search commands|Komut ara)$/ });
     await input.fill(query);
@@ -178,8 +183,8 @@ test('screenshots of the shell, Home and Document info (design review)', async (
   await shot('m0-shell-privacy-1440.png', { x: 0, y: 640, width: 520, height: 260 });
   await page.keyboard.press('Escape');
   const bar = page.getByRole('toolbar', { name: 'Tools' });
-  await bar.getByRole('button', { name: 'Mark up', exact: true }).click();
-  await bar.getByRole('button', { name: /^Highlight/ }).hover();
+  await bar.getByRole('button', { name: 'Write', exact: true }).click();
+  await bar.getByRole('button', { name: /^Eraser/ }).hover();
   // Base UI tooltips open after 500 ms and carry no role.
   await page.waitForTimeout(900);
   const box = await bar.boundingBox();
