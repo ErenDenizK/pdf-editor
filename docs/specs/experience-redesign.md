@@ -1,6 +1,11 @@
 # Spec: Experience redesign (M6)
 
 **Status:** draft (2026-10-01) · **Milestone:** M6 (beta with M7) · **Owner:** project lead
+· **Amended by:** `docs/specs/craft.md` (M8, 2026-10-03): §5.1's six groups become five with
+Read ⇄ Edit modes (ADR-0019); §6.5's ink-only lasso takes every kind and §6.2's yellow preset
+becomes the Highlighter (ADR-0021); §6.6 names `perfect-freehand`, which ADR-0018 replaced
+with our own outline (`packages/engine/src/annotations/ink-outline.ts`), and the preview
+smoothing that makes decision 7 true is specified there.
 
 M1–M5 built the features; the owner's verdict after M5 is that the experience is not
 right yet. This spec turns the experience audit (`docs/design/experience-audit-2026-10.md`)
@@ -360,7 +365,7 @@ the bar's width follows a group change over `--duration-base`. Reduced motion se
 ### 7.6 Light theme
 
 WP L1: `[data-theme='light']` on the same tokens, a System · Dark · Light toggle, the same
-contrast test plus white page vs light canvas ≥ 1.3:1. Moved to M8 by the owner on
+contrast test plus white page vs light canvas ≥ 1.3:1. Moved to M9 (then numbered M8) by the owner on
 2026-10-01 (§14 Q2); the tokens of §7.1 are written so that a light ladder can be added
 without renaming anything.
 
@@ -493,7 +498,7 @@ unless they start with a top-level directory or are root files (`NOTICE`, `.chan
 | A11 | Accessibility: F6 regions, roving tabindex, announcements, axe | `shell/AppShell.tsx`, `shell/announcer.ts`; fixes by each owner | S | H1, N1, T1, P2, P5 | no |
 | QA | e2e and visual suites (§11) | `apps/web/e2e/home.spec.ts`, `pen.spec.ts`, `visual.spec.ts`, `helpers.ts` | M | each feature | partly |
 | D1 | DESIGN.md A1–A7, screenshots, ROADMAP, changeset | `docs/DESIGN.md`, `docs/specs/viewer-annotations.md`, `docs/design/screenshots/**`, `docs/ROADMAP.md`, `.changeset/*` | S | all | no |
-| L1 | Light theme (§7.6) | `styles/tokens.css`, `shell/TabBar.tsx` (toggle), `styles/tokens.test.ts` | M | moved to M8 | — |
+| L1 | Light theme (§7.6) | `styles/tokens.css`, `shell/TabBar.tsx` (toggle), `styles/tokens.test.ts` | M | moved to M9 | — |
 | R | Independent experience review on the live build; correctness review of P4 | read-only, findings as issues | — | all | no |
 
 Rules as in M4 and M5: one agent per package, no edits outside owned paths (shared stores
@@ -503,7 +508,7 @@ take additive edits, merged by the lead), the lead commits, every R finding gets
 and 2 within days and needs no approval. (2) The owner answers Q1; ADR-0018 after S1.
 (3) H1, P2 and P3 in parallel; N1 and T1 once Q1 is answered; P4 once S1 passes. (4) P5
 after P2; A11 and QA complete as features land. (5) D1, R and fixes; L1 last (it may move
-to M8 without blocking the exit).
+to M9 without blocking the exit).
 
 ## 13. Decisions
 
@@ -529,4 +534,4 @@ to M8 without blocking the exit).
    inspector closed by default, the tool bar grouped by task. The owner left the shape of
    the group menu to the project lead: an in-place morph of the capsule bar (§5.2), not a
    radial menu, drawer or sheet.
-2. **Light theme timing.** The owner's answer: much later, not needed now. L1 moves to M8.
+2. **Light theme timing.** The owner's answer: much later, not needed now. L1 moves to M9 (numbered M8 at the time).

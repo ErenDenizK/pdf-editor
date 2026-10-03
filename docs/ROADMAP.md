@@ -1,6 +1,7 @@
 # Roadmap
 
-**Status:** revised 2026-10-01 after the owner's review of M5. Milestones are ordered by
+**Status:** revised 2026-10-03 after the owner's review of the beta (M8 added as Craft; the
+former M8 is now M9, tablets M10). Milestones are ordered by
 dependency, not by calendar. We ship when a milestone's exit criteria pass, not on a date.
 Versions follow SemVer and ADR-0017: M1–M5 were internal (0.1–0.5, never published); the
 first public release is `1.0.0-beta.0` at the end of M7, and `1.0.0` only when the exit
@@ -276,15 +277,53 @@ renders with every image under budget; the About page passes its size budget; th
 - Accessibility pass; complete English and Turkish; documentation current; an independent
   review of the beta.
 
-## M8 — Ecosystem  (→ 2.0)
+## M8 — Craft  (→ 1.0.0-beta.1, beta.2)
 
+Owner review of the beta (`docs/DISCUSSION.md` #28, 2026-10-03): every feature exists and
+works, but the experience is raw. Text editing feels like a patch and hides under "Pages";
+the pen is slightly laggy and sticky with a mouse; Draw and Mark up both have a highlighter;
+the lasso ignores arrows; colours look unclean; Home · Read · Arrange is the wrong top-level
+model; glass should go wider but never opaque. Spec: `docs/specs/craft.md`; decisions:
+ADR-0019 (modes), ADR-0020 (paragraph editing tiers), ADR-0021 (one Highlighter, lasso for
+every kind, one palette); research 11 (paragraph editing in PDF), 12 (low-latency ink), 13
+(glass and modes); audits summarised in the spec's §1.2.
+
+| Feature | Engine | Notes | Status |
+|---|---|---|---|
+| Home as a view; documents in Read (locked) ⇄ Edit; Arrange as a view; keys 0–4; Edit bar with five groups (Select · Write · Text · Fill & sign · Redact) | own | per-document mode flag; the bar collapses to one Edit button in Read; "Switch to Edit to fill" on fields; Recents later (P2) | planned (beta.1) |
+| Edit-mode interaction policy: only the armed tool creates; double-click on page text opens the paragraph editor (mouse or pen-as-pointer only); idle hover outline with a one-time hint; the pen never hit-tests text; one hit order across layers | own | ADR-0019 §5–§6 | planned (beta.1) |
+| Pen smoothness: measurement harness, constant-width mouse, one smoothed stroke model for preview and commit, own prediction, round joins, bake-once stable layer, dot cursor, no debounce on edit repaints | own | targets: ≤ 1 frame pointer-to-preview, committed stroke visible ≤ 50 ms after pen-up with no change of shape, no long task in a 64-path burst | planned (beta.1) |
+| Dry ink layer with deferred page re-render; cheaper bursts (cached outlines, fewer worker round trips); clip repaints; `pointerrawupdate` and the Windows Ink API where the harness shows presentation latency | own + P | research 12 §5–§7 | planned (beta.2) |
+| One Highlighter (constant width, Multiply, snaps to text as a Highlight annotation, Alt for free ink); lasso for every annotation kind with mixed selection and group edits; partial eraser | P + own | ADR-0021 | planned (beta.1; partial eraser beta.2) |
+| One palette for presets and swatches (eight inks in two lightness bands, four Multiply highlighter tints), contrast asserted; accent unchanged, vividness through content colour and state alphas | own | ADR-0021 §3–§4 | planned (beta.1) |
+| Text editing speed-ups: analysis cached per page, pure maths per keystroke, dry run on pause and commit, caret at the click, free space bounded by the column, no render-priority slot held | raw | audit items 1, 2, 10, 12, 13 | planned (beta.1) |
+| Paragraph editor (Tier B): structure tree first, geometry fallback, style spans, rewrap from the edit point, original font with per-glyph bundled substitutes and one honesty line, overflow policy (grow into the gap, tighten spacing within floors, run over with a warning), glyph-path canvas overlay with a deferred exact preview, corpus with golden read-backs | raw + own | ADR-0020; Tier C (same-page push-down) is an M9 candidate; Tier D (cross-page reflow) declined | planned (beta.2) |
+| Glass spike S2 and the "Glass panels" setting: stage full-bleed under the chrome, three glass tiers, docked tier composites to `--surface-1` over the canvas, in-app Reduce transparency; fps, GPU memory and contrast measured | own | DESIGN §2 changes only if S2 passes and the owner likes the live build | planned (beta.1, default off) |
+
+Exit: the latency harness meets its targets on the CI machine and on the owner's laptop;
+the paragraph corpus passes its golden read-backs; the interaction-policy table of the spec
+is covered by e2e; contrast tests pass for the palette and the glass tiers; an independent
+experience review on the live build finds no blocker; the owner's tablet and mouse try-out
+of the pen is recorded.
+
+## M9 — Ecosystem  (→ 2.0)
+
+- Text editing Tier C: same-page push-down of later blocks (ADR-0020), after Tier B is
+  measured on the corpus.
 - Light theme on the same tokens (moved from M6 on 2026-10-01).
+- Recents on Home with file handles where the browser keeps them.
 - Plugin API for tools.
 - Optional Tauri desktop shell with file associations.
 - Browser extension "open with".
-- Touch-optimized interaction for tablets.
 - Annotation set export/import as files.
-- Text editing tier 3: paragraph re-typesetting with embedded substitute fonts.
+
+## M10 — Tablet and phone
+
+After the desktop experience is excellent (owner decision, 2026-10-03). Touch targets ≥ 44 px
+under `pointer: coarse`, safe-area insets and `viewport-fit=cover`, breakpoints for the
+navigator and the bar (docked at the bottom), touch drag-and-drop on Home and Arrange, the
+pen and finger policy on every layer, gestures in place of single-letter shortcuts, and
+the burst defaults confirmed on a real tablet.
 
 ## Explicitly deferred or declined
 

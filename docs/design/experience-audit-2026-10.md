@@ -140,7 +140,7 @@ refresh are in [`audit-2026-10/`](audit-2026-10/V1-RESULTS.md). The accessibilit
 | 9 | Duplicate controls | The inspector no longer opens on its own, so the contextual bar is the one place a selection is edited; opened, its Properties section still carries the style controls. Arrange shows only its own bar | `m2-annotations-1440` |
 | 10 | Flat chrome | Canvas → panel 1.05:1 → 1.14:1; the glass over the canvas 1.03:1 → 1.27:1 with one elevation token; text on glass stays AA (glass-danger 4.51:1 over a white page, the minimum) | `m0-shell-read-1440`, `audit-2026-10/m6-v1-after-*` |
 | 11 | Pen engineering | Native pointer input with coalesced and predicted points, one outline function for preview and commit (no shift, no blink), width from pressure or speed written into the appearance (ADR-0018), fingers pan once a pen has been seen, a press while an editor is open commits it and starts the stroke | `m6-draw-presets-1440` |
-| 12 | Smaller items | The Compare segment still appears only while a comparison is open (by design); the light theme moved to M8; image selection in the inspector and saved signatures were not part of M6 | — |
+| 12 | Smaller items | The Compare segment still appears only while a comparison is open (by design); the light theme moved to M9 (M8 on 2026-10-01, renumbered 2026-10-03); image selection in the inspector and saved signatures were not part of M6 | — |
 
 First run now: from an empty app to two merged files in Read, 3 actions with no dead end
 (`apps/web/e2e/home.spec.ts`). Still open after M6: Home has no per-card menu, no

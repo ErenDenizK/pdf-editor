@@ -108,7 +108,7 @@ containers; and the anti-pattern of CSS-invert dark mode).
 ## 3. Tokens
 
 Dark is the default and the primary theme. A light theme follows the same ladder inverted
-and is an M8 item, not a v1 blocker. The source of truth is
+and is an M9 item (ROADMAP), not a v1 blocker. The source of truth is
 `apps/web/src/styles/tokens.css`; this is its shape after the experience redesign (M6;
 measurements in [`design/audit-2026-10/V1-RESULTS.md`](design/audit-2026-10/V1-RESULTS.md)).
 
