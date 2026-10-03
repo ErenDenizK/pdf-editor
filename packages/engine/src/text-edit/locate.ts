@@ -16,6 +16,7 @@ import {
   PAGEOBJ_TEXT,
   type Point,
   type RawText,
+  type Rgba,
 } from './raw';
 
 /** Deepest form nesting walked (page → form → form → text). */
@@ -34,6 +35,10 @@ export interface CharInfo {
   readonly box: Rect;
   /** A space the text page generated for a gap inside the object (no code draws it). */
   readonly generated: boolean;
+  /** Loose box (`FPDFText_GetLooseCharBox`), unrotated user space. */
+  readonly looseBox?: Rect;
+  /** The text page reads the character as a hyphen (`FPDFText_IsHyphen`). */
+  readonly hyphen?: boolean;
 }
 
 /** Everything the editor reads about one text object. */
@@ -51,6 +56,15 @@ export interface ObjectInfo {
   /** Every character of the object, in text-page order. */
   readonly chars: readonly CharInfo[];
   readonly vertical: boolean;
+  /** Font ascent and descent at `size`, text space (`FPDFFont_GetAscent` / `GetDescent`). */
+  readonly ascent?: number;
+  readonly descent?: number;
+  /** Fill colour, RGBA 0–255 (of the first character, else of the object). */
+  readonly fill?: Rgba;
+  /** Effective matrix of the first character (`FPDFText_GetMatrix`). */
+  readonly charMatrix?: TextMatrix;
+  /** Page-wide number of `font` (`fontIds`). */
+  readonly fontId?: number;
 }
 
 /** A run: `info.chars.slice(from, to)`. */
@@ -77,6 +91,19 @@ export function objectTree(raw: RawText, pagePtr: number): Map<number, ObjectPla
   return out;
 }
 
+/**
+ * Numbers every distinct `FPDF_FONT` of the page's text objects, in object order (the
+ * `objectTree` order), so runs drawn in one font share an id within the page.
+ */
+export function fontIds(raw: RawText, tree: ReadonlyMap<number, ObjectPlace>): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const obj of tree.keys()) {
+    const font = raw.font(obj);
+    if (font && !out.has(font)) out.set(font, out.size);
+  }
+  return out;
+}
+
 /** Unit writing direction and scale of a matrix's x axis. */
 export function axis(matrix: TextMatrix): { u: Point; scale: number } {
   const scale = Math.hypot(matrix[0], matrix[1]) || 1;
@@ -99,13 +126,17 @@ export function boxOf(chars: readonly CharInfo[]): Rect {
   return unionOf(chars.map((c) => ({ x: c.origin.x, y: c.origin.y, width: 0, height: 0 })));
 }
 
-/** Reads one text object and its characters (`indices`: its text-page indices). */
+/**
+ * Reads one text object and its characters (`indices`: its text-page indices). `ids` (from
+ * `fontIds`) gives the run its page-wide font number.
+ */
 export function objectInfo(
   raw: RawText,
   textPage: number,
   obj: number,
   place: ObjectPlace,
   indices: readonly number[],
+  ids?: ReadonlyMap<number, number>,
 ): ObjectInfo {
   const font = raw.font(obj);
   const facts: FontFacts = font
@@ -123,25 +154,43 @@ export function objectInfo(
   for (let k = place.forms.length - 1; k >= 0; k--) {
     pageMatrix = multiply(pageMatrix, raw.matrix(place.forms[k] ?? 0));
   }
-  const chars = indices.map((index) => ({
-    index,
-    text: raw.charText(textPage, index),
-    origin: raw.charOrigin(textPage, index),
-    box: raw.charBox(textPage, index),
-    generated: raw.isGenerated(textPage, index),
-  }));
+  const chars = indices.map((index): CharInfo => {
+    const looseBox = raw.looseCharBox(textPage, index);
+    return {
+      index,
+      text: raw.charText(textPage, index),
+      origin: raw.charOrigin(textPage, index),
+      box: raw.charBox(textPage, index),
+      generated: raw.isGenerated(textPage, index),
+      ...(looseBox ? { looseBox } : {}),
+      hyphen: raw.isHyphen(textPage, index),
+    };
+  });
+  const size = raw.fontSize(obj);
+  const first = indices[0];
+  const ascent = font && Number.isFinite(size) ? raw.ascent(font, size) : undefined;
+  const descent = font && Number.isFinite(size) ? raw.descent(font, size) : undefined;
+  const fill =
+    (first !== undefined ? raw.charFillColor(textPage, first) : undefined) ?? raw.fillColor(obj);
+  const charMatrix = first !== undefined ? raw.charMatrix(textPage, first) : undefined;
+  const fontId = font ? ids?.get(font) : undefined;
   return {
     obj,
     place,
     font,
     facts,
     classified: classifyFont(facts),
-    size: raw.fontSize(obj),
+    size,
     pageMatrix,
     renderMode: raw.renderMode(obj),
     mcid: raw.markedContentId(obj),
     chars,
     vertical: isVertical(pageMatrix, chars),
+    ...(ascent !== undefined ? { ascent } : {}),
+    ...(descent !== undefined ? { descent } : {}),
+    ...(fill ? { fill } : {}),
+    ...(charMatrix ? { charMatrix } : {}),
+    ...(fontId !== undefined ? { fontId } : {}),
   };
 }
 
@@ -203,6 +252,9 @@ export function toLocatedRun(
     origin: c.origin,
   }));
   const { u } = axis(info.pageMatrix);
+  const loose = chars.flatMap((c) => (c.looseBox ? [c.looseBox] : []));
+  const head = chars[0];
+  const last = chars[chars.length - 1];
   return {
     source,
     pageIndex,
@@ -220,6 +272,14 @@ export function toLocatedRun(
     ...(info.mcid >= 0 ? { mcid: info.mcid } : {}),
     inForm: info.place.forms.length > 0,
     vertical: info.vertical,
+    ...(info.ascent !== undefined ? { ascent: info.ascent } : {}),
+    ...(info.descent !== undefined ? { descent: info.descent } : {}),
+    ...(info.fill ? { fill: info.fill } : {}),
+    ...(loose.length > 0 ? { looseLineBox: unionOf(loose) } : {}),
+    ...(head ? { baseline: -head.origin.x * u.y + head.origin.y * u.x } : {}),
+    ...(info.fontId !== undefined ? { fontId: info.fontId } : {}),
+    ...(last?.hyphen !== undefined ? { endsWithHyphen: last.hyphen } : {}),
+    ...(info.charMatrix ? { textMatrix: info.charMatrix } : {}),
   };
 }
 
@@ -246,11 +306,12 @@ export function locatePage(
   pageIndex: number,
 ): LocatedRun[] {
   const tree = objectTree(raw, pagePtr);
+  const ids = fontIds(raw, tree);
   const runs: LocatedRun[] = [];
   for (const [obj, indices] of charsByObject(raw, textPage)) {
     const place = tree.get(obj);
     if (!place) continue;
-    const info = objectInfo(raw, textPage, obj, place, indices);
+    const info = objectInfo(raw, textPage, obj, place, indices, ids);
     for (const [from, to] of lineRanges(info)) {
       runs.push(toLocatedRun(source, pageIndex, info, from, to));
     }
@@ -292,7 +353,7 @@ export function resolveRun(
   const tree = objectTree(raw, pagePtr);
   const place = tree.get(obj) ?? { path: ref.objectPath, forms: [] };
   const indices = charsByObject(raw, textPage).get(obj) ?? [];
-  const info = objectInfo(raw, textPage, obj, place, indices);
+  const info = objectInfo(raw, textPage, obj, place, indices, fontIds(raw, tree));
   const from = info.chars.findIndex((c) => c.index === ref.charStart);
   if (from < 0) throw stale(ref, 'no such character in the object');
   const to = from + ref.charCount;

@@ -98,8 +98,9 @@ function getAdapter(): PdfiumAdapter {
 }
 
 /**
- * The text editor on the hosted engine. Its calls take the source's lock exclusively
- * (`withRawAccess`), so they are not wrapped in `onSource` (the lock is not re-entrant).
+ * The text editor on the hosted engine. Its calls take the source's lock themselves (edits
+ * exclusively, reads shared), so they are not wrapped in `onSource` (the lock is not
+ * re-entrant).
  */
 function getTextEditor(): Promise<HostedTextEditor> {
   if (!textEditor) {
@@ -355,6 +356,11 @@ const api: PdfiumWorkerApi = {
   locateRuns(id, pageIndex, options, abortPort) {
     return call(abortPort, async (signal) =>
       (await getTextEditor()).locateRuns(id, pageIndex, withSignal(options, signal)),
+    );
+  },
+  analyzeRun(run, options, abortPort) {
+    return call(abortPort, async (signal) =>
+      (await getTextEditor()).analyzeRun(run, withSignal(options, signal)),
     );
   },
   checkEditability(query, options, abortPort) {

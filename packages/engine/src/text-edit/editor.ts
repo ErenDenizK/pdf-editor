@@ -1,14 +1,21 @@
 /**
- * `PdfTextEditor` on the PDFium host (ADR-0011 §4): every call is one `withRawAccess` on the
- * source, so it runs as a task on the orchestrator's queue, exclusive per source, and never
- * awaits engine or adapter calls. Reads use a fresh text page; every committed edit is
- * followed by `GenerateContent` and dropping the executor's cached page.
+ * `PdfTextEditor` on the PDFium host (ADR-0011 §4): every call is one task on the
+ * orchestrator's queue and never awaits engine or adapter calls. Edits (`applyTextEdit`) are
+ * `withRawAccess`, exclusive per source, at the queue's top priority. Calls that leave the
+ * document as it was (`locateRuns`, `analyzeRun`, the dry run of `checkEditability`) hold the
+ * source's lock shared, like adapter calls, and run as one raw task behind pending renders
+ * (craft spec §4.8), so page renders do not wait for them. Reads use a fresh text page; every
+ * committed edit is followed by `GenerateContent` and dropping the executor's cached page.
  *
  * An edit runs in steps, each on a clean page: the analysis reads the object's codes from a
  * snapshot and matches them to the text page with probe glyphs, which also give tier 2 its
  * codes (`prepare`); `measure` lays the new code sequence out in the original object and
  * drops the page; `performEdit` splits the object on a freshly loaded page, verifies and
  * commits (or, for `checkEditability`, drops the page again).
+ *
+ * `analyzeRun` does the analysis and probing once for a run, for every character a keyboard
+ * is likely to type, and measures their advances, so the web editor checks each keystroke
+ * with arithmetic and asks `checkEditability` only after a pause and on commit.
  *
  * In the app the editor lives in the PDFium worker (`pdfium.worker.ts`) next to the adapter
  * and is reached through `PdfiumProxy`; tests construct it on the calling thread with
@@ -23,17 +30,27 @@ import type {
   EngineCallOptions,
   LocatedRun,
   PdfTextEditor,
+  TextAdvance,
   TextEditability,
   TextEditBlocker,
   TextEditQuery,
   TextEditRequest,
   TextEditResult,
   TextFitOption,
+  TextRunAnalysis,
+  TextRunRef,
   TextTier2Refusal,
 } from '../types';
-import { analyzeObject, type ObjectAnalysis, withGlyphs } from './analysis';
+import {
+  analysisChars,
+  analyzeObject,
+  measurableChar,
+  type ObjectAnalysis,
+  withGlyphs,
+} from './analysis';
 import {
   type EditPlan,
+  type Entry,
   layoutVerdict,
   measure,
   performEdit,
@@ -50,6 +67,7 @@ import {
   glyphRange,
   glyphSelection,
   honestyOf,
+  lineLimit,
   tier1Width,
   tier2Precheck,
   type Tier2Check,
@@ -81,7 +99,13 @@ export interface TextEditorOptions {
 }
 
 /** The raw-access part of `HostedEngine` the editor needs. */
-export type TextEditorHost = Pick<HostedEngine, 'withRawAccess'>;
+export type TextEditorHost = Pick<
+  HostedEngine,
+  'withRawAccess' | 'withRawTask' | 'withEngineAccess'
+>;
+
+/** Codes measured in one pass of `measure` by `analyzeRun` (a failed pass loses only these). */
+const MEASURE_CHUNK = 32;
 
 interface Resolved {
   readonly run: ResolvedRun;
@@ -174,7 +198,7 @@ export class HostedTextEditor implements PdfTextEditor {
     pageIndex: number,
     options?: EngineCallOptions,
   ): Promise<readonly LocatedRun[]> {
-    return this.host.withRawAccess(
+    return this.read(
       source,
       (access) => {
         const raw = new RawText(access.module, access.memory);
@@ -187,12 +211,16 @@ export class HostedTextEditor implements PdfTextEditor {
           page.release();
         }
       },
-      withSignal(options),
+      options,
     );
   }
 
+  analyzeRun(run: TextRunRef, options?: EngineCallOptions): Promise<TextRunAnalysis> {
+    return this.read(run.source, (access) => this.analyze(access, run), options);
+  }
+
   checkEditability(query: TextEditQuery, options?: EngineCallOptions): Promise<TextEditability> {
-    return this.host.withRawAccess(
+    return this.read(
       query.run.source,
       async (access) => {
         const raw = new RawText(access.module, access.memory);
@@ -287,13 +315,14 @@ export class HostedTextEditor implements PdfTextEditor {
           fit: {
             available: resolved.space.available,
             boundedByGlyph: resolved.space.boundedByGlyph,
+            boundedBy: resolved.space.boundedBy,
             replaced: resolved.space.replaced,
             ...(tier2.ok && tier2Fit ? { tier2: tier2Fit } : {}),
             ...(tier1Fit && tier1.ok ? { tier1: tier1Fit } : {}),
           },
         } satisfies TextEditability;
       },
-      withSignal(options),
+      options,
     );
   }
 
@@ -373,6 +402,170 @@ export class HostedTextEditor implements PdfTextEditor {
       },
       withSignal(options),
     );
+  }
+
+  /**
+   * Runs read-only work on `source`: the source's lock shared (edits wait, adapter calls do
+   * not) and one raw task behind pending renders. The work must leave the document as it was
+   * (temporary object changes are dropped with the page before it returns).
+   */
+  private read<R>(
+    source: SourceId,
+    fn: (access: RawAccess) => R | Promise<R>,
+    options: EngineCallOptions | undefined,
+  ): Promise<R> {
+    const signal = withSignal(options);
+    return this.host.withEngineAccess(
+      source,
+      () => this.host.withRawTask(source, fn, { ...signal, priority: 'normal' }),
+      signal,
+    );
+  }
+
+  /** `analyzeRun` inside the raw task (see `TextRunAnalysis`). */
+  private async analyze(access: RawAccess, ref: TextRunRef): Promise<TextRunAnalysis> {
+    const raw = new RawText(access.module, access.memory);
+    const page = access.doc.acquirePage(ref.pageIndex);
+    let held = true;
+    const release = () => {
+      if (held) page.release();
+      held = false;
+    };
+    try {
+      const { run, line } = raw.withTextPage(page.pagePtr, (textPage) => {
+        const resolved = resolveRun(raw, page.pagePtr, textPage, ref);
+        return { run: resolved, line: lineLimit(raw, page.pagePtr, textPage, resolved) };
+      });
+      const { info } = run;
+      const base = {
+        run: {
+          source: ref.source,
+          pageIndex: ref.pageIndex,
+          objectPath: ref.objectPath,
+          charStart: ref.charStart,
+          charCount: ref.charCount,
+          text: ref.text,
+        },
+        honesty: {
+          tier2: honestyOf(2, info) as TextRunAnalysis['honesty']['tier2'],
+          tier1: honestyOf(1, info) as TextRunAnalysis['honesty']['tier1'],
+        },
+        runEnd: line.runEnd,
+        lineEnd: line.limit,
+        lineBound: line.boundedBy,
+      };
+      const blocked = (blocker: TextEditBlocker): TextRunAnalysis => ({
+        ...base,
+        blocker,
+        tier2: { refusal: 'blocked', advances: {}, refused: {} },
+      });
+      const staticBlocker = blockerOf(info);
+      if (staticBlocker) return blocked(staticBlocker);
+      const facts = await analyzeObject(access, raw, page.pagePtr, ref.pageIndex, info);
+      if (facts.blocker) return blocked(facts.blocker);
+
+      const wanted = analysisChars(ref.text);
+      const precheck = tier2Precheck(raw, info, '');
+      let refusal: TextTier2Refusal | undefined = precheck.ok ? undefined : precheck.reason;
+      const candidates = refusal ? [] : tier2Candidates(facts, [...wanted].join(''));
+      if (!refusal && candidates === undefined) refusal = 'ambiguous-encoding';
+      const refused: Record<string, TextTier2Refusal> = {};
+      const chosen = new Map<string, number>();
+      const probes = probeCodes(access, raw, page.pagePtr, info.font, [
+        ...facts.decodings.flat(),
+        ...(candidates ?? []),
+      ]);
+      let analysis: ObjectAnalysis;
+      try {
+        analysis = withGlyphs(info, facts, (code) => probes.results.get(code)?.text);
+        if (analysis.blocker) return blocked(analysis.blocker);
+        if (!refusal) {
+          // Simple fonts: every character the font's codes read as.
+          for (const p of probes.results.values()) {
+            if (!p.mapError && measurableChar(p.text)) wanted.add(p.text);
+          }
+          for (const ch of wanted) {
+            const pre = tier2Precheck(raw, info, ch);
+            if (!pre.ok && !this.skipPrecheck) {
+              refused[ch] = pre.reason;
+              continue;
+            }
+            const choice = chooseTier2Codes(probes, analysis, ch);
+            if (choice.ok && choice.codes[0] !== undefined) chosen.set(ch, choice.codes[0]);
+            else if (!choice.ok) refused[ch] = choice.reason;
+          }
+        }
+      } finally {
+        probes.dispose();
+      }
+      release();
+      const advances = this.measureChars(access, raw, ref, analysis, chosen);
+      if (!advances) access.dropPageCache(ref.pageIndex); // the probes changed the page
+
+      const face = substituteFace(info.classified);
+      const font = await this.faces.get(face);
+      const tier1: Record<string, number> = {};
+      for (const ch of new Set([...wanted, ...chosen.keys()])) {
+        if (missingInFace(font, ch).length === 0) tier1[ch] = tier1Width(font, info, ch, info.size);
+      }
+      return {
+        ...base,
+        tier2: { ...(refusal ? { refusal } : {}), advances: advances ?? {}, refused },
+        tier1: { substitute: face.key, family: familyName(face), advances: tier1 },
+      };
+    } finally {
+      release();
+    }
+  }
+
+  /**
+   * Advances of the `chosen` codes in the run's object and alone (`measure`), by character,
+   * in passes of `MEASURE_CHUNK` codes on a freshly resolved page each (`measure` drops it).
+   * A pass that cannot read its codes back is left out. Undefined when nothing was measured.
+   */
+  private measureChars(
+    access: RawAccess,
+    raw: RawText,
+    ref: TextRunRef,
+    analysis: ObjectAnalysis,
+    chosen: ReadonlyMap<string, number>,
+  ): Record<string, TextAdvance> | undefined {
+    const entries = [...chosen];
+    if (entries.length === 0) return undefined;
+    const out: Record<string, TextAdvance> = {};
+    for (let i = 0; i < entries.length; i += MEASURE_CHUNK) {
+      const chunk = entries.slice(i, i + MEASURE_CHUNK);
+      const sequence: Sequence = {
+        entries: chunk.map(([text, code]): Entry => ({ kind: 'new', code, text })),
+        replacementAt: 0,
+        suffixAt: chunk.length,
+      };
+      const page = access.doc.acquirePage(ref.pageIndex);
+      let run: ResolvedRun;
+      try {
+        run = raw.withTextPage(page.pagePtr, (textPage) =>
+          resolveRun(raw, page.pagePtr, textPage, ref),
+        );
+      } catch (error) {
+        page.release();
+        throw error;
+      }
+      try {
+        // Closes the page, also when it throws.
+        const metrics = measure(
+          access,
+          raw,
+          { pageIndex: ref.pageIndex, pagePtr: page.pagePtr, run, analysis },
+          sequence,
+        );
+        chunk.forEach(([text], k) => {
+          out[text] = { spaced: metrics.spaced[k] ?? 0, plain: metrics.plain[k] ?? 0 };
+        });
+      } catch {
+        // These characters stay unknown: the engine's check decides for them.
+      }
+    }
+    return out;
   }
 
   private async applyTier1(

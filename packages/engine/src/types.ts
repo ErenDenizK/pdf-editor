@@ -1009,6 +1009,33 @@ export interface LocatedRun extends TextRunRef {
   readonly inForm: boolean;
   /** Glyphs advance along the text space's y axis (vertical writing): not editable. */
   readonly vertical: boolean;
+  // Paragraph analysis facts (spec craft §4.1, §8). Optional: older producers of runs omit them.
+  /**
+   * Font ascent above the baseline (`FPDFFont_GetAscent` at `fontSize`): text space units,
+   * before `matrix` scales them onto the page.
+   */
+  readonly ascent?: number;
+  /** Font descent (`FPDFFont_GetDescent` at `fontSize`): negative below the baseline. */
+  readonly descent?: number;
+  /** Fill colour of the run's first glyph (`FPDFText_GetFillColor`), RGBA 0–255. */
+  readonly fill?: readonly [number, number, number, number];
+  /**
+   * Union of the loose glyph boxes (`FPDFText_GetLooseCharBox`: ascent to descent over each
+   * advance, not the ink), unrotated user space: the line's height for overlays and leading.
+   */
+  readonly looseLineBox?: Rect;
+  /**
+   * The first glyph's baseline position across the writing direction: its origin projected
+   * on the normal of `direction` (`-x·dir.y + y·dir.x`). Runs on one line share it whatever
+   * the text matrix; for horizontal text it is the origin's y in user space.
+   */
+  readonly baseline?: number;
+  /** The run's `FPDF_FONT`, numbered in page object order: equal ids mean the same font. */
+  readonly fontId?: number;
+  /** The run's last character is a hyphen the text page reads as a line-end hyphen. */
+  readonly endsWithHyphen?: boolean;
+  /** Effective matrix of the run's first character (`FPDFText_GetMatrix`). */
+  readonly textMatrix?: TextMatrix;
 }
 
 /**
@@ -1084,14 +1111,20 @@ export interface TextFitOption {
   readonly canShrink: boolean;
 }
 
+/** What ends the free space of an edit: the next glyph, the text block's edge, the page edge. */
+export type TextSpaceBound = 'glyph' | 'column' | 'page';
+
 export interface TextFitReport {
   /**
    * Free space, points along the baseline, from the start of the selection to the origin of
-   * the next glyph on the line (any text object), or to the page edge when there is none.
+   * the next glyph on the line (any text object); at the end of a line, to the right edge of
+   * its text block when that comes first, or to the page edge when there is neither.
    */
   readonly available: number;
-  /** Whether `available` ends at a glyph (false: at the page box edge). */
+  /** Whether `available` ends at a glyph (false: at the block's or the page box's edge). */
   readonly boundedByGlyph: boolean;
+  /** What `available` ends at: a glyph, the text block's right edge or the page edge. */
+  readonly boundedBy?: TextSpaceBound;
   /** Width of the selected glyphs (what the replacement replaces). */
   readonly replaced: number;
   /** Tier 2 (original font); absent when tier 2 cannot encode the replacement. */
@@ -1133,6 +1166,55 @@ export interface TextEditability {
    */
   readonly colorSpaceChanged?: boolean;
   readonly fit: TextFitReport;
+}
+
+/** Advance of one character of a tier-2 replacement, points along the baseline at the run's size. */
+export interface TextAdvance {
+  /** Inside the original object (its Tc/Tw/Tz applied): what the replacement takes. */
+  readonly spaced: number;
+  /** In a new object of the run's size (no Tc/Tw): the part that scales with the size. */
+  readonly plain: number;
+}
+
+/**
+ * A run analysed once for the inline editor (craft spec §4.8): with it, the width, fit,
+ * tier and honesty of a replacement are arithmetic (`PdfTextEditor.checkEditability` stays
+ * the authority, run after a pause and on commit). Characters are keyed by their string;
+ * one that is in neither table of a tier is unknown to the analysis (the engine decides).
+ */
+export interface TextRunAnalysis {
+  /** The run as analysed (its identity at this page state). */
+  readonly run: TextRunRef;
+  /** Why no replacement of the run can be made, whatever the text. */
+  readonly blocker?: TextEditBlocker;
+  /** Honesty of an edit in each tier. */
+  readonly honesty: {
+    readonly tier2: Extract<TextEditHonesty, 'same-font' | 'same-font-not-embedded'>;
+    readonly tier1: Extract<TextEditHonesty, 'font-substituted' | 'moved-out-of-form'>;
+  };
+  readonly tier2: {
+    /** Why the original font takes no replacement at all (any text). */
+    readonly refusal?: TextTier2Refusal;
+    /** Measured advances of the characters the original font can take. */
+    readonly advances: Readonly<Record<string, TextAdvance>>;
+    /** Characters the original font cannot take, and why. */
+    readonly refused: Readonly<Record<string, TextTier2Refusal>>;
+  };
+  /** The bundled face tier 1 prefers; absent when the run is blocked. */
+  readonly tier1?: {
+    /** Bundled face key, e.g. `Inter-Regular`. */
+    readonly substitute: string;
+    readonly family: string;
+    /** Advance of each character the face has, points along the baseline at the run's size. */
+    readonly advances: Readonly<Record<string, number>>;
+  };
+  /**
+   * Distances along the writing direction from the run's first glyph origin, points: the end
+   * of the last glyph's advance, and where the free space after the run ends (`lineBound`).
+   */
+  readonly runEnd: number;
+  readonly lineEnd: number;
+  readonly lineBound: TextSpaceBound;
 }
 
 /** A replacement of `run.text.slice(start, end)` (UTF-16 offsets on glyph boundaries). */
@@ -1195,6 +1277,12 @@ export interface PdfTextEditor {
     pageIndex: number,
     options?: EngineCallOptions,
   ): Promise<readonly LocatedRun[]>;
+  /**
+   * What the editor needs to check replacements of the run without the engine (craft spec
+   * §4.8): its blockers, per-character advances in the original font and the substitute, and
+   * the free space at the end of its line. Read-only; run once when the editor opens.
+   */
+  analyzeRun(run: TextRunRef, options?: EngineCallOptions): Promise<TextRunAnalysis>;
   /** Tier 2 / tier 1 availability, honesty and fit for a replacement (no change made). */
   checkEditability(query: TextEditQuery, options?: EngineCallOptions): Promise<TextEditability>;
   /** Applies the edit, verified by read-back, and regenerates the page content. */

@@ -165,3 +165,32 @@ export async function analyzeObject(
     ...(form ? { form } : {}),
   };
 }
+
+/**
+ * Characters the editor's analysis measures besides the run's own (craft spec §4.8): what a
+ * Latin keyboard types (ASCII, Latin-1, Latin Extended-A, the WinAnsi punctuation). A
+ * character outside them is left to the engine's check.
+ */
+const TYPED_CHARS: readonly string[] = (() => {
+  const out: string[] = [];
+  const range = (from: number, to: number) => {
+    for (let cp = from; cp <= to; cp++) out.push(String.fromCodePoint(cp));
+  };
+  range(0x20, 0x7e);
+  range(0xa0, 0xac);
+  range(0xae, 0x17f);
+  out.push(...Array.from('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'));
+  return out;
+})();
+
+/** Characters a measured advance can be read for: one code point, printable, not a soft hyphen. */
+export function measurableChar(ch: string): boolean {
+  return Array.from(ch).length === 1 && ch !== '­' && !/[\p{C}]/u.test(ch);
+}
+
+/** The characters to analyse for a run: its own and `TYPED_CHARS`. */
+export function analysisChars(runText: string): Set<string> {
+  const out = new Set(TYPED_CHARS);
+  for (const ch of runText) if (measurableChar(ch)) out.add(ch);
+  return out;
+}

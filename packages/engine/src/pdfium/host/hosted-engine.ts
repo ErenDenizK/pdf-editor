@@ -37,8 +37,11 @@ import { docContext, orchestratorQueue, type RawDocContext } from './doc-context
 import { PdfiumMemory } from './memory';
 import { SourceLocks } from './source-lock';
 
-/** EmbedPDF's `Priority.CRITICAL` (the enum is not exported): the priority of renders. */
-const RAW_TASK_PRIORITY = 3;
+/**
+ * EmbedPDF's `Priority` (the enum is not exported): raw tasks run at CRITICAL by default,
+ * ahead of raw renders (HIGH); read-only work may ask for MEDIUM, behind them.
+ */
+const RAW_TASK_PRIORITY = { critical: 3, normal: 1 } as const;
 
 export interface HostedEngineOptions {
   /** `pdfium.wasm`: a URL (relative URLs resolve against `location`) or its bytes. */
@@ -77,6 +80,11 @@ export interface RawAccessOptions {
    * reported as aborted.
    */
   readonly signal?: AbortSignal;
+  /**
+   * Queue priority. `critical` (default): ahead of renders, for edits. `normal`: behind
+   * pending renders, with EmbedPDF's own reads, for read-only analysis (craft spec §4.8).
+   */
+  readonly priority?: 'critical' | 'normal';
 }
 
 export interface HostedEngine {
@@ -201,6 +209,7 @@ export async function createHostedEngine(options: HostedEngineOptions): Promise<
     sourceId: string,
     fn: (raw: RawAccess) => R | Promise<R>,
     signal: AbortSignal | undefined,
+    priority: RawAccessOptions['priority'] = 'critical',
   ): Promise<R> =>
     new Promise<R>((resolve, reject) => {
       if (signal?.aborted) {
@@ -241,7 +250,7 @@ export async function createHostedEngine(options: HostedEngineOptions): Promise<
           },
           meta: { docId: sourceId, operation: 'rawAccess' },
         },
-        { priority: RAW_TASK_PRIORITY },
+        { priority: RAW_TASK_PRIORITY[priority] },
       );
       if (!started && signal) {
         onAbort = () => {
@@ -266,10 +275,11 @@ export async function createHostedEngine(options: HostedEngineOptions): Promise<
       locks.run(
         sourceId,
         'exclusive',
-        () => runOnQueue(sourceId, fn, callOptions.signal),
+        () => runOnQueue(sourceId, fn, callOptions.signal, callOptions.priority),
         callOptions.signal,
       ),
-    withRawTask: (sourceId, fn, callOptions = {}) => runOnQueue(sourceId, fn, callOptions.signal),
+    withRawTask: (sourceId, fn, callOptions = {}) =>
+      runOnQueue(sourceId, fn, callOptions.signal, callOptions.priority),
     dropPageCache,
   };
 }

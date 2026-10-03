@@ -375,8 +375,16 @@ interface GraphicsState {
 /** A text-showing operator that creates a PDFium text object. */
 export interface TextOp {
   readonly font: PDFDict | undefined;
-  /** The string operands, in order (TJ: its strings; numbers dropped). */
+  /** The non-empty string operands, in order (TJ: its strings). */
   readonly strings: readonly Uint8Array[];
+  /**
+   * TJ position adjustments as written, in thousandths of a text space unit (positive moves
+   * the next glyph left): `adjustments[i]` is the sum of the numbers after `strings[i]` and
+   * before the next string (or the array's end). All 0 for `Tj`, `'` and `"`.
+   */
+  readonly adjustments: readonly number[];
+  /** TJ numbers before the first string (they shift the first glyph), same units. */
+  readonly leadingAdjustment: number;
   readonly fill: SpaceKind;
   readonly stroke: SpaceKind;
 }
@@ -486,11 +494,31 @@ export function interpret(
   let state: GraphicsState = { ...initial };
   const stack: GraphicsState[] = [];
   const name = (o: Operand | undefined) => (o?.kind === 'name' ? o.value : undefined);
-  const show = (strings: Uint8Array[]) => {
+  const show = (operands: readonly Operand[]) => {
     if (!state.font) return;
-    const kept = strings.filter((s) => s.length > 0);
-    if (kept.length === 0) return;
-    texts.push({ font: state.font, strings: kept, fill: state.fill, stroke: state.stroke });
+    const strings: Uint8Array[] = [];
+    const adjustments: number[] = [];
+    let leadingAdjustment = 0;
+    for (const o of operands) {
+      if (o.kind === 'str' && o.value.length > 0) {
+        strings.push(o.value);
+        adjustments.push(0);
+      } else if (o.kind === 'num') {
+        // A number after an empty string still moves the next glyph: it joins the sum.
+        const at = adjustments.length - 1;
+        if (at < 0) leadingAdjustment += o.value;
+        else adjustments[at] = (adjustments[at] ?? 0) + o.value;
+      }
+    }
+    if (strings.length === 0) return;
+    texts.push({
+      font: state.font,
+      strings,
+      adjustments,
+      leadingAdjustment,
+      fill: state.fill,
+      stroke: state.stroke,
+    });
   };
   new ContentReader(data).run((op, operands) => {
     const last = operands[operands.length - 1];
@@ -543,12 +571,10 @@ export function interpret(
       case 'Tj':
       case "'":
       case '"':
-        if (last?.kind === 'str') show([last.value]);
+        if (last?.kind === 'str') show([last]);
         break;
       case 'TJ':
-        if (last?.kind === 'array') {
-          show(last.value.flatMap((o) => (o.kind === 'str' ? [o.value] : [])));
-        }
+        if (last?.kind === 'array') show(last.value);
         break;
       case 'Do': {
         const xname = name(last);
@@ -569,6 +595,25 @@ export function interpret(
     }
   });
   return { texts, forms };
+}
+
+/**
+ * The TJ adjustment after each code of `op`, in thousandths of a text space unit (positive
+ * tightens): entry k is the displacement written between code k and code k + 1 (after the
+ * last code: the trailing number, if any). `codeCounts[i]` is the number of codes in
+ * `op.strings[i]` (from the font's code splitter: a code never spans two strings).
+ * Undefined when the counts do not fit the strings. Pairs of adjacent codes with their
+ * entry are the kerning a writer can reapply when the pair recurs (spec craft §4.3).
+ */
+export function kerningPerCode(op: TextOp, codeCounts: readonly number[]): number[] | undefined {
+  if (codeCounts.length !== op.strings.length) return undefined;
+  const out: number[] = [];
+  for (const [i, count] of codeCounts.entries()) {
+    if (!Number.isInteger(count) || count <= 0) return undefined;
+    for (let k = 1; k < count; k++) out.push(0);
+    out.push(op.adjustments[i] ?? 0);
+  }
+  return out;
 }
 
 /** The /Resources of a form (PDFium falls back to the caller's resources). */

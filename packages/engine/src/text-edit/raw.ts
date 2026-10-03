@@ -48,6 +48,26 @@ export interface MarkSnapshot {
 
 export type Rgba = readonly [number, number, number, number];
 
+/** `FPDF_SEGMENT_*` values of `FPDFPathSegment_GetType`. */
+const SEGMENT_LINETO = 0;
+const SEGMENT_BEZIERTO = 1;
+const SEGMENT_MOVETO = 2;
+
+/**
+ * A segment of a glyph outline (`FPDFGlyphPath_GetGlyphPathSegment`): its end point in em
+ * units (1 = the font size; y up, origin on the glyph origin on the baseline). PDFium
+ * returns the same outline whatever size is asked for: scale by the font size and the text
+ * matrix. A Bézier curve is three consecutive `bezier` segments (two control points, then
+ * the end point).
+ */
+export interface GlyphSegment {
+  readonly kind: 'move' | 'line' | 'bezier';
+  readonly x: number;
+  readonly y: number;
+  /** The segment closes the current subpath. */
+  readonly close: boolean;
+}
+
 /** Row-vector affine product: apply `a`, then `b`. */
 export function multiply(a: TextMatrix, b: TextMatrix): TextMatrix {
   return [
@@ -58,6 +78,20 @@ export function multiply(a: TextMatrix, b: TextMatrix): TextMatrix {
     a[4] * b[0] + a[5] * b[2] + b[4],
     a[4] * b[1] + a[5] * b[3] + b[5],
   ];
+}
+
+/** An `FS_RECTF` (`left, top, right, bottom` floats) at `p` as a rect. */
+function rectF(mem: PdfiumMemory, p: number): Rect {
+  const left = mem.f32(p);
+  const top = mem.f32(p + 4);
+  const right = mem.f32(p + 8);
+  const bottom = mem.f32(p + 12);
+  return {
+    x: Math.min(left, right),
+    y: Math.min(top, bottom),
+    width: Math.abs(right - left),
+    height: Math.abs(top - bottom),
+  };
 }
 
 /** Raw text, font and page-object calls, bound to one module. */
@@ -118,6 +152,40 @@ export class RawText {
     });
   }
 
+  /**
+   * Loose glyph box (`FPDFText_GetLooseCharBox`): the font's ascent to descent over the
+   * glyph's advance, not its ink; unrotated user space. Undefined on failure.
+   */
+  looseCharBox(textPage: number, index: number): Rect | undefined {
+    return this.mem.withMem(16, (p) => {
+      if (!this.m.FPDFText_GetLooseCharBox(textPage, index, p)) return undefined;
+      return rectF(this.mem, p);
+    });
+  }
+
+  /** Fill colour of the character (`FPDFText_GetFillColor`), RGBA 0–255. */
+  charFillColor(textPage: number, index: number): Rgba | undefined {
+    return this.mem.withMem(16, (p) => {
+      if (!this.m.FPDFText_GetFillColor(textPage, index, p, p + 4, p + 8, p + 12)) {
+        return undefined;
+      }
+      return [this.mem.u32(p), this.mem.u32(p + 4), this.mem.u32(p + 8), this.mem.u32(p + 12)];
+    });
+  }
+
+  /** The character's effective matrix (`FPDFText_GetMatrix`, an `FS_MATRIX` of floats). */
+  charMatrix(textPage: number, index: number): TextMatrix | undefined {
+    return this.mem.withMem(24, (p) => {
+      if (!this.m.FPDFText_GetMatrix(textPage, index, p)) return undefined;
+      return [0, 1, 2, 3, 4, 5].map((i) => this.mem.f32(p + 4 * i)) as unknown as TextMatrix;
+    });
+  }
+
+  /** Whether the text page reads the character as a hyphen (`FPDFText_IsHyphen`). */
+  isHyphen(textPage: number, index: number): boolean {
+    return this.m.FPDFText_IsHyphen(textPage, index) === 1;
+  }
+
   // --- Page objects ---
 
   pageObjects(pagePtr: number): number[] {
@@ -136,6 +204,18 @@ export class RawText {
 
   objectType(obj: number): number {
     return this.m.FPDFPageObj_GetType(obj);
+  }
+
+  /** The object's bounding box (`FPDFPageObj_GetBounds`), page space; undefined on failure. */
+  bounds(obj: number): Rect | undefined {
+    return this.mem.withMem(16, (p) => {
+      if (!this.m.FPDFPageObj_GetBounds(obj, p, p + 4, p + 8, p + 12)) return undefined;
+      const left = this.mem.f32(p);
+      const bottom = this.mem.f32(p + 4);
+      const right = this.mem.f32(p + 8);
+      const top = this.mem.f32(p + 12);
+      return { x: left, y: bottom, width: right - left, height: top - bottom };
+    });
   }
 
   matrix(obj: number): TextMatrix {
@@ -329,6 +409,60 @@ export class RawText {
     return path !== 0 && this.m.FPDFGlyphPath_CountGlyphSegments(path) > 0;
   }
 
+  /**
+   * The font's ascent at `size` (`FPDFFont_GetAscent`): text space units above the baseline,
+   * before the text matrix. Undefined on failure.
+   */
+  ascent(font: number, size: number): number | undefined {
+    return this.mem.withMem(4, (p) =>
+      this.m.FPDFFont_GetAscent(font, size, p) ? this.mem.f32(p) : undefined,
+    );
+  }
+
+  /** The font's descent at `size` (`FPDFFont_GetDescent`), negative below the baseline. */
+  descent(font: number, size: number): number | undefined {
+    return this.mem.withMem(4, (p) =>
+      this.m.FPDFFont_GetDescent(font, size, p) ? this.mem.f32(p) : undefined,
+    );
+  }
+
+  /**
+   * The outline of `ch` in `font` (`FPDFFont_GetGlyphPath` with `size`; em units, see
+   * `GlyphSegment`), read through the `FPDFPathSegment_*` getters; undefined when PDFium has
+   * none. The path may come from a fallback font (research 11 §4.1): presence is a hint,
+   * not proof.
+   */
+  glyphPath(font: number, ch: string, size: number): GlyphSegment[] | undefined {
+    const path = this.m.FPDFFont_GetGlyphPath(font, ch.codePointAt(0) ?? 0, size);
+    if (!path) return undefined;
+    const count = this.m.FPDFGlyphPath_CountGlyphSegments(path);
+    if (count <= 0) return undefined;
+    const out: GlyphSegment[] = [];
+    this.mem.withMem(8, (p) => {
+      for (let i = 0; i < count; i++) {
+        const segment = this.m.FPDFGlyphPath_GetGlyphPathSegment(path, i);
+        if (!segment) continue;
+        const type = this.m.FPDFPathSegment_GetType(segment);
+        const kind =
+          type === SEGMENT_MOVETO
+            ? 'move'
+            : type === SEGMENT_LINETO
+              ? 'line'
+              : type === SEGMENT_BEZIERTO
+                ? 'bezier'
+                : undefined;
+        if (!kind || !this.m.FPDFPathSegment_GetPoint(segment, p, p + 4)) continue;
+        out.push({
+          kind,
+          x: this.mem.f32(p),
+          y: this.mem.f32(p + 4),
+          close: this.m.FPDFPathSegment_GetClose(segment),
+        });
+      }
+    });
+    return out;
+  }
+
   /** A new text object in `font` with explicit char codes (the font's own codes). */
   createCharcodes(docPtr: number, font: number, size: number, codes: readonly number[]): number {
     const obj = this.m.FPDFPageObj_CreateTextObj(docPtr, font, size);
@@ -432,6 +566,101 @@ export class RawText {
       this.mem.free(dataPtr);
       this.mem.free(mapPtr);
     }
+  }
+
+  // --- Structure tree (tagged PDF) ---
+
+  /**
+   * Runs `fn` with the page's structure tree (`FPDF_StructTree_GetForPage`), closed
+   * afterwards; `fn` gets 0 when the page has none.
+   */
+  withStructTree<T>(pagePtr: number, fn: (tree: number) => T): T {
+    const tree = this.m.FPDF_StructTree_GetForPage(pagePtr);
+    try {
+      return fn(tree);
+    } finally {
+      if (tree) this.m.FPDF_StructTree_Close(tree);
+    }
+  }
+
+  /** The tree's top-level elements (null children skipped). */
+  structTreeChildren(tree: number): number[] {
+    const count = this.m.FPDF_StructTree_CountChildren(tree);
+    const out: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const child = this.m.FPDF_StructTree_GetChildAtIndex(tree, i);
+      if (child) out.push(child);
+    }
+    return out;
+  }
+
+  /**
+   * The element's child elements; kids that are marked content or object references are not
+   * elements and are skipped (`FPDF_StructElement_GetChildAtIndex` returns null for them).
+   */
+  structElementChildren(element: number): number[] {
+    const count = this.m.FPDF_StructElement_CountChildren(element);
+    const out: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const child = this.m.FPDF_StructElement_GetChildAtIndex(element, i);
+      if (child) out.push(child);
+    }
+    return out;
+  }
+
+  /**
+   * The element's kids in order: child elements, and the marked-content ids of kids that are
+   * marked content on this page (`FPDF_StructElement_GetChildMarkedContentID`, scoped to the
+   * page the tree was loaded for). Object references and kids on other pages are skipped.
+   */
+  structElementKids(element: number): ({ element: number } | { mcid: number })[] {
+    const count = this.m.FPDF_StructElement_CountChildren(element);
+    const out: ({ element: number } | { mcid: number })[] = [];
+    for (let i = 0; i < count; i++) {
+      const child = this.m.FPDF_StructElement_GetChildAtIndex(element, i);
+      if (child) {
+        out.push({ element: child });
+        continue;
+      }
+      const mcid = this.m.FPDF_StructElement_GetChildMarkedContentID(element, i);
+      if (mcid >= 0) out.push({ mcid });
+    }
+    return out;
+  }
+
+  /** The element's type (/S, after the tree's /RoleMap). */
+  structElementType(element: number): string {
+    return this.mem.readUtf16Result((buf, len) =>
+      this.m.FPDF_StructElement_GetType(element, buf, len),
+    );
+  }
+
+  /**
+   * The marked-content ids the element itself owns (not those of its child elements), read
+   * from its /K whatever page they are on.
+   */
+  structElementMcids(element: number): number[] {
+    const count = this.m.FPDF_StructElement_GetMarkedContentIdCount(element);
+    const out: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const mcid = this.m.FPDF_StructElement_GetMarkedContentIdAtIndex(element, i);
+      if (mcid >= 0) out.push(mcid);
+    }
+    return out;
+  }
+
+  /** The element's /ActualText ('' when absent). */
+  structElementActualText(element: number): string {
+    return this.mem.readUtf16Result((buf, len) =>
+      this.m.FPDF_StructElement_GetActualText(element, buf, len),
+    );
+  }
+
+  /** The element's /Lang ('' when absent). */
+  structElementLang(element: number): string {
+    return this.mem.readUtf16Result((buf, len) =>
+      this.m.FPDF_StructElement_GetLang(element, buf, len),
+    );
   }
 
   /** The page's visible box (CropBox ∩ MediaBox), unrotated user space. */

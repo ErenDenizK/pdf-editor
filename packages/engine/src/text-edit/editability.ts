@@ -2,7 +2,8 @@
  * Editability of a run (spec §2.5): what blocks editing entirely, whether the original font
  * can take the replacement (tier 2 pre-check: a glyph outline per non-space character,
  * WinAnsi for standard-14 fonts), and the fit report (the replacement's width in each tier's
- * font against the free space up to the next glyph on the line).
+ * font against the free space up to the next glyph on the line, or at the end of a line up
+ * to the right edge of its text block).
  */
 import type { Font } from '@cantoo/fontkit';
 
@@ -116,11 +117,16 @@ export function honestyOf(tier: 1 | 2, info: ObjectInfo): Exclude<TextEditHonest
 // Fit
 // ---------------------------------------------------------------------------
 
+/** What ends the free space after a line: a glyph, the text block's right edge, the page. */
+export type SpaceBound = 'glyph' | 'column' | 'page';
+
 export interface FreeSpace {
   /** Where the replacement starts (the first selected glyph's origin). */
   readonly start: Point;
   readonly available: number;
   readonly boundedByGlyph: boolean;
+  /** What `available` ends at. */
+  readonly boundedBy: SpaceBound;
   readonly replaced: number;
 }
 
@@ -141,10 +147,167 @@ function glyphEnd(raw: RawText, info: ObjectInfo, index: number): Point {
   return { x: c.origin.x + w * scale * u.x, y: c.origin.y + w * scale * u.y };
 }
 
+/** Baselines closer than this, in line heights, are one line. */
+const SAME_BASELINE = 0.2;
+/** A gap along a baseline wider than this, in line heights, separates two columns. */
+const COLUMN_GAP = 1;
+/** Neighbouring lines of one text block are at most this far apart, in line heights. */
+const BLOCK_LEADING = 1.75;
+/** The free space may run this far past the block's right edge, in line heights. */
+const COLUMN_TOLERANCE = 0.5;
+
+/** A stretch of characters on one baseline, in the run's line frame (see `lineLimit`). */
+interface Segment {
+  /** Offset of the baseline across the line (0: the run's own). */
+  readonly at: number;
+  start: number;
+  end: number;
+  mine: boolean;
+}
+
+/**
+ * Splits characters into lines (by baseline) and each line into segments at gaps wider than
+ * `COLUMN_GAP` line heights, so the columns of a page sharing baselines stay apart. Ordered
+ * by baseline, then along the line.
+ */
+function segmentsOf(
+  points: readonly { at: number; start: number; end: number; mine: boolean }[],
+  lineHeight: number,
+): Segment[][] {
+  const sorted = [...points].sort((a, b) => a.at - b.at);
+  const lines: (typeof points)[number][][] = [];
+  for (const p of sorted) {
+    const line = lines[lines.length - 1];
+    const last = line?.[line.length - 1];
+    if (line && last && p.at - last.at <= SAME_BASELINE * lineHeight) line.push(p);
+    else lines.push([p]);
+  }
+  return lines.map((line) => {
+    const at = line.reduce((sum, p) => sum + p.at, 0) / line.length;
+    const out: Segment[] = [];
+    for (const p of [...line].sort((a, b) => a.start - b.start)) {
+      const current = out[out.length - 1];
+      if (current && p.start - current.end <= COLUMN_GAP * lineHeight) {
+        current.end = Math.max(current.end, p.end);
+        current.mine ||= p.mine;
+      } else {
+        out.push({ at, start: p.start, end: p.end, mine: p.mine });
+      }
+    }
+    return out;
+  });
+}
+
+/**
+ * The right edge of the text block the run's line belongs to: lines whose baselines follow
+ * each other at most `BLOCK_LEADING` line heights apart and that overlap the line along the
+ * baseline, walked up and down from the run's line. Undefined when the line has no such
+ * neighbour (a heading, a label): nothing tells where its column ends.
+ */
+function blockEnd(lines: readonly Segment[][], lineHeight: number): number | undefined {
+  const index = lines.findIndex((line) => line.some((s) => s.mine));
+  const own = lines[index]?.find((s) => s.mine);
+  if (!own) return undefined;
+  let end = own.end;
+  let neighbours = 0;
+  for (const step of [-1, 1]) {
+    let edge = { at: own.at, start: own.start, end: own.end };
+    for (let i = index + step; i >= 0 && i < lines.length; i += step) {
+      const line = lines[i] ?? [];
+      const at = line[0]?.at ?? edge.at;
+      if (Math.abs(at - edge.at) > BLOCK_LEADING * lineHeight) break;
+      const overlapping = line.filter((s) => s.start < edge.end && s.end > edge.start);
+      if (overlapping.length === 0) break;
+      edge = {
+        at,
+        start: Math.min(...overlapping.map((s) => s.start)),
+        end: Math.max(...overlapping.map((s) => s.end)),
+      };
+      end = Math.max(end, edge.end);
+      neighbours += 1;
+    }
+  }
+  return neighbours > 0 ? end : undefined;
+}
+
+/** Where the free space after the run's last glyph ends (see `freeSpace`). */
+export interface LineLimit {
+  /** The run's first glyph origin: distances below are measured along the line from it. */
+  readonly origin: Point;
+  /** End of the run's last glyph advance. */
+  readonly runEnd: number;
+  /** Where the free space after the run ends. */
+  readonly limit: number;
+  readonly boundedBy: SpaceBound;
+}
+
+/**
+ * Where the free space after the run ends, along its line: at the nearest glyph of another
+ * object on the same baseline after the run, or at the right edge of the run's text block
+ * (the furthest right edge among the neighbouring lines of the block, plus half a line
+ * height), whichever comes first; else at the page box edge.
+ */
+export function lineLimit(
+  raw: RawText,
+  pagePtr: number,
+  textPage: number,
+  run: ResolvedRun,
+): LineLimit {
+  const { info, from, to } = run;
+  const { u } = axis(info.pageMatrix);
+  const origin = info.chars[from]?.origin ?? { x: 0, y: 0 };
+  const runEnd = to > from ? along(u, origin, glyphEnd(raw, info, to - 1)) : 0;
+  const lineHeight = Math.abs(info.size) * Math.hypot(info.pageMatrix[2], info.pageMatrix[3]) || 1;
+  const mine = new Set(info.chars.slice(from, to).map((c) => c.index));
+  let next = Number.POSITIVE_INFINITY;
+  const points: { at: number; start: number; end: number; mine: boolean }[] = [];
+  const count = raw.charCount(textPage);
+  for (let i = 0; i < count; i++) {
+    if (!raw.charObject(textPage, i)) continue;
+    const own = mine.has(i);
+    const o = raw.charOrigin(textPage, i);
+    const at = across(u, origin, o);
+    const t = along(u, origin, o);
+    if (!own && Math.abs(at) <= Math.max(0.3 * lineHeight, 0.5)) {
+      if (t >= runEnd - POSITION_TOLERANCE && t < next) next = t;
+    }
+    // Blocks are measured by their ink: a trailing space does not move a column's edge.
+    if (isBlank(raw.charText(textPage, i))) continue;
+    const box = raw.charBox(textPage, i);
+    let start = t;
+    let end = t;
+    if (box.width > 0 || box.height > 0) {
+      for (const corner of [
+        { x: box.x, y: box.y },
+        { x: box.x + box.width, y: box.y },
+        { x: box.x, y: box.y + box.height },
+        { x: box.x + box.width, y: box.y + box.height },
+      ]) {
+        const c = along(u, origin, corner);
+        start = Math.min(start, c);
+        end = Math.max(end, c);
+      }
+    }
+    points.push({ at, start, end, mine: own });
+  }
+  const page = toEdge(raw.pageBox(pagePtr), origin, u);
+  const right = mine.size > 0 ? blockEnd(segmentsOf(points, lineHeight), lineHeight) : undefined;
+  const column =
+    right === undefined
+      ? undefined
+      : Math.min(page, Math.max(right, runEnd) + COLUMN_TOLERANCE * lineHeight);
+  if (Number.isFinite(next) && (column === undefined || next <= column)) {
+    return { origin, runEnd, limit: next, boundedBy: 'glyph' };
+  }
+  if (column !== undefined) return { origin, runEnd, limit: column, boundedBy: 'column' };
+  return { origin, runEnd, limit: page, boundedBy: 'page' };
+}
+
 /**
  * Free space for the replacement: from the first selected glyph to the next glyph on the
- * line (the run's own next glyph, else the nearest glyph of any object on the same
- * baseline), else to the page box edge.
+ * line (the run's own next glyph), or, when the selection runs to the end of the line, to
+ * `lineLimit` (the next glyph of another object on the same baseline, the right edge of the
+ * text block, or the page box edge).
  */
 export function freeSpace(
   raw: RawText,
@@ -170,25 +333,15 @@ export function freeSpace(
         : start;
   const replaced = Math.max(0, along(u, start, selectionEnd));
   if (from + range.g1 < to) {
-    return { start, available: replaced, boundedByGlyph: true, replaced };
+    return { start, available: replaced, boundedByGlyph: true, boundedBy: 'glyph', replaced };
   }
-  // The selection runs to the end of the line: look for glyphs of other objects after it.
-  const lineHeight = Math.abs(info.size) * Math.hypot(info.pageMatrix[2], info.pageMatrix[3]);
-  const mine = new Set(info.chars.slice(from, to).map((c) => c.index));
-  let next = Number.POSITIVE_INFINITY;
-  const count = raw.charCount(textPage);
-  for (let i = 0; i < count; i++) {
-    if (mine.has(i) || !raw.charObject(textPage, i)) continue;
-    const o = raw.charOrigin(textPage, i);
-    if (Math.abs(across(u, start, o)) > Math.max(0.3 * lineHeight, 0.5)) continue;
-    const t = along(u, start, o);
-    if (t >= replaced - POSITION_TOLERANCE && t < next) next = t;
-  }
-  if (Number.isFinite(next)) return { start, available: next, boundedByGlyph: true, replaced };
+  // The selection runs to the end of the line.
+  const line = lineLimit(raw, pagePtr, textPage, run);
   return {
     start,
-    available: toEdge(raw.pageBox(pagePtr), start, u),
-    boundedByGlyph: false,
+    available: Math.max(0, line.limit - along(u, line.origin, start)),
+    boundedByGlyph: line.boundedBy === 'glyph',
+    boundedBy: line.boundedBy,
     replaced,
   };
 }

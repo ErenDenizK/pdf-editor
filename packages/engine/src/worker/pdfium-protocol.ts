@@ -46,6 +46,8 @@ import type {
   TextEditRequest,
   TextEditResult,
   TextRun,
+  TextRunAnalysis,
+  TextRunRef,
   VerificationExpectation,
   VerificationResult,
   VerifyRedactedOutputOptions,
@@ -198,13 +200,18 @@ export interface PdfiumWorkerApi {
     options: WireCallOptions,
     abortPort?: MessagePort,
   ): Promise<Wire<VerificationResult>>;
-  // PdfTextEditor (text-edit/): raw access, exclusive per source.
+  // PdfTextEditor (text-edit/): raw access; edits exclusive per source, reads shared.
   locateRuns(
     id: SourceId,
     pageIndex: number,
     options: WireCallOptions,
     abortPort?: MessagePort,
   ): Promise<Wire<readonly LocatedRun[]>>;
+  analyzeRun(
+    run: TextRunRef,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<TextRunAnalysis>>;
   checkEditability(
     query: TextEditQuery,
     options: WireCallOptions,

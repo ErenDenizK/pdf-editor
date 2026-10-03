@@ -352,6 +352,12 @@ export function createPdfiumProxy(worker: Worker, options: PdfiumProxyOptions): 
         remote.locateRuns(id, pageIndex, wire, withPort(port, port)),
       );
     },
+    analyzeRun(run, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke('analyzeRun', signal, (port) =>
+        remote.analyzeRun(run, wire, withPort(port, port)),
+      );
+    },
     checkEditability(query, callOptions) {
       const { signal, wire } = split(callOptions);
       return invoke('checkEditability', signal, (port) =>
