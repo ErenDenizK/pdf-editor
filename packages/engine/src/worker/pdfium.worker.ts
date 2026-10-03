@@ -321,6 +321,14 @@ const api: PdfiumWorkerApi = {
       ),
     );
   },
+  appendInkPath(id, ink, options, abortPort) {
+    return call(abortPort, async (signal) => {
+      const written = await onSource(id, signal, (a) =>
+        a.appendInkPath(id, ink, withSignal(options, signal)),
+      );
+      return written ?? null;
+    });
+  },
   listFormFields(id, options, abortPort) {
     return call(abortPort, (signal) =>
       onSource(id, signal, (a) => a.listFormFields(id, withSignal(options, signal))),
@@ -368,6 +376,11 @@ const api: PdfiumWorkerApi = {
       (await getTextEditor()).analyzeParagraphs(id, pageIndex, withSignal(options, signal)),
     );
   },
+  glyphPaths(id, pageIndex, fontId, chars, options, abortPort) {
+    return call(abortPort, async (signal) =>
+      (await getTextEditor()).glyphPaths(id, pageIndex, fontId, chars, withSignal(options, signal)),
+    );
+  },
   checkEditability(query, options, abortPort) {
     return call(abortPort, async (signal) =>
       (await getTextEditor()).checkEditability(query, withSignal(options, signal)),
@@ -376,6 +389,30 @@ const api: PdfiumWorkerApi = {
   applyTextEdit(request, options, abortPort) {
     return call(abortPort, async (signal) =>
       (await getTextEditor()).applyTextEdit(request, withSignal(options, signal)),
+    );
+  },
+  analyzeParagraphLayout(ref, options, abortPort) {
+    return call(abortPort, async (signal) =>
+      (await getTextEditor()).analyzeParagraphLayout(ref, withSignal(options, signal)),
+    );
+  },
+  applyParagraphEdit(id, pageIndex, edit, options, abortPort) {
+    return call(abortPort, async (signal) =>
+      (await getTextEditor()).applyParagraphEdit(id, pageIndex, edit, withSignal(options, signal)),
+    );
+  },
+  renderParagraphPreview(id, pageIndex, edit, scale, options, abortPort) {
+    return call(
+      abortPort,
+      async (signal) =>
+        (await getTextEditor()).renderParagraphPreview(
+          id,
+          pageIndex,
+          edit,
+          scale,
+          withSignal(options, signal),
+        ),
+      (preview) => [preview.bitmap],
     );
   },
   locateImages(id, pageIndex, options, abortPort) {

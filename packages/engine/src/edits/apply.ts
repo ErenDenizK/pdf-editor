@@ -21,9 +21,11 @@ import {
   EngineError,
   type ImageEditResult,
   type OcrApplyResult,
+  type ParagraphEditResult,
   type PdfEditor,
   type PdfImageEditor,
   type PdfOcrLayer,
+  type PdfParagraphEditor,
   type PdfRedactor,
   type PdfTextEditor,
   type TextEditResult,
@@ -44,7 +46,7 @@ import {
 } from './payloads';
 import { applyImageEdit, type ImageReplayPayload } from './image-edit';
 import { applyRedactionEdit, type RedactionReplayPayload } from './redaction-apply';
-import { applyTextEditEdit, type TextEditReplayPayload } from './text-edit';
+import { applyParagraphEditEdit, applyTextEditEdit, type TextEditReplayPayload } from './text-edit';
 import { applyOcrEdit, type OcrReplayPayload } from '../ocr/edit';
 
 /**
@@ -61,8 +63,10 @@ export type EditTarget = Pick<
   | 'listFormFields'
   | 'setFormFieldValue'
   | 'getAnnotationAppearance'
+  | 'appendInkPath'
 > &
   Partial<Pick<PdfTextEditor, 'applyTextEdit'>> &
+  Partial<Pick<PdfParagraphEditor, 'applyParagraphEdit'>> &
   Partial<Pick<PdfRedactor, 'applyRedactionPlan'>> &
   Partial<Pick<PdfImageEditor, 'transformImage' | 'removeImage' | 'replaceImage'>> &
   Partial<Pick<PdfOcrLayer, 'applyOcrLayer'>>;
@@ -76,6 +80,8 @@ export interface AppliedEdit {
   readonly annotation?: Annotation;
   /** `text.edit`: the editor's result (tier, honesty, verification). */
   readonly textEdit?: TextEditResult;
+  /** `text.editParagraph`: the paragraph editor's result (layout, tier, verification). */
+  readonly paragraphEdit?: ParagraphEditResult;
   /** `redaction.apply`: every report of the apply (and the redacted bytes). */
   readonly redaction?: ApplyRedactionsResult;
   /** `image.*`: the image editor's result (the image as located after the edit). */
@@ -136,6 +142,44 @@ async function snapshot(
   return { ...annotation, imageBlob };
 }
 
+/**
+ * An `annotation.update` with `inkAppend` (a pen burst): the last path of the new Ink is
+ * appended in place and the inverse is the `before` the caller sent, so nothing is listed.
+ * Undefined, with nothing changed, when the hint is absent or does not hold (another kind,
+ * not one path more, an editor without `appendInkPath`, or an ink on the page that does not
+ * hold `before`'s paths): the update then runs as usual.
+ */
+async function appendInk(
+  editor: EditTarget,
+  edit: EngineEdit,
+  json: SerializedAnnotation,
+  options: EngineCallOptions,
+): Promise<AppliedEdit | undefined> {
+  const hint = (edit.payload as Partial<AnnotationUpdatePayload> | null)?.inkAppend;
+  if (!hint || typeof hint.before !== 'object' || !editor.appendInkPath) return undefined;
+  const next = deserializeAnnotation(json) as Annotation;
+  const before = deserializeAnnotation({ ...hint.before, id: json.id }) as Annotation;
+  if (
+    next.kind !== 'ink' ||
+    before.kind !== 'ink' ||
+    next.pageIndex !== edit.pageIndex ||
+    next.paths.length !== before.paths.length + 1
+  ) {
+    return undefined;
+  }
+  const written = await editor.appendInkPath(edit.source, next, options);
+  if (!written) return undefined;
+  const applied: EngineEdit = { ...edit, payload: { annotation: json } };
+  const inverse: AnnotationUpdatePayload = {
+    annotation: { ...hint.before, id: json.id },
+  };
+  return {
+    applied,
+    inverse: inverseOf(applied, 'annotation.update', inverse),
+    annotation: written,
+  };
+}
+
 /** Applies `edit` and returns the applied edit and its inverse. */
 export async function applyEngineEditWithResult(
   editor: EditTarget,
@@ -164,6 +208,8 @@ export async function applyEngineEditWithResult(
       if (typeof json.id !== 'string') {
         throw new EngineError('internal', `Edit ${edit.id}: an update needs the annotation id`);
       }
+      const appended = await appendInk(editor, edit, json, options);
+      if (appended) return appended;
       const before = await findAnnotation(editor, edit, json.id, options);
       // The old image is only needed when the update replaces it.
       const previous =
@@ -209,6 +255,17 @@ export async function applyEngineEditWithResult(
       const applied: EngineEdit = { ...edit, payload };
       const inverse: TextEditReplayPayload = { replayRequired: true, of: edit.id };
       return { applied, inverse: inverseOf(applied, 'text.edit', inverse), textEdit: result };
+    }
+    case 'text.editParagraph': {
+      // Non-invertible, as text edits: the inverse tells history to reopen and replay.
+      const { payload, result } = await applyParagraphEditEdit(editor, edit, options);
+      const applied: EngineEdit = { ...edit, payload };
+      const inverse: TextEditReplayPayload = { replayRequired: true, of: edit.id };
+      return {
+        applied,
+        inverse: inverseOf(applied, 'text.editParagraph', inverse),
+        paragraphEdit: result,
+      };
     }
     case 'redaction.apply': {
       // Non-invertible, as text edits: the inverse tells history to reopen and replay.

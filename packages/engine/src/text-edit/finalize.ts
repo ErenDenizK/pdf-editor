@@ -7,8 +7,11 @@
  *    subset name (`ABCDEF+Inter-Regular`); the face is recognised by comparing the subset's
  *    advance widths with the bundled faces, the tag is a hash of the program.
  * 2. Tagged PDF: a split text object repeats its marked-content id (every new object gets
- *    its own `BDC … EMC` with the same /MCID). Repeats get fresh MCIDs, registered in the
- *    page's /ParentTree array and in the /K of the structure element that owned the id.
+ *    its own `BDC … EMC` with the same /MCID). Adjacent sequences of one id whose objects
+ *    sit on the same baseline (the objects of one written paragraph line, craft spec §4.4)
+ *    are first merged into one sequence; then repeats get fresh MCIDs, registered in the
+ *    page's /ParentTree array and in the /K of the structure element that owned the id, so
+ *    a rewritten paragraph has one MCID per written line under its original /P.
  * 3. Garbage collection (ADR-0011 §5): a second `GenerateContent` on a page leaves the
  *    previous content stream unreachable in the file; `dropUnreachable` removes it.
  */
@@ -254,6 +257,116 @@ function numberTreeGet(
 /** Positions of inline `/MCID n` in BDC property lists of a content stream. */
 const MCID_PATTERN = /(\/MCID\s+)(\d+)(?=[^>]*>>\s*BDC)/g;
 
+/** `/Tag <<… /MCID n …>> BDC` operations. */
+const BDC_PATTERN = /\/([^\s/<>[\]()]+)\s*<<([^>]*?)\/MCID\s+(\d+)([^>]*)>>\s*BDC\b/g;
+/** Marked-content operators, for nesting. */
+const MARK_OPERATOR = /\b(BDC|BMC|EMC)\b/g;
+const NUM = '(-?\\d*\\.?\\d+(?:[eE][-+]?\\d+)?)';
+const SIX = `${NUM}\\s+${NUM}\\s+${NUM}\\s+${NUM}\\s+${NUM}\\s+${NUM}\\s+`;
+const CM_PATTERN = new RegExp(`${SIX}cm\\b`, 'g');
+const TM_PATTERN = new RegExp(`${SIX}Tm\\b`, 'g');
+
+interface MarkedSequence {
+  /** Where the `/Tag <<…>> BDC` operation starts and ends, and where its `EMC` starts and ends. */
+  readonly start: number;
+  readonly contentStart: number;
+  readonly emcStart: number;
+  readonly end: number;
+  readonly header: string;
+}
+
+/** The marked-content sequences with an MCID of a content stream (unbalanced ones left out). */
+function markedSequences(text: string): MarkedSequence[] {
+  const out: MarkedSequence[] = [];
+  for (const m of text.matchAll(BDC_PATTERN)) {
+    const start = m.index;
+    const contentStart = start + m[0].length;
+    MARK_OPERATOR.lastIndex = contentStart;
+    let depth = 0;
+    for (let op = MARK_OPERATOR.exec(text); op; op = MARK_OPERATOR.exec(text)) {
+      if (op[1] !== 'EMC') {
+        depth += 1;
+      } else if (depth > 0) {
+        depth -= 1;
+      } else {
+        out.push({
+          start,
+          contentStart,
+          emcStart: op.index,
+          end: op.index + 3,
+          header: m[0].replace(/\s+/g, ''),
+        });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** The baseline of a text object drawn as `… a b c d e f cm BT … a' b' c' d' e' f' Tm …`. */
+function baselineOf(
+  cm: RegExpMatchArray | undefined,
+  tm: RegExpMatchArray | undefined,
+): { across: number; dx: number; dy: number } | undefined {
+  if (!cm || !tm) return undefined;
+  const [a, b, c, d, e, f] = cm.slice(1, 7).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const [ta, tb, , , te, tf] = tm.slice(1, 7).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const x = te * a + tf * c + e;
+  const y = te * b + tf * d + f;
+  const ux = ta * a + tb * c;
+  const uy = ta * b + tb * d;
+  const len = Math.hypot(ux, uy);
+  if (!(len > 0) || ![x, y].every(Number.isFinite)) return undefined;
+  const dx = ux / len;
+  const dy = uy / len;
+  return { across: -x * dy + y * dx, dx, dy };
+}
+
+/**
+ * Merges adjacent marked-content sequences of one MCID whose text objects share a baseline
+ * (the last object of the first, the first of the second): the objects of one written line.
+ */
+function mergeLineSequences(text: string): { text: string; merged: number } {
+  const list = markedSequences(text);
+  const cuts: [number, number][] = [];
+  for (let i = 0; i + 1 < list.length; i++) {
+    const a = list[i] as MarkedSequence;
+    const b = list[i + 1] as MarkedSequence;
+    if (a.header !== b.header || text.slice(a.end, b.start).trim() !== '') continue;
+    const bodyA = text.slice(a.contentStart, a.emcStart);
+    const bodyB = text.slice(b.contentStart, b.emcStart);
+    const last = (pattern: RegExp, body: string) => [...body.matchAll(pattern)].pop();
+    const first = (pattern: RegExp, body: string) => [...body.matchAll(pattern)][0];
+    const p = baselineOf(last(CM_PATTERN, bodyA), last(TM_PATTERN, bodyA));
+    const q = baselineOf(first(CM_PATTERN, bodyB), first(TM_PATTERN, bodyB));
+    if (!p || !q) continue;
+    if (
+      Math.abs(p.across - q.across) > 0.5 ||
+      Math.abs(p.dx - q.dx) + Math.abs(p.dy - q.dy) > 1e-3
+    ) {
+      continue;
+    }
+    cuts.push([a.emcStart, b.contentStart]);
+  }
+  let out = text;
+  for (const [from, to] of cuts.reverse()) out = `${out.slice(0, from)}${out.slice(to)}`;
+  return { text: out, merged: cuts.length };
+}
+
 /**
  * Adds `fresh` to the structure element's /K right after `after` (the original id, or the
  * last id already split from it), so the kids keep content order.
@@ -321,10 +434,12 @@ function repairMarkedContent(doc: PDFDocument): number {
     /** Original MCID → the last id split from it on this page. */
     const lastOf = new Map<number, number>();
     let next = ids.size();
-    const streams = refs.map((ref) => ({
-      ref,
-      text: ref ? latin1(streamBytes(doc, ref) ?? new Uint8Array()) : '',
-    }));
+    const streams = refs.map((ref) => {
+      const merged = mergeLineSequences(
+        ref ? latin1(streamBytes(doc, ref) ?? new Uint8Array()) : '',
+      );
+      return { ref, text: merged.text, merged: merged.merged > 0 };
+    });
     for (const s of streams)
       for (const m of s.text.matchAll(MCID_PATTERN)) next = Math.max(next, Number(m[2]) + 1);
     for (const stream of streams) {
@@ -348,7 +463,7 @@ function repairMarkedContent(doc: PDFDocument): number {
         changed = true;
         return `${prefix}${fresh}`;
       });
-      if (!changed) continue;
+      if (!changed && !stream.merged) continue;
       const out = new Uint8Array(text.length);
       for (let i = 0; i < text.length; i++) out[i] = text.charCodeAt(i) & 0xff;
       const old = context.lookup(stream.ref);

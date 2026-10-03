@@ -170,14 +170,20 @@ function folded(entry: Entry | undefined): boolean {
   return entry?.kind === 'kept' && entry.glyph.origin === undefined;
 }
 
-interface ReadChar {
+/** A character read back from a fresh text page. */
+export interface ReadChar {
   readonly text: string;
   readonly origin: Point;
   readonly box: Rect;
   readonly obj: number;
 }
 
-function readChars(raw: RawText, textPage: number, objects: ReadonlySet<number>): ReadChar[] {
+/** The characters of `objects` on a text page, generated spaces left out. */
+export function readChars(
+  raw: RawText,
+  textPage: number,
+  objects: ReadonlySet<number>,
+): ReadChar[] {
   const out: ReadChar[] = [];
   const count = raw.charCount(textPage);
   for (let i = 0; i < count; i++) {
@@ -197,7 +203,7 @@ function readChars(raw: RawText, textPage: number, objects: ReadonlySet<number>)
  * Matches `texts` (one per glyph, in order) to an object's characters; a space may be
  * folded (undefined). Undefined when they do not match.
  */
-function matchGlyphs(
+export function matchGlyphs(
   chars: readonly ReadChar[],
   texts: readonly string[],
 ): (ReadChar | undefined)[] | undefined {

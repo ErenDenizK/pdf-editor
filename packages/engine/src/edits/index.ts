@@ -45,8 +45,13 @@ export {
 } from './redaction-apply';
 export {
   appliedTextEditPayload,
+  applyParagraphEditEdit,
   isReplayRequired,
+  paragraphEditOf,
+  paragraphEditPayloadOf,
+  readParagraphEditPayload,
   readTextEditPayload,
+  type TextEditParagraphPayload,
   type TextEditPayload,
   textEditPayloadOf,
   type TextEditReplayPayload,

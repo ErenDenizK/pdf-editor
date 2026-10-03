@@ -20,7 +20,9 @@ import type {
   ExtractedImage,
   ForensicReport,
   FormField,
+  GlyphOutlineSegment,
   ImageEditResult,
+  InkAnnotation,
   ImageObjectRef,
   ImageReplacement,
   ImageTransformTarget,
@@ -34,6 +36,12 @@ import type {
   OpenedDocument,
   OpenOptions,
   ParagraphBlock,
+  ParagraphEdit,
+  ParagraphEditOptions,
+  ParagraphEditResult,
+  ParagraphLayoutAnalysis,
+  ParagraphPreview,
+  ParagraphRef,
   RedactionPlan,
   RenderForOcrOptions,
   RenderOptions,
@@ -86,6 +94,7 @@ export type WireSaveOptions = Omit<SaveOptions, 'signal'>;
 export type WireApplyRedactionsOptions = Omit<ApplyRedactionsOptions, 'signal'>;
 export type WireVerifyRedactedOutputOptions = Omit<VerifyRedactedOutputOptions, 'signal'>;
 export type WireRenderForOcrOptions = Omit<RenderForOcrOptions, 'signal'>;
+export type WireParagraphEditOptions = Omit<ParagraphEditOptions, 'signal'>;
 
 /**
  * The caller's `SourceInspector` (in the app: the assembly worker's proxy), reached from the
@@ -176,6 +185,13 @@ export interface PdfiumWorkerApi {
     options: WireCallOptions,
     abortPort?: MessagePort,
   ): Promise<Wire<Blob>>;
+  /** `PdfEditor.appendInkPath`; `null` when nothing was written. */
+  appendInkPath(
+    id: SourceId,
+    ink: InkAnnotation,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<InkAnnotation | null>>;
   listFormFields(
     id: SourceId,
     options: WireCallOptions,
@@ -219,6 +235,14 @@ export interface PdfiumWorkerApi {
     options: WireCallOptions,
     abortPort?: MessagePort,
   ): Promise<Wire<readonly ParagraphBlock[]>>;
+  glyphPaths(
+    id: SourceId,
+    pageIndex: number,
+    fontId: number,
+    chars: readonly string[],
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<Readonly<Record<string, readonly GlyphOutlineSegment[] | null>>>>;
   checkEditability(
     query: TextEditQuery,
     options: WireCallOptions,
@@ -229,6 +253,28 @@ export interface PdfiumWorkerApi {
     options: WireCallOptions,
     abortPort?: MessagePort,
   ): Promise<Wire<TextEditResult>>;
+  // PdfParagraphEditor (text-edit/paragraph-edit.ts): reads and dry runs shared, commits exclusive.
+  analyzeParagraphLayout(
+    ref: ParagraphRef,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<ParagraphLayoutAnalysis>>;
+  applyParagraphEdit(
+    id: SourceId,
+    pageIndex: number,
+    edit: ParagraphEdit,
+    options: WireParagraphEditOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<ParagraphEditResult>>;
+  /** The bitmap is transferred to the caller. */
+  renderParagraphPreview(
+    id: SourceId,
+    pageIndex: number,
+    edit: ParagraphEdit,
+    scale: number,
+    options: WireCallOptions,
+    abortPort?: MessagePort,
+  ): Promise<Wire<ParagraphPreview>>;
   // PdfImageEditor (image-objects/): raw access, exclusive per source.
   locateImages(
     id: SourceId,

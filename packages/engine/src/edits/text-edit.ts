@@ -1,10 +1,13 @@
 /**
- * The `text.edit` engine edit (spec redaction-and-text-editing §2.5, research 05 §4).
+ * The `text.edit` and `text.editParagraph` engine edits (spec redaction-and-text-editing §2.5,
+ * craft §4.4, research 05 §4).
  *
- * | kind        | payload                                                          | inverse          |
- * | ----------- | ---------------------------------------------------------------- | ---------------- |
- * | `text.edit` | `TextEditPayload`: the run (object path, char start/count, text) | replay required  |
- * |             | + start/end + replacement + tier + face + fit + fontSize        |                  |
+ * | kind                 | payload                                                     | inverse         |
+ * | -------------------- | ----------------------------------------------------------- | --------------- |
+ * | `text.edit`          | `TextEditPayload`: the run (object path, char start/count,  | replay required |
+ * |                      | text) + start/end + replacement + tier + face + fit + size  |                 |
+ * | `text.editParagraph` | `TextEditParagraphPayload`: the paragraph (index, runs) +   | replay required |
+ * |                      | new text + caret span + the layout written + tier           |                 |
  *
  * PDFium cannot restore a content stream, so a text edit has no exact inverse: undo is
  * "reopen the source's original bytes and replay the remaining edits". The inverse recorded
@@ -20,6 +23,10 @@ import { textEditError } from '../text-edit/errors';
 import {
   type EngineCallOptions,
   EngineError,
+  type ParagraphEdit,
+  type ParagraphEditResult,
+  type ParagraphLayout,
+  type PdfParagraphEditor,
   type PdfTextEditor,
   type TextEditRequest,
   type TextEditResult,
@@ -66,6 +73,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export function isReplayRequired(edit: EngineEdit): boolean {
   return (
     (edit.kind === 'text.edit' ||
+      edit.kind === 'text.editParagraph' ||
       edit.kind === 'redaction.apply' ||
       edit.kind === 'image.remove' ||
       edit.kind === 'image.replace' ||
@@ -186,4 +194,155 @@ export async function applyTextEditEdit(
   const payload = readTextEditPayload(edit.payload);
   const result = await editor.applyTextEdit(textEditRequestOf(edit, payload), options);
   return { payload: appliedTextEditPayload(payload, result), result };
+}
+
+// ---------------------------------------------------------------------------
+// text.editParagraph (craft spec §4.4)
+// ---------------------------------------------------------------------------
+
+/** Payload of a `text.editParagraph`: what `PdfParagraphEditor.applyParagraphEdit` takes. */
+export interface TextEditParagraphPayload {
+  /** The paragraph as detected: its index on the page and its runs (re-checked on replay). */
+  readonly paragraph: { readonly index: number; readonly runs: readonly TextEditRunJson[] };
+  /** The paragraph's text after the edit, and the replaced range of the original text. */
+  readonly text: string;
+  readonly caretSpan: { readonly start: number; readonly end: number };
+  /** Style id of the inserted text. */
+  readonly style?: string;
+  /** The layout written; recorded by the first application, written again on replay. */
+  readonly layout?: ParagraphLayout;
+  /** Once applied: 2 (original font only) or 1 (some characters in a bundled substitute). */
+  readonly tier?: 1 | 2;
+}
+
+function invalidParagraph(why: string): EngineError {
+  return new EngineError('internal', `Invalid text.editParagraph payload: ${why}`);
+}
+
+function readRun(run: unknown): TextEditRunJson {
+  if (!isObject(run)) throw invalidParagraph('a run must be an object');
+  const path = run.objectPath;
+  if (
+    !Array.isArray(path) ||
+    path.length === 0 ||
+    !path.every((n) => Number.isInteger(n) && (n as number) >= 0) ||
+    !Number.isInteger(run.charStart) ||
+    !Number.isInteger(run.charCount) ||
+    typeof run.text !== 'string'
+  ) {
+    throw invalidParagraph('runs need objectPath, charStart, charCount and text');
+  }
+  return {
+    objectPath: path as number[],
+    charStart: run.charStart as number,
+    charCount: run.charCount as number,
+    text: run.text,
+  };
+}
+
+export function readParagraphEditPayload(payload: unknown): TextEditParagraphPayload {
+  if (!isObject(payload) || !isObject(payload.paragraph) || !isObject(payload.caretSpan)) {
+    throw invalidParagraph('expected { paragraph, text, caretSpan, … }');
+  }
+  const { paragraph, text, caretSpan, style, layout, tier } = payload;
+  if (!Number.isInteger(paragraph.index) || (paragraph.index as number) < 0) {
+    throw invalidParagraph('paragraph.index must be a non-negative integer');
+  }
+  if (!Array.isArray(paragraph.runs) || paragraph.runs.length === 0) {
+    throw invalidParagraph('paragraph.runs must be a non-empty array');
+  }
+  if (typeof text !== 'string') throw invalidParagraph('text must be a string');
+  if (!Number.isInteger(caretSpan.start) || !Number.isInteger(caretSpan.end)) {
+    throw invalidParagraph('caretSpan needs integer start and end');
+  }
+  if (style !== undefined && typeof style !== 'string') throw invalidParagraph('bad style');
+  if (
+    layout !== undefined &&
+    (!isObject(layout) || layout.text !== text || !Array.isArray(layout.lines))
+  ) {
+    throw invalidParagraph('layout must be a layout of the text');
+  }
+  if (tier !== undefined && tier !== 1 && tier !== 2) throw invalidParagraph('tier must be 1 or 2');
+  return {
+    paragraph: { index: paragraph.index as number, runs: paragraph.runs.map(readRun) },
+    text,
+    caretSpan: { start: caretSpan.start as number, end: caretSpan.end as number },
+    ...(style === undefined ? {} : { style }),
+    ...(layout === undefined ? {} : { layout: layout as unknown as ParagraphLayout }),
+    ...(tier === undefined ? {} : { tier }),
+  };
+}
+
+/** The paragraph edit a recorded payload stands for (on the edit's source and page). */
+export function paragraphEditOf(
+  edit: EngineEdit,
+  payload: TextEditParagraphPayload,
+): ParagraphEdit {
+  return {
+    ref: {
+      source: edit.source,
+      pageIndex: edit.pageIndex,
+      index: payload.paragraph.index,
+      runs: payload.paragraph.runs.map((r) => ({
+        ...r,
+        source: edit.source,
+        pageIndex: edit.pageIndex,
+      })),
+    },
+    text: payload.text,
+    caretSpan: payload.caretSpan,
+    ...(payload.style === undefined ? {} : { style: payload.style }),
+    ...(payload.layout === undefined ? {} : { layout: payload.layout }),
+  };
+}
+
+/**
+ * The payload to record for a paragraph edit, with the layout and tier of `result` when it
+ * was applied (so replay writes the same layout).
+ */
+export function paragraphEditPayloadOf(
+  edit: ParagraphEdit,
+  result?: ParagraphEditResult,
+): TextEditParagraphPayload {
+  const layout = result?.layout ?? edit.layout;
+  return {
+    paragraph: {
+      index: edit.ref.index,
+      runs: edit.ref.runs.map((r) => ({
+        objectPath: [...r.objectPath],
+        charStart: r.charStart,
+        charCount: r.charCount,
+        text: r.text,
+      })),
+    },
+    text: edit.text,
+    caretSpan: { start: edit.caretSpan.start, end: edit.caretSpan.end },
+    ...(edit.style === undefined ? {} : { style: edit.style }),
+    ...(layout === undefined ? {} : { layout }),
+    ...(result ? { tier: result.tier } : {}),
+  };
+}
+
+/** Runs a `text.editParagraph` through `editor` (throws `replay-required` for an inverse). */
+export async function applyParagraphEditEdit(
+  editor: Partial<Pick<PdfParagraphEditor, 'applyParagraphEdit'>>,
+  edit: EngineEdit,
+  options: EngineCallOptions,
+): Promise<{ payload: TextEditParagraphPayload; result: ParagraphEditResult }> {
+  if (isReplayRequired(edit)) {
+    throw textEditError(
+      'replay-required',
+      `Edit ${edit.id} undoes a paragraph edit: reopen the source and replay its remaining edits`,
+    );
+  }
+  if (!editor.applyParagraphEdit) {
+    throw textEditError('not-editable', 'This engine has no paragraph editor');
+  }
+  const payload = readParagraphEditPayload(edit.payload);
+  const paragraph = paragraphEditOf(edit, payload);
+  const result = await editor.applyParagraphEdit(edit.source, edit.pageIndex, paragraph, {
+    ...options,
+    commit: true,
+  });
+  return { payload: paragraphEditPayloadOf(paragraph, result), result };
 }

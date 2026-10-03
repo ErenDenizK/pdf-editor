@@ -29,7 +29,14 @@ import type { HostedEngine, RawAccess } from '../pdfium/host/hosted-engine';
 import type {
   EngineCallOptions,
   LocatedRun,
+  GlyphOutlineSegment,
   ParagraphBlock,
+  ParagraphEdit,
+  ParagraphEditOptions,
+  ParagraphEditResult,
+  ParagraphLayoutAnalysis,
+  ParagraphPreview,
+  ParagraphRef,
   PdfTextEditor,
   TextAdvance,
   TextEditability,
@@ -85,7 +92,8 @@ import {
   missingInFace,
   substituteFace,
 } from './fonts';
-import { locatePage, type ResolvedRun, resolveRun } from './locate';
+import { ParagraphWriter } from './paragraph-edit';
+import { fontIds, locatePage, objectTree, type ResolvedRun, resolveRun } from './locate';
 import { RawText } from './raw';
 import { probeCodes } from './probe';
 import { chooseTier2Codes, tier2Candidates } from './tier2-codes';
@@ -188,6 +196,8 @@ export class HostedTextEditor implements PdfTextEditor {
   /** `analyzeParagraphs` per page, reused while the page is unchanged (craft spec §4.1). */
   private readonly paragraphs = new ParagraphCache();
   private readonly skipPrecheck: boolean;
+  /** `applyParagraphEdit` and friends (craft spec §4.4). */
+  private readonly writer: ParagraphWriter;
 
   constructor(
     private readonly host: TextEditorHost,
@@ -195,6 +205,7 @@ export class HostedTextEditor implements PdfTextEditor {
   ) {
     this.faces = new FaceCache(options.loadFace);
     this.skipPrecheck = options.skipTier2Precheck === true;
+    this.writer = new ParagraphWriter(this.faces, this.paragraphs);
   }
 
   locateRuns(
@@ -234,6 +245,86 @@ export class HostedTextEditor implements PdfTextEditor {
         } finally {
           page.release();
         }
+      },
+      options,
+    );
+  }
+
+  glyphPaths(
+    source: SourceId,
+    pageIndex: number,
+    fontId: number,
+    chars: readonly string[],
+    options?: EngineCallOptions,
+  ): Promise<Readonly<Record<string, readonly GlyphOutlineSegment[] | null>>> {
+    return this.read(
+      source,
+      (access) => {
+        const raw = new RawText(access.module, access.memory);
+        const page = access.doc.acquirePage(pageIndex);
+        try {
+          let font: number | undefined;
+          for (const [handle, id] of fontIds(raw, objectTree(raw, page.pagePtr))) {
+            if (id === fontId) font = handle;
+          }
+          const out: Record<string, readonly GlyphOutlineSegment[] | null> = {};
+          for (const ch of chars) {
+            // Outlines are in em units whatever the size asked for (`GlyphSegment`).
+            out[ch] = font === undefined ? null : (raw.glyphPath(font, ch, 1) ?? null);
+          }
+          return out;
+        } finally {
+          page.release();
+        }
+      },
+      options,
+    );
+  }
+
+  analyzeParagraphLayout(
+    ref: ParagraphRef,
+    options?: EngineCallOptions,
+  ): Promise<ParagraphLayoutAnalysis> {
+    return this.read(ref.source, (access) => this.writer.analyze(access, ref), options);
+  }
+
+  /** Dry runs work on a private copy of the page (shared lock); commits are exclusive. */
+  applyParagraphEdit(
+    source: SourceId,
+    pageIndex: number,
+    edit: ParagraphEdit,
+    options: ParagraphEditOptions,
+  ): Promise<ParagraphEditResult> {
+    if (!options.commit) {
+      return this.read(
+        source,
+        async (access) => (await this.writer.dryRun(access, pageIndex, edit)).result,
+        options,
+      );
+    }
+    return this.host.withRawAccess(
+      source,
+      (access) => this.writer.commit(access, pageIndex, edit),
+      withSignal(options),
+    );
+  }
+
+  renderParagraphPreview(
+    source: SourceId,
+    pageIndex: number,
+    edit: ParagraphEdit,
+    scale: number,
+    options?: EngineCallOptions,
+  ): Promise<ParagraphPreview> {
+    return this.read(
+      source,
+      async (access) => {
+        const { result, image } = await this.writer.dryRun(access, pageIndex, edit, scale);
+        if (!image) throw textEditError('verification-failed', 'The preview was not rendered');
+        const bitmap = await createImageBitmap(
+          new ImageData(image.data, image.width, image.height),
+        );
+        return { bitmap, width: image.width, height: image.height, clip: result.box, result };
       },
       options,
     );

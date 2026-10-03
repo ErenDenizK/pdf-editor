@@ -67,6 +67,7 @@ import {
   type FormFieldSignature,
   type FormFieldWidget,
   type Glyph,
+  type InkAnnotation,
   type NewAnnotation,
   type OcrWordsExpectation,
   type OpenedDocument,
@@ -113,7 +114,9 @@ import {
 } from './coords';
 import {
   annotationStringsOnPage,
+  appendInkPath as appendRawInkPath,
   clearAnnotationString,
+  pdfDate,
   setAnnotationAppearance,
 } from './host/annot-appearance';
 import type { RawAccess, RawAccessOptions } from './host/hosted-engine';
@@ -1048,6 +1051,59 @@ export class PdfiumAdapter implements PdfRenderer, PdfEditor, PdfVerifier {
       }
     }
     return this.reread(id, annotation.pageIndex, annotation.id, next, options);
+  }
+
+  /**
+   * Appends the last path of `ink` (the ink's full new state, as `updateAnnotation` takes it)
+   * to the Ink annotation `ink.id` (a pen burst, craft spec §5.3 item 8): one raw pass writes
+   * the new `/InkList` entry, our appearance of every path (per-path operators from
+   * `inkAppearance`'s cache), the outline's /Rect, `/PdfEditorInkWidths` and /M, with no
+   * listing, no EmbedPDF update and no regenerated appearance. Resolves to the ink as written,
+   * or `undefined`, with nothing written, when the ink on the page does not hold exactly
+   * `ink.paths.length - 1` paths (the caller then updates it whole).
+   *
+   * A Multiply ink (the free Highlighter, craft spec §5.4), an ink whose widths do not match
+   * its paths, or an adapter without raw access is updated through `updateAnnotation`, so a
+   * Multiply ink keeps EmbedPDF's blended appearance and never receives ours.
+   */
+  async appendInkPath(
+    id: SourceId,
+    ink: InkAnnotation,
+    options: EngineCallOptions = {},
+  ): Promise<InkAnnotation | undefined> {
+    const path = ink.paths[ink.paths.length - 1];
+    if (!path || path.length === 0) {
+      throw new EngineError('internal', `Appending to ${ink.id} needs a path with points`);
+    }
+    this.page(id, ink.pageIndex);
+    const rawTask = this.rawTask;
+    const write = ink.blendMode === 'multiply' || !rawTask ? undefined : inkAppearance(ink);
+    if (!rawTask || !write) {
+      const updated = await this.updateAnnotation(id, ink, options);
+      return updated.kind === 'ink' ? updated : undefined;
+    }
+    const modified =
+      ink.modified !== undefined && !Number.isNaN(new Date(ink.modified).getTime())
+        ? new Date(ink.modified)
+        : new Date();
+    const count = await rawTask(
+      id,
+      (raw) =>
+        appendRawInkPath(raw, ink.pageIndex, ink.id, {
+          path,
+          expectedPaths: ink.paths.length - 1,
+          appearance: {
+            content: write.content,
+            rect: write.rect,
+            strings: { [INK_WIDTHS_KEY]: write.widths },
+          },
+          modified: pdfDate(modified),
+        }),
+      options.signal ? { signal: options.signal } : {},
+    );
+    if (count === undefined) return undefined;
+    this.remember(id, ink, ink.id);
+    return { ...ink, widths: write.stored, rect: write.rect, modified: modified.toISOString() };
   }
 
   async deleteAnnotation(

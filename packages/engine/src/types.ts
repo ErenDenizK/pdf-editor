@@ -19,6 +19,8 @@ import type {
   VirtualDocument,
 } from '@pdf-editor/document-model';
 
+import type { LayoutInput } from './text-edit/linebreak';
+
 // ---------------------------------------------------------------------------
 // Common
 // ---------------------------------------------------------------------------
@@ -480,6 +482,18 @@ export interface PdfEditor {
     annotationId: string,
     options?: EngineCallOptions,
   ): Promise<Blob>;
+
+  /**
+   * Optional: appends the last path of `ink` (its full new state) to the Ink annotation
+   * `ink.id` without rewriting the others (a pen burst, craft spec §5.3 item 8). Resolves to
+   * the ink as written, or `undefined`, with nothing written, when the ink does not hold
+   * `ink.paths.length - 1` paths; callers then use `updateAnnotation`.
+   */
+  appendInkPath?(
+    id: SourceId,
+    ink: InkAnnotation,
+    options?: EngineCallOptions,
+  ): Promise<InkAnnotation | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1322,6 +1336,20 @@ export type ParagraphRefusal =
   | Extract<TextEditBlocker, 'type3' | 'paths' | 'invisible' | 'vertical' | 'nested-form'>
   | 'drop-cap';
 
+/**
+ * A segment of a glyph outline (`FPDFGlyphPath_GetGlyphPathSegment`): its end point in em
+ * units (1 = the font size; y up, origin on the glyph origin on the baseline). Scale by the
+ * font size and the text matrix. A Bézier curve is three consecutive `bezier` segments (two
+ * control points, then the end point).
+ */
+export interface GlyphOutlineSegment {
+  readonly kind: 'move' | 'line' | 'bezier';
+  readonly x: number;
+  readonly y: number;
+  /** The segment closes the current subpath. */
+  readonly close: boolean;
+}
+
 /** One detected paragraph (or heading, list item, table cell) of a page. */
 export interface ParagraphBlock {
   readonly ref: ParagraphRef;
@@ -1414,7 +1442,7 @@ export interface TextEditResult {
  * In-place text editing on an open source (spec §2.5). Implemented in the PDFium host
  * (`text-edit/`), exposed across the worker by `PdfiumProxy`.
  */
-export interface PdfTextEditor {
+export interface PdfTextEditor extends PdfParagraphEditor {
   /** Editable runs of a page (per text object and line), in reading order. */
   locateRuns(
     source: SourceId,
@@ -1436,6 +1464,19 @@ export interface PdfTextEditor {
     pageIndex: number,
     options?: EngineCallOptions,
   ): Promise<readonly ParagraphBlock[]>;
+  /**
+   * Outlines of `chars` in the page's font `fontId` (`LocatedRun.fontId`, as numbered by the
+   * page's analysis) from `FPDFFont_GetGlyphPath`, in em units (see `GlyphOutlineSegment`),
+   * for the paragraph editor's canvas (craft spec §4.7). A character the font has no outline
+   * for maps to null. Read-only, at the lower raw-task priority.
+   */
+  glyphPaths(
+    source: SourceId,
+    pageIndex: number,
+    fontId: number,
+    chars: readonly string[],
+    options?: EngineCallOptions,
+  ): Promise<Readonly<Record<string, readonly GlyphOutlineSegment[] | null>>>;
   /** Tier 2 / tier 1 availability, honesty and fit for a replacement (no change made). */
   checkEditability(query: TextEditQuery, options?: EngineCallOptions): Promise<TextEditability>;
   /** Applies the edit, verified by read-back, and regenerates the page content. */
@@ -2890,3 +2931,196 @@ export type OverflowDecision =
       readonly excess: number;
       readonly overlap: number;
     };
+
+// ---------------------------------------------------------------------------
+// Paragraph editing: the writer, its dry run and preview (spec craft §4.4–§4.6, §8;
+// ADR-0020 §3–§6). Implemented in `text-edit/paragraph-edit.ts`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The paragraph as `layoutParagraph` needs it (`text-edit/linebreak.ts`): text, style spans,
+ * original lines, styles with advances, harvested kerning and substitutes, measure, alignment
+ * and leading.
+ */
+export type ParagraphLayoutInput = LayoutInput;
+
+/**
+ * Why paragraph mode refuses a block (it stays editable per line where the run allows it):
+ * - everything `detectParagraphs` refuses (`ParagraphRefusal`);
+ * - `in-form`: the text is drawn by a Form XObject (tier 1 per line only, as before);
+ * - `clipped`: the paragraph's objects share a clip path the rewritten glyphs would leave;
+ * - `shared-object`: a text object the edit must change also draws text outside the edited
+ *   lines (another paragraph, or a line the edit keeps);
+ * - `shared-form`, `unreadable-encoding`: as for single-line edits (`TextEditBlocker`);
+ * - `unsupported-chars`: a typed character neither the font nor a bundled face has.
+ */
+export type ParagraphEditRefusal =
+  | ParagraphRefusal
+  | 'in-form'
+  | 'clipped'
+  | 'shared-object'
+  | 'shared-form'
+  | 'unreadable-encoding'
+  | 'unsupported-chars';
+
+/** How a style of the paragraph is drawn (for the overlay) and its tier-1 substitute. */
+export interface ParagraphStyleInfo {
+  /** The style's `FPDF_FONT` number on the page (`LocatedRun.fontId`). */
+  readonly fontId?: number;
+  readonly font: TextRunFont;
+  /** Font size (Tf) and the size on the page. */
+  readonly fontSize: number;
+  readonly size: number;
+  /** Object matrix in page space: the linear part every written glyph of the style uses. */
+  readonly matrix: TextMatrix;
+  /** Fill colour, RGBA 0–255. */
+  readonly fill?: readonly [number, number, number, number];
+  readonly renderMode: number;
+  /**
+   * The bundled face characters the font lacks are set in (`LayoutStyle.substitute.font` is
+   * its `face` key), its display family, and its size factor (x-heights matched).
+   */
+  readonly substitute: { readonly face: string; readonly family: string; readonly scale: number };
+}
+
+/**
+ * Everything the paragraph editor needs to lay keystrokes out on the main thread (craft spec
+ * §4.8): the layout input, the overflow facts and the styles. Read-only, run once when the
+ * editor opens (`PdfTextEditor.analyzeParagraphLayout`).
+ */
+export interface ParagraphLayoutAnalysis {
+  readonly ref: ParagraphRef;
+  /** The original paragraph text (`ParagraphBlock.text`): `caretSpan` offsets refer to it. */
+  readonly text: string;
+  readonly input: ParagraphLayoutInput;
+  /** Style id of `input.styles` → how it is drawn. */
+  readonly styles: Readonly<Record<string, ParagraphStyleInfo>>;
+  /**
+   * For `decideOverflow`: the empty space below the paragraph's ink down to the next block
+   * (or the bottom margin), and the gap to keep from that block (0 at the margin), points.
+   */
+  readonly gapBelow: number;
+  readonly paragraphGap: number;
+  /** Set when paragraph mode is refused; `input` then still describes the paragraph. */
+  readonly refusal?: ParagraphEditRefusal;
+}
+
+/** The replaced range of the original paragraph text (`ParagraphBlock.text`, UTF-16). */
+export interface ParagraphCaretSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
+/** An edit of one paragraph: its whole text afterwards and where it changed. */
+export interface ParagraphEdit {
+  readonly ref: ParagraphRef;
+  /**
+   * The paragraph's text after the edit: the original text with `caretSpan` replaced, i.e.
+   * `old.slice(0, start) + inserted + old.slice(end)`. `\n` is a typed line break.
+   */
+  readonly text: string;
+  readonly caretSpan: ParagraphCaretSpan;
+  /** Style id (`ParagraphLayoutAnalysis.input.styles`) of the inserted text; default: the caret's. */
+  readonly style?: string;
+  /**
+   * A layout of this edit made from the paragraph's `analyzeParagraphLayout` input (the
+   * overlay's, or the one recorded for replay), written as it is. Omitted: the engine lays
+   * the paragraph out and applies the overflow policy (`decideOverflow`).
+   */
+  readonly layout?: ParagraphLayout;
+}
+
+export interface ParagraphEditOptions extends EngineCallOptions {
+  /**
+   * `false`: dry run on a private copy of the page (the source never changes); `true`: the
+   * same on the source, ending with one `GenerateContent`.
+   */
+  readonly commit: boolean;
+}
+
+/** An annotation moved with the words it lies on. */
+export interface ParagraphMovedAnnotation {
+  /** Index on the page (`FPDFPage_GetAnnot`) and /NM, when it has one. */
+  readonly index: number;
+  readonly id?: string;
+  readonly subtype: 'link' | 'widget' | 'highlight' | 'underline' | 'squiggly' | 'strikeout';
+  /** /Rect before and after, unrotated user space. */
+  readonly from: Rect;
+  readonly to: Rect;
+}
+
+/** What the verification of a written paragraph found (craft spec §4.4). */
+export interface ParagraphEditVerification {
+  /** The paragraph read back from a fresh text page, and what the layout planned. */
+  readonly readback: string;
+  readonly expected: string;
+  /** Largest distance of a glyph origin from the plan, points (tolerance 0.01). */
+  readonly maxDrift: number;
+  /** Largest difference of a glyph box from the plan, points (tolerance 0.05). */
+  readonly maxBoxError: number;
+  /** Pixels that differ outside the paragraph box at scale 2 (must be 0). */
+  readonly changedPixelsOutside: number;
+  /** Text objects written (reused containers and new objects) and moved. */
+  readonly objectsWritten: number;
+  readonly objectsMoved: number;
+}
+
+export interface ParagraphEditResult {
+  /** The edit was written to the source (`commit: true` and the text changed). */
+  readonly committed: boolean;
+  /** The layout as written. */
+  readonly layout: ParagraphLayout;
+  /** The overflow policy's verdict on it. */
+  readonly decision: OverflowDecision;
+  /** 2: every character in the original font; 1: some are set in a bundled substitute. */
+  readonly tier: 1 | 2;
+  readonly honesty: Extract<
+    TextEditHonesty,
+    'same-font' | 'same-font-not-embedded' | 'font-substituted'
+  >;
+  /** Characters set in a substitute (the honesty line), with the face's display family. */
+  readonly substitutions: readonly (LayoutSubstitution & { readonly family: string })[];
+  /** Links, markup and widgets moved with their words. */
+  readonly moved: readonly ParagraphMovedAnnotation[];
+  /** Some glyphs are written in new objects in DeviceRGB while the original is not RGB. */
+  readonly colorSpaceChanged?: boolean;
+  readonly verification: ParagraphEditVerification;
+  /** The area the edit may change (old and new paragraph), unrotated user space. */
+  readonly box: Rect;
+}
+
+/** The dry-run page's paragraph area rendered for the overlay's settled preview. */
+export interface ParagraphPreview extends RenderResult {
+  /** The rendered area (`ParagraphEditResult.box`), unrotated user space. */
+  readonly clip: Rect;
+  readonly result: ParagraphEditResult;
+}
+
+/** Paragraph editing on an open source (craft spec §8; `PdfTextEditor` extends it). */
+export interface PdfParagraphEditor {
+  /** The layout input and overflow facts of a detected paragraph (read-only, once per open). */
+  analyzeParagraphLayout(
+    ref: ParagraphRef,
+    options?: EngineCallOptions,
+  ): Promise<ParagraphLayoutAnalysis>;
+  /**
+   * Lays out, writes and verifies a paragraph edit: a dry run on a private copy of the page
+   * (`commit: false`), or the edit itself (`commit: true`; record it as `text.editParagraph`).
+   * Refusals fail with `[text-edit:not-editable] (paragraph:<ParagraphEditRefusal>)`, a page
+   * that changed with `stale-run`, a failed check with `verification-failed`.
+   */
+  applyParagraphEdit(
+    source: SourceId,
+    pageIndex: number,
+    edit: ParagraphEdit,
+    options: ParagraphEditOptions,
+  ): Promise<ParagraphEditResult>;
+  /** The dry run's paragraph area at `scale` (as `renderPage` with `clip` would draw it). */
+  renderParagraphPreview(
+    source: SourceId,
+    pageIndex: number,
+    edit: ParagraphEdit,
+    scale: number,
+    options?: EngineCallOptions,
+  ): Promise<ParagraphPreview>;
+}

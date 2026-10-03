@@ -44,6 +44,13 @@ export interface AnnotationCreatePayload {
 }
 export interface AnnotationUpdatePayload {
   readonly annotation: SerializedAnnotation;
+  /**
+   * A pen burst append (craft spec §5.3 item 8): `annotation` is an Ink that is `before` plus
+   * one path at the end. The editor appends that path in place (`PdfEditor.appendInkPath`)
+   * and the inverse is `before`, so the page is not listed. Only on the way in: the applied
+   * (recorded) edit carries `annotation` alone, which replays as an ordinary update.
+   */
+  readonly inkAppend?: { readonly before: SerializedAnnotation };
 }
 export interface AnnotationDeletePayload {
   readonly annotationId: string;

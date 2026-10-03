@@ -528,6 +528,9 @@ export interface EngineEdit {
     // In-place text edit (spec redaction-and-text-editing §2.5). Not invertible: its
     // inverse is a `text.edit` marked "replay required" (undo = reopen + replay).
     | 'text.edit'
+    // Paragraph edit (spec craft §4.4, ADR-0020): one paragraph rewrapped and rewritten,
+    // its layout recorded. Not invertible either: undo is reopen + replay.
+    | 'text.editParagraph'
     // Image objects (M4 §3): a transform's inverse restores the previous matrix; remove
     // and replace are not invertible (their inverse is marked "replay required").
     | 'image.transform'

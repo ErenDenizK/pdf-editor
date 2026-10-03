@@ -6,14 +6,22 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  clearInkOutlineCache,
   formatInkWidths,
+  INK_OUTLINE_CACHE_PATHS,
   INK_WIDTHS_KEY,
   inkAppearance,
+  inkOutlineCacheStats,
   MIN_INK_WIDTH,
   parseInkWidths,
   storedInkWidths,
 } from './ink-appearance';
-import { inkAppearanceContent, inkOutlineBounds, type InkPoint } from './ink-outline';
+import {
+  encodeInkWidths,
+  inkAppearanceContent,
+  inkOutlineBounds,
+  type InkPoint,
+} from './ink-outline';
 
 const line = (n: number, y = 100): InkPoint[] =>
   Array.from({ length: n }, (_, i) => ({ x: 100 + i * 10, y }));
@@ -64,6 +72,16 @@ describe('formatInkWidths / parseInkWidths', () => {
   });
 });
 
+function expectBoundsNear(
+  actual: { x: number; y: number; width: number; height: number } | undefined,
+  expected: { x: number; y: number; width: number; height: number },
+): void {
+  expect(actual).toBeDefined();
+  for (const key of ['x', 'y', 'width', 'height'] as const) {
+    expect(Math.abs((actual?.[key] ?? Number.NaN) - expected[key])).toBeLessThan(1e-9);
+  }
+}
+
 describe('inkAppearance', () => {
   test('content, /Rect and widths from the stored (two-decimal) widths', () => {
     const widths = [
@@ -75,7 +93,7 @@ describe('inkAppearance', () => {
     const stored = storedInkWidths(PATHS, widths) ?? [];
     expect(write?.stored).toEqual(stored);
     expect(write?.widths).toBe('2;1 2.5 4 6;0.5 0.75 1');
-    expect(write?.rect).toEqual(inkOutlineBounds(PATHS, stored));
+    expectBoundsNear(write?.rect, inkOutlineBounds(PATHS, stored));
     expect(write?.content).toBe(
       inkAppearanceContent({ paths: PATHS, widths: stored, color: '#1E5BD8', opacity: 1 }),
     );
@@ -126,5 +144,124 @@ describe('inkAppearance', () => {
     const again = inkAppearance({ paths: PATHS, widths: read ?? [] });
     expect(again?.content).toBe(first?.content);
     expect(again?.widths).toBe(first?.widths);
+  });
+});
+
+/** A handwriting-like stroke: `n` points along a wavy line from (x, y), widths 1–3 pt. */
+function handStroke(x: number, y: number, n: number, seed: number) {
+  const path: InkPoint[] = [];
+  const widths: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / Math.max(1, n - 1);
+    path.push({
+      x: x + t * 18 + Math.sin(t * 9 + seed) * 2.3,
+      y: y + Math.cos(t * 7 + seed * 1.7) * 6.1 + ((i * 37 + seed) % 5) * 0.013,
+    });
+    widths.push(1 + ((i * 13 + seed) % 7) * 0.31);
+  }
+  return { path, widths };
+}
+
+function burst(paths: number, points = 100) {
+  const strokes = Array.from({ length: paths }, (_, k) => handStroke(60 + k * 7.5, 500, points, k));
+  return { paths: strokes.map((s) => s.path), widths: strokes.map((s) => s.widths) };
+}
+
+describe('per-path outline cache (craft spec §5.3 item 8)', () => {
+  test('cached and uncached builds are byte for byte the same', () => {
+    clearInkOutlineCache();
+    const { paths, widths } = burst(12, 40);
+    for (const opacity of [1, 0.5]) {
+      const cold = inkAppearance({ paths, widths, color: '#1760EE', opacity });
+      const warm = inkAppearance({ paths, widths, color: '#1760EE', opacity });
+      const stored = storedInkWidths(paths, widths) ?? [];
+      const expected = inkAppearanceContent({ paths, widths: stored, color: '#1760EE', opacity });
+      expect(cold?.content).toBe(expected);
+      expect(warm?.content).toBe(expected);
+      expect(warm?.widths).toBe(encodeInkWidths(stored));
+      expectBoundsNear(warm?.rect, inkOutlineBounds(paths, stored));
+    }
+    // A dot and an empty path among others.
+    const odd = {
+      paths: [[{ x: 10, y: 10 }], [], ...paths.slice(0, 2)],
+      widths: [[3], [], ...widths.slice(0, 2)],
+    };
+    const stored = storedInkWidths(odd.paths, odd.widths) ?? [];
+    expect(inkAppearance(odd)?.content).toBe(
+      inkAppearanceContent({ paths: odd.paths, widths: stored, color: '#000000' }),
+    );
+    expect(inkAppearance(odd)?.widths).toBe(encodeInkWidths(stored));
+  });
+
+  test('an append outlines the new path only; a changed point or width misses', () => {
+    clearInkOutlineCache();
+    const { paths, widths } = burst(5, 20);
+    inkAppearance({ paths: paths.slice(0, 4), widths: widths.slice(0, 4) });
+    expect(inkOutlineCacheStats()).toMatchObject({ misses: 4, hits: 0 });
+    inkAppearance({ paths, widths });
+    expect(inkOutlineCacheStats()).toMatchObject({ misses: 5, hits: 4 });
+    // The same path with one width changed (beyond the two stored decimals) is a new entry.
+    const changed = widths.map((w, k) => (k === 2 ? w.map((x, i) => (i === 3 ? x + 0.5 : x)) : w));
+    inkAppearance({ paths, widths: changed });
+    expect(inkOutlineCacheStats()).toMatchObject({ misses: 6, hits: 8 });
+    // A moved point too.
+    const moved = paths.map((p, k) => (k === 0 ? p.map((q) => ({ x: q.x + 1, y: q.y })) : p));
+    const write = inkAppearance({ paths: moved, widths });
+    expect(inkOutlineCacheStats()).toMatchObject({ misses: 7, hits: 12 });
+    expect(write?.content).toBe(
+      inkAppearanceContent({
+        paths: moved,
+        widths: storedInkWidths(moved, widths) ?? [],
+        color: '#000000',
+      }),
+    );
+  });
+
+  test('the cache is bounded', () => {
+    clearInkOutlineCache();
+    for (let k = 0; k < INK_OUTLINE_CACHE_PATHS + 10; k++) {
+      const s = handStroke(k, 0, 2, k);
+      inkAppearance({ paths: [s.path], widths: [s.widths] });
+    }
+    expect(inkOutlineCacheStats().size).toBe(INK_OUTLINE_CACHE_PATHS);
+  });
+
+  test('[p9] appending the 64th path of a burst costs the new path only', () => {
+    const { paths, widths } = burst(64, 100);
+    const time = (fn: () => void, runs: number) => {
+      const samples: number[] = [];
+      for (let r = 0; r < runs; r++) {
+        const t0 = performance.now();
+        fn();
+        samples.push(performance.now() - t0);
+      }
+      samples.sort((a, b) => a - b);
+      return samples[Math.floor(samples.length / 2)] ?? Number.NaN;
+    };
+    // Before: every path outlined again (what each append cost without the cache).
+    const stored = storedInkWidths(paths, widths) ?? [];
+    const full = time(() => {
+      inkAppearanceContent({ paths, widths: stored, color: '#1760EE' });
+      inkOutlineBounds(paths, stored);
+      encodeInkWidths(stored);
+    }, 9);
+    // After: the first 63 paths are cached by the previous appends; the 64th is new.
+    const appends: number[] = [];
+    for (let r = 0; r < 9; r++) {
+      clearInkOutlineCache();
+      inkAppearance({ paths: paths.slice(0, 63), widths: widths.slice(0, 63), color: '#1760EE' });
+      const t0 = performance.now();
+      inkAppearance({ paths, widths, color: '#1760EE' });
+      appends.push(performance.now() - t0);
+    }
+    appends.sort((a, b) => a - b);
+    const median = appends[Math.floor(appends.length / 2)] ?? Number.NaN;
+    // eslint-disable-next-line no-console -- the [p9] numbers of docs/qa/ink-latency-baseline.md
+    console.info(
+      `[p9] 64-path burst (100 points each): appearance of every path ${full.toFixed(2)} ms; ` +
+        `append of the 64th with 63 cached ${median.toFixed(2)} ms`,
+    );
+    expect(median).toBeLessThan(full);
+    expect(median).toBeLessThan(5);
   });
 });

@@ -589,6 +589,7 @@ const EDIT_KINDS: readonly EngineEdit['kind'][] = [
   'redaction.mark',
   'redaction.apply',
   'text.edit',
+  'text.editParagraph',
   'image.transform',
   'image.remove',
   'image.replace',

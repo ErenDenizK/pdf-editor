@@ -4,7 +4,6 @@
  * the export post-pass renames subset fonts, repairs repeated MCIDs (tagged.pdf) and drops
  * the content stream a second edit orphaned. Also the worker round trip through the proxy.
  */
-import type { PDFNumber } from '@cantoo/pdf-lib';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef, StandardFonts } from '@cantoo/pdf-lib';
 import type { EngineEdit, SourceId } from '@pdf-editor/document-model';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -255,7 +254,7 @@ describe('finalizeTextEdits (export post-pass)', () => {
     expect(new TextDecoder('latin1').decode(finalized.bytes)).not.toContain('/Untitled');
   });
 
-  test('tagged.pdf: split runs get fresh MCIDs under the original structure element', async () => {
+  test('tagged.pdf: the objects of a split line share one MCID under the original element', async () => {
     const original = await fixture(taggedUrl);
     const id = await h.open(original);
     const run = await runWith(h, id, 0, 'paragraph');
@@ -271,10 +270,13 @@ describe('finalizeTextEdits (export post-pass)', () => {
     await h.adapter.close(id);
     const before = (await inflatedContent(saved, 0)).page;
     expect(before.match(/MCID \d+/g)).toEqual(['MCID 0', 'MCID 0', 'MCID 0']);
+    // The three objects sit on one baseline: one marked-content sequence for the written
+    // line (craft spec §4.4), so no id is repeated and none needs to be added.
     const finalized = await finalizeTextEdits(saved);
-    expect(finalized.mcidsReassigned).toBe(2);
+    expect(finalized.mcidsReassigned).toBe(0);
     const after = await inflatedContent(finalized.bytes, 0);
-    expect(after.page.match(/MCID \d+/g)).toEqual(['MCID 0', 'MCID 1', 'MCID 2']);
+    expect(after.page.match(/MCID \d+/g)).toEqual(['MCID 0']);
+    expect(after.page.match(/\bBT\b/g)?.length).toBe(4);
     expect(after.page).toContain('/Artifact');
     // Page 2 is untouched.
     expect((await inflatedContent(finalized.bytes, 1)).page.match(/MCID \d+/g)).toEqual(['MCID 0']);
@@ -284,13 +286,8 @@ describe('finalizeTextEdits (export post-pass)', () => {
       .lookup(PDFName.of('ParentTree'), PDFDict)
       .lookup(PDFName.of('Nums'), PDFArray);
     const page0 = nums.lookup(1, PDFArray);
-    expect(page0.size()).toBe(3);
-    const owner = page0.get(0);
-    expect(owner).toBeInstanceOf(PDFRef);
-    expect([page0.get(1), page0.get(2)]).toEqual([owner, owner]);
-    const paragraph = pdf.context.lookup(owner, PDFDict);
-    const kids = paragraph.lookup(PDFName.of('K'), PDFArray);
-    expect(kids.asArray().map((k) => (k as PDFNumber).asNumber())).toEqual([0, 1, 2]);
+    expect(page0.size()).toBe(1);
+    expect(page0.get(0)).toBeInstanceOf(PDFRef);
     // The text still reads in order.
     const reopened = await h.open(finalized.bytes);
     expect((await h.adapter.getPageText(reopened, 0))[0]?.text).toBe(

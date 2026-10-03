@@ -24,6 +24,7 @@ import { RedactionFailedError } from '../redaction/apply';
 import {
   type EngineCallOptions,
   EngineError,
+  type InkAnnotation,
   type PdfEditor,
   type PdfRedactor,
   type PdfRenderer,
@@ -71,6 +72,11 @@ export interface PdfiumProxy
     annotationId: string,
     options?: EngineCallOptions,
   ): Promise<Blob>;
+  appendInkPath(
+    id: SourceId,
+    ink: InkAnnotation,
+    options?: EngineCallOptions,
+  ): Promise<InkAnnotation | undefined>;
   /** Terminates the worker (the adapter's `destroy`, for `EngineService`). */
   destroy(): Promise<void>;
   /** Releases the Comlink proxy and terminates the worker. */
@@ -312,6 +318,12 @@ export function createPdfiumProxy(worker: Worker, options: PdfiumProxyOptions): 
         remote.deleteAnnotation(id, pageIndex, annotationId, wire, withPort(port, port)),
       ).then(() => undefined);
     },
+    appendInkPath(id, ink, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke('appendInkPath', signal, (port) =>
+        remote.appendInkPath(id, ink, wire, withPort(port, port)),
+      ).then((written) => written ?? undefined);
+    },
     getAnnotationAppearance(id, pageIndex, annotationId, callOptions) {
       const { signal, wire } = split(callOptions);
       return invoke('getAnnotationAppearance', signal, (port) =>
@@ -364,6 +376,12 @@ export function createPdfiumProxy(worker: Worker, options: PdfiumProxyOptions): 
         remote.analyzeParagraphs(id, pageIndex, wire, withPort(port, port)),
       );
     },
+    glyphPaths(id, pageIndex, fontId, chars, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke('glyphPaths', signal, (port) =>
+        remote.glyphPaths(id, pageIndex, fontId, chars, wire, withPort(port, port)),
+      );
+    },
     checkEditability(query, callOptions) {
       const { signal, wire } = split(callOptions);
       return invoke('checkEditability', signal, (port) =>
@@ -374,6 +392,30 @@ export function createPdfiumProxy(worker: Worker, options: PdfiumProxyOptions): 
       const { signal, wire } = split(callOptions);
       return invoke('applyTextEdit', signal, (port) =>
         remote.applyTextEdit(request, wire, withPort(port, port)),
+      );
+    },
+    analyzeParagraphLayout(ref, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke('analyzeParagraphLayout', signal, (port) =>
+        remote.analyzeParagraphLayout(ref, wire, withPort(port, port)),
+      );
+    },
+    applyParagraphEdit(id, pageIndex, edit, editOptions) {
+      const { signal, ...wire } = editOptions;
+      return invoke('applyParagraphEdit', signal, (port) =>
+        remote.applyParagraphEdit(id, pageIndex, edit, wire, withPort(port, port)),
+      );
+    },
+    renderParagraphPreview(id, pageIndex, edit, scale, callOptions) {
+      const { signal, wire } = split(callOptions);
+      return invoke(
+        'renderParagraphPreview',
+        signal,
+        (port) =>
+          remote.renderParagraphPreview(id, pageIndex, edit, scale, wire, withPort(port, port)),
+        (late) => {
+          late.bitmap.close();
+        },
       );
     },
     locateImages(id, pageIndex, callOptions) {

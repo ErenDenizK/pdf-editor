@@ -85,12 +85,31 @@ export {
   type FinalizeTextEditsOptions,
   type FinalizeTextEditsResult,
   HostedTextEditor,
+  paragraphRefusalReason,
   type TextEditFailure,
   type TextEditorHost,
   type TextEditorOptions,
   textEditError,
   textEditFailureReason,
 } from './text-edit';
+// Paragraph layout (craft spec §4.3, §4.6): pure arithmetic, run by the web paragraph
+// editor on the main thread at every keystroke (no engine call).
+export {
+  type LayoutAlign,
+  type LayoutEdit,
+  type LayoutInput,
+  type LayoutOptions,
+  layoutParagraph,
+  type LayoutSourceLine,
+  type LayoutSpan,
+  type LayoutStyle,
+} from './text-edit/linebreak';
+export {
+  decideOverflow,
+  MIN_LEADING,
+  MIN_WORD_SPACING,
+  type OverflowBox,
+} from './text-edit/overflow';
 // Image objects (M4 §3): the `PdfImageEditor` on a hosted engine (in the app it runs in the
 // PDFium worker, reached through `PdfiumProxy`) and the matrix helpers the UI shares.
 export {

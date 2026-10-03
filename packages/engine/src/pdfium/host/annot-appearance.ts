@@ -16,6 +16,9 @@
  *   (one pass over the page, for `listAnnotations`).
  * - `clearAnnotationString`: empties a private key (PDFium has no public call that removes
  *   a key); an empty `/PdfEditorInkWidths` reads as "no widths".
+ * - `appendInkPath`: appends one path to an Ink's `/InkList` and writes our appearance of the
+ *   whole ink, its /Rect, the widths string and /M in one pass, without EmbedPDF's update
+ *   (a pen burst, craft spec §5.3 item 8).
  *
  * EmbedPDF's `updatePageAnnotation(…, { regenerateAppearance: true })` regenerates the
  * appearance from /InkList and /BS /W, replacing ours; private keys survive it. The adapter
@@ -79,6 +82,48 @@ export function withAnnotation<R>(
   }
 }
 
+/** Writes /Rect, the normal appearance and private keys of an open `FPDF_ANNOTATION`. */
+function writeAppearance(
+  access: RawAccess,
+  annot: number,
+  name: string,
+  write: AnnotationAppearanceWrite,
+): void {
+  const m = access.module;
+  const mem = access.memory;
+  if (write.rect) {
+    const { x, y, width, height } = write.rect;
+    const ok = mem.withMem(16, (p) => {
+      // FS_RECTF: left, top, right, bottom (float32).
+      const f = mem.heap().HEAPF32;
+      f[p >> 2] = x;
+      f[(p >> 2) + 1] = y + height;
+      f[(p >> 2) + 2] = x + width;
+      f[(p >> 2) + 3] = y;
+      return m.FPDFAnnot_SetRect(annot, p);
+    });
+    if (!ok) throw new EngineError('internal', `FPDFAnnot_SetRect failed for ${name}`);
+  }
+  const set = mem.withWideString(write.content, (ptr) =>
+    m.FPDFAnnot_SetAP(annot, APPEARANCE_MODE_NORMAL, ptr),
+  );
+  if (!set) throw new EngineError('internal', `FPDFAnnot_SetAP failed for ${name}`);
+  setStrings(access, annot, write.strings ?? {});
+}
+
+function setStrings(
+  access: RawAccess,
+  annot: number,
+  strings: Readonly<Record<string, string>>,
+): void {
+  for (const [key, value] of Object.entries(strings)) {
+    const ok = access.memory.withWideString(value, (ptr) =>
+      access.module.FPDFAnnot_SetStringValue(annot, key, ptr),
+    );
+    if (!ok) throw new EngineError('internal', `FPDFAnnot_SetStringValue(${key}) failed`);
+  }
+}
+
 /** Replaces the normal appearance (and /Rect, private keys) of annotation `name`. */
 export function setAnnotationAppearance(
   access: RawAccess,
@@ -86,36 +131,83 @@ export function setAnnotationAppearance(
   name: string,
   write: AnnotationAppearanceWrite,
 ): void {
-  const m = access.module;
-  const mem = access.memory;
   try {
     withAnnotation(access, pageIndex, name, (annot) => {
-      if (write.rect) {
-        const { x, y, width, height } = write.rect;
-        const ok = mem.withMem(16, (p) => {
-          // FS_RECTF: left, top, right, bottom (float32).
-          const f = mem.heap().HEAPF32;
-          f[p >> 2] = x;
-          f[(p >> 2) + 1] = y + height;
-          f[(p >> 2) + 2] = x + width;
-          f[(p >> 2) + 3] = y;
-          return m.FPDFAnnot_SetRect(annot, p);
-        });
-        if (!ok) throw new EngineError('internal', `FPDFAnnot_SetRect failed for ${name}`);
-      }
-      const set = mem.withWideString(write.content, (ptr) =>
-        m.FPDFAnnot_SetAP(annot, APPEARANCE_MODE_NORMAL, ptr),
-      );
-      if (!set) throw new EngineError('internal', `FPDFAnnot_SetAP failed for ${name}`);
-      for (const [key, value] of Object.entries(write.strings ?? {})) {
-        const ok = mem.withWideString(value, (ptr) => m.FPDFAnnot_SetStringValue(annot, key, ptr));
-        if (!ok) throw new EngineError('internal', `FPDFAnnot_SetStringValue(${key}) failed`);
-      }
+      writeAppearance(access, annot, name, write);
     });
   } finally {
     // The next render and annotation read reload the page.
     access.dropPageCache(pageIndex);
   }
+}
+
+/** `FPDF_ANNOT_INK`. */
+const ANNOT_SUBTYPE_INK = 15;
+
+/** A path appended to an Ink annotation (`appendInkPath`). */
+export interface InkPathAppend {
+  /** The new centre line, user space. */
+  readonly path: readonly { readonly x: number; readonly y: number }[];
+  /** Paths the ink must hold before the append; otherwise nothing is written. */
+  readonly expectedPaths: number;
+  /**
+   * Our appearance of the whole ink with the new path, its /Rect and private keys (the
+   * widths string). Omitted: the appearance is left as it is.
+   */
+  readonly appearance?: AnnotationAppearanceWrite;
+  /** /M, a PDF date string (`D:YYYYMMDDHHmmSS`). */
+  readonly modified?: string;
+}
+
+/**
+ * Appends one path to the `/InkList` of Ink annotation `name` (`FPDFAnnot_AddInkStroke`,
+ * float32 points in user space) and writes `append.appearance` and /M, without regenerating
+ * the appearance from `/InkList` (craft spec §5.3 item 8). Returns the ink's new path count,
+ * or `undefined`, with nothing written, when `name` is not an Ink or does not hold
+ * `append.expectedPaths` paths (the caller then updates the whole annotation).
+ */
+export function appendInkPath(
+  access: RawAccess,
+  pageIndex: number,
+  name: string,
+  append: InkPathAppend,
+): number | undefined {
+  const m = access.module;
+  const mem = access.memory;
+  const n = append.path.length;
+  if (n === 0) throw new EngineError('internal', `An ink path needs a point (${name})`);
+  let written = false;
+  try {
+    return withAnnotation(access, pageIndex, name, (annot) => {
+      if (m.FPDFAnnot_GetSubtype(annot) !== ANNOT_SUBTYPE_INK) return undefined;
+      if (m.FPDFAnnot_GetInkListCount(annot) !== append.expectedPaths) return undefined;
+      written = true;
+      const index = mem.withMem(n * 8, (p) => {
+        // FS_POINTF[n]: x, y (float32).
+        const f = mem.heap().HEAPF32;
+        for (const [i, point] of append.path.entries()) {
+          f[(p >> 2) + i * 2] = point.x;
+          f[(p >> 2) + i * 2 + 1] = point.y;
+        }
+        return m.FPDFAnnot_AddInkStroke(annot, p, n);
+      });
+      if (index < 0) throw new EngineError('internal', `FPDFAnnot_AddInkStroke failed for ${name}`);
+      if (append.appearance) writeAppearance(access, annot, name, append.appearance);
+      if (append.modified !== undefined) setStrings(access, annot, { M: append.modified });
+      return m.FPDFAnnot_GetInkListCount(annot);
+    });
+  } finally {
+    if (written) access.dropPageCache(pageIndex);
+  }
+}
+
+/** A date as PDF writes it in /M (UTC, as EmbedPDF writes it). */
+export function pdfDate(date: Date): string {
+  const z = (v: number) => String(v).padStart(2, '0');
+  return (
+    `D:${date.getUTCFullYear()}${z(date.getUTCMonth() + 1)}${z(date.getUTCDate())}` +
+    `${z(date.getUTCHours())}${z(date.getUTCMinutes())}${z(date.getUTCSeconds())}`
+  );
 }
 
 /** The normal appearance content of annotation `name` ('' when it has none). */
