@@ -1,7 +1,8 @@
 # Spec: Craft (M8): modes, paragraph editing, ink, colour and glass
 
-**Status:** draft (2026-10-03), awaiting the owner's answers to §14 · **Milestone:** M8
-(1.0.0-beta.1, beta.2 if a second drop is needed) · **Owner:** project lead
+**Status:** approved by the owner on 2026-10-03 (§14 answered; the overall approach and the
+changes accepted, questions 1–4 left to the lead, Tier C dropped) · **Milestone:** M8 (two
+drops; a drop is tagged `1.0.0-beta.N` only when the owner says so) · **Owner:** project lead
 
 **Inputs:** the project lead's decision brief of 2026-10-03 (binding where it differs from
 the research); three code audits of 2026-10-03 at `411015d` (text editing; pen, lasso and
@@ -26,7 +27,7 @@ wider glass. The former M8 is now M9, and M10 "Tablet and phone" follows. Paths 
 | Document modes | Read (locked) ⇄ Edit, Arrange a view; per-document `documentMode` flag | ADR-0019 §2–§3 |
 | Edit bar | Five groups: Select · Write · Text · Fill & sign · Redact | ADR-0019 §4 |
 | Interaction policy | Research 13 §6.2 plus double-click on page text opens the paragraph editor | ADR-0019 §5–§6 |
-| Text editing | Tier B in M8; Tier C an M9 candidate; Tier D declined | ADR-0020 §1 |
+| Text editing | Tier B in M8; Tier C and Tier D declined | ADR-0020 §1; owner, 2026-10-03 |
 | Fonts | Original font; per-glyph bundled substitute; one honesty line; no user choice | ADR-0020 §5 |
 | Overflow | Grow into the gap; tighten word spacing ≤ 15 %, then leading ≤ 5 %; run over with a warning; never to the next page; no shrink | ADR-0020 §6 (lead's correction, 2026-10-03) |
 | Variable-width ink | Kept | ADR-0018 |
@@ -272,8 +273,7 @@ Local Font Access, uploaded fonts.
 2. Growth that fits the empty space below (plus the original gap to the next block): grow.
 3. Else, in order: word spacing up to −15 %, then leading up to −5 % (floor 95 %), on the
    rewritten lines; never the glyph size. The editor says "Spacing tightened by N %".
-4. Tier C (M9): a preview of pushing later blocks down on the same page.
-5. Else run over with a warning and the overlap highlighted.
+4. Else run over with a warning and the overlap highlighted.
 
 The next page is never offered; "Shrink to N %" leaves the editor.
 
@@ -305,10 +305,12 @@ space bounded by the column instead of the page edge (`editability.ts:187-193`).
 
 Refused with their reason, as today: Type 3, text as paths, invisible or vertical text,
 nested or shared forms, broken clips, unreadable encodings, unsupported characters; new:
-drop caps. Text in a form XObject stays tier 1 only. **Tier C** (M9 candidate, 4–6 weeks)
-pushes later blocks of the column into free space with a preview, keeping recurring
-headers and footers (top and bottom 8 %) fixed. **Tier D**, cross-page reflow, is declined:
-the file has no flow record and its furniture is ordinary content.
+drop caps. Text in a form XObject stays tier 1 only. **Tier C**, pushing later blocks of the
+same page into free space, is declined by the owner (2026-10-03: too far from the core for
+its 4–6 weeks); research 11 §5 keeps the design should it ever be wanted. **Tier D**,
+cross-page reflow, is declined: the file has no flow record and its furniture is ordinary
+content. The user sentence in §4.10 therefore says that other content on the page never
+moves.
 
 ### 4.10 What users read
 
@@ -316,10 +318,12 @@ In the editor's info popover and the help page, verbatim from research 11 §7.4:
 
 > "Recto rewraps the text inside this paragraph using the paragraph's own font, size, colour
 > and spacing. Lines you did not change keep their exact spacing, and move up or down only if
-> the paragraph gains or loses a line. Recto never moves text
-> to another page, and it moves other content on this page only when you allow it: a PDF
-> stores finished pages, not a flowing document. If you type a character that the font in
-> this file does not contain, Recto shows it in a different font and tells you which one."
+> the paragraph gains or loses a line. Recto never moves other content on the page and never
+> moves text to another page: a PDF stores finished pages, not a flowing document. If you
+> type a character that the font in this file does not contain, Recto shows it in a
+> different font and tells you which one."
+
+(Research 11 §7.4's wording, with its push-down clause removed because Tier C is declined.)
 
 ## 5. Pen (ADR-0018 kept; ADR-0021)
 
@@ -644,12 +648,12 @@ take additive edits, merged by the lead), the lead commits, every R finding gets
 
 ## 12. Two drops
 
-**1.0.0-beta.1**: modes (M1–M4), the pen harness and smoothness batch (P6, P7), the palette
+**Drop 1** (tagged `1.0.0-beta.1` when the owner says so): modes (M1–M4), the pen harness and smoothness batch (P6, P7), the palette
 (C1), the Highlighter (P10), lasso for every kind (P11; P12 if ready), the text-edit
 speed-ups (T1, T2) and glass behind the setting (G1, S2). Exit: §5.1's preview targets, the
 committed stroke within 60 ms, §3.5 covered, contrast tests green, no blocker in review.
 
-**1.0.0-beta.2**: the paragraph editor (T3–T8), the dry ink layer (P8), the remaining pen
+**Drop 2** (`1.0.0-beta.2` likewise): the paragraph editor (T3–T8), the dry ink layer (P8), the remaining pen
 items (P9, P13, P14 if warranted, P12 if it slipped), Recents (M5) if it fits. Exit: §10.
 
 ## 13. Decisions
@@ -662,7 +666,7 @@ items (P9, P13, P14 if warranted, P12 if it slipped), Recents (M5) if it fits. E
 | 4 | Keys `1`–`4` follow the control | Keys match what is seen |
 | 5 | Document menu and Arrange stay usable in Read | Deliberate dialogs with undo; the lock guards against slips |
 | 6 | Undo and Redo work in Read | What Read allows must be undoable there |
-| 7 | Tier B now, C later, D never | Research 11's ceiling |
+| 7 | Tier B now; C and D never | Research 11's ceiling; the owner dropped C on 2026-10-03 |
 | 8 | A background plate under rewritten lines | Hides old glyphs, keeps coloured boxes |
 | 9 | Leaving the editor commits | Losing typed text is worse than one undo |
 | 10 | No new hyphenation in M8 | Needs a library and language data |
@@ -674,13 +678,19 @@ items (P9, P13, P14 if warranted, P12 if it slipped), Recents (M5) if it fits. E
 | 16 | One palette; yellow only as a tint | Inks ≥ 4.5:1; no "custom" surprise |
 | 17 | Glass panels behind a setting, one layout | Measured before it becomes the design |
 
-## 14. Open questions for the owner
+## 14. Open questions for the owner (answered 2026-10-03)
 
-1. **Double-click.** Keep double-click on page text in Edit, or edit text only with the
-   Edit text tool (E)?
-2. **Document menu in Read.** Keep its file-rewriting operations in Read, or require Edit?
-3. **Recents.** Keep file handles so a file reopens in one click, or names only?
-4. **Accent.** Keep `#7c8cff`, or compare `#7584fe` with slightly darker glass on the live
-   build?
-5. **Tier C.** Is same-page push-down wanted in M9, at 4–6 more weeks, working only where
-   the page has room below?
+The owner left 1–4 to the lead, accepted the approach and the changes, and dropped 5. The
+lead's answers:
+
+1. **Double-click** on page text in Edit stays, with the Edit text tool (E) as the one-click
+   path; the policy in §3.5 is final.
+2. **Document menu in Read** keeps its file-rewriting operations: they are dialogs with a
+   preview and undo, and Read guards against slips, not against intent.
+3. **Recents** keep a file handle where the browser hands one out (Chromium's
+   `showOpenFilePicker`), names only elsewhere; "Clear recents" always.
+4. **Accent** `#7c8cff` stays; no A/B.
+5. **Tier C** is dropped (owner). ADR-0020 §1 and §4.6 updated.
+
+Versioning: the two drops of §12 are planning units; a drop becomes `1.0.0-beta.1` or
+`beta.2` only when the owner says so.

@@ -1,6 +1,6 @@
 # ADR-0021: One Highlighter, a lasso for every kind, one ink palette
 
-**Status:** proposed · **Date:** 2026-10-03 · **Deciders:** project lead (technical
+**Status:** accepted (owner, 2026-10-03) · **Date:** 2026-10-03 · **Deciders:** project lead (technical
 decisions delegated by the owner) · **Amends:** `docs/specs/experience-redesign.md` §6.2,
 §6.5; DESIGN §3 swatches
 
@@ -77,3 +77,8 @@ Three findings of the pen audit (`docs/specs/craft.md` §1.2) and the owner's no
   is the habit from every notes app.
 - **Per-swatch opacity to make yellow usable as ink:** yellow on white cannot reach 3:1 at
   any opacity; it belongs to the highlighters.
+
+## Discussion summary
+
+Owner, 2026-10-03: accepted with the rest of the M8 plan; the accent question was left to
+the lead, who keeps `#7c8cff` with no A/B.

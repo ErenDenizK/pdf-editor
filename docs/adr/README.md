@@ -25,6 +25,6 @@ only after discussion with the project owner; the discussion summary is appended
 | 0016 | Addresses: portfolio root, project paths, custom domain and migration | accepted (GitHub Pages only for now) |
 | 0017 | Versioning and public releases: `1.0.0-beta.N` first | accepted |
 | 0018 | Variable-width ink as a standard Ink annotation with our appearance | accepted |
-| 0019 | Home as a view, documents in Read or Edit, Arrange as a view | proposed |
-| 0020 | Paragraph text editing: Tier B now, Tier C later, no cross-page reflow | proposed |
-| 0021 | One Highlighter, a lasso for every kind, one ink palette | proposed |
+| 0019 | Home as a view, documents in Read or Edit, Arrange as a view | accepted |
+| 0020 | Paragraph text editing: Tier B now, Tier C later, no cross-page reflow | accepted |
+| 0021 | One Highlighter, a lasso for every kind, one ink palette | accepted |

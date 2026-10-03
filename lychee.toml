@@ -27,11 +27,4 @@ exclude = [
 
   # Media are recorded by the deploy workflow's `media` job only; the CI build has none.
   '/apps/web/dist/media/',
-
-  # TEMPORARY, until the repository is renamed pdf-editor → recto (ADR-0016 decision 6,
-  # docs/specs/presentation.md §9 WP10). These addresses do not exist before the rename.
-  # Remove the three patterns below in the rename commit, so the checker covers them.
-  '^https://github\.com/ErenDenizK/recto',
-  '^https://erendenizk\.github\.io/recto/',
-  '^https://img\.shields\.io/github/.+/ErenDenizK/recto',
 ]

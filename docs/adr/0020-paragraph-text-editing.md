@@ -1,6 +1,6 @@
 # ADR-0020: Paragraph text editing: Tier B now, Tier C later, no cross-page reflow
 
-**Status:** proposed · **Date:** 2026-10-03 · **Deciders:** project lead (technical
+**Status:** accepted (owner, 2026-10-03) · **Date:** 2026-10-03 · **Deciders:** project lead (technical
 decisions delegated by the owner); supersedes the "tier 3" line of ROADMAP M8 (2026-10-01)
 
 ## Context
@@ -39,9 +39,9 @@ fonts; fontkit cannot read bare CFF or Type 1).
 
 1. **Tiers.** Tier A (one line, same font, verified) is what exists. **Tier B, the
    paragraph editor, is built in M8.** **Tier C, pushing later blocks on the same page down
-   into free space, is a candidate for M9**, decided after B is measured on the corpus.
-   **Tier D, reflow across pages, is declined** and the UI never offers it; the help text
-   says why in plain words (research 11 §7.4).
+   into free space, is declined** by the owner (2026-10-03): an extra feature not worth its
+   4–6 weeks; research 11 §5 keeps the design. **Tier D, reflow across pages, is declined**
+   and the UI never offers it; the help text says why in plain words (research 11 §7.4).
 2. **Paragraph detection:** the structure tree first where the file is tagged; otherwise
    geometry on the page's lines (leading, left edge and indent, style breaks, list markers,
    columns), ported from the Markdown converter's `toLines` / `toBlocks`
@@ -65,10 +65,10 @@ fonts; fontkit cannot read bare CFF or Type 1).
 6. **Overflow policy, in order:** (1) a paragraph that keeps or loses lines commits as is;
    (2) one that grows expands into the empty space below it when the gap allows;
    (3) otherwise word spacing is tightened up to −15 % and then leading up to −5 %, never
-   the glyph size, and the editor says "spacing tightened by N %"; (4) with Tier C, a
-   preview of the push-down on the same page, committed on confirmation; (5) otherwise the
-   text runs over with a visible warning and the overlap highlighted. Moving text to the
-   next page is never offered. "Shrink to N %" disappears from the editor.
+   the glyph size, and the editor says "spacing tightened by N %"; (4) otherwise the text
+   runs over with a visible warning and the overlap highlighted. Other content on the page
+   never moves, and moving text to the next page is never offered. "Shrink to N %"
+   disappears from the editor.
 7. **Overlay:** a transparent canvas drawn from PDFium glyph paths on the real baselines
    with the full text matrix, so the paragraph looks like the page while typing; a hidden
    `contenteditable` mirror carries IME input and accessibility; after a 300 ms pause a
@@ -93,9 +93,13 @@ fonts; fontkit cannot read bare CFF or Type 1).
 - New raw host wrappers: `FPDFFont_GetAscent` / `GetDescent`, `FPDFText_GetLooseCharBox`,
   `FPDFText_GetFillColor`, `FPDFText_GetMatrix`, `FPDFText_IsHyphen`,
   `FPDFPageObj_GetBounds`, and the structure-tree calls.
-- Effort (research 11 §0): Tier B 10–14 engineer-weeks including the overlay and corpus;
-  Tier C 4–6 weeks more. With agents in parallel the calendar is shorter, the review load
-  is not.
+- Effort (research 11 §0): Tier B 10–14 engineer-weeks including the overlay and corpus.
+  With agents in parallel the calendar is shorter, the review load is not.
+
+## Discussion summary
+
+Owner, 2026-10-03: the approach and the changes are accepted; Tier C is an extra feature
+not worth working on. Accepted with Tier C declined.
 
 ## Alternatives considered
 

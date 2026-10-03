@@ -1,8 +1,7 @@
 # ADR-0019: Home as a view, documents in Read or Edit, Arrange as a view
 
-**Status:** proposed · **Date:** 2026-10-03 · **Deciders:** project lead (technical
-decisions delegated by the owner); the owner's answers to `docs/specs/craft.md` §14 are
-appended on acceptance
+**Status:** accepted (owner, 2026-10-03) · **Date:** 2026-10-03 · **Deciders:** project lead
+(technical decisions delegated by the owner)
 
 ## Context
 
@@ -109,3 +108,10 @@ enters, and none lets a pen reach page text.
 - **No Read mode, tools only (Notability):** Notability's notes are the user's own; a PDF
   from someone else is read far more often than edited, and the owner asked for a locked
   state.
+
+## Discussion summary
+
+Owner, 2026-10-03: the approach and the changes are accepted; the open questions on the
+double-click habit, the Document menu in Read and Recents are left to the lead (answers in
+`docs/specs/craft.md` §14: double-click stays, the menu stays available in Read, Recents
+keep file handles where the browser gives them).
