@@ -43,6 +43,29 @@ const appVersion = (
 /** The about page's footer reads the version as `%VITE_APP_VERSION%`; CI may set it. */
 process.env.VITE_APP_VERSION ??= appVersion;
 
+/**
+ * The about page links to the sources of the build it ships with (`%VITE_SOURCE_REF%` in
+ * `about/index.html`): the full commit SHA, so the links hold whatever the branches do. CI's
+ * `GITHUB_SHA`, else the checkout's HEAD, else the development branch.
+ */
+process.env.VITE_SOURCE_REF ??= sourceRef();
+
+/** Full SHA of the built commit, else `develop` (no commit is known outside a checkout). */
+function sourceRef(): string {
+  const fromCi = process.env.GITHUB_SHA?.trim();
+  if (fromCi) return fromCi;
+  try {
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: fileURLToPath(new URL('.', import.meta.url)),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return sha === '' ? 'develop' : sha;
+  } catch {
+    return 'develop';
+  }
+}
+
 /** Short SHA of the built commit: CI's `GITHUB_SHA`, else the checkout's HEAD, else "unknown". */
 function appCommit(): string {
   const fromCi = process.env.GITHUB_SHA?.trim();
