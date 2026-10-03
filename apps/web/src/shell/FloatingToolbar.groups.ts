@@ -1,24 +1,21 @@
 /**
- * The tool bar's group model (experience-redesign spec §5.1–§5.2): six task groups, what
- * each holds, and the rules that keep the bar in step with the armed tool.
+ * The Edit bar's group model (ADR-0019 §4, craft spec §3.4): five groups, what each holds,
+ * and the rules that keep the bar in step with the armed tool.
  *
- * - Arming a tool (its button, its shortcut or the palette) shows the tool's group.
- * - Picking Draw arms the pen with its active preset (`pickBarGroup`).
+ * - Select is the idle tool: its chip in the row arms it and shows no tool row.
+ * - Arming a tool (its button, its shortcut or the palette) shows the tool's group; a tool
+ *   without one (the text markups, armed by U, S or the palette) shows the row.
+ * - Picking Write arms the pen with its active preset (`pickBarGroup`).
  * - One-shot tools (stamp, signature image) return to the previous tool once their object
  *   is placed, and the placed object is not selected.
+ *
+ * Find, layout and fit live in the title bar and the palette; the page operations in
+ * Arrange, the page context menu (stage/PageContextMenu.tsx) and the Document menu.
  *
  * The rules are store subscriptions, installed when this module is first imported (the
  * tool bar imports it), so they hold for shortcuts and the palette as well as the bar.
  */
-import {
-  BookOpen,
-  EyeOff,
-  FilePen,
-  Files,
-  Highlighter,
-  type LucideIcon,
-  PenLine,
-} from 'lucide-react';
+import { EyeOff, FilePen, type LucideIcon, MousePointer2, PenLine, Type } from 'lucide-react';
 
 import { pageKey, useAnnotationStore } from '../annotations/annotation-store';
 import { ANNOTATION_TOOLS, type ToolDefinition, toolsOfGroup } from '../annotations/tools';
@@ -32,13 +29,12 @@ export interface BarGroupDefinition {
   readonly Icon: LucideIcon;
 }
 
-/** The six groups, in bar order. */
+/** The five groups, in bar order. */
 export const BAR_GROUPS: readonly BarGroupDefinition[] = [
-  { id: 'read', label: m.bar_group_read, Icon: BookOpen },
-  { id: 'markup', label: m.bar_group_markup, Icon: Highlighter },
-  { id: 'draw', label: m.bar_group_draw, Icon: PenLine },
+  { id: 'select', label: m.bar_group_select, Icon: MousePointer2 },
+  { id: 'write', label: m.bar_group_write, Icon: PenLine },
+  { id: 'text', label: m.bar_group_text, Icon: Type },
   { id: 'fill', label: m.bar_group_fill, Icon: FilePen },
-  { id: 'pages', label: m.bar_group_pages, Icon: Files },
   { id: 'redact', label: m.bar_group_redact, Icon: EyeOff },
 ];
 
@@ -58,13 +54,9 @@ export type BarItem =
   | { readonly kind: 'shapes'; readonly tools: readonly ToolDefinition[] }
   /** Stamp: one button with a menu (an image or a built-in stamp). */
   | { readonly kind: 'stamp'; readonly tool: ToolDefinition }
-  /** A command button (Find, Crop…, Sign with certificate…, …). */
+  /** A command button (Sign with certificate…, Find sensitive data…, …). */
   | { readonly kind: 'command'; readonly command: string }
-  | { readonly kind: 'layout' }
-  | { readonly kind: 'fit' }
   | { readonly kind: 'fields' }
-  /** Rotate and Delete page: the selected pages, else the current page. */
-  | { readonly kind: 'page'; readonly action: 'rotate' | 'delete' }
   | { readonly kind: 'apply-redactions' };
 
 /** The tools of a group as bar items: shapes share one button, pen and stamp have theirs. */
@@ -85,18 +77,13 @@ function toolItems(group: BarGroup): BarItem[] {
   return items;
 }
 
-/** What each group's bar holds (spec §5.1), in order. */
+/** What each group's bar holds (craft spec §3.4), in order. Select has no tool row. */
 export function barItems(group: BarGroup): readonly BarItem[] {
   switch (group) {
-    case 'read':
-      return [
-        ...toolItems('read'),
-        { kind: 'command', command: 'search.open' },
-        { kind: 'layout' },
-        { kind: 'fit' },
-      ];
-    case 'markup':
-    case 'draw':
+    case 'select':
+      return [];
+    case 'write':
+    case 'text':
       return toolItems(group);
     case 'fill':
       return [
@@ -104,14 +91,6 @@ export function barItems(group: BarGroup): readonly BarItem[] {
         { kind: 'fields' },
         ...toolItems('fill'),
         { kind: 'command', command: 'document.sign' },
-      ];
-    case 'pages':
-      return [
-        ...toolItems('pages'),
-        { kind: 'command', command: 'pages.crop' },
-        { kind: 'page', action: 'rotate' },
-        { kind: 'page', action: 'delete' },
-        { kind: 'command', command: 'mode.arrange' },
       ];
     case 'redact':
       return [
@@ -125,57 +104,55 @@ export function barItems(group: BarGroup): readonly BarItem[] {
 
 /** Commands behind bar items other than tools, by group (for the overlay and palette). */
 const COMMAND_GROUPS: Readonly<Record<string, BarGroup>> = {
-  'search.open': 'read',
-  'zoom.fit': 'read',
-  'zoom.fitPage': 'read',
-  'zoom.actual': 'read',
-  'layout.continuous': 'read',
-  'layout.single': 'read',
-  'layout.two-up': 'read',
+  // The Highlighter is the fourth pen preset (craft spec §5.4).
+  'tool.highlighter': 'write',
   'forms.highlight': 'fill',
   'document.sign': 'fill',
   'stamp.image': 'fill',
-  'pages.crop': 'pages',
-  'pages.rotateRight': 'pages',
-  'pages.rotateLeft': 'pages',
-  'pages.delete': 'pages',
-  'mode.arrange': 'pages',
   'redaction.find': 'redact',
   'redaction.markMatches': 'redact',
 };
 
-/** The group a tool lives in. */
-export function barGroupOfMode(mode: ToolMode): BarGroup {
-  return ANNOTATION_TOOLS.find((t) => t.mode === mode)?.group ?? 'read';
+/** The group a tool lives in; none for the text markups. */
+export function barGroupOfMode(mode: ToolMode): BarGroup | undefined {
+  return ANNOTATION_TOOLS.find((t) => t.mode === mode)?.group;
 }
 
 /**
- * The tool bar group of a command, when the bar holds it: every tool command (`tool.*`),
- * the built-in stamps, the form fields, and the bar's other commands.
+ * The tool bar group of a command, when the bar holds it: the tool commands of tools with a
+ * group, the Highlighter, the built-in stamps, the form fields, and the bar's other commands.
  */
 export function barGroupOfCommand(id: string): BarGroup | undefined {
+  if (COMMAND_GROUPS[id] !== undefined) return COMMAND_GROUPS[id];
   if (id.startsWith('tool.')) {
     return ANNOTATION_TOOLS.find((t) => `tool.${t.mode}` === id)?.group;
   }
   if (id.startsWith('stamp.') || id.startsWith('forms.add.')) return 'fill';
-  return COMMAND_GROUPS[id];
+  return undefined;
 }
 
-/** The group's name, for a command that the bar holds ("Draw"); else undefined. */
+/** The group's name, for a command that the bar holds ("Write"); else undefined. */
 export function barGroupLabelOfCommand(id: string): string | undefined {
   const group = barGroupOfCommand(id);
   return group === undefined ? undefined : barGroupDefinition(group).label();
 }
 
 /**
- * Picks a group (its button, or Enter on it) and says so ("Draw tools", spec §10). Draw
- * arms the pen with its active preset unless one of its tools is armed already, so the first
- * stroke after picking it draws (spec §6.2); Esc then disarms as for any tool.
+ * Picks a group (its button, or Enter on it) and says so ("Write tools", spec §10). Select
+ * arms the idle tool and keeps the row ("Select tool"). Write arms the pen with its active
+ * preset unless one of its tools is armed already, so the first stroke after picking it
+ * draws (spec §6.2); Esc then disarms as for any tool.
  */
 export function pickBarGroup(group: BarGroup): void {
   const tools = useToolStore.getState();
+  if (group === 'select') {
+    tools.showGroup(null);
+    tools.setMode('select');
+    announce(m.announce_tool({ tool: m.tool_select() }), { key: 'tool' });
+    return;
+  }
   tools.showGroup(group);
-  if (group === 'draw' && barGroupOfMode(tools.mode) !== 'draw') {
+  if (group === 'write' && barGroupOfMode(tools.mode) !== 'write') {
     const annotations = useAnnotationStore.getState();
     annotations.armPreset(annotations.pen.active);
     useToolStore.getState().setMode('ink');
@@ -202,11 +179,11 @@ let installed = false;
 export function installBarGroupRules(): void {
   if (installed) return;
   installed = true;
-  // Arming a tool shows its group. Select is the resting tool (V and Esc disarm), so it
-  // leaves the bar where it is.
+  // Arming a tool shows its group; a tool without one (U, S, Squiggly) shows the row. Select
+  // is the resting tool (V and Esc disarm), so it leaves the bar where it is.
   useToolStore.subscribe((state, previous) => {
     if (state.mode === previous.mode || state.mode === 'select') return;
-    state.showGroup(barGroupOfMode(state.mode));
+    state.showGroup(barGroupOfMode(state.mode) ?? null);
   });
   // A one-shot tool placed its object (the layer selects what it places): nothing stays
   // selected and the previous tool comes back. A selection of existing annotations (a Review

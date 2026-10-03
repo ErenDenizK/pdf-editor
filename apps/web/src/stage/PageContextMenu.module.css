@@ -1,0 +1,8 @@
+/* The page context menu's item icons (the menu itself is ui/Menu.module.css, glass tier 3). */
+.icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.5;
+  color: inherit;
+}

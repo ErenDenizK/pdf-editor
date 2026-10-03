@@ -3,10 +3,10 @@
  * annotation tools (spec §2): `mode` and `setMode`. Tools are sticky until Esc, which
  * returns to `select`.
  *
- * It also holds the tool bar's group state (experience-redesign spec §5.1–§5.2): the group
- * whose tools the bar shows (`barGroup`, null for the row of six groups), the group used
- * last in this session (`lastGroup`), and the tool a one-shot tool (stamp, signature image)
- * returns to once it has placed its object (`previousMode`).
+ * It also holds the tool bar's group state (experience-redesign spec §5.1–§5.2, craft spec
+ * §3.4): the group whose tools the bar shows (`barGroup`, null for the row of five groups),
+ * the group used last in this session (`lastGroup`), and the tool a one-shot tool (stamp,
+ * signature image) returns to once it has placed its object (`previousMode`).
  *
  * Arming is guarded by the Read lock (ADR-0019 §3): a tool other than Select arms only for a
  * document in Edit, and the tool goes back to Select whenever the active document is not in
@@ -43,8 +43,11 @@ export type ToolMode =
   /** Image objects (M4 §3): select, move, resize, replace, extract, delete. */
   | 'image';
 
-/** The tool bar's task groups (experience-redesign spec §5.1), in bar order. */
-export const BAR_GROUP_IDS = ['read', 'markup', 'draw', 'fill', 'pages', 'redact'] as const;
+/**
+ * The Edit bar's groups (ADR-0019 §4, craft spec §3.4), in bar order. Select is the idle
+ * tool: its chip in the row arms it and shows no tool row.
+ */
+export const BAR_GROUP_IDS = ['select', 'write', 'text', 'fill', 'redact'] as const;
 export type BarGroup = (typeof BAR_GROUP_IDS)[number];
 
 /** Tools that place one object and give the pointer back (spec §5.2). */

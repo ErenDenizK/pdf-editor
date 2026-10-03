@@ -168,8 +168,8 @@ test.describe('annotations', () => {
     // Built-in stamp from the Fill & sign group's menu: a one-shot tool, so the eraser comes
     // back and the stamp is not selected (experience-redesign spec §5.2).
     const bar = page.getByRole('toolbar', { name: 'Tools' });
-    // The eraser's group (Draw) is shown: its chip returns to the row of groups.
-    await bar.getByRole('button', { name: 'Draw: back to all groups' }).click();
+    // The eraser's group (Write) is shown: its chip returns to the row of groups.
+    await bar.getByRole('button', { name: 'Write: back to all groups' }).click();
     await bar.getByRole('button', { name: 'Fill & sign' }).click();
     await bar.getByRole('button', { name: 'Stamp or image' }).click();
     await page.getByRole('menuitem', { name: 'Draft' }).click();
@@ -362,7 +362,7 @@ test.describe('annotations', () => {
     await page.getByRole('textbox', { name: 'Text box text' }).fill('Numbers updated in v2');
     await page.getByRole('textbox', { name: 'Text box text' }).press('Escape');
     await tool('Escape');
-    // From the text box's group (Mark up) back to the row, then Fill & sign.
+    // From the text box's group (Text) back to the row, then Fill & sign.
     await page.getByRole('button', { name: /: back to all groups$/ }).click();
     await page.getByRole('button', { name: 'Fill & sign' }).click();
     await page.getByRole('button', { name: 'Stamp or image' }).click();
@@ -427,9 +427,9 @@ test.describe('annotations', () => {
       });
     const ink = layer(page).locator('[data-annotation-kind="ink"]');
 
-    // The Draw group: four presets as ink dots, then Eraser, Lasso and Shapes.
+    // The Write group: four presets as ink dots, then Eraser, Lasso and Shapes.
     const bar = page.getByRole('toolbar', { name: 'Tools' });
-    await bar.getByRole('button', { name: 'Draw', exact: true }).click();
+    await bar.getByRole('button', { name: 'Write', exact: true }).click();
     const presets = bar.getByRole('radiogroup', { name: 'Pen presets' });
     // Yellow highlighter over "quick brown".
     await presets.getByRole('radio', { name: /^Yellow highlighter/ }).click();

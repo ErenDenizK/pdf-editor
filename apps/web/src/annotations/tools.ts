@@ -1,6 +1,8 @@
 /**
- * The Read-mode tools (spec §2): names, shortcuts, icons and tool bar groups, in tool bar
- * order (experience-redesign spec §5.1).
+ * The page tools (spec §2): names, shortcuts, icons and Edit bar groups, in bar order (ADR-0019
+ * §4, craft spec §3.4). The text markups (Highlight, Underline, Strikeout, Squiggly) have no
+ * place in the bar: they are offered by the contextual bar of a text selection and keep their
+ * shortcuts and palette entries.
  */
 import {
   ArrowUpRight,
@@ -40,36 +42,24 @@ export interface ToolDefinition {
   /** Extra command palette keywords. */
   readonly keywords?: readonly string[];
   /**
-   * The tool bar group that holds the tool (experience-redesign spec §5.1): every tool has
-   * one home, shown in the bar, the shortcut overlay and the palette.
+   * The Edit bar group that holds the tool (craft spec §3.4): its one home, shown in the bar,
+   * the shortcut overlay and the palette. None for the text markups, which the selection's
+   * contextual bar offers instead.
    */
-  readonly group: BarGroup;
+  readonly group?: BarGroup;
   /** Shapes share one button with a menu in their group. */
   readonly shape?: true;
 }
 
-/** Tool bar order within each group (spec §5.1); `select` stays first (the fallback). */
+/** Bar order within each group (craft spec §3.4); `select` stays first (the fallback). */
 export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
-  // Read
-  { mode: 'select', title: m.tool_select, shortcut: 'V', Icon: MousePointer2, group: 'read' },
-  // Mark up
-  // H arms the Highlighter preset instead (craft spec §5.4, `tool.highlighter`).
-  { mode: 'highlight', title: m.tool_highlight, Icon: Highlighter, group: 'markup' },
-  { mode: 'underline', title: m.tool_underline, shortcut: 'U', Icon: Underline, group: 'markup' },
-  {
-    mode: 'strikeout',
-    title: m.tool_strikeout,
-    shortcut: 'S',
-    Icon: Strikethrough,
-    group: 'markup',
-  },
-  { mode: 'squiggly', title: m.tool_squiggly, Icon: Waves, group: 'markup' },
-  { mode: 'note', title: m.tool_note, shortcut: 'N', Icon: StickyNote, group: 'markup' },
-  { mode: 'text-box', title: m.tool_text_box, shortcut: 'T', Icon: Type, group: 'markup' },
-  // Draw: the pen (its presets plug in, FloatingToolbar.slots.ts), eraser, lasso, shapes.
-  { mode: 'ink', title: m.tool_ink, shortcut: 'P', Icon: PenLine, group: 'draw' },
+  // Select: the idle tool, the first chip of the group row.
+  { mode: 'select', title: m.tool_select, shortcut: 'V', Icon: MousePointer2, group: 'select' },
+  // Write: the pen (its presets and the Highlighter plug in, FloatingToolbar.slots.ts),
+  // eraser, lasso, shapes.
+  { mode: 'ink', title: m.tool_ink, shortcut: 'P', Icon: PenLine, group: 'write' },
   // Shift+E: E is Edit text (spec §2.2).
-  { mode: 'eraser', title: m.tool_eraser, shortcut: 'Shift+E', Icon: Eraser, group: 'draw' },
+  { mode: 'eraser', title: m.tool_eraser, shortcut: 'Shift+E', Icon: Eraser, group: 'write' },
   // The lasso selects pen strokes to recolour, resize, move or delete (spec §6.5).
   {
     mode: 'lasso',
@@ -77,7 +67,7 @@ export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
     tooltip: m.lasso_tool_tooltip,
     shortcut: 'Q',
     Icon: LassoSelect,
-    group: 'draw',
+    group: 'write',
     keywords: ['lasso', 'select', 'strokes'],
   },
   {
@@ -85,7 +75,7 @@ export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
     title: m.tool_rectangle,
     shortcut: 'R',
     Icon: Square,
-    group: 'draw',
+    group: 'write',
     shape: true,
   },
   {
@@ -93,17 +83,38 @@ export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
     title: m.tool_ellipse,
     shortcut: 'O',
     Icon: Circle,
-    group: 'draw',
+    group: 'write',
     shape: true,
   },
-  { mode: 'line', title: m.tool_line, shortcut: 'L', Icon: Minus, group: 'draw', shape: true },
+  { mode: 'line', title: m.tool_line, shortcut: 'L', Icon: Minus, group: 'write', shape: true },
   {
     mode: 'arrow',
     title: m.tool_arrow,
     shortcut: 'A',
     Icon: ArrowUpRight,
-    group: 'draw',
+    group: 'write',
     shape: true,
+  },
+  // Text: the page's text, and the objects that carry text or replace it.
+  {
+    mode: 'edit-text',
+    title: m.tool_edit_text,
+    tooltip: m.tool_edit_text_tooltip,
+    shortcut: 'E',
+    Icon: TextCursorInput,
+    group: 'text',
+    keywords: ['edit', 'text', 'replace', 'change', 'typo', 'word', 'font'],
+  },
+  { mode: 'text-box', title: m.tool_text_box, shortcut: 'T', Icon: Type, group: 'text' },
+  { mode: 'note', title: m.tool_note, shortcut: 'N', Icon: StickyNote, group: 'text' },
+  {
+    mode: 'image',
+    title: m.tool_image,
+    tooltip: m.tool_image_tooltip,
+    shortcut: 'I',
+    Icon: Image,
+    group: 'text',
+    keywords: ['image', 'picture', 'photo', 'move', 'resize', 'replace', 'extract', 'logo'],
   },
   // Fill & sign: one-shot tools (spec §5.2).
   {
@@ -116,25 +127,6 @@ export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
   },
   // Shift+I: I is the Image tool (M4 §3).
   { mode: 'stamp', title: m.tool_stamp, shortcut: 'Shift+I', Icon: Stamp, group: 'fill' },
-  // Pages: tools that change the page itself (spec §13 decision 5).
-  {
-    mode: 'edit-text',
-    title: m.tool_edit_text,
-    tooltip: m.tool_edit_text_tooltip,
-    shortcut: 'E',
-    Icon: TextCursorInput,
-    group: 'pages',
-    keywords: ['edit', 'text', 'replace', 'change', 'typo', 'word', 'font'],
-  },
-  {
-    mode: 'image',
-    title: m.tool_image,
-    tooltip: m.tool_image_tooltip,
-    shortcut: 'I',
-    Icon: Image,
-    group: 'pages',
-    keywords: ['image', 'picture', 'photo', 'move', 'resize', 'replace', 'extract', 'logo'],
-  },
   // Redact
   {
     mode: 'redact',
@@ -145,6 +137,13 @@ export const ANNOTATION_TOOLS: readonly ToolDefinition[] = [
     Icon: EyeOff,
     group: 'redact',
   },
+  // Text markups: no bar entry (the selection's contextual bar offers them); keys and the
+  // palette arm them. H arms the Highlighter preset instead (craft spec §5.4,
+  // `tool.highlighter`), so the Highlight tool has no key.
+  { mode: 'highlight', title: m.tool_highlight, Icon: Highlighter },
+  { mode: 'underline', title: m.tool_underline, shortcut: 'U', Icon: Underline },
+  { mode: 'strikeout', title: m.tool_strikeout, shortcut: 'S', Icon: Strikethrough },
+  { mode: 'squiggly', title: m.tool_squiggly, Icon: Waves },
 ];
 
 export function toolDefinition(mode: ToolMode): ToolDefinition {
@@ -158,7 +157,7 @@ export function isMarkupMode(mode: ToolMode): mode is MarkupMode {
   return (MARKUP_MODES as readonly string[]).includes(mode);
 }
 
-/** The tools of a tool bar group, in bar order. */
+/** The tools of an Edit bar group, in bar order. */
 export function toolsOfGroup(group: BarGroup): readonly ToolDefinition[] {
   return ANNOTATION_TOOLS.filter((t) => t.group === group);
 }

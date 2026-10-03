@@ -1,9 +1,10 @@
 /**
- * The tool bar's task groups and options tier (experience-redesign spec §5.1–§5.2, §10),
- * Vitest browser mode with the Read view and real PDFium: group membership, the in-place
- * morph (none under reduced motion), remembering the group, a shortcut showing its tool's
- * group, the Esc rules, one-shot tools returning to the previous tool, Rotate and Delete
- * page naming their target, and the tier's style routing (a selection wins, else the tool).
+ * The Edit bar's five groups and options tier (ADR-0019 §4, craft spec §3.4, experience-
+ * redesign spec §5.2, §10), Vitest browser mode with the Read view and real PDFium: group
+ * membership, Select as the idle tool's chip, the in-place morph (none under reduced motion),
+ * remembering the group, a shortcut showing its tool's group (the row for the text markups),
+ * the Esc rules, one-shot tools returning to the previous tool, and the tier's style routing
+ * (a selection wins, else the tool).
  */
 import '../styles/tokens.css';
 import '../styles/reset.css';
@@ -29,6 +30,7 @@ import { INK, TINT } from '../annotations/palette';
 import { builtinPendingStamp } from '../annotations/stamps';
 import { ANNOTATION_TOOLS } from '../annotations/tools';
 import { registerAppCommands } from '../commands/app-commands';
+import { commandRegistry } from '../commands/registry';
 import { useShortcuts } from '../commands/use-shortcuts';
 import { ReadView } from '../stage/ReadView';
 import { useUiStore } from '../state/ui-store';
@@ -52,58 +54,78 @@ function itemName(item: BarItem): string {
       return `shapes(${item.tools.map((t) => t.mode).join(',')})`;
     case 'command':
       return item.command;
-    case 'page':
-      return `page:${item.action}`;
     default:
       return item.kind;
   }
 }
 
 describe('tool bar groups (model)', () => {
-  it('holds the six groups of the spec, each with its tools, none above six', () => {
+  it('holds the five groups of the spec, each with its tools', () => {
     expect(BAR_GROUPS.map((g) => g.label())).toEqual([
-      'Read',
-      'Mark up',
-      'Draw',
+      'Select',
+      'Write',
+      'Text',
       'Fill & sign',
-      'Pages',
       'Redact',
     ]);
     const table = Object.fromEntries(BAR_GROUPS.map((g) => [g.id, barItems(g.id).map(itemName)]));
     expect(table).toEqual({
-      read: ['select', 'search.open', 'layout', 'fit'],
-      markup: ['highlight', 'underline', 'strikeout', 'squiggly', 'note', 'text-box'],
-      draw: ['ink', 'eraser', 'lasso', 'shapes(rectangle,ellipse,line,arrow)'],
+      // Select is the idle tool: its chip, no tool row.
+      select: [],
+      write: ['ink', 'eraser', 'lasso', 'shapes(rectangle,ellipse,line,arrow)'],
+      text: ['edit-text', 'text-box', 'note', 'image'],
       fill: ['forms.highlight', 'fields', 'signature', 'stamp', 'document.sign'],
-      pages: ['edit-text', 'image', 'pages.crop', 'page:rotate', 'page:delete', 'mode.arrange'],
       redact: ['redact', 'redaction.find', 'redaction.markMatches', 'apply-redactions'],
     });
     for (const group of BAR_GROUPS) expect(barItems(group.id).length).toBeLessThanOrEqual(6);
-    // "Extract pages" is not on the bar until it exists.
-    expect(Object.values(table).flat()).not.toContain('pages.extract');
+    // Gone from the bar: the Read, Pages and Mark up groups' items (craft spec §3.4).
+    const all = Object.values(table).flat().join(' ');
+    for (const gone of [
+      'select',
+      'highlight',
+      'underline',
+      'strikeout',
+      'squiggly',
+      'search.open',
+      'layout',
+      'fit',
+      'pages.crop',
+      'page:',
+      'mode.arrange',
+    ]) {
+      expect(all.split(/[ (),]/)).not.toContain(gone);
+    }
   });
 
-  it('gives every tool one home, named for its command too', () => {
+  it('gives every tool with a group one home, named for its command too', () => {
     for (const tool of ANNOTATION_TOOLS) {
       const homes = BAR_GROUPS.filter((g) =>
         barItems(g.id).some((item) => itemName(item).split(/[(),]/).includes(tool.mode)),
       );
-      expect(homes.map((g) => g.id)).toEqual([tool.group]);
+      // Select is the group row's chip itself; the text markups have no bar entry.
+      const expected = tool.group === undefined || tool.group === 'select' ? [] : [tool.group];
+      expect(homes.map((g) => g.id)).toEqual(expected);
       expect(barGroupOfCommand(`tool.${tool.mode}`)).toBe(tool.group);
     }
+    for (const markup of ['highlight', 'underline', 'strikeout', 'squiggly']) {
+      expect(barGroupOfCommand(`tool.${markup}`)).toBeUndefined();
+    }
+    expect(barGroupOfCommand('tool.select')).toBe('select');
+    expect(barGroupOfCommand('tool.highlighter')).toBe('write');
     expect(barGroupOfCommand('stamp.draft')).toBe('fill');
     expect(barGroupOfCommand('forms.add.text')).toBe('fill');
-    expect(barGroupOfCommand('pages.crop')).toBe('pages');
-    expect(barGroupOfCommand('search.open')).toBe('read');
+    expect(barGroupOfCommand('redaction.find')).toBe('redact');
+    expect(barGroupOfCommand('pages.crop')).toBeUndefined();
+    expect(barGroupOfCommand('search.open')).toBeUndefined();
     expect(barGroupOfCommand('file.open')).toBeUndefined();
   });
 
   it('remembers the last group and returns a one-shot tool to the previous tool', () => {
     resetToolStore();
     const tools = useToolStore.getState();
-    tools.showGroup('draw');
+    tools.showGroup('write');
     tools.showGroup(null);
-    expect(useToolStore.getState()).toMatchObject({ barGroup: null, lastGroup: 'draw' });
+    expect(useToolStore.getState()).toMatchObject({ barGroup: null, lastGroup: 'write' });
     tools.setMode('ink');
     tools.setMode('stamp');
     tools.setMode('signature');
@@ -174,6 +196,7 @@ const morphs = () =>
 const settle = async () => {
   await Promise.all(morphs().map((a) => a.finished.catch(() => undefined)));
 };
+const GROUPS = ['Select', 'Write', 'Text', 'Fill & sign', 'Redact'];
 const groupNames = () =>
   within(bar())
     .getAllByRole('button')
@@ -219,16 +242,16 @@ describe('tool bar (mounted)', () => {
     resetWorkspace();
   });
 
-  it('shows six labelled groups; a group morphs in place, is announced, and the chip returns', async () => {
+  it('shows five labelled groups; a group morphs in place, is announced, and the chip returns', async () => {
     await mount();
-    expect(groupNames()).toEqual(['Read', 'Mark up', 'Draw', 'Fill & sign', 'Pages', 'Redact']);
-    const draw = within(bar()).getByRole('button', { name: 'Draw' });
-    const before = draw.getBoundingClientRect();
+    expect(groupNames()).toEqual(GROUPS);
+    const write = within(bar()).getByRole('button', { name: 'Write' });
+    const before = write.getBoundingClientRect();
     const animate = vi.spyOn(Element.prototype, 'animate');
-    await userEvent.click(draw);
+    await userEvent.click(write);
     // The same element became the chip at the left end; the group's tools slid in.
-    const chip = within(bar()).getByRole('button', { name: 'Draw: back to all groups' });
-    expect(chip).toBe(draw);
+    const chip = within(bar()).getByRole('button', { name: 'Write: back to all groups' });
+    expect(chip).toBe(write);
     expect(chip).toHaveFocus();
     expect(chip.getBoundingClientRect().left).toBeLessThan(before.left);
     // One movement: the chip slides from its place in the row, the rest fades in beside it.
@@ -240,43 +263,95 @@ describe('tool bar (mounted)', () => {
     expect(within(bar()).getByRole('button', { name: 'Pen' })).toBeVisible();
     expect(within(bar()).getByRole('button', { name: 'Eraser' })).toBeVisible();
     expect(within(bar()).getByRole('button', { name: /^Shapes/ })).toBeVisible();
-    expect(useAnnouncer.getState().message).toBe('Draw tools');
+    expect(useAnnouncer.getState().message).toBe('Write tools');
     // The bar keeps its height (44 px, spec §7.3).
     expect(bar().getBoundingClientRect().height).toBeCloseTo(44, 0);
 
     await userEvent.click(chip);
-    expect(groupNames()).toEqual(['Read', 'Mark up', 'Draw', 'Fill & sign', 'Pages', 'Redact']);
+    expect(groupNames()).toEqual(GROUPS);
     // The row remembers the group: it holds the bar's Tab stop.
-    const remembered = within(bar()).getByRole('button', { name: 'Draw' });
+    const remembered = within(bar()).getByRole('button', { name: 'Write' });
     expect(remembered).toHaveAttribute('data-last');
     expect(remembered.tabIndex).toBe(0);
-    expect(useToolStore.getState().lastGroup).toBe('draw');
+    expect(useToolStore.getState().lastGroup).toBe('write');
   });
 
-  it('picking Draw arms the active preset, so the first stroke draws; Esc disarms', async () => {
+  it("shows each group's tools, and none of the dropped groups' items", async () => {
+    await mount();
+    const expected: Readonly<Record<string, readonly (string | RegExp)[]>> = {
+      Write: ['Pen', 'Eraser', 'Lasso', /^Shapes/],
+      Text: ['Edit text', 'Text box', 'Note', 'Image'],
+      'Fill & sign': ['Signature image', 'Highlight form fields'],
+      Redact: ['Mark for redaction', 'Apply redactions…'],
+    };
+    for (const [group, names] of Object.entries(expected)) {
+      await userEvent.click(within(bar()).getByRole('button', { name: group }));
+      await settle();
+      for (const name of names) {
+        expect(within(bar()).getByRole('button', { name })).toBeVisible();
+      }
+      for (const gone of ['Find', 'Highlight', 'Underline', 'Strikeout', /^Rotate page/, 'Crop…']) {
+        expect(within(bar()).queryByRole('button', { name: gone })).toBeNull();
+      }
+      await userEvent.click(
+        within(bar()).getByRole('button', { name: `${group}: back to all groups` }),
+      );
+    }
+  });
+
+  it('Select is the idle tool: the first chip, on while nothing is armed, and it shows no row', async () => {
+    await mount();
+    const select = within(bar()).getAllByRole('button')[0] as HTMLElement;
+    expect(select).toHaveAccessibleName('Select');
+    expect(select).toHaveAttribute('aria-pressed', 'true');
+    expect(select).toHaveAttribute('aria-keyshortcuts', 'V');
+    // The first Tab stop of a fresh session.
+    expect(select.tabIndex).toBe(0);
+
+    await userEvent.keyboard('p');
+    await waitFor(() => expect(useToolStore.getState().mode).toBe('ink'));
+    expect(useToolStore.getState().barGroup).toBe('write');
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Write: back to all groups' }));
+    expect(within(bar()).getByRole('button', { name: 'Select' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Select' }));
+    // Disarmed, said, and the row stays: Select has no tool row.
+    expect(useToolStore.getState().mode).toBe('select');
+    expect(useToolStore.getState().barGroup).toBeNull();
+    expect(groupNames()).toEqual(GROUPS);
+    expect(useAnnouncer.getState().message).toBe('Select tool');
+    expect(within(bar()).getByRole('button', { name: 'Select' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('picking Write arms the active preset, so the first stroke draws; Esc disarms', async () => {
     await mount();
     useAnnotationStore.getState().armPreset(1);
     expect(useToolStore.getState().mode).toBe('select');
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Draw' }));
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Write' }));
     expect(useToolStore.getState().mode).toBe('ink');
     const { pen, styles } = useAnnotationStore.getState();
     expect(pen.active).toBe(1);
     expect(styles.ink.color.toUpperCase()).toBe(pen.presets[1].color.toUpperCase());
     expect(styles.ink.strokeWidth).toBe(pen.presets[1].width);
-    expect(useAnnouncer.getState().message).toBe('Draw tools');
+    expect(useAnnouncer.getState().message).toBe('Write tools');
 
     // Esc rules unchanged: the first disarms, the second returns to the row.
     within(bar()).getByRole('button', { name: 'Eraser' }).focus();
     await userEvent.keyboard('{Escape}');
     expect(useToolStore.getState().mode).toBe('select');
-    expect(useToolStore.getState().barGroup).toBe('draw');
+    expect(useToolStore.getState().barGroup).toBe('write');
     await userEvent.keyboard('{Escape}');
     expect(useToolStore.getState().barGroup).toBeNull();
 
-    // A Draw tool armed already (the eraser, from its shortcut) stays armed.
+    // A Write tool armed already (the eraser, from its shortcut) stays armed.
     useToolStore.getState().setMode('eraser');
     useToolStore.getState().showGroup(null);
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Draw' }));
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Write' }));
     expect(useToolStore.getState().mode).toBe('eraser');
   });
 
@@ -288,44 +363,65 @@ describe('tool bar (mounted)', () => {
     );
     await mount();
     const animate = vi.spyOn(Element.prototype, 'animate');
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Pages' }));
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Text' }));
     expect(within(bar()).getByRole('button', { name: 'Edit text' })).toBeVisible();
     expect(animate.mock.contexts.filter((el) => bar().contains(el as Node))).toEqual([]);
   });
 
   it('a shortcut arms its tool and shows its group; Esc disarms, then returns to the row', async () => {
     await mount();
-    // (H arms the Highlighter preset of the pen since craft spec §5.4; U is a Mark up tool.)
-    await userEvent.keyboard('u');
-    await waitFor(() => expect(useToolStore.getState().mode).toBe('underline'));
-    expect(within(bar()).getByRole('button', { name: 'Underline' })).toHaveAttribute(
+    await userEvent.keyboard('t');
+    await waitFor(() => expect(useToolStore.getState().mode).toBe('text-box'));
+    expect(within(bar()).getByRole('button', { name: 'Text box' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
-    expect(useToolStore.getState().barGroup).toBe('markup');
+    expect(useToolStore.getState().barGroup).toBe('text');
     await userEvent.keyboard('p');
     expect(within(bar()).getByRole('button', { name: 'Pen' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
-    expect(useToolStore.getState().barGroup).toBe('draw');
+    expect(useToolStore.getState().barGroup).toBe('write');
 
     // The group stays when the bar unmounts (Arrange) and comes back.
     useUiStore.getState().setViewMode('arrange');
     await waitFor(() => expect(screen.queryByRole('toolbar', { name: 'Tools' })).toBeNull());
     useUiStore.getState().setViewMode('read');
     expect(await screen.findByRole('toolbar', { name: 'Tools' })).toBeVisible();
-    expect(useToolStore.getState().barGroup).toBe('draw');
+    expect(useToolStore.getState().barGroup).toBe('write');
 
     // On the bar: the first Esc disarms, the second returns to the row.
     useToolStore.getState().setMode('ink');
     within(bar()).getByRole('button', { name: 'Eraser' }).focus();
     await userEvent.keyboard('{Escape}');
     expect(useToolStore.getState().mode).toBe('select');
-    expect(useToolStore.getState().barGroup).toBe('draw');
+    expect(useToolStore.getState().barGroup).toBe('write');
     await userEvent.keyboard('{Escape}');
     expect(useToolStore.getState().barGroup).toBeNull();
-    expect(within(bar()).getByRole('button', { name: 'Draw' })).toHaveFocus();
+    expect(within(bar()).getByRole('button', { name: 'Write' })).toHaveFocus();
+  });
+
+  it('U, S and the palette arm the text markups, which show the row and their options', async () => {
+    await mount();
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Text' }));
+    await userEvent.keyboard('u');
+    await waitFor(() => expect(useToolStore.getState().mode).toBe('underline'));
+    // No group holds them: the row, with the tool's options above it.
+    expect(useToolStore.getState().barGroup).toBeNull();
+    expect(groupNames()).toEqual(GROUPS);
+    const tier = await screen.findByRole('toolbar', { name: 'Underline options' });
+    expect(await within(tier).findAllByRole('radio')).not.toHaveLength(0);
+    await userEvent.keyboard('s');
+    await waitFor(() => expect(useToolStore.getState().mode).toBe('strikeout'));
+    // The palette entries stay, the Highlight tool's and Squiggly's included (no key).
+    for (const mode of ['highlight', 'underline', 'strikeout', 'squiggly']) {
+      expect(commandRegistry.get(`tool.${mode}`)).toBeDefined();
+    }
+    await commandRegistry.execute('tool.squiggly');
+    expect(useToolStore.getState().mode).toBe('squiggly');
+    await commandRegistry.execute('tool.highlight');
+    expect(useToolStore.getState().mode).toBe('highlight');
   });
 
   it('is one Tab stop; arrows move between groups and tools', async () => {
@@ -336,7 +432,7 @@ describe('tool bar (mounted)', () => {
     await userEvent.keyboard('{ArrowRight}');
     expect(buttons[1]).toHaveFocus();
     await userEvent.keyboard('{End}');
-    expect(buttons[5]).toHaveFocus();
+    expect(buttons[4]).toHaveFocus();
     await userEvent.keyboard('{Enter}');
     expect(useToolStore.getState().barGroup).toBe('redact');
     await userEvent.keyboard('{ArrowRight}');
@@ -363,22 +459,6 @@ describe('tool bar (mounted)', () => {
     await waitFor(() => expect(useToolStore.getState().mode).toBe('ink'));
     expect(useAnnotationStore.getState().selection).toBeNull();
     expect(screen.queryByTestId('annotation-bar')).toBeNull();
-  });
-
-  it('Rotate and Delete page act on the current page and name it', async () => {
-    const { doc } = await mount();
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Pages' }));
-    await settle();
-    // The Read view derives the current page from the viewport once it has laid out, so the
-    // test reads it after the bar has settled instead of assuming page 1.
-    const index = useViewStore.getState().currentPage;
-    const n = index + 1;
-    const rotate = within(bar()).getByRole('button', { name: `Rotate page ${n}` });
-    expect(within(bar()).getByRole('button', { name: `Delete page ${n}` })).toBeVisible();
-    await userEvent.click(rotate);
-    const after = getActiveDocument(useWorkspaceStore.getState().workspace);
-    expect(after?.pages[index]?.rotation).toBe(((doc.pages[index]?.rotation ?? 0) + 90) % 360);
-    expect(useAnnouncer.getState().message).toBe(`Rotated page ${n}`);
   });
 });
 
@@ -470,7 +550,7 @@ describe('options tier', () => {
         </button>
       ),
     });
-    await userEvent.click(within(bar()).getByRole('button', { name: 'Draw' }));
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Write' }));
     await settle();
     await userEvent.click(within(bar()).getByRole('button', { name: 'Blue pen' }));
     expect(useToolStore.getState().mode).toBe('ink');
@@ -494,16 +574,21 @@ describe('shortcut overlay', () => {
         if (!term) throw new Error(`no row ${title}`);
         return term;
       };
-      expect(row('Pen tool')).toHaveTextContent('Tool bar: Draw');
+      expect(row('Pen tool')).toHaveTextContent('Tool bar: Write');
       expect(row('Pen tool')).toHaveTextContent('P');
-      expect(row('Highlight tool')).toHaveTextContent('Tool bar: Mark up');
-      expect(row('Edit text tool')).toHaveTextContent('Tool bar: Pages');
+      expect(row('Highlighter tool')).toHaveTextContent('Tool bar: Write');
+      expect(row('Select tool')).toHaveTextContent('Tool bar: Select');
+      expect(row('Edit text tool')).toHaveTextContent('Tool bar: Text');
+      expect(row('Note tool')).toHaveTextContent('Tool bar: Text');
       expect(row('Redact tool')).toHaveTextContent('Tool bar: Redact');
+      // The text markups keep their keys, with no bar group.
+      expect(row('Underline tool')).toHaveTextContent('U');
+      expect(row('Underline tool')).not.toHaveTextContent('Tool bar');
       for (const tool of ANNOTATION_TOOLS) {
         expect(dialog.textContent).toContain(`${tool.title()} tool`);
       }
       expect(dialog.querySelectorAll('[data-bar-group-note]').length).toBeGreaterThanOrEqual(
-        ANNOTATION_TOOLS.length,
+        ANNOTATION_TOOLS.filter((t) => t.group !== undefined).length,
       );
     } finally {
       useUiStore.setState({ shortcutsOpen: false });

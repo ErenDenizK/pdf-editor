@@ -1,12 +1,13 @@
 /**
- * The floating tool bar (experience-redesign spec §5): a glass capsule over the document.
+ * The floating tool bar (experience-redesign spec §5, craft spec §3.4): a glass capsule over
+ * the document.
  *
- * At rest it shows six labelled task groups: Read, Mark up, Draw, Fill & sign, Pages and
- * Redact (FloatingToolbar.groups.ts). Picking one morphs the capsule in place: the group's
- * button becomes a chip with a chevron at the left end and the group's tools slide in
- * beside it (one 160 ms movement, none under reduced motion); the chip returns to the row.
- * The bar keeps its height, anchor and glass; arming a tool by its shortcut or the palette
- * shows its group.
+ * In Edit it shows five labelled groups: Select, Write, Text, Fill & sign and Redact
+ * (FloatingToolbar.groups.ts). Select is the idle tool: its chip arms it and the row stays.
+ * Picking another group morphs the capsule in place: the group's button becomes a chip with
+ * a chevron at the left end and the group's tools slide in beside it (one 160 ms movement,
+ * none under reduced motion); the chip returns to the row. The bar keeps its height, anchor
+ * and glass; arming a tool by its shortcut or the palette shows its group.
  *
  * While a tool with a style is armed, its options sit in a second tier attached to the top
  * of the bar (never over the page): the controls of the inspector's tool style, through
@@ -19,31 +20,24 @@
  *
  * A document in Read (ADR-0019 §3) shows the same capsule with one Edit button (`2`):
  * nothing can be armed from it; pressing it enters Edit and shows the row of groups.
+ *
+ * The page context menu (stage/PageContextMenu.tsx) mounts with the bar: both belong to the
+ * page view.
  */
 import { Menu } from '@base-ui/react/menu';
 import type { CreatedFieldKind } from '@pdf-editor/document-model';
 import {
   BadgeCheck,
-  Check,
   ChevronLeft,
   ChevronUp,
-  Columns2,
-  Crop,
-  File,
-  GalleryVertical,
   ImagePlus,
-  LayoutGrid,
   type LucideIcon,
-  Maximize2,
   Pencil,
   RectangleEllipsis,
-  RotateCw,
   ScanSearch,
-  Search,
   ShieldCheck,
   SquarePlus,
   TextSearch,
-  Trash2,
 } from 'lucide-react';
 import {
   type KeyboardEvent,
@@ -75,8 +69,7 @@ import { useFormStore } from '../forms/form-store';
 import { m } from '../i18n';
 import { useApplyDialogStore } from '../redaction/apply-store';
 import { showRedactionsPanel } from '../redaction/commands';
-import { useSelectionStore } from '../state/selection-store';
-import { READ_LAYOUTS, type ReadLayout, useViewStore } from '../state/view-store';
+import { PageContextMenu } from '../stage/PageContextMenu';
 import { useCanEdit, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
@@ -87,14 +80,6 @@ import { useFocusRescue } from '../ui/use-focus-rescue';
 import { showDocumentMode } from '../home/home-actions';
 import { useSearchStore } from '../viewer/search';
 import { type BarGroup, type ToolMode, useToolStore } from '../viewer/tool-store';
-import { layoutTitle, setReadLayout } from '../viewer/viewer-commands';
-import {
-  barPageTargets,
-  deleteBarPages,
-  deleteLabel,
-  rotateBarPages,
-  rotateLabel,
-} from './FloatingToolbar.actions';
 import {
   BAR_GROUPS,
   type BarGroupDefinition,
@@ -122,6 +107,7 @@ export function FloatingToolbar() {
   return (
     <>
       {viewMode === 'read' ? editable ? <Dock /> : <ReadDock /> : null}
+      {viewMode === 'read' ? <PageContextMenu /> : null}
       <SignatureDialog />
     </>
   );
@@ -188,7 +174,7 @@ function Bar() {
   const roving = useRovingTabindex(
     ref,
     group === null
-      ? `[data-bar-group="${lastGroup ?? 'read'}"]`
+      ? `[data-bar-group="${lastGroup ?? 'select'}"]`
       : // The armed tool (or pen preset); else the first control, the group's chip.
         '[data-tool][aria-pressed="true"], [data-pen-preset][data-armed]',
   );
@@ -269,8 +255,6 @@ function itemKey(item: BarItem, index: number): string {
       return item.tool.mode;
     case 'command':
       return item.command;
-    case 'page':
-      return `page:${item.action}`;
     default:
       return `${item.kind}:${index}`;
   }
@@ -347,10 +331,23 @@ function GroupButton({
   readonly chip: boolean;
 }) {
   const lastGroup = useToolStore((s) => s.lastGroup);
+  // Select is the idle tool (craft spec §3.4): its chip is on while nothing else is armed.
+  const selectOn = useToolStore((s) => group.id === 'select' && s.mode === 'select');
   const label = group.label();
   const { Icon } = group;
+  const select = group.id === 'select';
   return (
-    <Tooltip label={chip ? m.bar_back_tooltip() : m.bar_group_tools({ group: label })} side="top">
+    <Tooltip
+      label={
+        chip
+          ? m.bar_back_tooltip()
+          : select
+            ? m.cmd_tool({ tool: m.tool_select() })
+            : m.bar_group_tools({ group: label })
+      }
+      shortcut={select ? shortcutOf('tool.select') : undefined}
+      side="top"
+    >
       <button
         type="button"
         className={styles.group}
@@ -358,6 +355,8 @@ function GroupButton({
         data-bar-chip={chip ? '' : undefined}
         data-last={!chip && lastGroup === group.id ? '' : undefined}
         aria-label={chip ? m.bar_group_back({ group: label }) : undefined}
+        aria-pressed={select ? selectOn : undefined}
+        aria-keyshortcuts={select ? 'V' : undefined}
         onClick={() => {
           if (chip) showBarGroups();
           else pickBarGroup(group.id);
@@ -383,14 +382,8 @@ function BarItemView({ item }: { readonly item: BarItem }): ReactNode {
       return <StampMenu />;
     case 'command':
       return <CommandButton id={item.command} />;
-    case 'layout':
-      return <LayoutMenu />;
-    case 'fit':
-      return <FitMenu />;
     case 'fields':
       return <FieldsMenu />;
-    case 'page':
-      return <PageActionButton action={item.action} />;
     case 'apply-redactions':
       return (
         <IconButton
@@ -543,64 +536,6 @@ function StampMenu() {
   );
 }
 
-const LAYOUT_ICONS: Record<ReadLayout, LucideIcon> = {
-  continuous: GalleryVertical,
-  single: File,
-  'two-up': Columns2,
-};
-
-function LayoutMenu() {
-  const layout = useViewStore((s) => s.layout);
-  const Icon = LAYOUT_ICONS[layout];
-  return (
-    <MenuButton label={m.layout_label()} icon={<Icon />}>
-      {READ_LAYOUTS.map((id) => {
-        const ItemIcon = LAYOUT_ICONS[id];
-        return (
-          <Menu.Item
-            key={id}
-            className={menuStyles.item}
-            data-checked={layout === id ? '' : undefined}
-            onClick={() => setReadLayout(id)}
-          >
-            <ItemIcon aria-hidden="true" className={styles.menuIcon} />
-            <span className={menuStyles.label}>{layoutTitle(id)}</span>
-            {layout === id ? <Check aria-hidden="true" className={styles.menuIcon} /> : null}
-          </Menu.Item>
-        );
-      })}
-    </MenuButton>
-  );
-}
-
-const FIT_COMMANDS = ['zoom.fit', 'zoom.fitPage', 'zoom.actual'] as const;
-
-function FitMenu() {
-  const fitMode = useUiStore((s) => s.fitMode);
-  return (
-    <MenuButton label={m.bar_fit()} icon={<Maximize2 />}>
-      {FIT_COMMANDS.map((id) => {
-        const command = commandRegistry.get(id);
-        if (!command) return null;
-        const checked =
-          (id === 'zoom.fit' && fitMode === 'width') ||
-          (id === 'zoom.fitPage' && fitMode === 'page');
-        return (
-          <Menu.Item
-            key={id}
-            className={menuStyles.item}
-            data-checked={checked ? '' : undefined}
-            onClick={() => void commandRegistry.execute(id)}
-          >
-            <span className={menuStyles.label}>{command.title}</span>
-            {checked ? <Check aria-hidden="true" className={styles.menuIcon} /> : null}
-          </Menu.Item>
-        );
-      })}
-    </MenuButton>
-  );
-}
-
 function FieldsMenu() {
   return (
     <MenuButton label={m.forms_add_field()} icon={<SquarePlus />}>
@@ -621,11 +556,8 @@ function FieldsMenu() {
 const COMMAND_BUTTONS: Readonly<
   Record<string, { readonly Icon: LucideIcon; readonly label?: () => string }>
 > = {
-  'search.open': { Icon: Search, label: m.bar_find },
   'forms.highlight': { Icon: RectangleEllipsis },
   'document.sign': { Icon: BadgeCheck },
-  'pages.crop': { Icon: Crop, label: m.bar_crop },
-  'mode.arrange': { Icon: LayoutGrid, label: m.mode_arrange },
   'redaction.find': { Icon: ScanSearch },
   'redaction.markMatches': { Icon: TextSearch, label: m.bar_mark_matches },
 };
@@ -655,43 +587,6 @@ function CommandButton({ id }: { readonly id: string }) {
       data-command={id}
       onClick={() => {
         if (enabled) void commandRegistry.execute(id);
-      }}
-    />
-  );
-}
-
-/** Rotate and Delete page: the selected pages, else the current page, named ("Rotate page 3"). */
-function PageActionButton({ action }: { readonly action: 'rotate' | 'delete' }) {
-  // Re-render when the targets change.
-  useSelectionStore((s) => s.selected);
-  useViewStore((s) => s.currentPage);
-  useWorkspaceStore((s) => s.workspace);
-  const targets = barPageTargets();
-  const label =
-    targets === null
-      ? action === 'rotate'
-        ? m.action_rotate_pages()
-        : m.action_delete_pages()
-      : action === 'rotate'
-        ? rotateLabel(targets)
-        : deleteLabel(targets);
-  // The page commands' keys apply to selected pages (R in Read is the rectangle).
-  const shortcut =
-    targets?.selected === true
-      ? shortcutOf(action === 'rotate' ? 'pages.rotateRight' : 'pages.delete')
-      : undefined;
-  return (
-    <IconButton
-      size="toolbar"
-      tooltipSide="top"
-      label={label}
-      icon={action === 'rotate' ? <RotateCw /> : <Trash2 />}
-      shortcut={shortcut}
-      aria-disabled={targets === null ? 'true' : undefined}
-      data-page-action={action}
-      onClick={() => {
-        if (action === 'rotate') rotateBarPages();
-        else deleteBarPages();
       }}
     />
   );

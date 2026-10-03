@@ -99,16 +99,17 @@ test.describe('keyboard', () => {
     await openSimple(page);
     await enterEdit(page);
     await showInspector(page);
-    // An armed tool with options: the tier sits by the bar, but F6 lands on the bar. (U: H
-    // arms the Highlighter preset of the pen, whose tier is empty, craft spec §5.4.)
-    await page.locator('body').press('u');
+    // An armed tool with options: the tier sits by the bar, but F6 lands on the bar, on the
+    // armed tool. (T, the Text box in the Text group: the text markups have no bar entry since
+    // craft spec §3.4, and H arms the Highlighter preset, whose tier is empty.)
+    await page.locator('body').press('t');
     await expect(page.getByTestId('options-tier')).toBeVisible();
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
     const title = page.getByRole('tablist', { name: 'Open documents' });
     const navigator = page.getByRole('tablist', { name: 'Navigator views' });
     const inspector = page.locator('#right-panel');
-    const highlight = bar(page).getByRole('button', { name: 'Underline', exact: true });
+    const highlight = bar(page).getByRole('button', { name: 'Text box', exact: true });
 
     await page.keyboard.press('F6');
     await expect(title.getByRole('tab', { selected: true })).toBeFocused();
@@ -261,25 +262,30 @@ test.describe('keyboard', () => {
     await expect(bar(page).locator('button[tabindex="0"]')).toHaveCount(1);
     await bar(page).locator('button[tabindex="0"]').focus();
     await page.keyboard.press('Home');
-    await expect(bar(page).getByRole('button', { name: 'Read', exact: true })).toBeFocused();
+    // Select, the idle tool, is the row's first chip (craft spec §3.4).
+    const select = bar(page).getByRole('button', { name: 'Select', exact: true });
+    await expect(select).toBeFocused();
+    await expect(select).toHaveAttribute('aria-pressed', 'true');
     await page.keyboard.press('ArrowRight');
-    await expect(bar(page).getByRole('button', { name: 'Mark up', exact: true })).toBeFocused();
+    await expect(bar(page).getByRole('button', { name: 'Write', exact: true })).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(bar(page).getByRole('button', { name: 'Text', exact: true })).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(
-      bar(page).getByRole('button', { name: 'Mark up: back to all groups' }),
-    ).toBeFocused();
-    await expect(status(page)).toHaveText('Mark up tools');
+    await expect(bar(page).getByRole('button', { name: 'Text: back to all groups' })).toBeFocused();
+    await expect(status(page)).toHaveText('Text tools');
 
-    // Arrows within the group; Enter arms a tool (aria-pressed).
+    // Arrows within the group (Edit text, Text box, Note); Enter arms a tool (aria-pressed).
     await page.keyboard.press('ArrowRight');
-    const highlight = bar(page).getByRole('button', { name: 'Highlight' });
-    await expect(highlight).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    const note = bar(page).getByRole('button', { name: 'Note', exact: true });
+    await expect(note).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(highlight).toHaveAttribute('aria-pressed', 'true');
-    await expect(status(page)).toHaveText('Highlight tool');
+    await expect(note).toHaveAttribute('aria-pressed', 'true');
+    await expect(status(page)).toHaveText('Note tool');
 
     // Tab goes from the bar to its options tier: one Tab stop, arrows, and keys that work.
-    const tier = page.getByRole('toolbar', { name: 'Highlight options' });
+    const tier = page.getByRole('toolbar', { name: 'Note options' });
     await page.keyboard.press('Tab');
     expect(await holdsFocus(tier)).toBe(true);
     await expect(tier.locator('[tabindex="0"]')).toHaveCount(1);
@@ -298,11 +304,11 @@ test.describe('keyboard', () => {
     // Esc from the tier disarms; the tier goes and focus returns to the bar.
     await page.keyboard.press('Escape');
     await expect(tier).toHaveCount(0);
-    await expect(highlight).toHaveAttribute('aria-pressed', 'false');
-    await expect(highlight).toBeFocused();
+    await expect(note).toHaveAttribute('aria-pressed', 'false');
+    await expect(note).toBeFocused();
     // With nothing armed, Esc on the bar returns to the row, on the group used.
     await page.keyboard.press('Escape');
-    await expect(bar(page).getByRole('button', { name: 'Mark up', exact: true })).toBeFocused();
+    await expect(bar(page).getByRole('button', { name: 'Text', exact: true })).toBeFocused();
   });
 
   test('the pen presets: arrows, Enter arms, Enter again opens the editor, Esc closes it only', async ({
@@ -313,9 +319,8 @@ test.describe('keyboard', () => {
     await bar(page).locator('button[tabindex="0"]').focus();
     await page.keyboard.press('Home');
     await page.keyboard.press('ArrowRight');
-    await page.keyboard.press('ArrowRight');
     await page.keyboard.press('Enter');
-    await expect(status(page)).toHaveText('Draw tools');
+    await expect(status(page)).toHaveText('Write tools');
     await page.keyboard.press('ArrowRight');
     const presets = bar(page).getByRole('radiogroup', { name: 'Pen presets' });
     await expect(presets.getByRole('radio', { name: 'Black pen, 1.5 pt' })).toBeFocused();
@@ -527,20 +532,32 @@ test.describe('axe', () => {
     await axe(page, 'Home with files');
   });
 
-  test('Read with the bar open on each group, and an options tier', async ({ page }) => {
+  test('Read and Edit with the bar open on each group, the page menu and an options tier', async ({
+    page,
+  }) => {
     await openSimple(page);
+    await axe(page, 'Read, the Edit button');
     await enterEdit(page);
-    await axe(page, 'Read, the groups');
-    for (const group of ['Read', 'Mark up', 'Draw', 'Fill & sign', 'Pages', 'Redact']) {
+    await axe(page, 'Edit, the groups');
+    // Select has no tool row (craft spec §3.4): the four groups with tools.
+    for (const group of ['Write', 'Text', 'Fill & sign', 'Redact']) {
       await bar(page).getByRole('button', { name: group, exact: true }).click();
       const chip = bar(page).getByRole('button', { name: `${group}: back to all groups` });
       await expect(chip).toBeVisible();
-      await axe(page, `Read, ${group}`);
+      await axe(page, `Edit, ${group}`);
       await chip.click();
     }
+    // The page context menu (right-click on a page).
+    const first = await page.locator('[data-page-index="0"]').boundingBox();
+    if (!first) throw new Error('page 1 not laid out');
+    await page.mouse.click(first.x + 40, first.y + 40, { button: 'right' });
+    await expect(page.getByTestId('page-context-menu')).toBeVisible();
+    await axe(page, 'Edit, the page context menu');
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('page-context-menu')).toHaveCount(0);
     await page.locator('body').press('u');
     await expect(page.getByTestId('options-tier')).toBeVisible();
-    await axe(page, 'Read, Underline options');
+    await axe(page, 'Edit, Underline options');
   });
 
   test('the Review tab, the Document info sheet and the export dialog', async ({ page }) => {
@@ -641,7 +658,7 @@ test.describe('reduced motion', () => {
     await openSimple(page);
     await enterEdit(page);
     await recordScripted(page);
-    await bar(page).getByRole('button', { name: 'Draw', exact: true }).click();
+    await bar(page).getByRole('button', { name: 'Write', exact: true }).click();
     expect(await longestScripted(page)).toBeGreaterThanOrEqual(100);
   });
 
@@ -649,7 +666,7 @@ test.describe('reduced motion', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openSimple(page);
     await enterEdit(page);
-    const draw = bar(page).getByRole('button', { name: 'Draw', exact: true });
+    const draw = bar(page).getByRole('button', { name: 'Write', exact: true });
     expect(await longestDuration(draw)).toBeLessThanOrEqual(NONE_MS);
     await recordScripted(page);
     await draw.click();
@@ -732,8 +749,8 @@ test('the focus ring tokens apply to the new controls', async ({ page }) => {
   });
   await expectRing('page viewport', viewport(page));
   await enterEdit(page);
-  await expectRing('bar group', bar(page).getByRole('button', { name: 'Draw', exact: true }));
-  await bar(page).getByRole('button', { name: 'Draw', exact: true }).click();
+  await expectRing('bar group', bar(page).getByRole('button', { name: 'Write', exact: true }));
+  await bar(page).getByRole('button', { name: 'Write', exact: true }).click();
   await expectRing('ink dot', page.getByRole('radio', { name: 'Blue pen, 1.5 pt' }));
   await page.locator('body').press('p');
   await stroke(page, [0.3, 0.45], [0.5, 0.46]);

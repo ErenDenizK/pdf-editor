@@ -153,7 +153,7 @@ describe('the Read lock (mounted)', () => {
     const edit = buttons[0] as HTMLElement;
     expect(edit).toHaveAccessibleName('Edit');
     expect(edit).toHaveAttribute('aria-keyshortcuts', '2');
-    useToolStore.getState().showGroup('draw');
+    useToolStore.getState().showGroup('write');
 
     edit.focus();
     await userEvent.keyboard('{Enter}');
@@ -268,8 +268,14 @@ describe('the Read lock (mounted)', () => {
     expect(useAnnouncer.getState().message).toBe(
       'Edit mode. Highlight with H, underline with U, strike out with S',
     );
+    // In Edit the selection's bar offers the markups instead (craft spec §3.4).
     await waitFor(() =>
-      expect(screen.queryByRole('toolbar', { name: 'Selected text' })).toBeNull(),
+      expect(
+        within(screen.getByRole('toolbar', { name: 'Selected text' })).getByRole('button', {
+          name: 'Underline',
+        }),
+      ).toBeVisible(),
     );
+    expect(screen.queryByRole('button', { name: /Mark up/ })).toBeNull();
   });
 });
