@@ -135,6 +135,25 @@
   }
 }
 
+/* Read's one Edit button (ADR-0019 §3): the group look, its name always shown. */
+.readEdit {
+  color: var(--text-primary);
+}
+
+@media (max-width: 640px) {
+  .group.readEdit:not([data-bar-chip]) .groupLabel {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+
+  .group.readEdit {
+    padding: 0 var(--space-3);
+  }
+}
+
 .divider {
   flex: none;
   width: 1px;

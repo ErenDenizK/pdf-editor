@@ -16,6 +16,9 @@
  * Both are toolbars with a roving tabindex. Esc disarms the tool and clears the selection
  * (the global Escape command); with nothing armed, Esc on the bar returns to the row.
  * Arrange shows only its own selection bar, so this bar is Read-only.
+ *
+ * A document in Read (ADR-0019 §3) shows the same capsule with one Edit button (`2`):
+ * nothing can be armed from it; pressing it enters Edit and shows the row of groups.
  */
 import { Menu } from '@base-ui/react/menu';
 import type { CreatedFieldKind } from '@pdf-editor/document-model';
@@ -32,6 +35,7 @@ import {
   LayoutGrid,
   type LucideIcon,
   Maximize2,
+  Pencil,
   RectangleEllipsis,
   RotateCw,
   ScanSearch,
@@ -73,13 +77,14 @@ import { useApplyDialogStore } from '../redaction/apply-store';
 import { showRedactionsPanel } from '../redaction/commands';
 import { useSelectionStore } from '../state/selection-store';
 import { READ_LAYOUTS, type ReadLayout, useViewStore } from '../state/view-store';
-import { useUiStore } from '../state/ui-store';
+import { useCanEdit, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
 import iconButtonStyles from '../ui/IconButton.module.css';
 import menuStyles from '../ui/Menu.module.css';
 import { Tooltip } from '../ui/Tooltip';
 import { useFocusRescue } from '../ui/use-focus-rescue';
+import { showDocumentMode } from '../home/home-actions';
 import { useSearchStore } from '../viewer/search';
 import { type BarGroup, type ToolMode, useToolStore } from '../viewer/tool-store';
 import { layoutTitle, setReadLayout } from '../viewer/viewer-commands';
@@ -113,11 +118,49 @@ const reducedMotion = () =>
 
 export function FloatingToolbar() {
   const viewMode = useUiStore((s) => s.viewMode);
+  const editable = useCanEdit();
   return (
     <>
-      {viewMode === 'read' ? <Dock /> : null}
+      {viewMode === 'read' ? editable ? <Dock /> : <ReadDock /> : null}
       <SignatureDialog />
     </>
+  );
+}
+
+/** Set by the Read bar's Edit button: the bar that replaces it takes the focus. */
+let focusBarOnMount = false;
+
+/** Read (ADR-0019 §3, spec §3.2): the capsule holds one Edit button, the way into Edit. */
+function ReadDock() {
+  return (
+    <div className={styles.dock}>
+      <div
+        role="toolbar"
+        aria-label={m.toolbar_label()}
+        aria-orientation="horizontal"
+        className={styles.toolbar}
+        data-annotation-keep=""
+        data-region="toolbar"
+        data-bar-view="read"
+      >
+        <Tooltip label={m.cmd_mode_edit()} shortcut={shortcutOf('mode.edit')} side="top">
+          <button
+            type="button"
+            className={`${styles.group} ${styles.readEdit}`}
+            data-read-edit=""
+            aria-keyshortcuts="2"
+            onClick={(event) => {
+              focusBarOnMount = event.currentTarget.contains(document.activeElement);
+              showBarGroups();
+              showDocumentMode('edit');
+            }}
+          >
+            <Pencil aria-hidden="true" className={styles.groupIcon} />
+            <span className={styles.groupLabel}>{m.mode_edit()}</span>
+          </button>
+        </Tooltip>
+      </div>
+    </div>
   );
 }
 
@@ -151,6 +194,13 @@ function Bar() {
   );
   const refocus = useRef<BarGroup | null>(null);
   useBarMorph(ref, group);
+
+  // Entered from the Read bar's Edit button: the focus moves on to the row of groups.
+  useLayoutEffect(() => {
+    if (!focusBarOnMount) return;
+    focusBarOnMount = false;
+    ref.current?.querySelector<HTMLElement>('[tabindex="0"], [data-bar-group]')?.focus();
+  }, []);
 
   // Esc back to the row: the focus stays on that group's button.
   useLayoutEffect(() => {

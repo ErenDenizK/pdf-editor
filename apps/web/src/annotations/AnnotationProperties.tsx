@@ -4,12 +4,13 @@
  * drawing tool armed it shows that tool's style, so colour and width can be chosen before
  * drawing (experience-redesign spec §6.3). The tool bar's options tier is the primary place
  * for these controls (§5.2, the same `StyleControls`); this panel repeats them. Renders
- * `fallback` otherwise.
+ * `fallback` otherwise. In Read (ADR-0019 §3) the facts and the comment show read-only.
  */
 import type { ReactNode } from 'react';
 import { useId, useState } from 'react';
 
 import { getLocale, m } from '../i18n';
+import { useCanEdit } from '../state/ui-store';
 import { useToolStore } from '../viewer/tool-store';
 import { updateAnnotations } from './actions';
 import { selectedAnnotations, useAnnotationStore } from './annotation-store';
@@ -32,6 +33,7 @@ export function AnnotationProperties({ fallback }: { readonly fallback: ReactNod
   const selection = useAnnotationStore((s) => s.selection);
   const pages = useAnnotationStore((s) => s.pages);
   const mode = useToolStore((s) => s.mode);
+  const editable = useCanEdit();
   const titleId = useId();
   const annotations = selectedAnnotations({ selection, pages });
   const first = annotations[0];
@@ -79,14 +81,15 @@ export function AnnotationProperties({ fallback }: { readonly fallback: ReactNod
       </dl>
       {locked ? (
         <p className={styles.note}>{m.annot_locked()}</p>
-      ) : (
+      ) : editable ? (
         <StyleControls target={selection} annotations={annotations} variant="panel" />
-      )}
+      ) : null}
       {single ? (
         <ContentsField
           key={`${first.id}:${first.contents ?? ''}`}
           initial={first.kind === 'free-text' ? first.text : (first.contents ?? '')}
           disabled={first.flags?.locked === true}
+          readOnly={!editable}
           onCommit={(value) =>
             void updateAnnotations(
               selection,
@@ -110,15 +113,18 @@ export function AnnotationProperties({ fallback }: { readonly fallback: ReactNod
 function ContentsField({
   initial,
   disabled,
+  readOnly,
   onCommit,
 }: {
   readonly initial: string;
   readonly disabled: boolean;
+  /** Read: the comment can be read and copied, not changed. */
+  readonly readOnly: boolean;
   readonly onCommit: (value: string) => void;
 }) {
   const [value, setValue] = useState(initial);
   const commit = () => {
-    if (value !== initial) onCommit(value);
+    if (!readOnly && value !== initial) onCommit(value);
   };
   return (
     <label className={styles.contents}>
@@ -127,6 +133,7 @@ function ContentsField({
         value={value}
         rows={4}
         disabled={disabled}
+        readOnly={readOnly}
         placeholder={m.annot_comment_placeholder()}
         onChange={(e) => setValue(e.target.value)}
         onBlur={commit}

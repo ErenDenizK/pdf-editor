@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, test } from '@playwright/test';
 
-import { openFixtures, useFileInputPicker } from './helpers';
+import { enterEdit, openFixtures, useFileInputPicker } from './helpers';
 
 const screenshots = new URL('../../../docs/design/screenshots/', import.meta.url);
 
@@ -155,6 +155,7 @@ test('screenshots of the shell, Home and Document info (design review)', async (
 
   // Home with three files, then Read and Arrange with all three.
   await openFixtures(page, ['outline-named-dests.pdf', 'images.pdf', 'forms-a.pdf']);
+  await enterEdit(page);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.locator('body').press('0');
   const home = page.getByTestId('home');

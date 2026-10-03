@@ -10,7 +10,8 @@ import type { SourceId } from '@pdf-editor/document-model';
 import { vi } from 'vitest';
 
 import { getEngineService } from '../src/engine/engine-service';
-import type { StoredBlob } from '../src/state/workspace-store';
+import { useUiStore } from '../src/state/ui-store';
+import { type StoredBlob, useWorkspaceStore } from '../src/state/workspace-store';
 
 export interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -83,4 +84,13 @@ export function gateEngine(held: readonly string[]): EngineGates {
     opened: (name) => openedIds.get(name)?.promise ?? Promise.reject(new Error(`${name} not held`)),
     closed,
   };
+}
+
+/**
+ * Puts the active document in Edit (ADR-0019 §3): a file opens in Read, where nothing on the
+ * page can be selected, drawn on or filled.
+ */
+export function enterEditMode(): void {
+  const id = useWorkspaceStore.getState().workspace.activeDocument;
+  if (id !== undefined) useUiStore.getState().setDocumentMode(id, 'edit');
 }

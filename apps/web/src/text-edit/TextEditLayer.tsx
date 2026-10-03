@@ -27,6 +27,7 @@ import type { PageTarget } from '../annotations/annotation-store';
 import { cssPointToUser, type PageFrame, rectToCss } from '../annotations/geometry';
 import { m } from '../i18n';
 import type { PageOverlayProps } from '../stage/page-overlays';
+import { useCanEdit } from '../state/ui-store';
 import { Tooltip } from '../ui/Tooltip';
 import { pageFrame } from '../viewer/page-frame';
 import { useToolStore } from '../viewer/tool-store';
@@ -41,7 +42,9 @@ const HIT_PADDING = 2;
 
 export function TextEditLayer(props: PageOverlayProps) {
   const { sourceId, sourceIndex, pageId, pageIndex, visible } = props;
-  const active = useToolStore((s) => s.mode === 'edit-text');
+  // Never in Read (ADR-0019 §3), even if the tool were armed.
+  const editable = useCanEdit();
+  const active = useToolStore((s) => s.mode === 'edit-text') && editable;
   const session = useTextEditStore((s) => (s.session?.target.pageId === pageId ? s.session : null));
   const revision = usePageRevision(sourceId, sourceIndex);
   const runs = usePageRuns(active && visible ? sourceId : undefined, sourceIndex, revision);

@@ -19,7 +19,7 @@ import { userEvent } from 'vitest/browser';
 
 import formsAUrl from '../../../../../test/fixtures/forms-a.pdf?url';
 import simpleUrl from '../../../../../test/fixtures/simple-text.pdf?url';
-import { fixtureFile } from '../../../test/store-harness';
+import { enterEditMode, fixtureFile } from '../../../test/store-harness';
 import { resetAnnotationStore } from '../../annotations/annotation-store';
 import { engineContext, resetEditRunner, whenIdle } from '../../annotations/edit-runner';
 import { FormsPanel } from '../../shell/FormsPanel';
@@ -39,6 +39,7 @@ const labels = () => historyEntries(model().history).map((e) => e.label);
 
 async function openSimple(): Promise<{ source: SourceId; pages: PageId[] }> {
   const report = await model().openFiles([await fixtureFile(simpleUrl, 'simple-text.pdf')]);
+  enterEditMode();
   expect(report.skipped).toEqual([]);
   const doc = getActiveDocument(model().workspace);
   const first = doc?.pages[0];
@@ -205,6 +206,7 @@ describe('placing fields', () => {
     const report = await model().openFiles([
       new File([(await pdf.save()).slice()], 'rotated.pdf', { type: 'application/pdf' }),
     ]);
+    enterEditMode();
     expect(report.skipped).toEqual([]);
     const props = {
       ...overlayProps(0),
@@ -338,6 +340,7 @@ describe('filling created fields', () => {
 describe('Clear all', () => {
   it('empties source and created fields as one history entry; undo restores both', async () => {
     const report = await model().openFiles([await fixtureFile(formsAUrl, 'forms-a.pdf')]);
+    enterEditMode();
     expect(report.skipped).toEqual([]);
     renderLayer(0);
     act(() => startPlacing('text'));

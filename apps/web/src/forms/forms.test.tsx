@@ -18,11 +18,12 @@ import { userEvent } from 'vitest/browser';
 
 import formsAUrl from '../../../../test/fixtures/forms-a.pdf?url';
 import xfaUrl from '../../../../test/fixtures/xfa-stub.pdf?url';
-import { fixtureFile } from '../../test/store-harness';
+import { enterEditMode, fixtureFile } from '../../test/store-harness';
 import { resetAnnotationStore } from '../annotations/annotation-store';
 import { engineContext, resetEditRunner, whenIdle } from '../annotations/edit-runner';
 import { FormsPanel } from '../shell/FormsPanel';
 import type { PageOverlayProps } from '../stage/page-overlays';
+import { documentModeOf, useUiStore } from '../state/ui-store';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { useToolStore } from '../viewer/tool-store';
 import { resetFormStore, useFormStore } from './form-store';
@@ -31,8 +32,9 @@ import './index';
 
 const model = () => useWorkspaceStore.getState();
 
-async function openFile(file: File): Promise<{ source: SourceId; pages: PageId[] }> {
+async function openFile(file: File, edit = true): Promise<{ source: SourceId; pages: PageId[] }> {
   const report = await model().openFiles([file]);
+  if (edit) enterEditMode();
   expect(report.skipped).toEqual([]);
   const doc = getActiveDocument(model().workspace);
   const first = doc?.pages[0];
@@ -321,5 +323,50 @@ describe('Forms panel', () => {
       await screen.findByText('This form uses XFA, which no browser engine can edit'),
     ).toBeVisible();
     expect(screen.queryByText('No form fields')).toBeNull();
+  });
+});
+
+describe('form layer in Read (ADR-0019 §3)', () => {
+  const mode = () =>
+    documentModeOf(useUiStore.getState(), model().workspace.activeDocument ?? undefined);
+
+  it('a click shows the focus and "Switch to Edit to fill"; nothing fills', async () => {
+    const { source, pages } = await openFile(await fixtureFile(formsAUrl, 'forms-a.pdf'), false);
+    render(<FormLayer {...overlayProps(source, pages, 0, { width: 612, height: 792 })} />);
+    const name = await screen.findByRole('button', { name: 'name' });
+    await userEvent.click(name);
+    expect(name).toHaveFocus();
+    expect(name).toHaveAttribute('data-active');
+    expect(screen.queryByRole('textbox', { name: 'name' })).toBeNull();
+    const notice = await screen.findByRole('status');
+    expect(notice).toHaveTextContent('Switch to Edit to fill');
+    expect(within(notice).getByRole('button', { name: 'Edit' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      '2',
+    );
+
+    // A checkbox does not toggle either.
+    const agree = screen.getByRole('checkbox', { name: 'agree' });
+    expect(agree).toHaveAttribute('aria-readonly', 'true');
+    await userEvent.click(agree);
+    await settle();
+    expect(await engineValue(source, 'agree')).toBe(true);
+    expect(within(await screen.findByRole('status')).getByRole('button')).toBeVisible();
+    expect(labels().some((l) => l.startsWith('Fill'))).toBe(false);
+    expect(mode()).toBe('read');
+  });
+
+  it('Tab from the field reaches the Edit button, which switches to Edit and opens the field', async () => {
+    const { source, pages } = await openFile(await fixtureFile(formsAUrl, 'forms-a.pdf'), false);
+    render(<FormLayer {...overlayProps(source, pages, 0, { width: 612, height: 792 })} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'name' }));
+    await userEvent.keyboard('{Tab}');
+    const edit = within(await screen.findByRole('status')).getByRole('button', { name: 'Edit' });
+    expect(edit).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    expect(mode()).toBe('edit');
+    const editor = await screen.findByRole('textbox', { name: 'name' });
+    expect(editor).toHaveValue('Alice Example');
+    expect(screen.queryByRole('status')).toBeNull();
   });
 });

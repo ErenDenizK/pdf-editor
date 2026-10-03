@@ -2,6 +2,7 @@ import type { DocumentId } from '@pdf-editor/document-model';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  canEdit,
   DEFAULT_LAYOUT,
   documentModeOf,
   isNavigatorShowing,
@@ -271,5 +272,37 @@ describe('nextZoomLevel', () => {
     expect(nextZoomLevel(1.03, -1)).toBe(1);
     expect(nextZoomLevel(MAX_ZOOM, 1)).toBe(MAX_ZOOM);
     expect(nextZoomLevel(MIN_ZOOM, -1)).toBe(MIN_ZOOM);
+  });
+});
+
+describe('canEdit, the Read lock (ADR-0019 §3)', () => {
+  const a = 'doc-a' as DocumentId;
+  const b = 'doc-b' as DocumentId;
+  afterEach(() => {
+    useUiStore.setState({ documentMode: {} });
+  });
+
+  it('is true only for a document in Edit, and fails closed otherwise', () => {
+    expect(canEdit(a)).toBe(false);
+    expect(canEdit(null)).toBe(false);
+    expect(canEdit(undefined)).toBe(false);
+    useUiStore.getState().setDocumentMode(a, 'edit');
+    expect(canEdit(a)).toBe(true);
+    expect(canEdit(b)).toBe(false);
+    useUiStore.getState().setDocumentMode(a, 'read');
+    expect(canEdit(a)).toBe(false);
+  });
+
+  it('reads a given state, so selectors can use it', () => {
+    expect(canEdit(a, { documentMode: { [a]: 'edit' } })).toBe(true);
+    expect(canEdit(a, { documentMode: { [b]: 'edit' } })).toBe(false);
+  });
+
+  it('is kept through views and Home: the lock belongs to the document', () => {
+    useUiStore.getState().setDocumentMode(a, 'edit');
+    useUiStore.getState().setViewMode('arrange');
+    useUiStore.getState().showHome();
+    expect(canEdit(a)).toBe(true);
+    useUiStore.setState({ destination: 'document', viewMode: 'read' });
   });
 });

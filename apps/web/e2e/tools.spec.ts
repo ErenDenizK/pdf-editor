@@ -18,7 +18,7 @@ import {
 } from '@cantoo/pdf-lib';
 import { expect, type Page, test } from '@playwright/test';
 
-import { fixturePath, openFixtures, useFileInputPicker } from './helpers';
+import { enterEdit, fixturePath, openFixtures, useFileInputPicker } from './helpers';
 
 test.skip(
   ({ browserName }) => browserName !== 'chromium',
@@ -111,6 +111,7 @@ test('export page 1 as a PNG with the expected pixel size', async ({ page }) => 
 
 test('the tool bar walks its groups by mouse and keyboard', async ({ page }) => {
   await setUp(page);
+  await enterEdit(page);
   const bar = page.getByRole('toolbar', { name: 'Tools' });
   const groups = ['Read', 'Mark up', 'Draw', 'Fill & sign', 'Pages', 'Redact'];
   // At rest: six labelled groups (experience-redesign spec §5.1).

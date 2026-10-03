@@ -10,6 +10,7 @@ import type { DocumentId } from '@pdf-editor/document-model';
 import { create } from 'zustand';
 
 import { readJson, writeJson } from './safe-storage';
+import { useWorkspaceStore } from './workspace-store';
 
 /**
  * The view of the open documents (ADR-0019 §2): `read`, the page view (shown in Read or Edit,
@@ -486,3 +487,27 @@ useUiStore.subscribe((state, previous) => {
     writeJson(LAYOUT_STORAGE_KEY, layout);
   }
 });
+
+/**
+ * The Read lock (ADR-0019 §3): whether `id` may change from the page. True only while the
+ * document is in Edit; an unknown or missing document is locked, so a missed check fails
+ * closed. Whole-document operations with their own dialog (Document menu, Arrange) and
+ * Undo / Redo do not ask.
+ */
+export function canEdit(
+  id: DocumentId | null | undefined,
+  state: Pick<UiState, 'documentMode'> = useUiStore.getState(),
+): boolean {
+  return id != null && state.documentMode[id] === 'edit';
+}
+
+/** `canEdit` for the active document. */
+export function canEditActive(): boolean {
+  return canEdit(useWorkspaceStore.getState().workspace.activeDocument);
+}
+
+/** Whether the active document is in Edit (the page layers and the bar follow it). */
+export function useCanEdit(): boolean {
+  const id = useWorkspaceStore((s) => s.workspace.activeDocument);
+  return useUiStore((s) => canEdit(id, s));
+}

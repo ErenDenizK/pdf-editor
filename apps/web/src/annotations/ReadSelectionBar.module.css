@@ -1,0 +1,56 @@
+/*
+ * The Read selection bar: a small glass toolbar over the page (the annotation bar's look),
+ * in a layer that takes no pointer itself, so text selection below is untouched.
+ */
+.root {
+  z-index: 3;
+  pointer-events: none;
+}
+
+.bar {
+  composes: glass from global;
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 3px;
+  border-radius: var(--radius-3);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  pointer-events: auto;
+  user-select: none;
+  cursor: default;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+}
+
+.action svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.5;
+}
+
+@media (hover: hover) {
+  .action:hover {
+    background: var(--surface-hover);
+  }
+}
+
+.action:active {
+  background: var(--surface-active);
+}
+
+.action:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}

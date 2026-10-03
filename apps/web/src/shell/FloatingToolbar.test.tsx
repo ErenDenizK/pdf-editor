@@ -11,12 +11,12 @@ import '../styles/global.css';
 import '../annotations/index';
 
 import { getActiveDocument, type VirtualDocument } from '@pdf-editor/document-model';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 
 import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
-import { fixtureFile } from '../../test/store-harness';
+import { enterEditMode, fixtureFile } from '../../test/store-harness';
 import { createAnnotations } from '../annotations/actions';
 import {
   type PageTarget,
@@ -136,6 +136,7 @@ async function mount(): Promise<Mounted> {
   const report = await useWorkspaceStore
     .getState()
     .openFiles([await fixtureFile(simpleUrl, 'simple.pdf')]);
+  enterEditMode();
   expect(report.skipped).toEqual([]);
   const doc = getActiveDocument(useWorkspaceStore.getState().workspace) as VirtualDocument;
   const first = doc.pages[0];
@@ -294,9 +295,10 @@ describe('tool bar (mounted)', () => {
 
   it('a shortcut arms its tool and shows its group; Esc disarms, then returns to the row', async () => {
     await mount();
-    await userEvent.keyboard('h');
-    await waitFor(() => expect(useToolStore.getState().mode).toBe('highlight'));
-    expect(within(bar()).getByRole('button', { name: 'Highlight' })).toHaveAttribute(
+    // (H arms the Highlighter preset of the pen since craft spec §5.4; U is a Mark up tool.)
+    await userEvent.keyboard('u');
+    await waitFor(() => expect(useToolStore.getState().mode).toBe('underline'));
+    expect(within(bar()).getByRole('button', { name: 'Underline' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
@@ -409,7 +411,8 @@ describe('options tier', () => {
   it('shows the armed tool options above the bar; changing them changes the tool', async () => {
     const { target } = await mount();
     expect(screen.queryByTestId('options-tier')).toBeNull();
-    await userEvent.keyboard('h');
+    // The Highlight markup tool (H arms the Highlighter preset since craft spec §5.4).
+    act(() => useToolStore.getState().setMode('highlight'));
     const tier = await screen.findByRole('toolbar', { name: 'Highlight options' });
     // Attached to the top of the bar, not over the page.
     expect(tier.getBoundingClientRect().bottom).toBeLessThanOrEqual(

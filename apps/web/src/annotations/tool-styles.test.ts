@@ -8,7 +8,7 @@ import { getActiveDocument } from '@pdf-editor/document-model';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
-import { fixtureFile } from '../../test/store-harness';
+import { enterEditMode, fixtureFile } from '../../test/store-harness';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { useToolStore } from '../viewer/tool-store';
 import { createAnnotations } from './actions';
@@ -36,6 +36,7 @@ async function openSimple(): Promise<PageTarget> {
   const report = await useWorkspaceStore
     .getState()
     .openFiles([await fixtureFile(simpleUrl, 'simple.pdf')]);
+  enterEditMode();
   expect(report.skipped).toEqual([]);
   const doc = getActiveDocument(useWorkspaceStore.getState().workspace);
   const first = doc?.pages[0];

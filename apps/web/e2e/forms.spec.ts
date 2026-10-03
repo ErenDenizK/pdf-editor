@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { PDFDict, PDFDocument, PDFName } from '@cantoo/pdf-lib';
 import { expect, type Page, test } from '@playwright/test';
 
-import { openFixtures, useFileInputPicker } from './helpers';
+import { enterEdit, openFixtures, useFileInputPicker } from './helpers';
 
 const screenshots = new URL('../../../docs/design/screenshots/', import.meta.url);
 
@@ -35,6 +35,7 @@ async function fillName(page: Page, value: string): Promise<void> {
   await page.goto('./');
   await expect(page.getByTestId('app-shell')).toBeVisible();
   await openFixtures(page, ['forms-a.pdf']);
+  await enterEdit(page);
 
   const target = page.locator('[data-form-layer="0"] [data-field-name="name"]');
   await expect(target).toBeVisible({ timeout: 20_000 });
@@ -106,6 +107,7 @@ test('add a text field and a checkbox by drag, fill them, export: the fields exi
   await page.goto('./');
   await expect(page.getByTestId('app-shell')).toBeVisible();
   await openFixtures(page, ['simple-text.pdf']);
+  await enterEdit(page);
   // No fields yet: the Review tab has no Fields chip (chips show the kinds present); "Add
   // field" is in the tool bar's Fill & sign group (experience-redesign §4.1).
   const review = page.getByRole('tab', { name: /^Review/ });
@@ -189,6 +191,7 @@ test('keyboard: place a field from the palette, cancel from the Forms panel', as
   await page.goto('./?lang=en');
   await expect(page.getByTestId('app-shell')).toBeVisible();
   await openFixtures(page, ['simple-text.pdf']);
+  await enterEdit(page);
   const pageBox = page.locator('[data-page-index="0"]');
   await expect(pageBox).toBeVisible({ timeout: 20_000 });
   const layer = page.locator('[data-page-index="0"] [data-created-field-layer]');

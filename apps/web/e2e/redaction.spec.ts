@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { type PDFArray, type PDFDict, PDFDocument, PDFName, type PDFNumber } from '@cantoo/pdf-lib';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 
-import { openFixtures, showInspector, useFileInputPicker } from './helpers';
+import { enterEdit, openFixtures, showInspector, useFileInputPicker } from './helpers';
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'Covered in Chromium');
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -92,6 +92,7 @@ test('mark by selection and by area, list them, export and re-open with the mark
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['redact-text-runs.pdf']);
+  await enterEdit(page);
   await showInspector(page);
   await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
     timeout: 20_000,
@@ -184,6 +185,7 @@ test('mark every search match, then review the marks with J and K', async ({ pag
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['redact-text-runs.pdf']);
+  await enterEdit(page);
   await showInspector(page);
   await expect(
     page
@@ -259,6 +261,7 @@ test('apply marks made by selection, search and area; export; the re-opened expo
   await useFileInputPicker(page);
   await page.goto('./?lang=en');
   await openFixtures(page, ['redact-text-runs.pdf']);
+  await enterEdit(page);
   await showInspector(page);
   await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
     timeout: 20_000,

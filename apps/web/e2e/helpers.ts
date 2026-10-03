@@ -97,3 +97,16 @@ export async function showInspector(page: Page): Promise<void> {
   if (!(await inspector.isVisible())) await page.keyboard.press('ControlOrMeta+Alt+b');
   await expect(inspector).toBeVisible();
 }
+
+/**
+ * Puts the active document in Edit with `2` (ADR-0019 §3): a file opens in Read, where
+ * nothing on the page can be selected, moved, filled or drawn on, and the tool bar is one
+ * Edit button.
+ */
+export async function enterEdit(page: Page): Promise<void> {
+  await page.keyboard.press('2');
+  await expect(page.getByRole('radio', { name: /^(Edit|Düzenleme)$/ })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
+}

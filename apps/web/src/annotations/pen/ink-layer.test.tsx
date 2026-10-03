@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { page } from 'vitest/browser';
 
 import simpleUrl from '../../../../../test/fixtures/simple-text.pdf?url';
-import { fixtureFile } from '../../../test/store-harness';
+import { enterEditMode, fixtureFile } from '../../../test/store-harness';
 import { displaySize } from '../../pages/page-geometry';
 import { resetWorkspace, useWorkspaceStore } from '../../state/workspace-store';
 import { useToolStore } from '../../viewer/tool-store';
@@ -46,6 +46,7 @@ interface Mounted {
 
 async function mountLayer(): Promise<Mounted> {
   const report = await model().openFiles([await fixtureFile(simpleUrl, 'simple.pdf')]);
+  enterEditMode();
   expect(report.skipped).toEqual([]);
   const ws = model().workspace;
   const doc = getActiveDocument(ws) as VirtualDocument;

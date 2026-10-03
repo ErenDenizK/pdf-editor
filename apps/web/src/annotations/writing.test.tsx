@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 
 import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
-import { fixtureFile } from '../../test/store-harness';
+import { enterEditMode, fixtureFile } from '../../test/store-harness';
 import { getEngineService } from '../engine/engine-service';
 import { m } from '../i18n';
 import { useAnnouncer } from '../shell/announcer';
@@ -67,6 +67,7 @@ async function mountRead(): Promise<Mounted> {
   const report = await useWorkspaceStore
     .getState()
     .openFiles([await fixtureFile(simpleUrl, 'simple.pdf')]);
+  enterEditMode();
   expect(report.skipped).toEqual([]);
   const doc = getActiveDocument(useWorkspaceStore.getState().workspace) as VirtualDocument;
   const first = doc.pages[0];
@@ -201,6 +202,7 @@ describe('writing is never interrupted', () => {
   it('writes on page 1 even when another test file left this document at a later page', async () => {
     // What crop.test leaves in the shared localStorage: this fixture remembered at page 2.
     await useWorkspaceStore.getState().openFiles([await fixtureFile(simpleUrl, 'simple.pdf')]);
+    enterEditMode();
     const ws = useWorkspaceStore.getState().workspace;
     const fingerprint = documentFingerprint(ws, getActiveDocument(ws) as VirtualDocument);
     if (fingerprint === undefined) throw new Error('no fingerprint');

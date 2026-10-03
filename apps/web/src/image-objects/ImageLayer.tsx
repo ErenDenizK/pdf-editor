@@ -27,6 +27,7 @@ import { currentPlatform, parseShortcut, toAriaKeyShortcut } from '../commands/s
 import { type Box, cssBoxToUser, type PageFrame, rectToCss } from '../annotations/geometry';
 import { m } from '../i18n';
 import type { PageOverlayProps } from '../stage/page-overlays';
+import { useCanEdit } from '../state/ui-store';
 import { usePageRevision } from '../text-edit/runs';
 import { pageFrame } from '../viewer/page-frame';
 import { useToolStore } from '../viewer/tool-store';
@@ -71,7 +72,9 @@ interface Gesture {
 
 export function ImageLayer(props: PageOverlayProps) {
   const { sourceId, sourceIndex, pageId, pageIndex, visible } = props;
-  const active = useToolStore((s) => s.mode === 'image');
+  // Never in Read (ADR-0019 §3), even if the tool were armed.
+  const editable = useCanEdit();
+  const active = useToolStore((s) => s.mode === 'image') && editable;
   const selection = useImageStore((s) =>
     s.selection?.target.pageId === pageId ? s.selection : null,
   );

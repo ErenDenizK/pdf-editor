@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, type Page, test } from '@playwright/test';
 
-import { openFixtures, showInspector, useFileInputPicker } from './helpers';
+import { enterEdit, openFixtures, showInspector, useFileInputPicker } from './helpers';
 
 const screenshots = new URL('../../../docs/design/screenshots/', import.meta.url);
 const capture = Boolean(process.env.CAPTURE_SCREENSHOTS);
@@ -76,6 +76,7 @@ test.describe('annotations', () => {
     test.skip(browserName !== 'chromium', 'Covered in Chromium');
     await page.goto('./');
     await openFixtures(page, ['simple-text.pdf']);
+    await enterEdit(page);
     await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
       timeout: 20_000,
     });
@@ -117,6 +118,7 @@ test.describe('annotations', () => {
     test.skip(browserName !== 'chromium', 'Covered in Chromium');
     await page.goto('./');
     await openFixtures(page, ['simple-text.pdf']);
+    await enterEdit(page);
     await showInspector(page);
     const line = page
       .getByTestId('text-layer')
@@ -138,6 +140,7 @@ test.describe('annotations', () => {
     test.skip(browserName !== 'chromium', 'Covered in Chromium');
     await page.goto('./');
     await openFixtures(page, ['simple-text.pdf']);
+    await enterEdit(page);
     await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
       timeout: 20_000,
     });
@@ -195,6 +198,7 @@ test.describe('annotations', () => {
     test.skip(browserName !== 'chromium', 'Covered in Chromium');
     await page.goto('./');
     await openFixtures(page, ['rotated-pages.pdf']);
+    await enterEdit(page);
     await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
       timeout: 20_000,
     });
@@ -232,6 +236,7 @@ test.describe('annotations', () => {
     test.skip(browserName !== 'chromium', 'Covered in Chromium');
     await page.goto('./');
     await openFixtures(page, ['simple-text.pdf']);
+    await enterEdit(page);
     await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
       timeout: 20_000,
     });
@@ -277,6 +282,7 @@ test.describe('annotations', () => {
 
     await page.reload();
     await openFixtures(page, ['simple-text.pdf']);
+    await enterEdit(page);
     await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
       timeout: 20_000,
     });
@@ -306,6 +312,7 @@ test.describe('annotations', () => {
     test.skip(!capture || browserName !== 'chromium', 'Set CAPTURE_SCREENSHOTS=1 (Chromium).');
     await page.goto('./');
     await openFixtures(page, ['simple-text.pdf']);
+    await enterEdit(page);
     await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
       timeout: 20_000,
     });
@@ -393,6 +400,7 @@ test.describe('annotations', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('./?lang=en');
     await openFixtures(page, ['simple-text.pdf']);
+    await enterEdit(page);
     await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
       timeout: 20_000,
     });

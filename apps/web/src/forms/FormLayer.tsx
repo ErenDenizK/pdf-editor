@@ -13,13 +13,19 @@
  * Kinds: checkbox and radio toggle on click / Space; text, combo box and list box open an
  * editor; a push button shows that its actions are not run; a signature field shows what
  * the engine read about it, never validated.
+ *
+ * In Read (ADR-0019 §3) the fields show their values and take the focus, but never change:
+ * a click (or Space) on a fillable field shows "Switch to Edit to fill" under it with an
+ * Edit button, and no editor opens; switching is always the person's choice.
  */
 import type { FormField } from '@pdf-editor/engine';
-import { BadgeAlert } from 'lucide-react';
+import { BadgeAlert, Pencil } from 'lucide-react';
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 
+import { showDocumentMode } from '../home/home-actions';
 import { m } from '../i18n';
 import type { PageOverlayProps } from '../stage/page-overlays';
+import { useCanEdit } from '../state/ui-store';
 import { type Box, type PageFrame, userRectToCss } from '../viewer/geometry';
 import { pageFrame } from '../viewer/page-frame';
 import { useToolStore } from '../viewer/tool-store';
@@ -124,14 +130,24 @@ export function FieldWidget({
   const { field, box } = placed;
   const ref = useRef<HTMLButtonElement>(null);
   const [notice, setNotice] = useState(false);
+  // The Read lock: values show, nothing fills; a fill attempt shows the Edit notice.
+  const canFill = useCanEdit();
+  const [lockNotice, setLockNotice] = useState(false);
+  const showLock = lockNotice && active && !canFill;
   const editable = field.kind === 'text' || field.kind === 'combobox' || field.kind === 'listbox';
 
-  // Keyboard navigation lands here for toggles: take focus.
+  // Keyboard navigation lands here for toggles (and for every field in Read): take focus.
   useEffect(() => {
-    if (active && !editable) ref.current?.focus({ preventScroll: false });
-  }, [active, editable]);
+    if (active && (!editable || !canFill)) ref.current?.focus({ preventScroll: false });
+  }, [active, editable, canFill]);
 
-  if (active && editable && !field.readOnly) {
+  /** Runs a fill in Edit; in Read shows the notice instead. */
+  const fill = (run: () => void) => {
+    setLockNotice(!canFill);
+    if (canFill) run();
+  };
+
+  if (active && editable && !field.readOnly && canFill) {
     return field.kind === 'text' || (field.kind === 'combobox' && field.editable) ? (
       <TextEditor field={field} here={here} box={box} frame={frame} />
     ) : (
@@ -143,6 +159,8 @@ export function FieldWidget({
   const position = { left: box.left, top: box.top, width: box.width, height: box.height };
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === 'Tab') {
+      // With the Edit notice shown, Tab goes on to its button (the next element).
+      if (showLock && !event.shiftKey) return;
       event.preventDefault();
       event.stopPropagation();
       moveField(here, event.shiftKey ? -1 : 1);
@@ -150,6 +168,7 @@ export function FieldWidget({
       event.preventDefault();
       event.stopPropagation();
       setNotice(false);
+      setLockNotice(false);
       useFormStore.getState().setActive(null);
       ref.current?.blur();
     }
@@ -166,42 +185,66 @@ export function FieldWidget({
     'data-active': active || undefined,
     onKeyDown,
     onFocus: () => {
-      if (!active) useFormStore.getState().setActive(here);
+      // The notice belongs to one visit of the field.
+      if (!active) {
+        setLockNotice(false);
+        useFormStore.getState().setActive(here);
+      }
     },
   };
+
+  const lock = showLock ? (
+    <EditNotice
+      box={box}
+      onEdit={() => {
+        setLockNotice(false);
+        showDocumentMode('edit');
+        ref.current?.focus({ preventScroll: true });
+      }}
+    />
+  ) : null;
 
   switch (field.kind) {
     case 'checkbox': {
       const on = field.value === true;
       return (
-        <button
-          {...common}
-          role="checkbox"
-          aria-checked={on}
-          aria-label={label}
-          aria-readonly={field.readOnly || undefined}
-          aria-required={field.required || undefined}
-          onClick={() => {
-            if (!field.readOnly) void commitFieldValue(here, !on);
-          }}
-        />
+        <>
+          <button
+            {...common}
+            role="checkbox"
+            aria-checked={on}
+            aria-label={label}
+            aria-readonly={field.readOnly || !canFill || undefined}
+            aria-required={field.required || undefined}
+            onClick={() => {
+              if (!field.readOnly) fill(() => void commitFieldValue(here, !on));
+            }}
+          />
+          {lock}
+        </>
       );
     }
     case 'radio': {
       const on = placed.exportValue !== undefined && field.value === placed.exportValue;
       return (
-        <button
-          {...common}
-          role="radio"
-          aria-checked={on}
-          aria-label={m.forms_radio_option({ name: label, option: placed.exportValue ?? '' })}
-          aria-disabled={field.readOnly || undefined}
-          onClick={() => {
-            if (!field.readOnly && !on && placed.exportValue !== undefined) {
-              void commitFieldValue(here, placed.exportValue);
-            }
-          }}
-        />
+        <>
+          <button
+            {...common}
+            role="radio"
+            aria-checked={on}
+            aria-label={m.forms_radio_option({ name: label, option: placed.exportValue ?? '' })}
+            aria-disabled={field.readOnly || undefined}
+            onClick={() => {
+              const value = placed.exportValue;
+              if (!field.readOnly && value !== undefined) {
+                fill(() => {
+                  if (!on) void commitFieldValue(here, value);
+                });
+              }
+            }}
+          />
+          {lock}
+        </>
       );
     }
     case 'button':
@@ -229,16 +272,49 @@ export function FieldWidget({
       );
     default:
       return (
-        <button
-          {...common}
-          aria-label={field.readOnly ? m.forms_read_only({ name: label }) : label}
-          aria-disabled={field.readOnly || field.kind === 'unknown' || undefined}
-          onClick={() => {
-            if (!field.readOnly && editable) useFormStore.getState().setActive(here);
-          }}
-        />
+        <>
+          <button
+            {...common}
+            aria-label={field.readOnly ? m.forms_read_only({ name: label }) : label}
+            aria-disabled={field.readOnly || field.kind === 'unknown' || undefined}
+            onClick={() => {
+              if (!field.readOnly && editable) {
+                fill(() => useFormStore.getState().setActive(here));
+              }
+            }}
+          />
+          {lock}
+        </>
       );
   }
+}
+
+/**
+ * Read's answer to a fill (ADR-0019 §3, spec §9): one line under the field and an Edit
+ * button, a polite status. Tab from the field reaches the button; Esc on the field closes it.
+ */
+function EditNotice({ box, onEdit }: { readonly box: Box; readonly onEdit: () => void }) {
+  return (
+    <div
+      role="status"
+      className={styles.lockNotice}
+      data-annotation-keep=""
+      data-form-lock-notice=""
+      style={{ left: box.left, top: box.top + box.height + 6 }}
+    >
+      <span>{m.form_switch_to_edit()}</span>
+      <button
+        type="button"
+        className={styles.lockEdit}
+        aria-keyshortcuts="2"
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={onEdit}
+      >
+        <Pencil aria-hidden="true" />
+        {m.mode_edit()}
+      </button>
+    </div>
+  );
 }
 
 function SignatureNotice({

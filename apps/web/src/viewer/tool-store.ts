@@ -7,8 +7,16 @@
  * whose tools the bar shows (`barGroup`, null for the row of six groups), the group used
  * last in this session (`lastGroup`), and the tool a one-shot tool (stamp, signature image)
  * returns to once it has placed its object (`previousMode`).
+ *
+ * Arming is guarded by the Read lock (ADR-0019 §3): a tool other than Select arms only for a
+ * document in Edit, and the tool goes back to Select whenever the active document is not in
+ * Edit (`1`, another tab in Read). Callers that arm from Read switch to Edit first
+ * (`activateTool`).
  */
 import { create } from 'zustand';
+
+import { canEdit, useUiStore } from '../state/ui-store';
+import { useWorkspaceStore } from '../state/workspace-store';
 
 export type ToolMode =
   | 'select'
@@ -57,6 +65,15 @@ interface ToolState {
   finishOneShot: () => void;
 }
 
+/**
+ * Whether the active document is in Read, so no tool but Select may arm. With no document
+ * open there is no page to change, and the tool state is only remembered.
+ */
+function locked(): boolean {
+  const id = useWorkspaceStore.getState().workspace.activeDocument;
+  return id !== undefined && !canEdit(id);
+}
+
 export const useToolStore = create<ToolState>()((set, get) => ({
   mode: 'select',
   previousMode: 'select',
@@ -64,7 +81,7 @@ export const useToolStore = create<ToolState>()((set, get) => ({
   lastGroup: null,
   setMode: (mode) =>
     set((s) =>
-      s.mode === mode
+      s.mode === mode || (mode !== 'select' && locked())
         ? s
         : { mode, previousMode: ONE_SHOT_MODES.has(s.mode) ? s.previousMode : s.mode },
     ),
@@ -76,6 +93,19 @@ export const useToolStore = create<ToolState>()((set, get) => ({
     get().setMode(ONE_SHOT_MODES.has(previousMode) ? 'select' : previousMode);
   },
 }));
+
+// The Read lock: nothing stays armed for a document that is not in Edit.
+const disarmWhenLocked = () => {
+  if (useToolStore.getState().mode !== 'select' && locked()) {
+    useToolStore.getState().setMode('select');
+  }
+};
+useUiStore.subscribe((state, previous) => {
+  if (state.documentMode !== previous.documentMode) disarmWhenLocked();
+});
+useWorkspaceStore.subscribe((state, previous) => {
+  if (state.workspace.activeDocument !== previous.workspace.activeDocument) disarmWhenLocked();
+});
 
 /** Tests: the state of a fresh session. */
 export function resetToolStore(): void {
