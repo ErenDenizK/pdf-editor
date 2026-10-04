@@ -32,7 +32,7 @@ import {
 import { clearRecentFiles, openFilesFromPicker } from '../commands/app-commands';
 import { currentPlatform } from '../commands/shortcuts';
 import { RENDER_PRIORITY } from '../engine/engine-service';
-import { loadRecents, type RecentEntry, useRecentsStore } from '../files/recents';
+import { canReopenRecent, loadRecents, type RecentEntry, useRecentsStore } from '../files/recents';
 import { formatNumber, m, useLocale } from '../i18n';
 import { PageCanvas } from '../pages/PageCanvas';
 import { displaySize, fitInBox } from '../pages/page-geometry';
@@ -597,7 +597,7 @@ function RecentFiles({ variant }: { readonly variant: 'cards' | 'empty' }) {
 
 /** The quiet hint a row carries: permission to ask for, or the file dialog to go through. */
 function recentHint(entry: RecentEntry, access: string | undefined): string | undefined {
-  if (entry.handle === undefined || access === 'unavailable') return m.recents_hint_open_again();
+  if (!canReopenRecent(entry) || access === 'unavailable') return m.recents_hint_open_again();
   if (access === 'prompt') return m.recents_hint_permission();
   return undefined;
 }

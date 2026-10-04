@@ -3,11 +3,17 @@
  * on this device only and always clearable.
  *
  * Stored in IndexedDB, database `pdf-editor:recents:v1`, one record per entry
- * `{ id, name, size, pages?, openedAt, handle? }`, at most `RECENTS_LIMIT` (the oldest go
- * first). No file bytes and no thumbnails are stored. `handle` is the browser's
- * `FileSystemFileHandle`, kept only when the browser handed one out (Chromium's
- * `showOpenFilePicker` and a drop's `getAsFileSystemHandle()`); elsewhere an entry is a name
- * and the file is chosen again in the file dialog ("Open again…").
+ * `{ id, name, size, pages?, openedAt, handleStored? }`, at most `RECENTS_LIMIT` (the oldest
+ * go first). No file bytes and no thumbnails are stored. The browser's `FileSystemFileHandle`
+ * is kept only when the browser handed one out (Chromium's `showOpenFilePicker` and a drop's
+ * `getAsFileSystemHandle()`); elsewhere an entry is a name and the file is chosen again in
+ * the file dialog ("Open again…").
+ *
+ * Handles live in a store of their own and are read one at a time, only when a row is
+ * clicked, never when the list loads: Chromium 153 ends the whole browser when IndexedDB
+ * hands a stored handle back (seen in CI, also reported for macOS), so a list that carried
+ * handles would take the browser down on every visit to Home. On Chromium 153 stored handles
+ * are not read at all and such rows reopen through the file dialog.
  *
  * Every record is checked field by field when read, so a damaged or foreign record is
  * skipped rather than shown. When IndexedDB cannot be opened (storage disabled, some private
@@ -20,8 +26,10 @@
 import { create } from 'zustand';
 
 export const RECENTS_DB_NAME = 'pdf-editor:recents:v1';
-const RECENTS_DB_VERSION = 1;
+/** Version 2 moved handles out of the entries into `handles` (see above). */
+const RECENTS_DB_VERSION = 2;
 const RECENTS_STORE = 'entries';
+const HANDLES_STORE = 'handles';
 /** At most this many entries are kept (spec M5: 12). */
 export const RECENTS_LIMIT = 12;
 const MAX_NAME_LENGTH = 1024;
@@ -46,7 +54,10 @@ export interface RecentEntry {
   readonly pages?: number;
   /** When it was last opened (ms since the epoch). */
   readonly openedAt: number;
+  /** The handle, when this session holds it (recorded or read back on a click). */
   readonly handle?: RecentFileHandle;
+  /** A handle for this entry is stored beside it, to be read on a click (`readHandle`). */
+  readonly handleStored?: true;
 }
 
 /**
@@ -66,10 +77,33 @@ export interface RecentNote {
 
 /** Where the entries live; tests pass their own. */
 export interface RecentsBackend {
+  /** The stored entries, without their handles. */
   list(): Promise<readonly unknown[]>;
+  /** Stores the entry; its `handle`, if any, is stored apart and marked `handleStored`. */
   put(entry: RecentEntry): Promise<void>;
   remove(id: string): Promise<void>;
   clear(): Promise<void>;
+  /** The handle stored for one entry, or undefined. Only ever called from a click. */
+  readHandle(id: string): Promise<unknown>;
+}
+
+/**
+ * False on Chromium 153, whose browser process crashes when IndexedDB returns a stored
+ * file handle (with or without a reload, top-level page or frame, headless or not).
+ */
+export function storedHandlesReadable(
+  nav: Pick<Navigator, 'userAgent'> & {
+    readonly userAgentData?: { readonly brands?: readonly { brand: string; version: string }[] };
+  } = navigator,
+): boolean {
+  const brand = nav.userAgentData?.brands?.find((b) => b.brand === 'Chromium')?.version;
+  const version = brand ?? /\bChrom(?:e|ium)\/(\d+)/.exec(nav.userAgent)?.[1];
+  return version === undefined || Number.parseInt(version, 10) !== 153;
+}
+
+/** True when a click on the entry can try its handle rather than the file dialog. */
+export function canReopenRecent(entry: RecentEntry): boolean {
+  return entry.handle !== undefined || (entry.handleStored === true && storedHandlesReadable());
 }
 
 // ---------------------------------------------------------------------------
@@ -100,7 +134,7 @@ const isCount = (value: unknown): value is number =>
  */
 export function parseRecentEntry(value: unknown): RecentEntry | null {
   if (!isRecord(value)) return null;
-  const { id, name, size, pages, openedAt, handle } = value;
+  const { id, name, size, pages, openedAt, handle, handleStored } = value;
   if (typeof id !== 'string' || id.length === 0 || id.length > 128) return null;
   if (typeof name !== 'string' || name.length === 0 || name.length > MAX_NAME_LENGTH) return null;
   if (!isCount(size)) return null;
@@ -112,7 +146,16 @@ export function parseRecentEntry(value: unknown): RecentEntry | null {
     ...(isCount(pages) && pages > 0 ? { pages } : {}),
     openedAt,
     ...(isFileHandle(handle) ? { handle } : {}),
+    ...(handleStored === true ? { handleStored } : {}),
   };
+}
+
+/** The entry as its stored record: the handle goes to its own store, a mark stays. */
+function withoutHandle(entry: RecentEntry): RecentEntry {
+  const { handle, handleStored: _mark, ...rest } = entry;
+  return handle === undefined && entry.handleStored !== true
+    ? rest
+    : { ...rest, handleStored: true };
 }
 
 /** Newest first; ties keep their order. */
@@ -157,26 +200,40 @@ export function addRecentEntry(
 // Backends
 // ---------------------------------------------------------------------------
 
+/** Like the IndexedDB store, in memory: handles apart from the entries. */
 export function memoryRecentsBackend(initial: readonly unknown[] = []): RecentsBackend {
   const records = new Map<string, unknown>();
+  const handles = new Map<string, unknown>();
   for (const record of initial) {
     const id = isRecord(record) && typeof record.id === 'string' ? record.id : undefined;
-    if (id !== undefined) records.set(id, record);
+    if (id === undefined || !isRecord(record)) continue;
+    const { handle, ...rest } = record;
+    if (handle === undefined) {
+      records.set(id, record);
+    } else {
+      records.set(id, { ...rest, handleStored: true });
+      handles.set(id, handle);
+    }
   }
   return {
     list: () => Promise.resolve([...records.values()]),
     put: (entry) => {
-      records.set(entry.id, entry);
+      records.set(entry.id, withoutHandle(entry));
+      if (entry.handle !== undefined) handles.set(entry.id, entry.handle);
+      else if (entry.handleStored !== true) handles.delete(entry.id);
       return Promise.resolve();
     },
     remove: (id) => {
       records.delete(id);
+      handles.delete(id);
       return Promise.resolve();
     },
     clear: () => {
       records.clear();
+      handles.clear();
       return Promise.resolve();
     },
+    readHandle: (id) => Promise.resolve(handles.get(id)),
   };
 }
 
@@ -196,9 +253,11 @@ function transactionDone(tx: IDBTransaction): Promise<void> {
 }
 
 /**
- * The IndexedDB store. Version 1 creates the object store from nothing; a later version
- * adds its upgrade step here. The connection closes when another tab or a reset asks to
- * upgrade or delete the database, and reopens on the next use.
+ * The IndexedDB store: `entries` (keyed by id) and `handles` (the handle under the entry's
+ * id). Version 2 creates both from nothing; a version 1 store, whose records carried their
+ * handles inline, is dropped unread rather than read (Recents never shipped with it). The
+ * connection closes when another tab or a reset asks to upgrade or delete the database, and
+ * reopens on the next use.
  */
 export function indexedDbRecentsBackend(
   factory: IDBFactory = indexedDB,
@@ -208,10 +267,13 @@ export function indexedDbRecentsBackend(
   const db = (): Promise<IDBDatabase> => {
     connection ??= new Promise<IDBDatabase>((resolve, reject) => {
       const open = factory.open(name, RECENTS_DB_VERSION);
-      open.onupgradeneeded = () => {
-        if (!open.result.objectStoreNames.contains(RECENTS_STORE)) {
-          open.result.createObjectStore(RECENTS_STORE, { keyPath: 'id' });
-        }
+      open.onupgradeneeded = (event) => {
+        // `objectStoreNames` is a snapshot: read it again after each change.
+        const has = (store: string) => open.result.objectStoreNames.contains(store);
+        if (event.oldVersion < 2 && has(RECENTS_STORE))
+          open.result.deleteObjectStore(RECENTS_STORE);
+        if (!has(RECENTS_STORE)) open.result.createObjectStore(RECENTS_STORE, { keyPath: 'id' });
+        if (!has(HANDLES_STORE)) open.result.createObjectStore(HANDLES_STORE);
       };
       open.onsuccess = () => {
         const result = open.result;
@@ -232,20 +294,47 @@ export function indexedDbRecentsBackend(
     });
     return connection;
   };
-  const write = async (run: (store: IDBObjectStore) => void): Promise<void> => {
-    const tx = (await db()).transaction(RECENTS_STORE, 'readwrite');
+  const write = async (
+    run: (entries: IDBObjectStore, handles: IDBObjectStore) => void,
+  ): Promise<void> => {
+    const tx = (await db()).transaction([RECENTS_STORE, HANDLES_STORE], 'readwrite');
     const done = transactionDone(tx);
-    run(tx.objectStore(RECENTS_STORE));
+    try {
+      run(tx.objectStore(RECENTS_STORE), tx.objectStore(HANDLES_STORE));
+    } catch (error) {
+      // A handle that cannot be cloned throws here: nothing of this write may land.
+      done.catch(() => undefined);
+      tx.abort();
+      throw error;
+    }
     await done;
   };
   return {
+    // Entries only: a stored handle is never deserialized here (see the module comment).
     list: async () =>
       request(
         (await db()).transaction(RECENTS_STORE, 'readonly').objectStore(RECENTS_STORE).getAll(),
       ),
-    put: (entry) => write((store) => store.put(entry)),
-    remove: (id) => write((store) => store.delete(id)),
-    clear: () => write((store) => store.clear()),
+    put: (entry) =>
+      write((entries, handles) => {
+        if (entry.handle !== undefined) handles.put(entry.handle, entry.id);
+        else if (entry.handleStored !== true) handles.delete(entry.id);
+        entries.put(withoutHandle(entry));
+      }),
+    remove: (id) =>
+      write((entries, handles) => {
+        entries.delete(id);
+        handles.delete(id);
+      }),
+    clear: () =>
+      write((entries, handles) => {
+        entries.clear();
+        handles.clear();
+      }),
+    readHandle: async (id): Promise<unknown> =>
+      request<unknown>(
+        (await db()).transaction(HANDLES_STORE, 'readonly').objectStore(HANDLES_STORE).get(id),
+      ),
   };
 }
 
@@ -333,7 +422,9 @@ async function probeAccess(entries: readonly RecentEntry[]): Promise<void> {
   await Promise.all(
     entries.map(async (entry) => {
       if (entry.handle === undefined) {
-        access[entry.id] = 'unavailable';
+        // A stored handle is not read until the click, so its permission is not known yet;
+        // after a reload the browser usually asks again.
+        access[entry.id] = canReopenRecent(entry) ? 'prompt' : 'unavailable';
         return;
       }
       try {
@@ -442,8 +533,8 @@ export async function recordRecent(input: RecordRecentInput): Promise<RecentEntr
     } catch (error) {
       // A handle that cannot be stored (DataCloneError) still leaves the name.
       if (entry.handle === undefined) throw error;
-      const { handle: _dropped, ...withoutHandle } = entry;
-      await target.put(withoutHandle);
+      const { handle: _dropped, ...nameOnly } = entry;
+      await target.put(nameOnly);
     }
     for (const id of removed) await target.remove(id);
   });
@@ -507,17 +598,29 @@ export function setRecentNote(note: RecentNote | null): void {
 }
 
 export type ReopenResult =
-  | { readonly ok: true; readonly file: File }
+  | { readonly ok: true; readonly file: File; readonly handle: RecentFileHandle }
   | { readonly ok: false; readonly reason: 'no-handle' | 'denied' | 'missing' };
 
+/** The entry's handle: the one this session holds, else the stored one, read now. */
+async function handleOf(entry: RecentEntry): Promise<RecentFileHandle | undefined> {
+  if (entry.handle !== undefined) return entry.handle;
+  if (!canReopenRecent(entry)) return undefined;
+  try {
+    const stored = await store().readHandle(entry.id);
+    return isFileHandle(stored) ? stored : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Reads an entry's file through its handle. Call it straight from the click (no await
- * before it): `requestPermission` needs the click's user activation. A denied permission
- * or a moved file marks the entry `unavailable` for this session; a moved file also loses
- * its stored handle.
+ * Reads an entry's file through its handle, reading a stored handle first. Call it straight
+ * from the click (no await before it): `requestPermission` needs the click's user
+ * activation, which a short IndexedDB read keeps. A denied permission or a moved file marks
+ * the entry `unavailable` for this session; a moved file also loses its stored handle.
  */
 export async function reopenRecent(entry: RecentEntry): Promise<ReopenResult> {
-  const handle = entry.handle;
+  const handle = await handleOf(entry);
   if (handle === undefined) return { ok: false, reason: 'no-handle' };
   const setAccess = (value: RecentAccess) =>
     useRecentsStore.setState((s) => ({ access: { ...s.access, [entry.id]: value } }));
@@ -536,11 +639,17 @@ export async function reopenRecent(entry: RecentEntry): Promise<ReopenResult> {
   try {
     const file = await handle.getFile();
     setAccess('granted');
-    return { ok: true, file };
+    // Held for the rest of the session, so the next click does not read storage again.
+    useRecentsStore.setState((s) => ({
+      entries: s.entries.map((existing) =>
+        existing.id === entry.id ? { ...existing, handle } : existing,
+      ),
+    }));
+    return { ok: true, file, handle };
   } catch {
     // NotFoundError: moved, renamed or deleted. The handle is of no further use.
     setAccess('unavailable');
-    const { handle: _gone, ...rest } = entry;
+    const { handle: _gone, handleStored: _mark, ...rest } = entry;
     useRecentsStore.setState((s) => ({
       entries: s.entries.map((existing) => (existing.id === entry.id ? rest : existing)),
     }));

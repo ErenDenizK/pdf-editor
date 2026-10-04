@@ -16,6 +16,7 @@ import { enterCompare } from '../compare/compare-commands';
 import { useCompareStore } from '../compare/compare-store';
 import { pickFiles, rememberFileHandle } from '../files/open-files';
 import {
+  canReopenRecent,
   type RecentEntry,
   removeRecent,
   reopenRecent,
@@ -235,11 +236,10 @@ async function openFromRecents(files: readonly File[]): Promise<boolean> {
  */
 export async function openRecent(entry: RecentEntry): Promise<void> {
   const access = useRecentsStore.getState().access[entry.id];
-  if (entry.handle === undefined || access === 'unavailable') {
+  if (!canReopenRecent(entry) || access === 'unavailable') {
     await openRecentAgain(entry);
     return;
   }
-  const handle = entry.handle;
   const result = await reopenRecent(entry);
   if (!result.ok) {
     setRecentNote({ id: entry.id, name: entry.name, kind: 'unavailable' });
@@ -247,7 +247,7 @@ export async function openRecent(entry: RecentEntry): Promise<void> {
     return;
   }
   setRecentNote(null);
-  rememberFileHandle(result.file, handle);
+  rememberFileHandle(result.file, result.handle);
   noteReopenedFrom(result.file, entry.id);
   await openFromRecents([result.file]);
 }

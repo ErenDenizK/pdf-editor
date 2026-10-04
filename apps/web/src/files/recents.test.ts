@@ -21,6 +21,7 @@ import {
   removeRecent,
   reopenRecent,
   setRecentsBackend,
+  storedHandlesReadable,
   useRecentsStore,
 } from './recents';
 
@@ -175,7 +176,7 @@ describe('IndexedDB backend', () => {
     expect(await backend.list()).toEqual([]);
   });
 
-  it('keeps a real FileSystemFileHandle and reads the file through it again', async () => {
+  it('keeps a real FileSystemFileHandle apart: the list never carries it, a click reads it', async () => {
     const root = await navigator.storage.getDirectory();
     const name = `recents-${crypto.randomUUID()}.pdf`;
     const handle = await root.getFileHandle(name, { create: true });
@@ -187,15 +188,63 @@ describe('IndexedDB backend', () => {
       await indexedDbRecentsBackend(indexedDB, dbName).put(
         entry('a', 1, { name, handle: handle as unknown as RecentFileHandle }),
       );
-      // A new connection, as after a reload.
+      // A new connection, as after a reload: the entry says a handle is stored, and holds none.
       const [record] = await indexedDbRecentsBackend(indexedDB, dbName).list();
       const parsed = parseRecentEntry(record);
-      expect(parsed?.handle?.kind).toBe('file');
-      const file = await parsed?.handle?.getFile();
-      expect(await file?.text()).toBe('%PDF-1.7 recents');
+      expect(parsed).toMatchObject({ name, handleStored: true });
+      expect(parsed?.handle).toBeUndefined();
+      // Chromium 153 ends the browser when IndexedDB returns a stored handle, so Recents never
+      // reads one there; elsewhere the handle read on a click opens the file.
+      if (storedHandlesReadable()) {
+        const back = await indexedDbRecentsBackend(indexedDB, dbName).readHandle('a');
+        const file = await (back as FileSystemFileHandle).getFile();
+        expect(await file.text()).toBe('%PDF-1.7 recents');
+      }
     } finally {
       await root.removeEntry(name);
     }
+  });
+});
+
+describe('IndexedDB version 2', () => {
+  it('drops a version 1 store unread and starts with entries and handles apart', async () => {
+    const dbName = testDbName();
+    await new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open(dbName, 1);
+      open.onupgradeneeded = () => {
+        open.result.createObjectStore('entries', { keyPath: 'id' }).put(entry('old', 1));
+      };
+      open.onsuccess = () => {
+        open.result.close();
+        resolve();
+      };
+      open.onerror = () => reject(open.error ?? new Error('open failed'));
+    });
+    const backend = indexedDbRecentsBackend(indexedDB, dbName);
+    expect(await backend.list()).toEqual([]);
+    await backend.put(entry('new', 2));
+    expect((await backend.list()).map((r) => parseRecentEntry(r)?.id)).toEqual(['new']);
+    expect(await backend.readHandle('new')).toBeUndefined();
+  });
+});
+
+describe('storedHandlesReadable', () => {
+  const ua = (version: number) =>
+    `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version}.0.0.0 Safari/537.36`;
+
+  it('is false on Chromium 153 only, by brand or by user agent', () => {
+    expect(storedHandlesReadable({ userAgent: ua(153) })).toBe(false);
+    expect(storedHandlesReadable({ userAgent: ua(152) })).toBe(true);
+    expect(storedHandlesReadable({ userAgent: ua(154) })).toBe(true);
+    expect(
+      storedHandlesReadable({
+        userAgent: ua(152),
+        userAgentData: { brands: [{ brand: 'Chromium', version: '153' }] },
+      }),
+    ).toBe(false);
+    expect(storedHandlesReadable({ userAgent: 'Mozilla/5.0 (Macintosh) Firefox/140.0' })).toBe(
+      true,
+    );
   });
 });
 
@@ -278,22 +327,43 @@ describe('the recents store', () => {
     const [record] = await indexed.list();
     expect(parseRecentEntry(record)).toMatchObject({ name: 'x.pdf', size: 1 });
     expect(parseRecentEntry(record)?.handle).toBeUndefined();
+    expect(parseRecentEntry(record)?.handleStored).toBeUndefined();
+    expect(await indexed.readHandle(parseRecentEntry(record)?.id ?? '')).toBeUndefined();
   });
 
-  it('reads the probe of each handle on load: granted, prompt, or none', async () => {
+  it('loads without reading a stored handle; such a row asks on the click', async () => {
     const file = new File(['x'], 'x.pdf');
-    backend = memoryRecentsBackend([
-      entry('granted', 3, { handle: fakeHandle(file, { query: 'granted' }) }),
-      entry('prompt', 2, { handle: fakeHandle(file, { query: 'prompt' }) }),
+    const memory = memoryRecentsBackend([
+      entry('stored', 2, { handle: fakeHandle(file, { query: 'granted' }) }),
       entry('none', 1),
     ]);
+    let reads = 0;
+    backend = {
+      ...memory,
+      readHandle: (id) => {
+        reads += 1;
+        return memory.readHandle(id);
+      },
+    };
     setRecentsBackend(backend);
     await loadRecents();
+    expect(reads).toBe(0);
+    expect(useRecentsStore.getState().entries.map((e) => [e.id, e.handle, e.handleStored])).toEqual(
+      [
+        ['stored', undefined, true],
+        ['none', undefined, undefined],
+      ],
+    );
     expect(useRecentsStore.getState().access).toEqual({
-      granted: 'granted',
-      prompt: 'prompt',
+      stored: storedHandlesReadable() ? 'prompt' : 'unavailable',
       none: 'unavailable',
     });
+  });
+
+  it('probes the handle of a file opened this session', async () => {
+    const handle = fakeHandle(new File(['x'], 'x.pdf'), { query: 'granted' });
+    const recorded = await recordRecent({ name: 'x.pdf', size: 1, handle, now: 1 });
+    expect(useRecentsStore.getState().access[recorded?.id ?? '']).toBe('granted');
   });
 });
 
@@ -419,14 +489,14 @@ describe('reopenRecent', () => {
     const file = new File(['%PDF'], 'a.pdf');
     const handle = fakeHandle(file, { query: 'granted' });
     const result = await reopenRecent(entry('a', 1, { handle }));
-    expect(result).toEqual({ ok: true, file });
+    expect(result).toEqual({ ok: true, file, handle });
     expect(handle.requested).toBe(0);
   });
 
   it('asks for read permission when the browser says prompt', async () => {
     const file = new File(['%PDF'], 'a.pdf');
     const handle = fakeHandle(file, { query: 'prompt', request: 'granted' });
-    expect(await reopenRecent(entry('a', 1, { handle }))).toEqual({ ok: true, file });
+    expect(await reopenRecent(entry('a', 1, { handle }))).toEqual({ ok: true, file, handle });
     expect(handle.requested).toBe(1);
   });
 
@@ -451,6 +521,34 @@ describe('reopenRecent', () => {
     const a = stored.find((e) => e?.name === 'a.pdf');
     expect(a).toBeDefined();
     expect(a?.handle).toBeUndefined();
+    expect(a?.handleStored).toBeUndefined();
+    expect(await backend.readHandle(a?.id ?? '')).toBeUndefined();
+  });
+
+  it('reads a stored handle on the click, then holds it for the session', async () => {
+    const file = new File(['%PDF'], 'a.pdf');
+    const handle = fakeHandle(file, { query: 'granted' });
+    const memory = memoryRecentsBackend([entry('a', 1, { handle })]);
+    let reads = 0;
+    setRecentsBackend({
+      ...memory,
+      readHandle: (id) => {
+        reads += 1;
+        return memory.readHandle(id);
+      },
+    });
+    await loadRecents();
+    const [loaded] = useRecentsStore.getState().entries;
+    if (loaded === undefined) throw new Error('not loaded');
+    if (!storedHandlesReadable()) {
+      // Chromium 153: the stored handle is left alone and the row goes to the file dialog.
+      expect(await reopenRecent(loaded)).toEqual({ ok: false, reason: 'no-handle' });
+      expect(reads).toBe(0);
+      return;
+    }
+    expect(await reopenRecent(loaded)).toEqual({ ok: true, file, handle });
+    expect(reads).toBe(1);
+    expect(useRecentsStore.getState().entries[0]?.handle).toBe(handle);
   });
 
   it('says no-handle for an entry without one', async () => {
