@@ -26,6 +26,9 @@
  * - **Cursor** (§5.2 item 5). While armed the layer's `--pen-cursor` is a dot of the preset's
  *   colour and on-screen width with a 1 px ring (`penCursor`), refreshed when the pointer
  *   moves over the layer after a preset or zoom change.
+ * - **Straight lines** (craft spec §5.6, `straighten.ts`). Shift draws a straight line whose
+ *   end snaps to 45° steps; holding still for 500 ms straightens the stroke to the pointer
+ *   until release. Either is handed over as two points at the nominal width.
  * - **Pointer types and palms.** See `pointerRole`. Once a pen has been seen in the
  *   session, one finger pans the stage (our own pan: the layer has `touch-action: none`;
  *   no inertia) and two fingers zoom through the Read view's anchored pinch zoom, which
@@ -34,6 +37,13 @@
 import { inkDedupeDistance, InkStrokeModel, type WidthPoint } from '../ink';
 import type { InkPreview, PreviewPath, PreviewPoint } from './ink-preview';
 import { inkStats } from './ink-stats';
+import {
+  HoldStill,
+  prefersReducedMotion,
+  STRAIGHTEN_CUE_MS,
+  STRAIGHTEN_CUE_PX,
+  straightEnd,
+} from './straighten';
 
 /** Touch is ignored for this long after a pen leaves the surface (ms). */
 export const TOUCH_AFTER_PEN_MS = 300;
@@ -453,7 +463,14 @@ interface ActiveStroke {
   /** The layer's size now relative to `baseWidth`: the zoom since the stroke started. */
   zoom: number;
   readonly startTime: number;
+  /** Shift is held: a straight line snapped to 45° steps. */
   straight: boolean;
+  /** Hold to straighten (craft spec §5.6, `straighten.ts`). */
+  readonly hold: HoldStill;
+  /** The pointer held still: a straight line to the pointer until release. */
+  held: boolean;
+  /** The snapped line is drawn thicker until then (`performance.now()`; 0: no cue). */
+  cueUntil: number;
   predicted: PreviewPoint[];
   /** The next frame must rebuild the preview. */
   restart: boolean;
@@ -500,6 +517,9 @@ export function attachInkInput(options: InkInputOptions): () => void {
   /** The layer's box while a stroke is down; null when a resize or scroll moved it. */
   let layerBox: DOMRect | null = null;
   let cursorKey = '';
+  /** The hold-to-straighten check and the end of its cue (window timers; 0: none). */
+  let holdTimer = 0;
+  let cueTimer = 0;
 
   const invalidateBox = () => {
     layerBox = null;
@@ -544,15 +564,22 @@ export function attachInkInput(options: InkInputOptions): () => void {
     };
   };
 
-  /** Shift: a straight line from the first sample to the newest, at the nominal width. */
+  /**
+   * Shift or a hold: a straight line from the first sample to the newest (its end snapped to
+   * 45° steps with Shift), at the nominal width, 1 px thicker during the straighten cue.
+   */
   const straightView = (s: ActiveStroke): PreviewPath => {
     const { samples, zoom } = s;
     const last = samples.length - 1;
+    const start = { x: samples.x(0), y: samples.y(0) };
+    const end = straightEnd(start, { x: samples.x(last), y: samples.y(last) }, s.straight);
+    const cue = s.cueUntil > 0 && performance.now() < s.cueUntil ? STRAIGHTEN_CUE_PX : 0;
+    const width = s.nominal * s.scale * zoom + cue;
     return {
       length: 2,
-      x: (i) => samples.x(i === 0 ? 0 : last) * zoom,
-      y: (i) => samples.y(i === 0 ? 0 : last) * zoom,
-      w: () => s.nominal * s.scale * zoom,
+      x: (i) => (i === 0 ? start.x : end.x) * zoom,
+      y: (i) => (i === 0 ? start.y : end.y) * zoom,
+      w: () => width,
     };
   };
 
@@ -561,7 +588,9 @@ export function attachInkInput(options: InkInputOptions): () => void {
    * joins of all but the last smoothed point are final.
    */
   const liveView = (s: ActiveStroke): { path: PreviewPath; settled: number } => {
-    if (s.straight && s.samples.length > 1) return { path: straightView(s), settled: 0 };
+    if ((s.straight || s.held) && s.samples.length > 1) {
+      return { path: straightView(s), settled: 0 };
+    }
     const { smooth } = s.model;
     const tip = s.model.tip();
     const scale = s.scale * s.zoom;
@@ -594,7 +623,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
     const stats = inkStats();
     const start = stats ? performance.now() : 0;
     const view = liveView(s);
-    preview.draw(view.path, s.straight ? [] : s.predicted, s.restart, view.settled);
+    preview.draw(view.path, s.straight || s.held ? [] : s.predicted, s.restart, view.settled);
     s.restart = false;
     if (stats) {
       // Event-to-draw: the newest sample's event time to the end of this draw.
@@ -612,6 +641,46 @@ export function attachInkInput(options: InkInputOptions): () => void {
     frame = 0;
   };
 
+  const clearHold = () => {
+    if (holdTimer !== 0) clearTimeout(holdTimer);
+    if (cueTimer !== 0) clearTimeout(cueTimer);
+    holdTimer = 0;
+    cueTimer = 0;
+  };
+
+  /** The stroke becomes a straight line to the pointer, with its cue. */
+  const straighten = (s: ActiveStroke) => {
+    s.held = true;
+    s.restart = true;
+    s.predicted = [];
+    if (!prefersReducedMotion()) {
+      s.cueUntil = performance.now() + STRAIGHTEN_CUE_MS;
+      cueTimer = window.setTimeout(() => {
+        cueTimer = 0;
+        if (stroke !== s) return;
+        s.restart = true;
+        schedule();
+      }, STRAIGHTEN_CUE_MS);
+    }
+    schedule();
+  };
+
+  /** Checks the hold when it can next be due (event times share `performance.now()`'s clock). */
+  const armHold = (s: ActiveStroke) => {
+    if (s.held || holdTimer !== 0) return;
+    const wait = s.hold.remaining(performance.now());
+    if (!Number.isFinite(wait)) return;
+    holdTimer = window.setTimeout(
+      () => {
+        holdTimer = 0;
+        if (stroke !== s || s.held) return;
+        if (s.hold.remaining(performance.now()) > 0) armHold(s);
+        else straighten(s);
+      },
+      Math.max(0, wait),
+    );
+  };
+
   const local = (e: { clientX: number; clientY: number }, rect: DOMRect) => ({
     x: e.clientX - rect.left,
     y: e.clientY - rect.top,
@@ -624,6 +693,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
     y /= s.zoom;
     const { width, rewrote } = s.widths.take(x, y, pressure, t);
     s.samples.push(x, y, pressure, t, width);
+    s.hold.add(x, y, time);
     if (rewrote) {
       // Earlier widths changed (a pen's first real pressure): smooth them again.
       s.model = buildModel(s.samples, s.minDistance);
@@ -701,6 +771,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
     if (!s) return;
     stroke = null;
     cancelFrame();
+    clearHold();
     penUp(s);
     releaseCapture(s.pointerId);
     preview.cancel();
@@ -774,6 +845,9 @@ export function attachInkInput(options: InkInputOptions): () => void {
       zoom: 1,
       startTime: e.timeStamp,
       straight: e.shiftKey,
+      hold: new HoldStill(),
+      held: false,
+      cueUntil: 0,
       predicted: [],
       restart: false,
     };
@@ -781,6 +855,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
     inkStats()?.strokeBegin(e.pointerType);
     preview.begin({ color: context.color, opacity: context.opacity });
     const p = local(e, rect);
+    s.hold.begin(p.x, p.y, e.timeStamp);
     addSample(s, p.x, p.y, e.pressure, e.timeStamp);
     if (s.widths.source === 'pressure' && e.pointerType === 'pen') session.pressureSeen = true;
     startListening();
@@ -803,6 +878,7 @@ export function attachInkInput(options: InkInputOptions): () => void {
         s.restart = true;
       }
       s.predicted = predict(s, e, rect);
+      armHold(s);
       schedule();
       return;
     }
@@ -834,15 +910,19 @@ export function attachInkInput(options: InkInputOptions): () => void {
         addSample(s, p.x, p.y, e.pressure > 0 ? e.pressure : s.samples.pressure(last), e.timeStamp);
       }
       const straight = e.shiftKey && s.samples.length > 1;
+      // Shift snaps the line; a hold straightens it to the pointer as it is.
+      const line = straight || (s.held && s.samples.length > 1);
       if (straight !== s.straight) s.restart = true;
       s.straight = straight;
+      s.cueUntil = 0;
       s.predicted = [];
       cancelFrame();
+      clearHold();
       const drawStart = stats ? performance.now() : 0;
       // The last frame: the whole stroke smoothed as the commit smooths it. Its stable part
       // is already drawn, so only the end and the tip's area are outlined again.
       let points: PreviewPoint[];
-      if (straight) {
+      if (line) {
         const v = straightView(s);
         preview.draw(v, [], true);
         points = [0, 1].map((i) => ({ x: v.x(i), y: v.y(i), w: v.w(i) }));

@@ -599,7 +599,9 @@ function CommandButton({ id }: { readonly id: string }) {
 /** The armed tool's options, attached to the top of the bar (spec §5.2). */
 function OptionsTier() {
   const mode = useToolStore((s) => s.mode);
+  const { EraserTier } = usePenSlots();
   const group = toolStyleGroup(mode);
+  if (mode === 'eraser' && EraserTier) return <Tier mode={mode} content={<EraserTier />} />;
   if (group === undefined) return null;
   return <Tier mode={mode} group={group} />;
 }
@@ -611,9 +613,12 @@ const barTabStop = (tier: HTMLElement) =>
 function Tier({
   mode,
   group,
+  content,
 }: {
   readonly mode: ToolMode;
-  readonly group: NonNullable<ReturnType<typeof toolStyleGroup>>;
+  readonly group?: NonNullable<ReturnType<typeof toolStyleGroup>>;
+  /** A plug-in's tier (the eraser's) instead of the tool style. */
+  readonly content?: ReactNode;
 }) {
   const { Tier: PenTier } = usePenSlots();
   const ref = useRef<HTMLDivElement>(null);
@@ -633,11 +638,12 @@ function Tier({
       onKeyDown={roving.onKeyDown}
       onFocus={roving.onFocus}
     >
-      {mode === 'ink' && PenTier ? (
-        <PenTier />
-      ) : (
-        <StyleControls variant="tool" group={group} placement="tier" />
-      )}
+      {content ??
+        (mode === 'ink' && PenTier ? (
+          <PenTier />
+        ) : group ? (
+          <StyleControls variant="tool" group={group} placement="tier" />
+        ) : null)}
     </div>
   );
 }

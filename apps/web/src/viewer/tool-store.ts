@@ -12,9 +12,14 @@
  * document in Edit, and the tool goes back to Select whenever the active document is not in
  * Edit (`1`, another tab in Read). Callers that arm from Read switch to Edit first
  * (`activateTool`).
+ *
+ * The eraser's options (craft spec §5.6) live here too: Stroke or Partial (`eraserMode`) and
+ * the eraser's diameter on screen (`eraserSize`), persisted per device beside the pen
+ * presets (`ERASER_STORAGE_KEY`).
  */
 import { create } from 'zustand';
 
+import { readJson, writeJson } from '../state/safe-storage';
 import { canEdit, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 
@@ -50,6 +55,41 @@ export type ToolMode =
 export const BAR_GROUP_IDS = ['select', 'write', 'text', 'fill', 'redact'] as const;
 export type BarGroup = (typeof BAR_GROUP_IDS)[number];
 
+/**
+ * What the eraser takes (craft spec §5.6): whole strokes, or only the parts of pen strokes
+ * under its circle.
+ */
+export type EraserMode = 'stroke' | 'partial';
+
+/** The eraser's diameters (CSS px on screen), smallest first. */
+export const ERASER_SIZES = [6, 12, 24, 48] as const;
+export type EraserSize = (typeof ERASER_SIZES)[number];
+/** 12 px: the reach of the eraser before it had a size (6 px either side of the pointer). */
+export const DEFAULT_ERASER_SIZE: EraserSize = 12;
+
+/** Where the eraser's options persist per device, with the pen's settings. */
+export const ERASER_STORAGE_KEY = 'pdf-editor:ui:eraser:v1';
+
+interface EraserSettings {
+  readonly eraserMode: EraserMode;
+  readonly eraserSize: EraserSize;
+}
+
+/** The stored eraser options; anything unknown falls back to the defaults. */
+function readEraserSettings(): EraserSettings {
+  const raw = readJson(ERASER_STORAGE_KEY);
+  const value = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+  const size = ERASER_SIZES.find((s) => s === value.size);
+  return {
+    eraserMode: value.mode === 'partial' ? 'partial' : 'stroke',
+    eraserSize: size ?? DEFAULT_ERASER_SIZE,
+  };
+}
+
+function writeEraserSettings(settings: EraserSettings): void {
+  writeJson(ERASER_STORAGE_KEY, { v: 1, mode: settings.eraserMode, size: settings.eraserSize });
+}
+
 /** Tools that place one object and give the pointer back (spec §5.2). */
 export const ONE_SHOT_MODES: ReadonlySet<ToolMode> = new Set<ToolMode>(['stamp', 'signature']);
 
@@ -61,7 +101,13 @@ interface ToolState {
   readonly barGroup: BarGroup | null;
   /** The group shown last in this session (kept while the row is shown). */
   readonly lastGroup: BarGroup | null;
+  readonly eraserMode: EraserMode;
+  readonly eraserSize: EraserSize;
   setMode: (mode: ToolMode) => void;
+  /** Stroke or Partial; remembered per device. */
+  setEraserMode: (mode: EraserMode) => void;
+  /** The eraser's diameter on screen; remembered per device. */
+  setEraserSize: (size: EraserSize) => void;
   /** Shows a group's tools, or the row of groups (null). */
   showGroup: (group: BarGroup | null) => void;
   /** After a one-shot tool placed its object: back to the tool used before it. */
@@ -82,6 +128,7 @@ export const useToolStore = create<ToolState>()((set, get) => ({
   previousMode: 'select',
   barGroup: null,
   lastGroup: null,
+  ...readEraserSettings(),
   setMode: (mode) =>
     set((s) =>
       s.mode === mode || (mode !== 'select' && locked())
@@ -90,6 +137,16 @@ export const useToolStore = create<ToolState>()((set, get) => ({
     ),
   showGroup: (group) =>
     set((s) => (s.barGroup === group ? s : { barGroup: group, lastGroup: group ?? s.lastGroup })),
+  setEraserMode: (eraserMode) => {
+    if (get().eraserMode === eraserMode) return;
+    set({ eraserMode });
+    writeEraserSettings(get());
+  },
+  setEraserSize: (eraserSize) => {
+    if (get().eraserSize === eraserSize) return;
+    set({ eraserSize });
+    writeEraserSettings(get());
+  },
   finishOneShot: () => {
     const { mode, previousMode } = get();
     if (!ONE_SHOT_MODES.has(mode)) return;
@@ -110,12 +167,13 @@ useWorkspaceStore.subscribe((state, previous) => {
   if (state.workspace.activeDocument !== previous.workspace.activeDocument) disarmWhenLocked();
 });
 
-/** Tests: the state of a fresh session. */
+/** Tests: the state of a fresh session (the eraser's options read back from storage). */
 export function resetToolStore(): void {
   useToolStore.setState({
     mode: 'select',
     previousMode: 'select',
     barGroup: null,
     lastGroup: null,
+    ...readEraserSettings(),
   });
 }

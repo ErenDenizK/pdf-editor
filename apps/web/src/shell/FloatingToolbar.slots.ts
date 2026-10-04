@@ -24,6 +24,8 @@ export interface PenBarProps {
 export interface PenSlots {
   readonly Bar?: ComponentType<PenBarProps>;
   readonly Tier?: ComponentType;
+  /** The eraser's options tier (Stroke or Partial, size; craft spec §5.6) while it is armed. */
+  readonly EraserTier?: ComponentType;
 }
 
 let slots: PenSlots = {};

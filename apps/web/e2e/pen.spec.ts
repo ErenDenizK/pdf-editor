@@ -761,3 +761,86 @@ test.describe('pen: width changes, zoom, Draw, lines and undo', () => {
     await expect(ink.locator('polyline')).toHaveCount(2);
   });
 });
+
+test.describe('eraser and straight lines (craft spec §5.6)', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test.beforeEach(async ({ page }) => {
+    await useFileInputPicker(page);
+  });
+
+  test('a Partial erase through the middle of a stroke leaves two pieces', async ({ page }) => {
+    await openSimple(page);
+    await page.locator('body').press('p');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    const ink = layer(page).locator('[data-annotation-kind="ink"]');
+    await mouseStroke(page, [0.2, 0.62], [0.5, 0.62]);
+    await expect(ink.locator('polyline')).toHaveCount(1, { timeout: 10_000 });
+    await expect(page.locator('[data-dry-ink]').first()).toHaveAttribute('data-strokes', '0', {
+      timeout: 10_000,
+    });
+    const box = await layer(page).boundingBox();
+    if (!box) throw new Error('page not rendered');
+    const height = Math.min(box.height, 800);
+    const midX = box.x + box.width * 0.35;
+    const y = box.y + height * 0.62;
+    const cut = { x: midX - 3, y: y - 6, width: 6, height: 12 };
+    expect(await darkShare(page, cut)).toBeGreaterThan(0.1);
+
+    // The eraser's tier: Partial, remembered.
+    await page.locator('body').press('Shift+E');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'eraser');
+    const tier = page.getByRole('toolbar', { name: 'Eraser options' });
+    await tier.getByRole('radio', { name: 'Partial' }).click();
+    await expect(tier.getByRole('radio', { name: 'Partial' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await page.mouse.move(midX, y - 30);
+    await page.mouse.down();
+    await page.mouse.move(midX, y + 30, { steps: 8 });
+    await page.mouse.up();
+
+    // Two pieces of the same annotation, with a gap where the eraser passed.
+    await expect(ink.locator('polyline')).toHaveCount(2, { timeout: 10_000 });
+    await expect(ink).toHaveCount(1);
+    const [left, right] = await inkPoints(page);
+    const localMid = midX - box.x;
+    expect(left?.at(-1)?.[0] ?? 0).toBeLessThan(localMid - 4);
+    expect(right?.[0]?.[0] ?? 0).toBeGreaterThan(localMid + 4);
+    // The erased part is gone from the page.
+    await expect.poll(() => darkShare(page, cut), { timeout: 10_000 }).toBeLessThan(0.02);
+    // One history entry: one undo brings the whole stroke back.
+    await page.keyboard.press('ControlOrMeta+z');
+    await expect(ink.locator('polyline')).toHaveCount(1, { timeout: 10_000 });
+  });
+
+  test('hold to straighten: a pause while drawing commits a two-point line', async ({ page }) => {
+    await openSimple(page);
+    await page.locator('body').press('p');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    const box = await layer(page).boundingBox();
+    if (!box) throw new Error('page not rendered');
+    const height = Math.min(box.height, 800);
+    const start = { x: box.x + box.width * 0.2, y: box.y + height * 0.7 };
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    // A wavy stroke, then still for 700 ms, then on to the end.
+    for (let i = 1; i <= 12; i++) {
+      await page.mouse.move(start.x + i * 12, start.y + (i % 2) * 8 + i * 2);
+    }
+    await page.waitForTimeout(700);
+    const end = { x: start.x + 260, y: start.y + 60 };
+    await page.mouse.move(end.x, end.y, { steps: 6 });
+    await page.mouse.up();
+
+    const ink = layer(page).locator('[data-annotation-kind="ink"]');
+    await expect(ink.locator('polyline')).toHaveCount(1, { timeout: 10_000 });
+    const [path] = await inkPoints(page);
+    expect(path).toHaveLength(2);
+    expect(Math.abs((path?.[0]?.[0] ?? 0) - (start.x - box.x))).toBeLessThanOrEqual(1);
+    expect(Math.abs((path?.[0]?.[1] ?? 0) - (start.y - box.y))).toBeLessThanOrEqual(1);
+    expect(Math.abs((path?.[1]?.[0] ?? 0) - (end.x - box.x))).toBeLessThanOrEqual(1);
+    expect(Math.abs((path?.[1]?.[1] ?? 0) - (end.y - box.y))).toBeLessThanOrEqual(1);
+  });
+});

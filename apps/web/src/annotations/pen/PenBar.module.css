@@ -283,3 +283,31 @@
 :global([data-tier-tool='ink']):empty {
   display: none;
 }
+
+/* The eraser's options tier (craft spec §5.6): two radio groups of stops with a hairline
+   between them; a size is a hollow circle that grows with it. */
+.eraserTier {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.divider {
+  align-self: stretch;
+  width: 1px;
+  margin: 4px 0;
+  background: var(--border-hairline);
+}
+
+.eraserSize {
+  display: inline-grid;
+  place-items: center;
+}
+
+.eraserMark {
+  box-sizing: border-box;
+  width: var(--mark);
+  height: var(--mark);
+  border: 1.5px solid currentColor;
+  border-radius: var(--radius-round);
+}

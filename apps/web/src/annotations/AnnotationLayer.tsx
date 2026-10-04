@@ -23,7 +23,8 @@
  * the engine's outline function (`pen/ink-preview.ts`) and width from pressure or speed,
  * with no React state per move. The other tools keep the React gesture below. Strokes
  * written in one go join one Ink annotation (a burst, spec §6.4, `pen/bursts.ts`); the
- * eraser removes whole paths from it and the annotation with its last path.
+ * eraser removes whole paths from it and the annotation with its last path, or in Partial
+ * cuts the paths under its circle (craft spec §5.6, `pen/eraser.ts`).
  *
  * The lasso (spec §6.5, `lasso/`) also has native handlers: it draws a free path, takes the
  * pen paths it touches as a path selection, highlights only those paths and shows the
@@ -53,7 +54,7 @@ import { isLive, penButtonOf } from '../viewer/hit-order';
 import { pageFrame } from '../viewer/page-frame';
 import { whenPainted } from '../viewer/read-controller';
 import { type ToolMode, useToolStore } from '../viewer/tool-store';
-import { createAnnotations, deleteAnnotations, updateAnnotations } from './actions';
+import { createAnnotations, updateAnnotations } from './actions';
 import { AnnotationBar } from './AnnotationBar';
 import {
   activePathSelection,
@@ -83,20 +84,14 @@ import {
   userToCss,
 } from './geometry';
 import { commitOpenEditor, InlineEditorView } from './InlineEditors';
-import {
-  boundsOf,
-  distanceToPolyline,
-  finishInkStroke,
-  type Point,
-  snapAngle,
-  snapSquare,
-} from './ink';
+import { boundsOf, finishInkStroke, type Point, snapAngle, snapSquare } from './ink';
 import { attachLassoInput } from './lasso/lasso-input';
 import { LassoHighlight } from './lasso/LassoSelection';
 import { mountedLayers } from './layer-registry';
 import { commitPenStroke, noteBurstPress } from './pen/bursts';
 import { attachInkInput, type InkStrokeInput, type SettleInk } from './pen/ink-input';
 import { drySettle, inkCommitted } from './pen/dry-ink';
+import { commitErase, eraseHits, eraserCursor, sweepFromCss } from './pen/eraser';
 // Registers the dry ink overlay (craft spec §5.3 item 7) before this layer.
 import './pen/DryInkLayer';
 import { commitHighlighterStroke, createPenPreview } from './pen/highlighter';
@@ -196,6 +191,8 @@ const DRAWING_TOOLS = new Set<ToolMode>([
 export function AnnotationLayer(props: PageOverlayProps) {
   const { sourceId, sourceIndex, pageId, pageIndex, visible } = props;
   const mode = useToolStore((s) => s.mode);
+  // The eraser's circle (craft spec §5.6): its size is the cursor, the trail and the reach.
+  const eraserSize = useToolStore((s) => s.eraserSize);
   // The Read lock: every press below fails closed while the document is not in Edit.
   const editable = useCanEdit();
   const annotations = usePageAnnotations(sourceId, sourceIndex);
@@ -329,7 +326,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
       const start = local(down);
       updateGesture({
         type: 'erase',
-        hits: eraseHits(new Map(), list, layer.frame, start),
+        hits: eraseHits(new Map(), list, layer.frame, start, useToolStore.getState().eraserSize),
         points: [start],
       });
       const stop = () => {
@@ -343,7 +340,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
         const p = local(event);
         updateGesture({
           ...g,
-          hits: eraseHits(g.hits, list, layer.frame, p),
+          hits: eraseHits(g.hits, list, layer.frame, p, useToolStore.getState().eraserSize),
           points: [...g.points, p],
         });
       };
@@ -352,7 +349,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
         stop();
         const g = gestureRef.current;
         updateGesture(null);
-        if (g?.type === 'erase') void commitErase(target, list, g.hits);
+        if (g?.type === 'erase') commitSweep(target, layer.frame, g.points);
       };
       const cancel = (event: PointerEvent) => {
         if (event.pointerId !== down.pointerId) return;
@@ -481,7 +478,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
     if (mode === 'eraser') {
       const first: Gesture = {
         type: 'erase',
-        hits: eraseHits(new Map(), annotations, frame, start),
+        hits: eraseHits(new Map(), annotations, frame, start, eraserSize),
         points: [start],
       };
       update(first);
@@ -491,14 +488,14 @@ export function AnnotationLayer(props: PageOverlayProps) {
           if (g?.type !== 'erase') return;
           update({
             ...g,
-            hits: eraseHits(g.hits, annotations, frame, p),
+            hits: eraseHits(g.hits, annotations, frame, p, eraserSize),
             points: [...g.points, p],
           });
         },
         () => {
           const g = gestureRef.current;
           update(null);
-          if (g?.type === 'erase') void commitErase(target, annotations, g.hits);
+          if (g?.type === 'erase') commitSweep(target, frame, g.points);
         },
       );
       return;
@@ -668,6 +665,7 @@ export function AnnotationLayer(props: PageOverlayProps) {
       data-annotation-layer={pageIndex}
       data-tool={mode}
       data-drawing={drawing || undefined}
+      style={drawing && mode === 'eraser' ? { cursor: eraserCursor(eraserSize) } : undefined}
       onPointerDown={onRootPointerDown}
     >
       <svg className={styles.svg} aria-hidden="true">
@@ -712,7 +710,9 @@ export function AnnotationLayer(props: PageOverlayProps) {
           <DrawPreview key={x.key} gesture={x.gesture} frame={frame} settling />
         ))}
         {gesture?.type === 'draw' ? <DrawPreview gesture={gesture} frame={frame} /> : null}
-        {gesture?.type === 'erase' ? <EraseTrail points={gesture.points} /> : null}
+        {gesture?.type === 'erase' ? (
+          <EraseTrail points={gesture.points} size={eraserSize} />
+        ) : null}
       </svg>
       {/* The pen's canvases (pen/ink-preview.ts); React never renders into it. */}
       <div ref={inkHostRef} className={styles.inkPreview} aria-hidden="true" />
@@ -1153,76 +1153,29 @@ function DrawPreview({
   }
 }
 
-function EraseTrail({ points }: { readonly points: readonly Point[] }) {
-  return <polyline className={styles.eraseTrail} points={polyline(points)} />;
-}
-
-/** Ink strokes under `p` (CSS px), added to `hits` (annotation id → stroke indices). */
-function eraseHits(
-  hits: ReadonlyMap<string, ReadonlySet<number>>,
-  annotations: readonly Annotation[],
-  frame: PageFrame,
-  p: Point,
-): ReadonlyMap<string, ReadonlySet<number>> {
-  const user = cssPointToUser(frame, p);
-  let next: Map<string, Set<number>> | undefined;
-  for (const a of annotations) {
-    if (a.kind !== 'ink' || a.flags?.locked) continue;
-    const tolerance = a.strokeWidth / 2 + 6 / frame.scale;
-    a.paths.forEach((path, i) => {
-      if (hits.get(a.id)?.has(i)) return;
-      if (distanceToPolyline(user, path) > tolerance) return;
-      next ??= new Map([...hits].map(([k, v]) => [k, new Set(v)]));
-      const set = next.get(a.id) ?? new Set<number>();
-      set.add(i);
-      next.set(a.id, set);
-    });
-  }
-  return next ?? hits;
+function EraseTrail({
+  points,
+  size,
+}: {
+  readonly points: readonly Point[];
+  readonly size: number;
+}) {
+  return (
+    <polyline
+      className={styles.eraseTrail}
+      points={polyline(points)}
+      style={{ strokeWidth: size }}
+    />
+  );
 }
 
 /**
- * Removes erased strokes (spec §6.4): whole paths, never parts of one. An Ink whose every
- * path goes is deleted; otherwise the paths that remain stay one annotation, their widths
- * kept parallel (ADR-0018), even when the erased path was between them.
+ * Erases what an eraser drag swept (craft spec §5.6, `pen/eraser.ts`): whole strokes or, in
+ * Partial, the parts of pen strokes under the circle; one history entry per drag.
  */
-async function commitErase(
-  target: PageTarget,
-  annotations: readonly Annotation[],
-  hits: ReadonlyMap<string, ReadonlySet<number>>,
-): Promise<void> {
-  const whole: string[] = [];
-  const partial: string[] = [];
-  for (const [id, strokes] of hits) {
-    const a = annotations.find((x) => x.id === id);
-    if (a?.kind !== 'ink') continue;
-    if (strokes.size >= a.paths.length) whole.push(id);
-    else partial.push(id);
-  }
-  if (whole.length > 0) await deleteAnnotations(target, whole);
-  if (partial.length > 0) {
-    await updateAnnotations(
-      target,
-      partial,
-      (a) => {
-        if (a.kind !== 'ink') return undefined;
-        const gone = hits.get(a.id) ?? new Set<number>();
-        const paths = a.paths.filter((_, i) => !gone.has(i));
-        // Per-point widths stay parallel to the paths that remain (ADR-0018).
-        const widths = a.widths?.filter((_, i) => !gone.has(i));
-        const widest = Math.max(a.strokeWidth, ...(widths?.flat() ?? []));
-        // Paths left on both sides of an erased one stay one annotation: the burst was
-        // written as one item, and splitting it would change its Review row and comment.
-        return {
-          ...a,
-          paths,
-          ...(widths ? { widths } : {}),
-          rect: roundRect(boundsOf(paths, widest / 2 + 1)),
-        };
-      },
-      { action: 'erase' },
-    );
-  }
+function commitSweep(target: PageTarget, frame: PageFrame, points: readonly Point[]): void {
+  const { eraserMode, eraserSize } = useToolStore.getState();
+  void commitErase(target, sweepFromCss(frame, points, eraserSize), eraserMode);
 }
 
 function dragged(g: DrawGesture): boolean {

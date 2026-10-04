@@ -23,6 +23,12 @@
  * been seen: the variable width lives in the stroke's appearance, and viewers that redraw
  * ink themselves show one width (spec §6.7, §13 decision 9). Otherwise the tier stays empty
  * and hidden.
+ *
+ * The eraser's options tier (`EraserTier`, craft spec §5.6): Whole stroke or Partial, and the
+ * eraser's size (a hollow circle per size; the cursor is that circle on the page). Both are
+ * radio groups in the tier's roving tabindex and are remembered per device (`tool-store.ts`).
+ * Partial's tooltip, also its description, says that highlighter strokes and highlights are
+ * erased whole.
  */
 import { Popover } from '@base-ui/react/popover';
 import { Plus } from 'lucide-react';
@@ -40,6 +46,7 @@ import type { PenBarProps } from '../../shell/FloatingToolbar.slots';
 import popoverStyles from '../../ui/Popover.module.css';
 import { Range } from '../../ui/Range';
 import { Tooltip } from '../../ui/Tooltip';
+import { ERASER_SIZES, type EraserMode, useToolStore } from '../../viewer/tool-store';
 import { useAnnotationStore } from '../annotation-store';
 import { penSession } from './ink-input';
 import {
@@ -406,5 +413,77 @@ export function PenTier() {
     <p className={styles.note} data-testid="pen-width-note">
       {m.pen_width_note()}
     </p>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The eraser's options tier
+// ---------------------------------------------------------------------------
+
+const ERASER_MODES: readonly {
+  readonly mode: EraserMode;
+  readonly label: () => string;
+  readonly tooltip: () => string;
+}[] = [
+  { mode: 'stroke', label: m.eraser_mode_stroke, tooltip: m.eraser_mode_stroke_tooltip },
+  { mode: 'partial', label: m.eraser_mode_partial, tooltip: m.eraser_mode_partial_tooltip },
+];
+
+/** The size marks in the tier (CSS px): the circles grow with the size, but stay small. */
+const ERASER_MARKS = [5, 8, 11, 15] as const;
+
+/** The eraser's options tier: Whole stroke or Partial, and its size (module header). */
+export function EraserTier() {
+  const eraserMode = useToolStore((s) => s.eraserMode);
+  const eraserSize = useToolStore((s) => s.eraserSize);
+  const hintId = useId();
+  return (
+    <div className={styles.eraserTier} data-testid="eraser-options">
+      <div role="radiogroup" aria-label={m.eraser_mode_label()} className={styles.stops}>
+        {ERASER_MODES.map(({ mode, label, tooltip }) => (
+          <Tooltip key={mode} label={tooltip()} side="top">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={eraserMode === mode}
+              aria-describedby={mode === 'partial' ? hintId : undefined}
+              className={styles.stop}
+              data-eraser-mode={mode}
+              onClick={() => useToolStore.getState().setEraserMode(mode)}
+            >
+              {label()}
+            </button>
+          </Tooltip>
+        ))}
+        <span id={hintId} hidden>
+          {m.eraser_mode_partial_tooltip()}
+        </span>
+      </div>
+      <span className={styles.divider} aria-hidden="true" />
+      <div role="radiogroup" aria-label={m.eraser_size_label()} className={styles.stops}>
+        {ERASER_SIZES.map((size, i) => {
+          const label = m.eraser_size_option({ size: formatNumber(size) });
+          return (
+            <Tooltip key={size} label={label} side="top">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={eraserSize === size}
+                aria-label={label}
+                className={`${styles.stop} ${styles.eraserSize}`}
+                data-eraser-size={size}
+                onClick={() => useToolStore.getState().setEraserSize(size)}
+              >
+                <span
+                  className={styles.eraserMark}
+                  style={{ '--mark': `${ERASER_MARKS[i] ?? 15}px` } as CSSProperties}
+                  aria-hidden="true"
+                />
+              </button>
+            </Tooltip>
+          );
+        })}
+      </div>
+    </div>
   );
 }
