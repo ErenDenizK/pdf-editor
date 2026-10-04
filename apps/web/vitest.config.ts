@@ -58,7 +58,13 @@ export default mergeConfig(
       browser: {
         enabled: true,
         headless: true,
-        provider: playwright({ launchOptions: chromiumLaunchOptions() }),
+        // Full Chromium (new headless), not Playwright's default headless shell. In CI the
+        // shell's browser process died part-way through this suite three runs in a row (SIGTRAP
+        // where logged), each time as a Batch or Recents test file started; full Chromium never
+        // has, and it is the browser users run. A local executable override still wins.
+        provider: playwright({
+          launchOptions: { channel: 'chromium', ...chromiumLaunchOptions() },
+        }),
         instances: [{ browser: 'chromium' }],
       },
     },
