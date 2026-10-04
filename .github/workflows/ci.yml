@@ -54,7 +54,10 @@ jobs:
       # pw:browser prints the browser's own stderr, so a page that closes mid-run (the web
       # suite's tab died that way in runs 125 and 126) leaves its reason in the log.
       - name: Unit and browser-mode tests
-        run: pnpm --filter @pdf-editor/web exec vitest run src/files/recents.test.ts --reporter=verbose --reporter=./test/start-reporter.ts
+        run: |
+          cd apps/web
+          pnpm exec vitest run src/files/handle-diag.test.ts --reporter=verbose --no-file-parallelism || true
+          exit 1
         env:
           DEBUG: pw:browser
 
