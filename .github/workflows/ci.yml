@@ -23,10 +23,13 @@ jobs:
     # The Playwright image tag must match @playwright/test in package.json (Renovate groups
     # both). It carries the browsers that Vitest browser mode (engine and web tests)
     # launches. Running as the runner's uid keeps the workspace writable and lets Firefox
-    # start.
+    # start. --ipc=host and --init follow Playwright's Docker guide: without the host IPC
+    # namespace Chromium can run out of shared memory and close the page mid-run (the
+    # browser-mode suite died that way in CI runs 125 and its re-run), and --init reaps
+    # browser child processes.
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
-      options: --user 1001
+      options: --user 1001 --ipc=host --init
     steps:
       - uses: actions/checkout@v7
 
@@ -98,7 +101,7 @@ jobs:
     timeout-minutes: 20
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
-      options: --user 1001
+      options: --user 1001 --ipc=host --init
     strategy:
       fail-fast: false
       matrix:
