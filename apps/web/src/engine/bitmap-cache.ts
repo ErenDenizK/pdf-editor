@@ -18,6 +18,12 @@ export interface CachedBitmap {
   readonly width: number;
   readonly height: number;
   readonly bucket: number;
+  /**
+   * The page revision (`EngineService.pageRevision`) whose content the bitmap shows: the
+   * revision it was rendered under, or the one a clipped repaint patched it for. A view that
+   * draws it reports this revision, never a newer one (craft spec §5.3 items 7 and 9).
+   */
+  readonly revision: number;
 }
 
 /** Page identity without the scale: every scale of one rendered page shares it. */
@@ -74,14 +80,21 @@ export class BitmapCache {
   /**
    * Largest cached scale of a page that is <= `maxBucket` (or the smallest one above it
    * when `allowLarger`); used to show a stretched preview while the right scale renders.
-   * Scales are compared as numbers, so buckets and exact scales mix freely.
+   * Scales are compared as numbers, so buckets and exact scales mix freely. Keys for which
+   * `skip` answers true are passed over (bitmaps being repainted).
    */
-  best(page: string, maxBucket: number, allowLarger = false): CachedBitmap | undefined {
+  best(
+    page: string,
+    maxBucket: number,
+    allowLarger = false,
+    skip?: (key: string) => boolean,
+  ): CachedBitmap | undefined {
     const set = this.buckets.get(page);
     if (set === undefined || set.size === 0) return undefined;
     let below: number | undefined;
     let above: number | undefined;
     for (const bucket of set) {
+      if (skip?.(`${page}:${bucket}`)) continue;
       if (bucket <= maxBucket) {
         if (below === undefined || bucket > below) below = bucket;
       } else if (above === undefined || bucket < above) {
@@ -106,6 +119,15 @@ export class BitmapCache {
     }
     set.add(entry.bucket);
     this.evict(entry.key);
+  }
+
+  /**
+   * Records that the bitmap under `key` shows `revision` too (its content did not change
+   * with the newer revision), keeping the bitmap and its place in the LRU order.
+   */
+  retag(key: string, revision: number): void {
+    const entry = this.entries.get(key);
+    if (entry !== undefined) this.entries.set(key, { ...entry, revision });
   }
 
   /** Removes one entry and closes its bitmap. */

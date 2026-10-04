@@ -11,7 +11,9 @@
  *   engine's (`inkOutlineOps`), so nothing moves. The live canvas is cleared in that task.
  * - **Revision.** Once the commit lands, `inkCommitted` tags the stroke with the page's
  *   revision (`EngineService.pageRevision`), the first that contains it. When a Read canvas
- *   draws a bitmap of revision *r* (`onPageBitmap`, in the task that drew it), the strokes
+ *   draws a bitmap of revision *r* (`onPageBitmap`, in the task that drew it; *r* is the
+ *   revision whose content the bitmap shows, `CachedBitmap.revision`, which stays older than
+ *   the page's while a clipped repaint is still patching that bitmap), the strokes
  *   tagged ≤ *r* are removed and the dry canvases redrawn in that same task: there is no
  *   frame where the stroke is missing or drawn twice. A stroke whose commit fails is dropped
  *   at once.

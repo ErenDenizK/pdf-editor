@@ -12,6 +12,10 @@
  * Every record is checked field by field when read, so a damaged or foreign record is
  * skipped rather than shown. When IndexedDB cannot be opened (storage disabled, some private
  * windows) the list lives in memory until the tab closes.
+ *
+ * "Clear recents" is final: a read or a record that began before it never brings entries
+ * back after it (`clears`). After a write failure switched the list to memory, Clear and
+ * Remove still try the stored database, and Clear says when it could not be cleared.
  */
 import { create } from 'zustand';
 
@@ -265,14 +269,26 @@ interface RecentsState {
   /** Session only: what reopening each entry needs (see `RecentAccess`). */
   readonly access: Readonly<Record<string, RecentAccess>>;
   readonly note: RecentNote | null;
+  /** The last "Clear recents" emptied the list but not the copy stored on this device. */
+  readonly clearFailed: boolean;
 }
 
-const INITIAL: RecentsState = { entries: [], loaded: false, access: {}, note: null };
+const INITIAL: RecentsState = {
+  entries: [],
+  loaded: false,
+  access: {},
+  note: null,
+  clearFailed: false,
+};
 
 export const useRecentsStore = create<RecentsState>(() => INITIAL);
 
 let backend: RecentsBackend | undefined;
 let fallbackToMemory = true;
+/** The stored backend a write failure switched away from: Clear and Remove still try it. */
+let abandoned: RecentsBackend | undefined;
+/** Bumped by every clear (and backend reset): reads and records begun earlier are void. */
+let clears = 0;
 let loading: Promise<void> | undefined;
 /** Writes run one after another, so a cap never deletes what a later put just wrote. */
 let queue: Promise<void> = Promise.resolve();
@@ -286,6 +302,7 @@ function enqueue(run: (target: RecentsBackend) => Promise<void>): Promise<void> 
     .catch(() => {
       if (!fallbackToMemory) return;
       // IndexedDB failed (quota, storage disabled): keep the list for this tab instead.
+      abandoned = backend;
       backend = memoryRecentsBackend(useRecentsStore.getState().entries);
       fallbackToMemory = false;
     });
@@ -302,6 +319,8 @@ export function setRecentsBackend(
 ): void {
   backend = next;
   fallbackToMemory = options.memoryFallback ?? true;
+  abandoned = undefined;
+  clears += 1;
   loading = undefined;
   queue = Promise.resolve();
   useRecentsStore.setState(INITIAL);
@@ -325,21 +344,29 @@ async function probeAccess(entries: readonly RecentEntry[]): Promise<void> {
       }
     }),
   );
-  useRecentsStore.setState((s) => ({ access: { ...access, ...s.access } }));
+  useRecentsStore.setState((s) => {
+    // Entries cleared or removed while the probe ran get nothing.
+    const kept = new Set(s.entries.map((entry) => entry.id));
+    const probed = Object.fromEntries(Object.entries(access).filter(([id]) => kept.has(id)));
+    return { access: { ...probed, ...s.access } };
+  });
 }
 
 /**
  * Reads the stored list once per page (later calls share the first read). Invalid records
- * are skipped and deleted; a list over the cap loses its oldest entries.
+ * are skipped and deleted; a list over the cap loses its oldest entries. A read that a
+ * "Clear recents" overtook shows nothing of what it read.
  */
 export function loadRecents(): Promise<void> {
   loading ??= (async () => {
+    const generation = clears;
     let records: readonly unknown[];
     try {
       records = await store().list();
     } catch {
       records = [];
     }
+    if (clears !== generation) records = [];
     const valid: RecentEntry[] = [];
     const invalid: string[] = [];
     for (const record of records) {
@@ -397,7 +424,10 @@ export async function recordRecent(input: RecordRecentInput): Promise<RecentEntr
     openedAt: input.now ?? Date.now(),
     ...(input.handle === undefined ? {} : { handle: input.handle }),
   };
+  const generation = clears;
   await loadRecents();
+  // Recents were cleared since this open: it is forgotten with the rest.
+  if (clears !== generation) return null;
   const state = useRecentsStore.getState();
   const { entries, removed } = addRecentEntry(state.entries, entry, {
     ...(input.replaces === undefined ? {} : { replaces: input.replaces }),
@@ -430,13 +460,45 @@ export async function removeRecent(id: string): Promise<void> {
     access,
     note: state.note?.id === id ? null : state.note,
   });
-  await enqueue((target) => target.remove(id));
+  await enqueue(async (target) => {
+    await target.remove(id);
+    // After a switch to memory the stored copy still holds it: try there too.
+    const stored = abandoned;
+    if (stored !== undefined && stored !== target) await stored.remove(id).catch(() => undefined);
+  });
 }
 
-/** Forgets every entry and handle ("Clear recents"). */
-export async function clearRecents(): Promise<void> {
-  useRecentsStore.setState({ entries: [], access: {}, note: null });
-  await enqueue((target) => target.clear());
+/**
+ * Forgets every entry and handle ("Clear recents"), on screen at once and in storage. A
+ * read or a record begun before it does not bring anything back. After a write failure
+ * switched the list to memory, the stored database is cleared too, and used again once it
+ * is. Resolves false when the copy stored on this device could not be cleared (the list on
+ * screen is empty either way; `clearFailed` tells Home).
+ */
+export async function clearRecents(): Promise<boolean> {
+  clears += 1;
+  useRecentsStore.setState({ entries: [], access: {}, note: null, clearFailed: false });
+  let cleared = false;
+  await enqueue(async (target) => {
+    await target.clear();
+    const stored = abandoned;
+    if (stored === undefined || stored === target) {
+      cleared = true;
+      return;
+    }
+    try {
+      await stored.clear();
+    } catch {
+      return;
+    }
+    // Both are empty now: the stored database takes over again.
+    cleared = true;
+    backend = stored;
+    abandoned = undefined;
+    fallbackToMemory = true;
+  });
+  if (!cleared) useRecentsStore.setState({ clearFailed: true });
+  return cleared;
 }
 
 /** Shows (or hides, with null) the one-line note under the list. */

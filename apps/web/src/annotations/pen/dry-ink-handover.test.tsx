@@ -4,8 +4,9 @@
  * stroke is on the dry layer in its pointer-up task; the page re-renders once the pen is
  * up and idle; when the bitmap with the stroke is drawn, the dry stroke goes in that same
  * task. Sampled every animation frame across the hand-over, the stroke's pixel is never
- * missing and never drawn by both layers. An undo before the hand-over removes the strokes
- * and re-renders at once.
+ * missing and never drawn by both layers, also when a burst's next stroke repaints only its
+ * box into the cached bitmap (a clipped repaint). An undo before the hand-over removes the
+ * strokes and re-renders at once.
  */
 import '../../styles/tokens.css';
 import '../../styles/reset.css';
@@ -20,12 +21,12 @@ import {
   type VirtualPage,
 } from '@pdf-editor/document-model';
 import { cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 
 import simpleUrl from '../../../../../test/fixtures/simple-text.pdf?url';
 import { enterEditMode, fixtureFile } from '../../../test/store-harness';
-import { RENDER_PRIORITY } from '../../engine/engine-service';
+import { getEngineService, RENDER_PRIORITY } from '../../engine/engine-service';
 import { displaySize } from '../../pages/page-geometry';
 import { PageCanvas } from '../../pages/PageCanvas';
 import { resetWorkspace, useWorkspaceStore } from '../../state/workspace-store';
@@ -43,6 +44,7 @@ import {
   useAnnotationStore,
 } from '../annotation-store';
 import { resetEditRunner, whenIdle } from '../edit-runner';
+import { closeBurst } from './bursts';
 import { dryStrokes, resetDryInk } from './dry-ink';
 import { DryInkLayer } from './DryInkLayer';
 import { resetPenSession } from './ink-input';
@@ -284,6 +286,79 @@ describe('dry ink hand-over (real PDFium)', () => {
     expect(swaps.some((s) => s.page && !s.dry)).toBe(true);
     expect(swaps.filter((s) => s.page && s.dry)).toEqual([]);
     expect(dry.dataset.strokes).toBe('0');
+  }, 40_000);
+
+  // Review F5: a burst's second stroke repaints only its box into the cached bitmap. While
+  // that patch runs, the bitmap still shows the old content and must not stand for the new
+  // revision, or the dry layer drops the stroke before any bitmap shows it.
+  it('the clipped repaint of a burst append: no frame without the stroke or with it twice', async () => {
+    // A long burst pause, so the second stroke joins the first after its hand-over.
+    localStorage.setItem(
+      PEN_PRESETS_STORAGE_KEY,
+      JSON.stringify({ ...useAnnotationStore.getState().pen, burstPauseMs: 5000 }),
+    );
+    resetAnnotationStore();
+    const mounted = await mountPage();
+    const { layer, canvas, dry, source } = mounted;
+    await armPen(mounted);
+    const y = Math.round(layer.getBoundingClientRect().height * 0.9) + 0.5;
+    const service = getEngineService();
+    // Calls through: counts the clipped repaints.
+    const clipped = vi.spyOn(service, 'requestClippedRepaint');
+    let clippedCalls: number | undefined;
+    const swaps: Sample[] = [];
+    let off: (() => void) | undefined;
+    let sampler: ReturnType<typeof sampleFrames> | undefined;
+    try {
+      // The burst's first stroke (a create), handed over to a whole-page bitmap.
+      await stroke(layer, 150, 250, y);
+      await waitFor(
+        () => {
+          expect(pageDark(canvas, 200.5, y)).toBe(true);
+          expect(dryStrokes(source, 0)).toHaveLength(0);
+        },
+        { timeout: 4_000 },
+      );
+      expect(clipped).not.toHaveBeenCalled();
+
+      // The second stroke joins it (an append): only its box is repainted.
+      const x = 320.5;
+      expect(pageDark(canvas, x, y)).toBe(false);
+      off = onPageBitmap(() =>
+        swaps.push({ page: pageDark(canvas, x, y), dry: dryDrawn(dry, x, y) }),
+      );
+      await stroke(layer, 270, 370, y);
+      sampler = sampleFrames(canvas, dry, x, y);
+      expect(dryDrawn(dry, x, y)).toBe(true);
+      expect(pageDark(canvas, x, y)).toBe(false);
+      await waitFor(
+        () => {
+          expect(pageDark(canvas, x, y)).toBe(true);
+          expect(dryStrokes(source, 0)).toHaveLength(0);
+        },
+        { timeout: 15_000 },
+      );
+      await frame();
+      await frame();
+    } finally {
+      sampler?.stop();
+      off?.();
+      clippedCalls = clipped.mock.calls.length;
+      clipped.mockRestore();
+      closeBurst();
+    }
+    expect(clippedCalls).toBe(1);
+    const after = sampler?.samples ?? [];
+    expect(after.length).toBeGreaterThan(2);
+    expect(after.filter((s) => !s.page && !s.dry)).toEqual([]);
+    expect(after.filter((s) => s.page && s.dry)).toEqual([]);
+    expect(after.some((s) => s.dry && !s.page)).toBe(true);
+    expect(after.at(-1)).toEqual({ page: true, dry: false });
+    // Every bitmap reported while the stroke was held either lacked it with the dry layer
+    // still drawing it, or showed it with the dry layer empty.
+    expect(swaps.filter((s) => !s.page && !s.dry)).toEqual([]);
+    expect(swaps.filter((s) => s.page && s.dry)).toEqual([]);
+    expect(swaps.some((s) => s.page && !s.dry)).toBe(true);
   }, 40_000);
 
   it('the re-render waits while a pointer is down; an undo removes the strokes at once', async () => {

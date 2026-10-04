@@ -18,6 +18,7 @@ import {
   RENDER_PRIORITY,
   sheetSize,
 } from '../engine/engine-service';
+import { onPageBitmap } from '../viewer/read-controller';
 import { PageCanvas } from './PageCanvas';
 
 const WIDTH_PT = 612;
@@ -151,6 +152,41 @@ describe('PageCanvas (edits)', () => {
       await waitFor(() => expect(canvas.dataset.state).toBe('rendered'), { timeout: 20_000 });
     } finally {
       spy.mockRestore();
+    }
+  }, 30_000);
+
+  // Review F5: a bitmap is reported under the revision whose content it shows, so the dry ink
+  // layer never takes a bitmap that a clipped repaint has not patched yet for the new revision.
+  it('reports every bitmap it draws under the bitmap’s own revision', async () => {
+    const service = getEngineService();
+    const { container } = render(<Sheet zoom={1} />);
+    const canvas = canvasOf(container);
+    await waitFor(() => expect(canvas.dataset.state).toBe('rendered'), { timeout: 20_000 });
+    const before = service.pageRevision(source, 0);
+    const old = service.peek(source, 0, 0, expectedScale(1));
+    expect(old?.revision).toBe(before);
+    const reported: number[] = [];
+    const off = onPageBitmap((id, index, generation) => {
+      if (id === source && index === 0) reported.push(generation);
+    });
+    // While the patch runs the service offers nothing of the old content (it passes over the
+    // bitmap being repainted); a cache that still offered it would carry its old revision.
+    const preview = vi.spyOn(service, 'preview').mockImplementationOnce(() => old);
+    try {
+      act(() =>
+        service.requestClippedRepaint(source, 0, { x: 100, y: 600, width: 20, height: 20 }),
+      );
+      const after = service.pageRevision(source, 0);
+      expect(after).toBe(before + 1);
+      expect(preview).toHaveBeenCalled();
+      // The old bitmap was drawn as a preview and reported as what it is.
+      expect(reported).toEqual([before]);
+      await waitFor(() => expect(canvas.dataset.state).toBe('rendered'), { timeout: 20_000 });
+      expect(reported).toEqual([before, after]);
+      expect(service.peek(source, 0, 0, expectedScale(1))?.revision).toBe(after);
+    } finally {
+      off();
+      preview.mockRestore();
     }
   }, 30_000);
 

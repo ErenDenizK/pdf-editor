@@ -1007,6 +1007,8 @@ export class EngineService {
       this.cache.remove(entry.key);
     }
     const generation = this.generations.get(pageId) ?? 0;
+    // The revision this change makes: each patched bitmap is labelled with it.
+    const revision = (this.revisions.get(pageId) ?? 0) + 1;
     const waits = patched.map((entry) => {
       let done: (() => void) | undefined;
       const wait = new Promise<void>((resolve) => {
@@ -1019,7 +1021,7 @@ export class EngineService {
       for (const { entry, wait, done } of waits) {
         try {
           if ((this.generations.get(pageId) ?? 0) === generation) {
-            await this.patchBitmap(sourceId, index, entry, rectInPage, generation);
+            await this.patchBitmap(sourceId, index, entry, rectInPage, generation, revision);
           }
         } finally {
           if (this.repainting.get(entry.key) === wait) this.repainting.delete(entry.key);
@@ -1031,17 +1033,21 @@ export class EngineService {
     void run.finally(() => {
       if (this.repaints.get(pageId) === run) this.repaints.delete(pageId);
     });
-    this.revisions.set(pageId, (this.revisions.get(pageId) ?? 0) + 1);
+    this.revisions.set(pageId, revision);
     for (const listener of this.revisionListeners) listener();
   }
 
-  /** Renders `rect` of one cached bitmap's page at its scale and composites it in its place. */
+  /**
+   * Renders `rect` of one cached bitmap's page at its scale and composites it in its place,
+   * labelled with `revision` (the revision of the change it paints).
+   */
   private async patchBitmap(
     sourceId: SourceId,
     index: number,
     entry: RenderedEntry,
     rect: Rect,
     generation: number,
+    revision: number,
   ): Promise<void> {
     const pageId = `${sourceId}:${index}`;
     const base = this.cache.get(entry.key);
@@ -1052,8 +1058,10 @@ export class EngineService {
         ? undefined
         : clippedRepaintBox(shape, entry.rotation, rect, base.width, base.height);
     if (box === undefined) {
-      // Nothing of the page's shape is known (or the rect misses it): render it again whole.
+      // Nothing of the page's shape is known: render it again whole. The rect misses the
+      // page: the bitmap already shows the new revision.
       if (shape === undefined) this.cache.remove(entry.key);
+      else this.cache.retag(entry.key, revision);
       return;
     }
     const started = this.mark(`render-start:${entry.key}#clip`);
@@ -1082,7 +1090,7 @@ export class EngineService {
       ctx.drawImage(base.bitmap, 0, 0);
       ctx.clearRect(box.left, box.top, box.width, box.height);
       ctx.drawImage(piece, box.left, box.top, box.width, box.height);
-      this.cache.set(entry.page, { ...base, bitmap: canvas.transferToImageBitmap() });
+      this.cache.set(entry.page, { ...base, bitmap: canvas.transferToImageBitmap(), revision });
       this.measure(`render ${entry.key}#clip`, started);
     } catch {
       // A failed piece: the bitmap goes, and the page renders again whole when shown.
@@ -1144,7 +1152,9 @@ export class EngineService {
 
   /**
    * The best cached bitmap of a page at or below `bucket` (or above, if nothing below),
-   * whether it was rendered at an exact scale or a bucket.
+   * whether it was rendered at an exact scale or a bucket. Bitmaps being repainted
+   * (`requestClippedRepaint`) are passed over, as in `peek`: they still show the content of
+   * an older revision. Whatever is returned shows the content of its own `revision`.
    */
   preview(
     sourceId: SourceId,
@@ -1152,7 +1162,9 @@ export class EngineService {
     rotation: Rotation,
     bucket: number,
   ): CachedBitmap | undefined {
-    return this.cache.best(pageKey(sourceId, index, rotation), bucket, true);
+    return this.cache.best(pageKey(sourceId, index, rotation), bucket, true, (key) =>
+      this.repainting.has(key),
+    );
   }
 
   get cacheStats(): { readonly entries: number; readonly bytes: number; readonly budget: number } {
@@ -1252,6 +1264,9 @@ export class EngineService {
   private async run(job: Job): Promise<void> {
     const { sourceId, index, rotation, bucket, clip } = job.request;
     const started = this.mark(`render-start:${job.key}`);
+    // The content this render shows: any change after this point marks the job stale
+    // (`invalidatePage`, `requestClippedRepaint`), and a stale result is never handed out.
+    const revision = this.pageRevision(sourceId, index);
     let result: EngineResult<CachedBitmap>;
     try {
       const rendered = await (await this.engine()).renderPage(sourceId, index, {
@@ -1266,6 +1281,7 @@ export class EngineService {
         width: rendered.width,
         height: rendered.height,
         bucket,
+        revision,
       };
       if (job.sourceClosed || job.stale) {
         // The source was closed while PDFium rendered (the adapter finished before it saw

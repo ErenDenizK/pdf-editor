@@ -213,4 +213,62 @@ describe('EngineService clipped repaint', () => {
     expect(service.peek(id, 0, 0, 0.5)).toBeUndefined();
     expect(service.cacheStats.entries).toBe(MAX_CLIPPED_REPAINTS + 1);
   });
+
+  // Review F5: a bitmap still being patched was offered by `preview()`, and PageCanvas drew
+  // it as the new revision, so the dry ink layer dropped the new stroke a frame too early.
+  it('preview() does not offer a bitmap that is still being repainted', async () => {
+    const { service, id, content } = await openService();
+    const req = { sourceId: id, index: 0, rotation: 0 as Rotation, bucket: 2, priority: 3 };
+    const first = await service.renderPage(req);
+    if (!first.ok) throw new Error('render failed');
+    expect(first.value.revision).toBe(service.pageRevision(id, 0));
+    content.color = '#0000ff';
+    service.noteClippedChange(id, 0, BOX);
+    service.invalidatePage(id, 0);
+    expect(service.peek(id, 0, 0, 2)).toBeUndefined();
+    expect(service.preview(id, 0, 0, 2)).toBeUndefined();
+    // Once patched, both offer it, with the new content in the box.
+    const after = await service.renderPage(req);
+    if (!after.ok) throw new Error('render failed');
+    const preview = service.preview(id, 0, 0, 2);
+    expect(preview?.bitmap).toBe(after.value.bitmap);
+    if (preview) expect(pixel(preview.bitmap, 50, 90)).toBe('#0000ff');
+  });
+
+  it('every bitmap carries the revision whose content it shows', async () => {
+    const { service, id, content } = await openService();
+    const req = { sourceId: id, index: 0, rotation: 0 as Rotation, bucket: 1, priority: 3 };
+    const first = await service.renderPage(req);
+    if (!first.ok) throw new Error('render failed');
+    const r0 = service.pageRevision(id, 0);
+    expect(first.value.revision).toBe(r0);
+    content.color = '#0000ff';
+    service.requestClippedRepaint(id, 0, BOX);
+    const r1 = service.pageRevision(id, 0);
+    expect(r1).toBe(r0 + 1);
+    // Whatever is offered during the repaint is never labelled newer than its content.
+    for (const offered of [service.peek(id, 0, 0, 1), service.preview(id, 0, 0, 1)]) {
+      if (offered) expect(offered.revision).toBe(r0);
+    }
+    const patched = await service.renderPage(req);
+    if (!patched.ok) throw new Error('render failed');
+    expect(patched.value.revision).toBe(r1);
+    expect(pixel(patched.value.bitmap, 25, 45)).toBe('#0000ff');
+    expect(service.peek(id, 0, 0, 1)?.revision).toBe(r1);
+
+    // A change that misses the page leaves the pixels as they are: they show the new revision.
+    service.requestClippedRepaint(id, 0, { x: 300, y: 10, width: 5, height: 5 });
+    const r2 = service.pageRevision(id, 0);
+    const kept = await service.renderPage(req);
+    if (!kept.ok) throw new Error('render failed');
+    expect(kept.value.bitmap).toBe(patched.value.bitmap);
+    expect(kept.value.revision).toBe(r2);
+
+    // A whole render after a full invalidation carries the revision it was rendered under.
+    service.invalidatePage(id, 0);
+    const whole = await service.renderPage(req);
+    if (!whole.ok) throw new Error('render failed');
+    expect(whole.value.revision).toBe(service.pageRevision(id, 0));
+    expect(whole.value.revision).toBe(r2 + 1);
+  });
 });

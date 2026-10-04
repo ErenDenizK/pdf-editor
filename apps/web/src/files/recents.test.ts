@@ -297,6 +297,121 @@ describe('the recents store', () => {
   });
 });
 
+// Review F6: "Clear recents" must be final, and must reach the stored copy even after a
+// write failure switched the list to memory.
+describe('clearing recents', () => {
+  /** `list()` waits for `release()`, as a slow IndexedDB read would. */
+  function slowList(memory: RecentsBackend) {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const backend: RecentsBackend = {
+      ...memory,
+      list: async () => {
+        const records = await memory.list();
+        await gate;
+        return records;
+      },
+    };
+    return { backend, release };
+  }
+
+  /** A stored backend whose writes fail while `failing.put` / `failing.clear` are set. */
+  function flaky(records: readonly unknown[]) {
+    const memory = memoryRecentsBackend(records);
+    const failing = { put: false, clear: false };
+    const backend: RecentsBackend = {
+      ...memory,
+      put: (record) =>
+        failing.put ? Promise.reject(new Error('QuotaExceededError')) : memory.put(record),
+      clear: () =>
+        failing.clear ? Promise.reject(new Error('InvalidStateError')) : memory.clear(),
+    };
+    return { backend, memory, failing };
+  }
+
+  it('a clear pressed while the list is loading is not undone by the load', async () => {
+    const memory = memoryRecentsBackend([
+      { id: 'a', name: 'secret-contract.pdf', size: 10, openedAt: 1 },
+    ]);
+    const slow = slowList(memory);
+    setRecentsBackend(slow.backend);
+    const loading = loadRecents();
+    expect(await clearRecents()).toBe(true);
+    slow.release();
+    await loading;
+    expect(useRecentsStore.getState().entries).toEqual([]);
+    expect(useRecentsStore.getState().access).toEqual({});
+    expect(useRecentsStore.getState().loaded).toBe(true);
+    expect(await memory.list()).toEqual([]);
+  });
+
+  it('an open recorded before the clear does not come back after it; later ones do', async () => {
+    const memory = memoryRecentsBackend([entry('old', 1)]);
+    const slow = slowList(memory);
+    setRecentsBackend(slow.backend);
+    const before = recordRecent({ name: 'before.pdf', size: 1, now: 2 });
+    await clearRecents();
+    const after = recordRecent({ name: 'after.pdf', size: 1, now: 3 });
+    slow.release();
+    expect(await before).toBeNull();
+    await after;
+    expect(useRecentsStore.getState().entries.map((e) => e.name)).toEqual(['after.pdf']);
+    expect((await memory.list()).map((r) => parseRecentEntry(r)?.name)).toEqual(['after.pdf']);
+  });
+
+  it('after a failure switched to memory, Remove and Clear still reach the stored copy', async () => {
+    const stored = flaky([entry('old', 1), entry('older', 0)]);
+    setRecentsBackend(stored.backend);
+    await loadRecents();
+    stored.failing.put = true;
+    await recordRecent({ name: 'new.pdf', size: 1, now: 2 });
+    // The list carries on in memory for this tab.
+    expect(useRecentsStore.getState().entries.map((e) => e.name)).toEqual([
+      'new.pdf',
+      'old.pdf',
+      'older.pdf',
+    ]);
+    await removeRecent('old');
+    expect((await stored.memory.list()).map((r) => parseRecentEntry(r)?.id)).toEqual(['older']);
+    expect(await clearRecents()).toBe(true);
+    expect(await stored.memory.list()).toEqual([]);
+    expect(useRecentsStore.getState().clearFailed).toBe(false);
+    // The stored database is used again once it is cleared.
+    stored.failing.put = false;
+    await recordRecent({ name: 'next.pdf', size: 1, now: 3 });
+    expect((await stored.memory.list()).map((r) => parseRecentEntry(r)?.name)).toEqual([
+      'next.pdf',
+    ]);
+  });
+
+  it('says so when the stored copy cannot be cleared, and a later clear tries again', async () => {
+    const stored = flaky([entry('old', 1)]);
+    setRecentsBackend(stored.backend);
+    await loadRecents();
+    stored.failing.put = true;
+    stored.failing.clear = true;
+    await recordRecent({ name: 'new.pdf', size: 1, now: 2 });
+    expect(await clearRecents()).toBe(false);
+    expect(useRecentsStore.getState()).toMatchObject({ entries: [], clearFailed: true });
+    expect(await stored.memory.list()).toHaveLength(1);
+    stored.failing.clear = false;
+    expect(await clearRecents()).toBe(true);
+    expect(useRecentsStore.getState().clearFailed).toBe(false);
+    expect(await stored.memory.list()).toEqual([]);
+  });
+
+  it('says so when the only backend refuses to clear', async () => {
+    const stored = flaky([entry('old', 1)]);
+    setRecentsBackend(stored.backend, { memoryFallback: false });
+    await loadRecents();
+    stored.failing.clear = true;
+    expect(await clearRecents()).toBe(false);
+    expect(useRecentsStore.getState()).toMatchObject({ entries: [], clearFailed: true });
+  });
+});
+
 describe('reopenRecent', () => {
   beforeEach(() => setRecentsBackend(memoryRecentsBackend()));
 

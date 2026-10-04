@@ -33,7 +33,9 @@
  *   committed stroke is on screen (experience-redesign spec §6.1, `whenPainted`).
  * - Dry ink (craft spec §5.3 item 7): a Read canvas reports every bitmap it draws (a
  *   stretched preview too, `notePageBitmap`) in the task that drew it, so the dry ink layer
- *   clears the strokes that bitmap contains in the same frame. Its re-render after an edit
+ *   clears the strokes that bitmap contains in the same frame. A bitmap is reported under
+ *   its own revision (`CachedBitmap.revision`: the content it shows), so a bitmap a clipped
+ *   repaint has not patched yet never stands for the new revision. Its re-render after an edit
  *   goes through `deferPageRender`: it waits while the dry layer holds fresh ink of the page
  *   (until the burst closes or idle time comes with no pointer down). Thumbnails and the
  *   other pages wait while a pen is down (`whenPenUp`).
@@ -243,22 +245,25 @@ export function PageCanvas({
       canvas.dataset.revision = revisionKey;
     }
     // A canvas of the Read view: its bitmaps hand dry ink over (craft spec §5.3 item 7).
+    // Each bitmap is reported under its own revision (the content it shows), which is older
+    // than the page's while a clipped repaint is still patching it; never under a newer one.
     const inRead = exact || canvas.closest('[data-read-viewport]') !== null;
-    const painted = () => {
-      if (exact) notePagePainted(sourceId, index, revision);
-      else if (inRead) notePageBitmap(sourceId, index, revision);
+    const painted = (entry: CachedBitmap) => {
+      if (exact) notePagePainted(sourceId, index, entry.revision);
+      else if (inRead) notePageBitmap(sourceId, index, entry.revision);
     };
     const hit = service.peek(sourceId, index, rotation, bucket);
     if (hit && draw(canvas, hit, 'rendered')) {
       requestedBucketRef.current = bucket;
-      painted();
+      painted(hit);
       return;
     }
     const shownBucket = Number(canvas.dataset.bucket ?? 0);
     const preview = service.preview(sourceId, index, rotation, bucket);
     if (preview && canvas.dataset.state !== 'rendered' && preview.bucket > shownBucket) {
-      // The cache holds only bitmaps of the current revision (`invalidatePage` drops the rest).
-      if (draw(canvas, preview, 'preview') && inRead) notePageBitmap(sourceId, index, revision);
+      if (draw(canvas, preview, 'preview') && inRead) {
+        notePageBitmap(sourceId, index, preview.revision);
+      }
     }
 
     const controller = new AbortController();
@@ -270,7 +275,7 @@ export function PageCanvas({
         .then((result) => {
           if (cancelled) return;
           if (result.ok) {
-            if (draw(canvas, result.value, 'rendered')) painted();
+            if (draw(canvas, result.value, 'rendered')) painted(result.value);
           } else if (result.error.code !== 'aborted' && canvas.dataset.state === 'placeholder') {
             canvas.dataset.state = 'error';
           }

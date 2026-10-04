@@ -36,7 +36,7 @@ function fakeBitmap(width: number, height: number) {
 function entry(key: string, width: number, height: number, bucket = 1) {
   const bitmap = fakeBitmap(width, height);
   return {
-    entry: { key, bitmap: bitmap as unknown as ImageBitmap, width, height, bucket },
+    entry: { key, bitmap: bitmap as unknown as ImageBitmap, width, height, bucket, revision: 0 },
     bitmap,
   };
 }
