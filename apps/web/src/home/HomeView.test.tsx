@@ -28,6 +28,7 @@ import {
   type RecentFileHandle,
   recordRecent,
   setRecentsBackend,
+  storedHandlesReadable,
   useRecentsStore,
 } from '../files/recents';
 import { setLocale } from '../i18n';
@@ -792,6 +793,19 @@ describe('Recents on Home', () => {
     );
     render(<App />);
     await screen.findByRole('list', { name: 'Recent files' });
+    if (!storedHandlesReadable()) {
+      // Chromium 153 crashes on reading a stored handle back, so the row goes through the
+      // file dialog instead (files/recents.ts).
+      expect(row('simple-text.pdf')).toHaveAccessibleName(/, Open again…$/);
+      const picker = stubPicker([file]);
+      await userEvent.click(row('simple-text.pdf'));
+      await waitFor(() => {
+        expect(ws().documentOrder).toHaveLength(1);
+      });
+      expect(picker.calls).toBe(1);
+      expect(handle.requested).toBe(0);
+      return;
+    }
     await waitFor(() => {
       expect(row('simple-text.pdf')).toHaveAccessibleName(/, Needs permission$/);
     });
