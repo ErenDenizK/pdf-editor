@@ -47,7 +47,10 @@ jobs:
       - name: Unit and browser-mode tests
         run: |
           cd apps/web
+          echo '=== Playwright flags as they are'
           pnpm exec vitest run src/files/handle-diag.test.ts --reporter=verbose --no-file-parallelism || true
+          echo '=== ThirdPartyStoragePartitioning left on'
+          DIAG_KEEP_PARTITIONING=1 pnpm exec vitest run src/files/handle-diag.test.ts --reporter=verbose --no-file-parallelism || true
           exit 1
         env:
           DEBUG: pw:browser

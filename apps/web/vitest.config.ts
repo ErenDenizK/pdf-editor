@@ -58,7 +58,7 @@ export default mergeConfig(
       browser: {
         enabled: true,
         headless: true,
-        provider: playwright({ launchOptions: chromiumLaunchOptions() }),
+        provider: playwright({ launchOptions: process.env.DIAG_KEEP_PARTITIONING ? { ...chromiumLaunchOptions(), ignoreDefaultArgs: ['--disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion'], args: ['--disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion'] } : chromiumLaunchOptions() }),
         instances: [{ browser: 'chromium' }],
       },
     },
