@@ -10,8 +10,17 @@ import {
   type SourceId,
 } from '@pdf-editor/document-model';
 
+import { noteReopenedFrom, openDocuments } from '../commands/app-commands';
 import { enterCompare } from '../compare/compare-commands';
 import { useCompareStore } from '../compare/compare-store';
+import { pickFiles, rememberFileHandle } from '../files/open-files';
+import {
+  type RecentEntry,
+  removeRecent,
+  reopenRecent,
+  setRecentNote,
+  useRecentsStore,
+} from '../files/recents';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { openOperationDialog } from '../stage/operation-dialogs-store';
@@ -191,4 +200,63 @@ export function closeOnHome(selection: readonly DocumentId[]): void {
       ? m.announce_closed({ name: names[0] ?? '' })
       : m.home_announce_closed({ count: ids.length }),
   );
+}
+
+/** Opens what a Recents reopen produced: one file goes straight to Read, several to Home. */
+async function openFromRecents(files: readonly File[]): Promise<boolean> {
+  const wasEmpty = order().length === 0;
+  const ids = await openDocuments(files);
+  const [only] = ids;
+  if (only !== undefined && ids.length === 1) openInRead(only);
+  else showOpened(ids, { wasEmpty });
+  return ids.length > 0;
+}
+
+/**
+ * A Recents row (click, Enter): reopens the file through its handle, asking for read
+ * permission within the click where the browser needs it. Without a handle, or when the
+ * handle fails (permission denied, file moved), the row turns to "Open again…" and says so
+ * in one line; "Open again…" opens the file dialog. Call it straight from the event, with no
+ * await before it, so the permission request keeps the click's user activation.
+ */
+export async function openRecent(entry: RecentEntry): Promise<void> {
+  const access = useRecentsStore.getState().access[entry.id];
+  if (entry.handle === undefined || access === 'unavailable') {
+    await openRecentAgain(entry);
+    return;
+  }
+  const handle = entry.handle;
+  const result = await reopenRecent(entry);
+  if (!result.ok) {
+    setRecentNote({ id: entry.id, name: entry.name, kind: 'unavailable' });
+    announce(m.recents_note_unavailable({ name: entry.name }));
+    return;
+  }
+  setRecentNote(null);
+  rememberFileHandle(result.file, handle);
+  noteReopenedFrom(result.file, entry.id);
+  await openFromRecents([result.file]);
+}
+
+/** "Open again…": the file dialog, with one line saying why it opened. */
+export async function openRecentAgain(entry: RecentEntry): Promise<void> {
+  const note = { id: entry.id, name: entry.name, kind: 'open-again' } as const;
+  // The dialog opens first, within the click's user activation; the note follows at once.
+  const picking = pickFiles('openable');
+  setRecentNote(note);
+  announce(m.recents_note_open_again({ name: entry.name }));
+  const files = await picking;
+  if (files.length === 0) return;
+  for (const file of files) {
+    if (file.name === entry.name) noteReopenedFrom(file, entry.id);
+  }
+  if (await openFromRecents(files)) {
+    if (useRecentsStore.getState().note === note) setRecentNote(null);
+  }
+}
+
+/** "Remove from recents" and Delete on a row. */
+export function removeRecentEntry(entry: RecentEntry): void {
+  void removeRecent(entry.id);
+  announce(m.recents_announce_removed({ name: entry.name }));
 }

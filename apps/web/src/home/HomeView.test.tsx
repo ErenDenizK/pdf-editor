@@ -22,6 +22,15 @@ import { openDocuments } from '../commands/app-commands';
 import { commandRegistry } from '../commands/registry';
 import { currentPlatform } from '../commands/shortcuts';
 import { resetCompareStore, useCompareStore } from '../compare/compare-store';
+import {
+  loadRecents,
+  memoryRecentsBackend,
+  type RecentFileHandle,
+  recordRecent,
+  setRecentsBackend,
+  useRecentsStore,
+} from '../files/recents';
+import { setLocale } from '../i18n';
 import { closeOperationDialog } from '../stage/operation-dialogs-store';
 import { useAnnouncer } from '../shell/announcer';
 import { stageView, useUiStore } from '../state/ui-store';
@@ -512,6 +521,307 @@ describe('Home', () => {
       expect(shown()).toBe('home');
     });
   });
+});
+
+/** A file handle as Chromium hands one out, with a scripted read permission. */
+function fakeHandle(
+  file: File,
+  permission: { readonly query: PermissionState; readonly request?: PermissionState },
+): RecentFileHandle & { requested: number } {
+  const handle = {
+    kind: 'file' as const,
+    name: file.name,
+    requested: 0,
+    getFile: () => Promise.resolve(file),
+    queryPermission: () => Promise.resolve(permission.query),
+    requestPermission: () => {
+      handle.requested += 1;
+      return Promise.resolve(permission.request ?? permission.query);
+    },
+  };
+  return handle;
+}
+
+describe('Recents on Home', () => {
+  const recents = () => screen.getByRole('list', { name: 'Recent files' });
+  const row = (name: string) =>
+    within(recents()).getByRole('button', { name: new RegExp(`^${name.replace('.', '\\.')},`) });
+  const recentNames = () =>
+    within(recents())
+      .getAllByRole('button')
+      .filter((b) => b.hasAttribute('data-recent-id'))
+      .map((b) => b.getAttribute('aria-label')?.split(',')[0]);
+  let restorePicker: (() => void) | undefined;
+
+  /** Replaces the Chromium file picker with one that "chooses" `files`. */
+  function stubPicker(files: readonly File[]): { calls: number } {
+    const state = { calls: 0 };
+    const previous = Object.getOwnPropertyDescriptor(window, 'showOpenFilePicker');
+    Object.defineProperty(window, 'showOpenFilePicker', {
+      configurable: true,
+      value: () => {
+        state.calls += 1;
+        return Promise.resolve(files.map((file) => fakeHandle(file, { query: 'granted' })));
+      },
+    });
+    restorePicker = () => {
+      if (previous) Object.defineProperty(window, 'showOpenFilePicker', previous);
+      else Reflect.deleteProperty(window, 'showOpenFilePicker');
+    };
+    return state;
+  }
+
+  beforeEach(async () => {
+    await page.viewport(1440, 900);
+    setRecentsBackend(memoryRecentsBackend());
+    resetWorkspace();
+    useUiStore.setState({
+      destination: 'document',
+      viewMode: 'read',
+      documentMode: {},
+      lastView: {},
+      homeSelection: [],
+      homeAnchor: null,
+      paletteOpen: false,
+    });
+  });
+  afterEach(() => {
+    restorePicker?.();
+    restorePicker = undefined;
+    resetWorkspace();
+    setRecentsBackend(undefined);
+  });
+
+  it('shows nothing while there are no recents', async () => {
+    render(<App />);
+    const home = await screen.findByTestId('home');
+    await loadRecents();
+    expect(within(home).queryByRole('heading', { name: 'Recent' })).toBeNull();
+    expect(within(home).queryByRole('list', { name: 'Recent files' })).toBeNull();
+  });
+
+  it('lists recents above the drop area with no file open: name, pages, size and time', async () => {
+    const now = Date.now();
+    await recordRecent({ name: 'report.pdf', size: 6246, pages: 6, now: now - 5 * 60_000 });
+    await recordRecent({ name: 'invoice.pdf', size: 812, now: now - 86_400_000 - 3_600_000 });
+    await recordRecent({ name: 'scan.pdf', size: 2_936_013, pages: 1, now: now - 10_000 });
+    render(<App />);
+    const home = await screen.findByTestId('home');
+    expect(home).toHaveAttribute('data-variant', 'empty');
+    const heading = await within(home).findByRole('heading', { name: 'Recent' });
+    // Newest first.
+    expect(recentNames()).toEqual(['scan.pdf', 'report.pdf', 'invoice.pdf']);
+    expect(row('report.pdf')).toHaveAccessibleName(
+      'report.pdf, 6 pages · 6.1 KB, 5 minutes ago, Open again…',
+    );
+    expect(row('invoice.pdf')).toHaveAccessibleName('invoice.pdf, 812 B, yesterday, Open again…');
+    expect(row('scan.pdf')).toHaveTextContent('now');
+    // Above the drop area.
+    const drop = within(home).getByRole('heading', { name: 'Drop PDFs to start' });
+    expect(heading.compareDocumentPosition(drop) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(home).getByRole('button', { name: 'Clear recents' })).toBeVisible();
+  });
+
+  it('records every open, lists it under the cards once closed, in the active language', async () => {
+    await openOnHome('simple-text.pdf', 'rotated-pages.pdf');
+    await waitFor(() => {
+      expect(useRecentsStore.getState().entries.map((e) => e.name)).toEqual([
+        'rotated-pages.pdf',
+        'simple-text.pdf',
+      ]);
+    });
+    // Open files are the cards above; Recents does not repeat them.
+    expect(screen.queryByRole('list', { name: 'Recent files' })).toBeNull();
+    const first = ws().documentOrder[0];
+    if (first !== undefined) useWorkspaceStore.getState().closeDocument(first);
+    // Closing keeps the entry.
+    await waitFor(() => {
+      expect(recentNames()).toEqual(['simple-text.pdf']);
+    });
+    expect(row('simple-text.pdf')).toHaveAccessibleName(/^simple-text\.pdf, 3 pages · .+, now/);
+    // Under the cards.
+    expect(
+      grid().compareDocumentPosition(recents()) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    act(() => {
+      setLocale('tr');
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Son açılanlar' })).toBeVisible();
+    });
+    expect(
+      within(screen.getByRole('list', { name: 'Son açılan dosyalar' })).getByRole('button', {
+        name: /^simple-text\.pdf, 3 sayfa · .+, şimdi, Yeniden aç…$/,
+      }),
+    ).toBeVisible();
+    act(() => {
+      setLocale('en');
+    });
+  }, 45_000);
+
+  it('moves with the arrows, removes with Delete and reaches the ⋯ menu with Right', async () => {
+    for (const [i, name] of ['a.pdf', 'b.pdf', 'c.pdf'].entries()) {
+      await recordRecent({ name, size: 100 + i, now: Date.now() - (3 - i) * 1000 });
+    }
+    render(<App />);
+    await screen.findByRole('list', { name: 'Recent files' });
+    expect(recentNames()).toEqual(['c.pdf', 'b.pdf', 'a.pdf']);
+    // One tab stop: the first row.
+    expect(row('c.pdf')).toHaveAttribute('tabindex', '0');
+    expect(row('b.pdf')).toHaveAttribute('tabindex', '-1');
+    row('c.pdf').focus();
+    await userEvent.keyboard('{ArrowDown}');
+    expect(row('b.pdf')).toHaveFocus();
+    expect(row('b.pdf')).toHaveAttribute('tabindex', '0');
+    await userEvent.keyboard('{End}');
+    expect(row('a.pdf')).toHaveFocus();
+    await userEvent.keyboard('{Home}');
+    expect(row('c.pdf')).toHaveFocus();
+    await userEvent.keyboard('{ArrowDown}{Delete}');
+    await waitFor(() => {
+      expect(recentNames()).toEqual(['c.pdf', 'a.pdf']);
+    });
+    expect(useAnnouncer.getState().message).toBe('b.pdf removed from recents');
+    await waitFor(() => {
+      expect(row('a.pdf')).toHaveFocus();
+    });
+
+    await userEvent.keyboard('{ArrowRight}');
+    const more = screen.getByRole('button', { name: 'More actions for a.pdf' });
+    expect(more).toHaveFocus();
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(row('a.pdf')).toHaveFocus();
+  });
+
+  it('removes an entry from its ⋯ menu', async () => {
+    await recordRecent({ name: 'a.pdf', size: 1, now: Date.now() - 2000 });
+    await recordRecent({ name: 'b.pdf', size: 2, now: Date.now() - 1000 });
+    render(<App />);
+    await screen.findByRole('list', { name: 'Recent files' });
+    await userEvent.click(screen.getByRole('button', { name: 'More actions for a.pdf' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Remove from recents' }));
+    await waitFor(() => {
+      expect(recentNames()).toEqual(['b.pdf']);
+    });
+    expect(useRecentsStore.getState().entries.map((e) => e.name)).toEqual(['b.pdf']);
+  });
+
+  it('clears every entry with "Clear recents", and the palette has the command', async () => {
+    await recordRecent({ name: 'a.pdf', size: 1 });
+    await recordRecent({ name: 'b.pdf', size: 2 });
+    render(<App />);
+    await screen.findByRole('list', { name: 'Recent files' });
+    await userEvent.click(screen.getByRole('button', { name: 'Clear recents' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Recent' })).toBeNull();
+    });
+    expect(useAnnouncer.getState().message).toBe('Recents cleared');
+
+    await recordRecent({ name: 'c.pdf', size: 3 });
+    await screen.findByRole('list', { name: 'Recent files' });
+    const command = commandRegistry.list().find((c) => c.id === 'file.clearRecents');
+    expect(command?.title).toBe('Clear recents');
+    expect(command?.keywords).toEqual(expect.arrayContaining(['history', 'geçmiş']));
+    await act(async () => {
+      await commandRegistry.execute('file.clearRecents');
+    });
+    expect(screen.queryByRole('list', { name: 'Recent files' })).toBeNull();
+  });
+
+  it('reopens through a kept handle, in Read, asking for permission within the click', async () => {
+    const file = await fixture(simpleUrl, 'simple-text.pdf');
+    const handle = fakeHandle(file, { query: 'prompt', request: 'granted' });
+    // Stored by an earlier visit: after a reload Chromium asks again before reading.
+    setRecentsBackend(
+      memoryRecentsBackend([
+        { id: 'kept', name: file.name, size: file.size, pages: 3, openedAt: 1, handle },
+      ]),
+    );
+    render(<App />);
+    await screen.findByRole('list', { name: 'Recent files' });
+    await waitFor(() => {
+      expect(row('simple-text.pdf')).toHaveAccessibleName(/, Needs permission$/);
+    });
+    await userEvent.click(row('simple-text.pdf'));
+    await waitFor(() => {
+      expect(ws().documentOrder).toHaveLength(1);
+    });
+    expect(handle.requested).toBe(1);
+    expect(titleOf(ws().activeDocument)).toBe('simple-text');
+    expect(shown()).toBe('read');
+    // Still one entry, now on top, with its handle.
+    await waitFor(() => {
+      expect(useRecentsStore.getState().entries).toHaveLength(1);
+    });
+    expect(useRecentsStore.getState().entries[0]?.handle).toBe(handle);
+  }, 45_000);
+
+  it('turns a row to "Open again…" when permission is denied, then opens the file dialog', async () => {
+    const file = await fixture(simpleUrl, 'simple-text.pdf');
+    const handle = fakeHandle(file, { query: 'prompt', request: 'denied' });
+    await recordRecent({ name: file.name, size: file.size, handle, now: Date.now() });
+    render(<App />);
+    await screen.findByRole('list', { name: 'Recent files' });
+    const picker = stubPicker([file]);
+
+    await userEvent.click(row('simple-text.pdf'));
+    const note = await screen.findByTestId('recent-note');
+    expect(note).toHaveTextContent(
+      '“simple-text.pdf” could not be reopened: it was moved, or access was not given. Open again… to choose it.',
+    );
+    expect(row('simple-text.pdf')).toHaveAccessibleName(/, Open again…$/);
+    expect(ws().documentOrder).toHaveLength(0);
+    expect(picker.calls).toBe(0);
+
+    // The second click goes through the file dialog.
+    await userEvent.click(row('simple-text.pdf'));
+    await waitFor(() => {
+      expect(ws().documentOrder).toHaveLength(1);
+    });
+    expect(picker.calls).toBe(1);
+    expect(shown()).toBe('read');
+  }, 45_000);
+
+  it('opens the file dialog for an entry without a handle and says so in one line', async () => {
+    const file = await fixture(simpleUrl, 'simple-text.pdf');
+    await recordRecent({ name: file.name, size: file.size, now: Date.now() });
+    render(<App />);
+    await screen.findByRole('list', { name: 'Recent files' });
+    let release: (files: unknown[]) => void = () => undefined;
+    const previous = Object.getOwnPropertyDescriptor(window, 'showOpenFilePicker');
+    Object.defineProperty(window, 'showOpenFilePicker', {
+      configurable: true,
+      value: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    });
+    restorePicker = () => {
+      if (previous) Object.defineProperty(window, 'showOpenFilePicker', previous);
+      else Reflect.deleteProperty(window, 'showOpenFilePicker');
+    };
+
+    await userEvent.click(row('simple-text.pdf'));
+    // While the dialog is open, the line says why it opened.
+    const note = await screen.findByTestId('recent-note');
+    expect(note).toHaveTextContent(
+      'This browser doesn’t keep access to files: choose “simple-text.pdf” in the file dialog.',
+    );
+    expect(useAnnouncer.getState().message).toBe(note.textContent);
+    act(() => release([fakeHandle(file, { query: 'granted' })]));
+    await waitFor(() => {
+      expect(ws().documentOrder).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId('recent-note')).toBeNull();
+    });
+    // The picked file came with a handle: the entry keeps it from now on.
+    await waitFor(() => {
+      expect(useRecentsStore.getState().entries[0]?.handle).toBeDefined();
+    });
+    expect(useRecentsStore.getState().entries).toHaveLength(1);
+  }, 45_000);
 });
 
 async function pageCount(title: string): Promise<number> {

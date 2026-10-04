@@ -25,7 +25,8 @@ import {
 import { registerCompareCommands } from '../compare/compare-commands';
 import { registerConvertCommands } from '../convert/convert-commands';
 import type { EngineFailure } from '../engine/engine-service';
-import { partitionFiles, pickFiles } from '../files/open-files';
+import { fileHandleOf, partitionFiles, pickFiles } from '../files/open-files';
+import { clearRecents, recordRecent } from '../files/recents';
 import { registerFurnitureCommands } from '../furniture';
 import { registerFormCommands } from '../forms';
 import { showDocumentMode, showHome, showOpened, watchDestination } from '../home/home-actions';
@@ -38,7 +39,13 @@ import { announce } from '../shell/announcer';
 import { useAuthorPrompt } from '../shell/comment-author';
 import { openImagesAsDocument } from '../stage/section-operations';
 import { selectAllOf, useSelectionStore } from '../state/selection-store';
-import { ARRANGE_SIZES, stageView, useUiStore } from '../state/ui-store';
+import {
+  ARRANGE_SIZES,
+  type DocumentMode,
+  documentModeOf,
+  stageView,
+  useUiStore,
+} from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { registerToolCommands } from '../tools/tool-commands';
 import { registerEditPolicyCommands } from '../viewer/edit-policy';
@@ -49,6 +56,18 @@ import { currentPlatform } from './shortcuts';
 
 const ui = () => useUiStore.getState();
 const model = () => useWorkspaceStore.getState();
+
+/**
+ * The stage already shows `view` (Home, Arrange, or the page view in that document mode):
+ * the view and mode commands then change nothing and say nothing (craft spec §9: a mode is
+ * announced on change).
+ */
+function showing(view: 'home' | 'arrange' | DocumentMode): boolean {
+  const state = ui();
+  const stage = stageView(state);
+  if (view === 'home' || view === 'arrange') return stage === view;
+  return stage === 'read' && documentModeOf(state, model().workspace.activeDocument) === view;
+}
 const selection = () => useSelectionStore.getState();
 const activeDocument = () => getActiveDocument(model().workspace);
 
@@ -95,6 +114,7 @@ export async function openDocuments(files: readonly File[]): Promise<readonly Do
   if (images.length > 0) await openImagesAsDocument(images);
   if (pdfs.length === 0) return [];
   const { opened, skipped } = await model().openFiles(pdfs);
+  rememberOpened(pdfs, opened);
   const parts: string[] = [];
   if (opened.length === 1) parts.push(m.announce_opened({ name: opened[0]?.name ?? '' }));
   else if (opened.length > 1) parts.push(m.announce_opened_many({ count: opened.length }));
@@ -103,6 +123,46 @@ export async function openDocuments(files: readonly File[]): Promise<readonly Do
   }
   if (parts.length > 0) announce(parts.join('. '));
   return opened.map((o) => o.documentId);
+}
+
+/** Entries that a reopen from Recents should replace, by the file it produced. */
+const reopenedFrom = new WeakMap<File, string>();
+
+/** Marks `file` as the reopen of Recents entry `id`, so its entry moves rather than doubles. */
+export function noteReopenedFrom(file: File, id: string): void {
+  reopenedFrom.set(file, id);
+}
+
+/**
+ * Records each opened PDF in Recents (craft §3.1): name, size, page count and, where the
+ * browser gave one, the file handle. Matched to the files by name, in order.
+ */
+function rememberOpened(
+  files: readonly File[],
+  opened: readonly { readonly name: string; readonly documentId: DocumentId }[],
+): void {
+  const unused = [...files];
+  for (const { name, documentId } of opened) {
+    const index = unused.findIndex((file) => file.name === name);
+    const [file] = unused.splice(index < 0 ? 0 : index, 1);
+    if (file === undefined) continue;
+    const handle = fileHandleOf(file);
+    const replaces = reopenedFrom.get(file);
+    const pages = model().workspace.documents[documentId]?.pages.length;
+    void recordRecent({
+      name: file.name,
+      size: file.size,
+      ...(pages === undefined ? {} : { pages }),
+      ...(handle === undefined ? {} : { handle }),
+      ...(replaces === undefined ? {} : { replaces }),
+    });
+  }
+}
+
+/** "Clear recents": forgets every recent file and handle on this device. */
+export async function clearRecentFiles(): Promise<void> {
+  await clearRecents();
+  announce(m.recents_announce_cleared());
 }
 
 /**
@@ -230,6 +290,13 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
       keywords: ['add', 'import', 'pdf', 'load'],
       allowInInputs: true,
       run: openFilesFromPicker,
+    }),
+    registry.register({
+      id: 'file.clearRecents',
+      title: m.cmd_clear_recents(),
+      group: m.group_file(),
+      // Always offered, also with nothing remembered (craft §14 answer 3).
+      run: clearRecentFiles,
     }),
     registry.register({
       id: 'tab.close',
@@ -440,6 +507,7 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
       group: m.group_view(),
       shortcut: '0',
       run: () => {
+        if (showing('home')) return;
         showHome();
         announce(m.home_long());
       },
@@ -451,7 +519,9 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
       shortcut: '1',
       keywords: ['mode', 'viewer', 'continuous', 'lock'],
       when: () => activeDocument() !== undefined,
-      run: () => showDocumentMode('read'),
+      run: () => {
+        if (!showing('read')) showDocumentMode('read');
+      },
     }),
     registry.register({
       id: 'mode.edit',
@@ -460,7 +530,9 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
       shortcut: '2',
       keywords: ['mode', 'annotate', 'markup', 'write'],
       when: () => activeDocument() !== undefined,
-      run: () => showDocumentMode('edit'),
+      run: () => {
+        if (!showing('edit')) showDocumentMode('edit');
+      },
     }),
     registry.register({
       id: 'mode.arrange',
@@ -469,6 +541,7 @@ export function registerAppCommands(registry: CommandRegistry = commandRegistry)
       shortcut: '3',
       keywords: ['mode', 'light table', 'grid', 'organize', 'reorder'],
       run: () => {
+        if (showing('arrange')) return;
         ui().setViewMode('arrange');
         announce(m.mode_arrange_long());
       },

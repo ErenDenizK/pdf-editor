@@ -2,11 +2,13 @@
  * Status-bar privacy indicator (ARCHITECTURE.md §7): the live external-request count, and a
  * popover with the observed external URLs (expected: none), the CSP in one sentence plus
  * the enforced `connect-src`, the service worker's offline status, and the app version,
- * which opens the About dialog (ADR-0017 §6).
+ * which opens the About dialog (ADR-0017 §6). One line says Recents stay on this device, with
+ * "Clear recents" (craft §3.1).
  */
 import { Popover } from '@base-ui/react/popover';
 import { useRef } from 'react';
 
+import { commandRegistry } from '../commands/registry';
 import { m } from '../i18n';
 import { usePwaStore } from '../pwa/register';
 import { serviceWorkerLabel } from '../pwa/service-worker-label';
@@ -56,6 +58,19 @@ export function PrivacyIndicator({ className }: { readonly className?: string })
             <Popover.Description className={popoverStyles.body}>
               {m.privacy_body()}
             </Popover.Description>
+
+            {/* Recents are kept on this device only and can always be cleared (craft §3.1). */}
+            <p className={`${styles.value} ${styles.recents}`} data-testid="privacy-recents">
+              <span>
+                {m.privacy_recents()}{' '}
+                <Popover.Close
+                  className={styles.inlineLink}
+                  onClick={() => void commandRegistry.execute('file.clearRecents')}
+                >
+                  {m.recents_clear()}
+                </Popover.Close>
+              </span>
+            </p>
 
             <section className={styles.section} aria-label={m.privacy_requests_heading()}>
               <h3 className={styles.heading}>{m.privacy_requests_heading()}</h3>

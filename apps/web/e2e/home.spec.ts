@@ -286,3 +286,51 @@ test('the keyboard path: Tab to the cards, arrows, Space and Enter', async ({ pa
   await page.getByTestId('home-button').click();
   await expect(page.getByTestId('home')).toBeVisible();
 });
+
+test('Recents remember a closed file across a reload, open it again and clear', async ({
+  page,
+}) => {
+  // The <input> picker hands out no file handle (as in Firefox and Safari), so the entry is
+  // a name and reopens through the file dialog ("Open again…").
+  await useFileInputPicker(page);
+  await page.goto('./?lang=en');
+  const recents = page.getByRole('list', { name: 'Recent files' });
+  const row = recents.getByRole('button', { name: /^simple-text\.pdf, / });
+  await expect(page.getByRole('heading', { name: 'Recent' })).toHaveCount(0);
+
+  await openFixtures(page, ['simple-text.pdf']);
+  await page.getByRole('tab', { name: 'simple-text' }).focus();
+  await page.keyboard.press('Delete');
+  await expect(page.getByRole('heading', { name: 'Drop PDFs to start' })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Recent' })).toBeVisible();
+  await expect(row).toHaveAccessibleName(/^simple-text\.pdf, 3 pages · .+, Open again…$/);
+
+  // The file dialog opens and one line says why.
+  const chooser = page.waitForEvent('filechooser');
+  await row.click();
+  await expect(page.getByTestId('recent-note')).toHaveText(
+    'This browser doesn’t keep access to files: choose “simple-text.pdf” in the file dialog.',
+  );
+  await (await chooser).setFiles(fixturePath('simple-text.pdf'));
+  await expect(page.getByRole('tab', { name: 'simple-text' })).toBeVisible();
+  await expect(page.getByRole('radio', { name: 'Read, locked' })).toBeChecked();
+
+  // The privacy popover says where Recents live.
+  await page.getByTestId('privacy-indicator').click();
+  await expect(page.getByTestId('privacy-recents')).toHaveText(
+    'Recent files are remembered on this device only. Clear recents',
+  );
+  await page.keyboard.press('Escape');
+
+  // Closed again: one entry, not two. "Clear recents" forgets it, also after a reload.
+  await page.getByRole('tab', { name: 'simple-text' }).focus();
+  await page.keyboard.press('Delete');
+  await expect(recents.getByRole('button', { name: /^simple-text\.pdf, / })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Clear recents' }).click();
+  await expect(recents).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Drop PDFs to start' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Recent' })).toHaveCount(0);
+});

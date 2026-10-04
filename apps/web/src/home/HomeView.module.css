@@ -15,6 +15,19 @@
 /* The empty variant is the same area: the drop target fills it (shell/EmptyState). */
 .home[data-variant='empty'] {
   height: 100%;
+  overflow-y: auto;
+}
+
+/* The drop area under Recents keeps the rest of the height (shell/EmptyState fills it). */
+.emptyArea {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+
+.emptyArea > * {
+  flex: 1 0 auto;
+  height: auto;
 }
 
 .home[data-dragging]::after {
@@ -234,4 +247,178 @@
   white-space: nowrap;
   transform: translateX(-50%);
   pointer-events: none;
+}
+
+/*
+ * Recents (craft §3.1): a compact list under the cards, or above the drop area when no file is
+ * open. Docked and opaque like the cards: rows on the canvas with the hover fill, the name in
+ * primary text and the rest in secondary and tertiary. The ⋯ button shows on hover and focus.
+ */
+.scroller:has(.recents) .grid {
+  min-height: 0;
+}
+
+.recents {
+  width: min(640px, 100%);
+  margin: var(--space-8) auto 0;
+}
+
+.recents[data-variant='empty'] {
+  flex: none;
+  margin-top: var(--space-6);
+  padding: 0 var(--space-6);
+  width: min(640px + 2 * var(--space-6), 100%);
+}
+
+.recentsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--space-2) var(--space-1);
+}
+
+.recentsTitle {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: var(--leading-tight);
+}
+
+.quietButton {
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+@media (hover: hover) {
+  .quietButton:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+.recentList {
+  display: grid;
+  gap: 1px;
+}
+
+.recentRow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  border-radius: var(--radius-2);
+}
+
+@media (hover: hover) {
+  .recentRow:hover {
+    background: var(--surface-hover);
+  }
+}
+
+.recentOpen {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  text-align: left;
+}
+
+.recentOpen:focus-visible {
+  outline-offset: -2px;
+}
+
+.recentName {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recentDetails,
+.recentTime,
+.recentHint {
+  flex: none;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.recentDetails {
+  color: var(--text-secondary);
+}
+
+.recentTime {
+  margin-left: auto;
+  color: var(--text-tertiary);
+}
+
+/* A word, not a colour: "Needs permission" or "Open again…". */
+.recentHint {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.recentMore {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 2px;
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+  opacity: 0;
+}
+
+.recentMore svg {
+  width: 16px;
+  height: 16px;
+}
+
+.recentMore:focus-visible {
+  outline-offset: -2px;
+}
+
+.recentRow:hover .recentMore,
+.recentRow:focus-within .recentMore,
+.recentMore[data-popup-open] {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .recentMore:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+  }
+}
+
+@media (hover: none) {
+  .recentMore {
+    opacity: 1;
+  }
+}
+
+.recentNote {
+  margin-top: var(--space-2);
+  padding: 0 var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+}
+
+@media (max-width: 560px) {
+  .recentDetails {
+    display: none;
+  }
 }

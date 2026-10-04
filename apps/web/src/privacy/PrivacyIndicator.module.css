@@ -148,3 +148,22 @@
   outline: var(--focus-ring);
   outline-offset: -2px;
 }
+
+/* "Recent files are remembered on this device only. Clear recents" (craft §3.1). */
+.recents {
+  display: block;
+  margin-top: var(--space-2);
+}
+
+.inlineLink {
+  border-radius: var(--radius-1);
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (hover: hover) {
+  .inlineLink:hover {
+    color: var(--accent-hover);
+  }
+}

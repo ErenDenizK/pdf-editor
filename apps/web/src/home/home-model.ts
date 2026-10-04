@@ -194,3 +194,43 @@ export function middleTruncate(text: string, max: number): string {
   const head = Math.floor(keep / 2);
   return `${chars.slice(0, head).join('')}…${chars.slice(chars.length - (keep - head)).join('')}`;
 }
+
+/**
+ * "now", "5 minutes ago", "yesterday", "3 weeks ago" in the active language (Recents).
+ * Rounds to the largest unit that fits; a time in the future (a changed clock) reads "now".
+ */
+export function relativeTime(then: number, now: number, locale: string): string {
+  const format = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  const seconds = Math.max(0, (now - then) / 1000);
+  const steps: readonly [Intl.RelativeTimeFormatUnit, number][] = [
+    ['minute', 60],
+    ['hour', 3600],
+    ['day', 86_400],
+    ['week', 7 * 86_400],
+    ['month', 30 * 86_400],
+    ['year', 365 * 86_400],
+  ];
+  if (seconds < 45) return format.format(0, 'second');
+  let unit: Intl.RelativeTimeFormatUnit = 'minute';
+  let size = 60;
+  for (const [name, length] of steps) {
+    if (seconds < length) break;
+    unit = name;
+    size = length;
+  }
+  // Whole units passed: 47 hours is "yesterday", 13 days "last week".
+  return format.format(-Math.max(1, Math.floor(seconds / size)), unit);
+}
+
+/**
+ * The Recents Home lists: every entry but those for a file open right now (the card above
+ * already stands for it), matched by name and size.
+ */
+export function visibleRecents<T extends { readonly name: string; readonly size: number }>(
+  entries: readonly T[],
+  open: readonly { readonly name: string; readonly size: number }[],
+): T[] {
+  return entries.filter(
+    (entry) => !open.some((f) => f.name === entry.name && f.size === entry.size),
+  );
+}

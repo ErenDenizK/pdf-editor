@@ -8,20 +8,30 @@
  * Keyboard (§10): the cards are a multi-select listbox with a roving tabindex. Arrows move,
  * Shift+arrows extend from the anchor, Space toggles, Mod+A selects all, Enter opens, Esc
  * clears the selection.
+ *
+ * Recents (craft §3.1, WP M5): under the cards (above the drop area when no file is open), a
+ * compact list of the files opened lately, kept on this device only, with "Clear recents".
+ * Nothing shows when the list is empty. Rows have a roving tabindex: Up and Down move, Enter
+ * opens, Delete removes, Right reaches the row's ⋯ menu.
  */
-import type { DocumentId, VirtualPage, Workspace } from '@pdf-editor/document-model';
+import { Menu } from '@base-ui/react/menu';
+import type { DocumentId, SourceId, VirtualPage, Workspace } from '@pdf-editor/document-model';
+import { MoreHorizontal } from 'lucide-react';
 import {
   type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
+  useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
 } from 'react';
 
-import { openFilesFromPicker } from '../commands/app-commands';
+import { clearRecentFiles, openFilesFromPicker } from '../commands/app-commands';
 import { currentPlatform } from '../commands/shortcuts';
 import { RENDER_PRIORITY } from '../engine/engine-service';
+import { loadRecents, type RecentEntry, useRecentsStore } from '../files/recents';
 import { formatNumber, m, useLocale } from '../i18n';
 import { PageCanvas } from '../pages/PageCanvas';
 import { displaySize, fitInBox } from '../pages/page-geometry';
@@ -29,12 +39,15 @@ import { EmptyState } from '../shell/EmptyState';
 import { contentFrame, ResizedContent } from '../stage/ResizedContent';
 import { useUiStore } from '../state/ui-store';
 import { pagesPhrase, useWorkspaceStore } from '../state/workspace-store';
+import menuStyles from '../ui/Menu.module.css';
 import {
   arrangeOnHome,
   closeOnHome,
   combine,
   compareOnHome,
   openInRead,
+  openRecent,
+  removeRecentEntry,
   selectOnHome,
 } from './home-actions';
 import {
@@ -48,7 +61,9 @@ import {
   liveSelection,
   middleTruncate,
   rangeBetween,
+  relativeTime,
   toggleSelection,
+  visibleRecents,
 } from './home-model';
 import styles from './HomeView.module.css';
 
@@ -75,7 +90,10 @@ export function HomeView({ dragging }: { readonly dragging: boolean }) {
         data-variant="empty"
         data-dragging={dragging || undefined}
       >
-        <EmptyState dragging={dragging} />
+        <RecentFiles variant="empty" />
+        <div className={styles.emptyArea}>
+          <EmptyState dragging={dragging} />
+        </div>
       </section>
     );
   }
@@ -317,6 +335,7 @@ function HomeCards({
             />
           ))}
         </div>
+        <RecentFiles variant="cards" />
       </div>
     </section>
   );
@@ -406,5 +425,247 @@ function HomeThumb({
         />
       </ResizedContent>
     </div>
+  );
+}
+
+const RECENT_NAME_LENGTH = 48;
+
+/** The current time, refreshed every minute while mounted ("5 minutes ago" moves on). */
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return now;
+}
+
+/** Name and size of each file open right now, so Recents does not repeat a card. */
+function useOpenFiles(): readonly { readonly name: string; readonly size: number }[] {
+  const workspace = useWorkspaceStore((s) => s.workspace);
+  const files = useWorkspaceStore((s) => s.files);
+  return useMemo(() => {
+    const sources = new Set<SourceId>();
+    for (const id of workspace.documentOrder) {
+      for (const page of workspace.documents[id]?.pages ?? []) {
+        if (page.ref.kind === 'source') sources.add(page.ref.source);
+      }
+    }
+    return [...sources].flatMap((id) => {
+      const file = files[id];
+      return file === undefined ? [] : [{ name: file.name, size: file.size }];
+    });
+  }, [workspace, files]);
+}
+
+/**
+ * Home's "Recent" section: the files opened lately (craft §3.1), newest first, without the
+ * ones open right now. Nothing renders while there are none (no placeholder).
+ */
+function RecentFiles({ variant }: { readonly variant: 'cards' | 'empty' }) {
+  const entries = useRecentsStore((s) => s.entries);
+  const access = useRecentsStore((s) => s.access);
+  const note = useRecentsStore((s) => s.note);
+  const open = useOpenFiles();
+  const visible = useMemo(() => visibleRecents(entries, open), [entries, open]);
+  const [focused, setFocused] = useState<string | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const headingId = useId();
+  const locale = useLocale();
+  const now = useNow();
+
+  useEffect(() => {
+    void loadRecents();
+  }, []);
+
+  if (visible.length === 0) return null;
+  const tabbable = visible.some((e) => e.id === focused) ? focused : (visible[0]?.id ?? null);
+
+  const focusRow = (id: string | undefined) => {
+    if (id === undefined) return;
+    setFocused(id);
+    listRef.current?.querySelector<HTMLElement>(`[data-recent-id="${id}"]`)?.focus();
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const row = target?.closest<HTMLElement>('[data-recent-row]');
+    const id = row?.getAttribute('data-recent-row') ?? undefined;
+    const index = visible.findIndex((e) => e.id === id);
+    const entry = visible[index];
+    if (entry === undefined) return;
+    const onMore = target?.hasAttribute('data-recent-more') ?? false;
+    switch (event.key) {
+      case 'ArrowDown':
+      case 'ArrowUp':
+      case 'Home':
+      case 'End': {
+        event.preventDefault();
+        const next =
+          event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? visible.length - 1
+              : Math.min(
+                  visible.length - 1,
+                  Math.max(0, index + (event.key === 'ArrowDown' ? 1 : -1)),
+                );
+        focusRow(visible[next]?.id);
+        return;
+      }
+      case 'ArrowRight':
+        if (onMore) return;
+        event.preventDefault();
+        row?.querySelector<HTMLElement>('[data-recent-more]')?.focus();
+        return;
+      case 'ArrowLeft':
+        if (!onMore) return;
+        event.preventDefault();
+        focusRow(entry.id);
+        return;
+      case 'Delete':
+      case 'Backspace': {
+        if (onMore) return;
+        event.preventDefault();
+        const after = visible[index + 1] ?? visible[index - 1];
+        removeRecentEntry(entry);
+        if (after !== undefined) {
+          setFocused(after.id);
+          // The row re-renders as the roving stop once the entry has gone.
+          requestAnimationFrame(() => focusRow(after.id));
+        }
+        return;
+      }
+    }
+  };
+
+  return (
+    <section className={styles.recents} data-variant={variant} aria-labelledby={headingId}>
+      <div className={styles.recentsHeader}>
+        <h2 id={headingId} className={styles.recentsTitle}>
+          {m.recents_heading()}
+        </h2>
+        <button
+          type="button"
+          className={styles.quietButton}
+          onClick={() => void clearRecentFiles()}
+        >
+          {m.recents_clear()}
+        </button>
+      </div>
+      <ul
+        ref={listRef}
+        className={styles.recentList}
+        aria-label={m.recents_list_label()}
+        data-testid="recent-files"
+      >
+        {visible.map((entry) => (
+          <RecentRow
+            key={entry.id}
+            entry={entry}
+            hint={recentHint(entry, access[entry.id])}
+            time={relativeTime(entry.openedAt, now, locale)}
+            locale={locale}
+            tabbable={entry.id === tabbable}
+            onFocus={() => setFocused(entry.id)}
+            onKeyDown={onKeyDown}
+          />
+        ))}
+      </ul>
+      {note !== null ? (
+        <p className={styles.recentNote} data-testid="recent-note">
+          {note.kind === 'open-again'
+            ? m.recents_note_open_again({ name: note.name })
+            : m.recents_note_unavailable({ name: note.name })}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/** The quiet hint a row carries: permission to ask for, or the file dialog to go through. */
+function recentHint(entry: RecentEntry, access: string | undefined): string | undefined {
+  if (entry.handle === undefined || access === 'unavailable') return m.recents_hint_open_again();
+  if (access === 'prompt') return m.recents_hint_permission();
+  return undefined;
+}
+
+function RecentRow({
+  entry,
+  hint,
+  time,
+  locale,
+  tabbable,
+  onFocus,
+  onKeyDown,
+}: {
+  readonly entry: RecentEntry;
+  readonly hint: string | undefined;
+  readonly time: string;
+  readonly locale: string;
+  readonly tabbable: boolean;
+  readonly onFocus: () => void;
+  /** The list's roving keys (Up, Down, Home, End, Right, Left, Delete). */
+  readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+}) {
+  const details = [
+    entry.pages === undefined ? undefined : pagesPhrase(entry.pages),
+    formatFileSize(entry.size, locale),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const label = [entry.name, details, time, hint].filter(Boolean).join(', ');
+  return (
+    <li className={styles.recentRow} data-recent-row={entry.id}>
+      <button
+        type="button"
+        className={styles.recentOpen}
+        data-recent-id={entry.id}
+        tabIndex={tabbable ? 0 : -1}
+        aria-label={label}
+        aria-keyshortcuts="Delete"
+        title={entry.name}
+        onFocus={onFocus}
+        onKeyDown={onKeyDown}
+        // No await before openRecent: the permission prompt needs this click's activation.
+        onClick={() => void openRecent(entry)}
+      >
+        <span className={styles.recentName} aria-hidden="true">
+          {middleTruncate(entry.name, RECENT_NAME_LENGTH)}
+        </span>
+        <span className={styles.recentDetails} aria-hidden="true">
+          {details}
+        </span>
+        <span className={styles.recentTime} aria-hidden="true">
+          {time}
+        </span>
+        {hint === undefined ? null : (
+          <span className={styles.recentHint} aria-hidden="true">
+            {hint}
+          </span>
+        )}
+      </button>
+      <Menu.Root>
+        <Menu.Trigger
+          className={styles.recentMore}
+          tabIndex={-1}
+          data-recent-more=""
+          aria-label={m.recents_more({ name: entry.name })}
+          onKeyDown={onKeyDown}
+        >
+          <MoreHorizontal aria-hidden="true" />
+        </Menu.Trigger>
+        <Menu.Portal>
+          <Menu.Positioner side="bottom" align="end" sideOffset={4} collisionPadding={8}>
+            <Menu.Popup className={menuStyles.popup} data-testid="recent-menu">
+              <Menu.Item className={menuStyles.item} onClick={() => removeRecentEntry(entry)}>
+                <span className={menuStyles.label}>{m.recents_remove()}</span>
+              </Menu.Item>
+            </Menu.Popup>
+          </Menu.Positioner>
+        </Menu.Portal>
+      </Menu.Root>
+    </li>
   );
 }

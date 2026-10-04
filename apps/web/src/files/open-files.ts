@@ -7,12 +7,17 @@
  *
  * Results are filtered by type or extension (`file-filters.ts`, `images.ts`): PDFs by
  * default; drops and the Open picker also take PNG, JPEG and WebP images (image pages).
+ *
+ * Where the browser hands out a `FileSystemFileHandle` (the Chromium picker, a dropped
+ * file's `getAsFileSystemHandle()`), the handle is kept beside the `File` it produced
+ * (`fileHandleOf`), so Recents can reopen the file later (`recents.ts`).
  */
 import { m } from '../i18n';
 import {
   collectFromEntries,
   collectFromHandles,
   type EntryLike,
+  type FileHandleLike,
   type HandleLike,
   isPdfFile,
   type NamedFile,
@@ -49,10 +54,23 @@ interface OpenFilePickerOptions {
   types?: { description: string; accept: Record<string, string[]> }[];
 }
 interface WindowWithPicker {
-  showOpenFilePicker?: (options: OpenFilePickerOptions) => Promise<{ getFile(): Promise<File> }[]>;
+  showOpenFilePicker?: (options: OpenFilePickerOptions) => Promise<FileHandleLike[]>;
 }
 interface DataTransferItemWithHandle {
   getAsFileSystemHandle?: () => Promise<HandleLike | null>;
+}
+
+/** The handle each picked or dropped file came from, where the browser gave one. */
+const fileHandles = new WeakMap<File, FileHandleLike>();
+
+/** Remembers that `file` was read from `handle` (Recents keeps it to reopen the file). */
+export function rememberFileHandle(file: File, handle: FileHandleLike): void {
+  fileHandles.set(file, handle);
+}
+
+/** The handle `file` was read from, or undefined (an `<input>` pick, a Firefox drop). */
+export function fileHandleOf(file: File): FileHandleLike | undefined {
+  return fileHandles.get(file);
 }
 
 export function supportsOpenFilePicker(win: Window = window): boolean {
@@ -101,8 +119,13 @@ export async function pickFiles(kind: 'pdf' | 'images' | 'openable'): Promise<Fi
           },
         ],
       });
-      // TODO(save): keep the handles so "Save" can write back in place on Chromium.
-      const files = await Promise.all(handles.map((handle) => handle.getFile()));
+      const files = await Promise.all(
+        handles.map(async (handle) => {
+          const file = await handle.getFile();
+          rememberFileHandle(file, handle);
+          return file;
+        }),
+      );
       return files.filter(accept);
     } catch (error) {
       if (isAbort(error)) return [];
@@ -205,7 +228,12 @@ export async function filesFromItems(
   for (const item of captured) {
     const handle = item.handle ? await item.handle.catch(() => null) : null;
     if (handle) {
-      results.push(...(await collectFromHandles([handle], { accept })));
+      const files = await collectFromHandles([handle], { accept });
+      const [only] = files;
+      if (handle.kind === 'file' && only !== undefined && files.length === 1) {
+        rememberFileHandle(only, handle as FileHandleLike);
+      }
+      results.push(...files);
     } else if (item.entry) {
       results.push(...(await collectFromEntries([item.entry], { accept })));
     } else if (item.file && accept(item.file)) {

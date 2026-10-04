@@ -14,7 +14,9 @@ import {
   liveSelection,
   middleTruncate,
   rangeBetween,
+  relativeTime,
   toggleSelection,
+  visibleRecents,
 } from './home-model';
 
 const [a, b, c, d] = ['a', 'b', 'c', 'd'] as DocumentId[] as [
@@ -165,3 +167,38 @@ describe('middle truncation', () => {
 const plain = { shift: false, mod: false };
 const mod = { shift: false, mod: true };
 const shift = { shift: true, mod: false };
+
+describe('Recents', () => {
+  const now = Date.UTC(2026, 9, 3, 12);
+  const ago = (seconds: number) => now - seconds * 1000;
+
+  it('says how long ago a file was opened, in the active language', () => {
+    expect(relativeTime(ago(10), now, 'en')).toBe('now');
+    expect(relativeTime(ago(50), now, 'en')).toBe('1 minute ago');
+    expect(relativeTime(ago(5 * 60), now, 'en')).toBe('5 minutes ago');
+    expect(relativeTime(ago(3 * 3600 + 100), now, 'en')).toBe('3 hours ago');
+    expect(relativeTime(ago(30 * 3600), now, 'en')).toBe('yesterday');
+    expect(relativeTime(ago(3 * 86_400), now, 'en')).toBe('3 days ago');
+    expect(relativeTime(ago(10 * 86_400), now, 'en')).toBe('last week');
+    expect(relativeTime(ago(65 * 86_400), now, 'en')).toBe('2 months ago');
+    expect(relativeTime(ago(800 * 86_400), now, 'en')).toBe('2 years ago');
+    // A clock set back reads "now", never "in 5 minutes".
+    expect(relativeTime(now + 300_000, now, 'en')).toBe('now');
+    expect(relativeTime(ago(10), now, 'tr')).toBe('şimdi');
+    expect(relativeTime(ago(30 * 3600), now, 'tr')).toBe('dün');
+    expect(relativeTime(ago(5 * 60), now, 'tr')).toBe('5 dakika önce');
+  });
+
+  it('leaves out the files open right now, by name and size', () => {
+    const entries = [
+      { id: '1', name: 'a.pdf', size: 10 },
+      { id: '2', name: 'b.pdf', size: 20 },
+      { id: '3', name: 'a.pdf', size: 11 },
+    ];
+    expect(visibleRecents(entries, [{ name: 'a.pdf', size: 10 }]).map((e) => e.id)).toEqual([
+      '2',
+      '3',
+    ]);
+    expect(visibleRecents(entries, [])).toEqual(entries);
+  });
+});
