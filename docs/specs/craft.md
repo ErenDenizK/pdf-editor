@@ -821,7 +821,9 @@ lead's answers:
 2. **Document menu in Read** keeps its file-rewriting operations: they are dialogs with a
    preview and undo, and Read guards against slips, not against intent.
 3. **Recents** keep a file handle where the browser hands one out (Chromium's
-   `showOpenFilePicker`), names only elsewhere; "Clear recents" always.
+   `showOpenFilePicker`), names only elsewhere; "Clear recents" always. As built, the
+   handle is stored apart and read only on a click, and not at all on Chromium 153, which
+   crashes when IndexedDB returns a stored handle (DISCUSSION #32).
 4. **Accent** `#7c8cff` stays; no A/B.
 5. **Tier C** is dropped (owner). ADR-0020 §1 and §4.6 updated.
 

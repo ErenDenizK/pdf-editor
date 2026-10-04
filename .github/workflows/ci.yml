@@ -51,12 +51,8 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      # pw:browser prints the browser's own stderr, so a page that closes mid-run (the web
-      # suite's tab died that way in runs 125 and 126) leaves its reason in the log.
       - name: Unit and browser-mode tests
         run: pnpm test
-        env:
-          DEBUG: pw:browser
 
       # Two independent renderers (our PDFium build, pdf.js) check every annotation of the
       # committed sample; the sample is regenerated first and must match what is committed.
