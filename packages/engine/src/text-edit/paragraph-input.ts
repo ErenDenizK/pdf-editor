@@ -18,8 +18,12 @@
  *   and `Td`-positioned glyphs (one object per glyph, as Chromium writes) alike.
  * - **Word gap.** The space glyph's advance when the paragraph draws spaces; otherwise
  *   (pdfTeX) the median gap between words on its lines that are not justified.
- * - **Substitutes** (craft §4.5): the class-matched bundled face (`substituteFace`), sized so
- *   its x-height matches the original's (`FPDFFont_GetGlyphPath` of "x"; factor 0.8–1.25).
+ * - **Substitutes** (craft §4.5): each character the font cannot set goes to the first bundled
+ *   face, in the order `substituteCandidates` gives for the font's class (serif, monospaced or
+ *   sans, from the flags, the name and the program's PANOSE) and weight, that has it. Each
+ *   face is sized so its x-height matches the original's: the AFM value of a standard-14 font,
+ *   else the outline of "x" (or z, v, w; the cap height of H, E, I, T without one), read only
+ *   for letters the font was shown to set (factor 0.8–1.25, `substituteScale`).
  * - **Measure.** A left-aligned paragraph may extend to the right edge of its column (the
  *   furthest right edge of the blocks that share its horizontal extent): its own longest line
  *   is not where the producer wrapped. Justified, centred and right-aligned paragraphs keep
@@ -34,6 +38,16 @@ import type { Font } from '@cantoo/fontkit';
 import type { Rect, SourceId } from '@pdf-editor/document-model';
 
 import type { BundledFace } from '../fonts/font-catalog';
+import {
+  bundledFamilyOfFont,
+  CAP_HEIGHT_LETTERS,
+  classFamilies,
+  standardFontMetrics,
+  substituteCandidates,
+  substituteClass,
+  substituteScale,
+  X_HEIGHT_LETTERS,
+} from '../fonts/substitutes';
 import type { RawAccess } from '../pdfium/host/hosted-engine';
 import type {
   LocatedRun,
@@ -49,7 +63,7 @@ import { type Entry, measure, type Metrics, type Sequence } from './apply';
 import { analyzePageParagraphs, type ParagraphCache } from './blocks';
 import { blockerOf, tier2Precheck } from './editability';
 import { textEditError } from './errors';
-import { type FaceCache, faceAdvance, familyName, missingInFace, substituteFace } from './fonts';
+import { type FaceCache, faceAdvance, familyName, missingInFace, readPanose } from './fonts';
 import type { LayoutInput, LayoutSpan, LayoutStyle } from './linebreak';
 import {
   charsByObject,
@@ -72,9 +86,6 @@ const MEASURE_CHUNK = 32;
  * producer took from the font program while the PDF's /W rounds them (Chromium).
  */
 const KERN_NOISE = 0.005;
-/** Substitute size factor bounds (x-height matching). */
-const SUBSTITUTE_SCALE_MIN = 0.8;
-const SUBSTITUTE_SCALE_MAX = 1.25;
 /** Smallest bottom margin assumed when the page gives no hint, points. */
 const MIN_MARGIN = 36;
 /** `FPDF_PAGEOBJ_*` of graphics that can sit below a paragraph. */
@@ -152,16 +163,36 @@ export interface CharMetrics {
   readonly box: Rect;
 }
 
-export interface SubstituteMetrics {
+/** A bundled face as one style uses it. */
+export interface SubstituteFace {
   readonly face: BundledFace;
   readonly font: Font;
   /** Size factor matching the x-heights. */
   readonly scale: number;
+}
+
+export interface SubstituteMetrics extends SubstituteFace {
   /** Synthetic italic (the original is italic, the bundled faces are upright). */
   readonly italic: boolean;
-  /** Advances of the characters the original font cannot set, points. */
+  /** Advances of the characters the original font cannot set, points (in their face). */
   readonly advances: ReadonlyMap<string, number>;
+  /** Face key of each character in `advances`. */
+  readonly faceOf: ReadonlyMap<string, string>;
+  /** Every face loaded for the style by key, the first candidate (`face`) included. */
+  readonly faces: ReadonlyMap<string, SubstituteFace>;
+  /** Keys of the faces tried, in order (the overlay's fallback chain). */
+  readonly candidates: readonly string[];
+  /** The original's x-height and cap height (fractions of the size) the scales match. */
+  readonly heights: { readonly xHeight?: number; readonly capHeight?: number };
 }
+
+/**
+ * Characters a loaded face also gets advances for beyond the ones asked for, so the overlay can
+ * lay out what the user types next (a Greek or Cyrillic letter) without another analysis:
+ * single code points that are letters, numbers, punctuation, symbols or spaces. Combining marks
+ * need positioning the writer does not do.
+ */
+const EXTRA_CHAR = /^[\p{L}\p{N}\p{P}\p{S}\p{Zs}]$/u;
 
 export interface StyleMetrics {
   readonly chars: ReadonlyMap<string, CharMetrics>;
@@ -482,25 +513,32 @@ function resolveOn(
   }
 }
 
-/** Top of the glyph "x" over the font size, from its outline; undefined without one. */
-function xHeightOf(raw: RawText, font: number): number | undefined {
-  const path = raw.glyphPath(font, 'x', 1);
-  if (!path || path.length === 0) return undefined;
-  const top = Math.max(...path.map((s) => s.y));
-  return top > 0 ? top : undefined;
-}
-
-function faceXHeight(font: Font): number | undefined {
-  const glyph = font.glyphForCodePoint(0x78);
-  if (!glyph || glyph.id === 0) return undefined;
-  const top = glyph.bbox.maxY / font.unitsPerEm;
-  return top > 0 ? top : undefined;
+/**
+ * Top of the first of `letters` the font sets (it has a code for it), over the font size,
+ * from its outline; undefined without one.
+ */
+function letterTop(
+  raw: RawText,
+  font: number,
+  codes: ReadonlyMap<string, number>,
+  letters: readonly string[],
+): number | undefined {
+  for (const letter of letters) {
+    if (!codes.has(letter)) continue;
+    const path = raw.glyphPath(font, letter, 1);
+    if (!path || path.length === 0) continue;
+    const top = Math.max(...path.map((s) => s.y));
+    if (top > 0) return top;
+  }
+  return undefined;
 }
 
 interface FontCodes {
   readonly codes: ReadonlyMap<string, number>;
   readonly facts: ObjectFacts;
   readonly xHeight?: number;
+  readonly capHeight?: number;
+  readonly panose?: readonly number[];
 }
 
 /** The tier-2 code of each wanted character in the font of `ref`'s object (one probe pass). */
@@ -536,8 +574,17 @@ async function fontCodes(
         probes.dispose();
       }
     }
-    const xHeight = xHeightOf(raw, info.font);
-    return { codes, facts, ...(xHeight === undefined ? {} : { xHeight }) };
+    const xHeight = letterTop(raw, info.font, codes, X_HEIGHT_LETTERS);
+    const capHeight = letterTop(raw, info.font, codes, CAP_HEIGHT_LETTERS);
+    const fontFacts = raw.fontFacts(info.font);
+    const panose = fontFacts.embedded ? readPanose(raw, info.font, fontFacts.dataBytes) : undefined;
+    return {
+      codes,
+      facts,
+      ...(xHeight === undefined ? {} : { xHeight }),
+      ...(capHeight === undefined ? {} : { capHeight }),
+      ...(panose === undefined ? {} : { panose }),
+    };
   } finally {
     release();
   }
@@ -625,6 +672,11 @@ function harvestPairs(
     const distance = along(model.u, a.origin, b.origin);
     // Two characters of one glyph (a ligature) share an origin.
     if (distance < 0.2 * advance) continue;
+    // `a` is the second character of a ligature: the distance to `b` spans the whole glyph.
+    const prev = model.chars[i - 1];
+    if (prev?.line === a.line && Math.abs(along(model.u, prev.origin, a.origin)) < 0.2 * advance) {
+      continue;
+    }
     const value = Math.round((distance - advance) * 1000) / 1000;
     if (Math.abs(value) < KERN_NOISE * model.block.size) continue;
     const pair = a.text + b.text;
@@ -678,6 +730,86 @@ function wordGapOf(
   return median(gaps) ?? space ?? 0.25 * size;
 }
 
+/**
+ * The bundled faces a style's missing characters are set in (see the module comment): the
+ * class's candidates in order. One face of each family of the class is always loaded (the
+ * first candidate is the one the overlay draws with); faces of other classes only while some
+ * character asked for is still unplaced. Every other character a loaded
+ * face has (`EXTRA_CHAR`) gets an advance too, in the first loaded face that has it: the layout
+ * still prefers the original font's advance, and a layout made by the overlay before the
+ * character was probed can be written as it is.
+ */
+async function substitutesOf(
+  span: ParagraphSpan,
+  codes: FontCodes,
+  chars: ReadonlyMap<string, CharMetrics>,
+  wanted: ReadonlySet<string>,
+  faces: FaceCache,
+): Promise<SubstituteMetrics> {
+  const { font: runFont } = span;
+  const cls = substituteClass({
+    baseName: runFont.baseName,
+    flags: runFont.flags,
+    ...(codes.panose ? { panose: codes.panose } : {}),
+  });
+  const same = bundledFamilyOfFont(runFont.baseName);
+  const candidates = substituteCandidates(cls, runFont.bold, undefined, same);
+  const standard =
+    runFont.kind === 'standard14' ? standardFontMetrics(runFont.baseName) : undefined;
+  const original = standard ?? {
+    ...(codes.xHeight === undefined ? {} : { xHeight: codes.xHeight }),
+    ...(codes.capHeight === undefined ? {} : { capHeight: codes.capHeight }),
+  };
+  const linear = Math.hypot(span.matrix[0], span.matrix[1]) || 1;
+  const loaded = new Map<string, SubstituteFace>();
+  const advances = new Map<string, number>();
+  const faceOf = new Map<string, string>();
+  const place = (ch: string, entry: SubstituteFace) => {
+    advances.set(ch, faceAdvance(entry.font, ch) * span.fontSize * linear * entry.scale);
+    faceOf.set(ch, entry.face.key);
+  };
+  let pending = [...wanted].filter((ch) => !chars.has(ch) && !/[\n\r]/.test(ch));
+  const own = same ? [same, ...classFamilies(cls)] : classFamilies(cls);
+  const families = new Set<string>();
+  for (const face of candidates) {
+    // Another face is loaded for a character still unplaced, or as the first face of a family
+    // of the class (its extra characters let the overlay lay out what is typed next).
+    const wantedForClass = own.includes(face.family) && !families.has(face.family);
+    if (loaded.size > 0 && pending.length === 0 && !wantedForClass) continue;
+    let font: Font;
+    try {
+      font = await faces.get(face);
+    } catch {
+      // A face that cannot load is skipped (the next one of the class takes its place).
+      continue;
+    }
+    const entry: SubstituteFace = { face, font, scale: substituteScale(original, face) };
+    loaded.set(face.key, entry);
+    families.add(face.family);
+    const rest: string[] = [];
+    for (const ch of pending) {
+      if (missingInFace(font, ch).length > 0) rest.push(ch);
+      else place(ch, entry);
+    }
+    pending = rest;
+    for (const cp of font.characterSet) {
+      const ch = String.fromCodePoint(cp);
+      if (!advances.has(ch) && EXTRA_CHAR.test(ch)) place(ch, entry);
+    }
+  }
+  const first = candidates.map((f) => loaded.get(f.key)).find((f) => f !== undefined);
+  if (!first) throw new Error('No bundled face could be loaded');
+  return {
+    ...first,
+    italic: runFont.italic,
+    advances,
+    faceOf,
+    faces: loaded,
+    candidates: candidates.map((f) => f.key),
+    heights: original,
+  };
+}
+
 /** Measures every style (see the module comment); a refusal when a font cannot be read. */
 async function measureStyles(
   target: PageTarget,
@@ -698,29 +830,11 @@ async function measureStyles(
       byFont.set(fontKey, codes);
     }
     const chars = measureCodes(target, raw, style.run, codes.facts, [...codes.codes]);
-    const face = substituteFace(style.span.font);
-    const font = await faces.get(face);
-    const subX = faceXHeight(font);
-    const scale =
-      codes.xHeight !== undefined && subX !== undefined
-        ? Math.min(SUBSTITUTE_SCALE_MAX, Math.max(SUBSTITUTE_SCALE_MIN, codes.xHeight / subX))
-        : 1;
-    const linear = Math.hypot(style.span.matrix[0], style.span.matrix[1]) || 1;
-    const advances = new Map<string, number>();
-    for (const ch of wanted) {
-      if (chars.has(ch) || /[\n\r]/.test(ch) || missingInFace(font, ch).length > 0) continue;
-      advances.set(ch, faceAdvance(font, ch) * style.span.fontSize * linear * scale);
-    }
+    const substitute = await substitutesOf(style.span, codes, chars, wanted, faces);
     const plain = (space: string) => space === 'DeviceRGB' || space === 'DeviceGray';
     metrics.set(style.id, {
       chars,
-      substitute: {
-        face,
-        font,
-        scale,
-        italic: style.span.font.italic,
-        advances,
-      },
+      substitute,
       wordGap: wordGapOf(model, style.id, chars, style.span.size),
       kerning: harvestPairs(model, style.id, chars),
       fontSize: style.span.fontSize,
@@ -770,12 +884,22 @@ function layoutInputOf(
     // take one, the layout reports it unsupported and the writer refuses.
     const own = new Set(model.chars.filter((c) => c.style === style.id).map((c) => c.text));
     const substitute: Record<string, number> = {};
-    for (const [ch, w] of m.substitute.advances) if (!own.has(ch)) substitute[ch] = w;
+    const fonts: Record<string, string> = {};
+    for (const [ch, w] of m.substitute.advances) {
+      if (own.has(ch)) continue;
+      substitute[ch] = w;
+      const face = m.substitute.faceOf.get(ch);
+      if (face !== undefined && face !== m.substitute.face.key) fonts[ch] = face;
+    }
     styles[style.id] = {
       advances,
       wordGap: m.wordGap,
       kerning: m.kerning,
-      substitute: { font: m.substitute.face.key, advances: substitute },
+      substitute: {
+        font: m.substitute.face.key,
+        advances: substitute,
+        ...(Object.keys(fonts).length > 0 ? { fonts } : {}),
+      },
     };
   }
   const spans: LayoutSpan[] = [];
@@ -866,7 +990,13 @@ function styleInfos(
   for (const style of model.styles) {
     const { span } = style;
     const m = metrics.get(style.id);
-    const face = m?.substitute.face ?? substituteFace(span.font);
+    const face =
+      m?.substitute.face ??
+      substituteCandidates(
+        substituteClass({ baseName: span.font.baseName, flags: span.font.flags }),
+        span.font.bold,
+      )[0];
+    if (!face) continue;
     out[style.id] = {
       ...(span.fontId === undefined ? {} : { fontId: span.fontId }),
       font: span.font,
@@ -875,7 +1005,12 @@ function styleInfos(
       matrix: span.matrix,
       ...(span.fill ? { fill: span.fill } : {}),
       renderMode: span.renderMode,
-      substitute: { face: face.key, family: familyName(face), scale: m?.substitute.scale ?? 1 },
+      substitute: {
+        face: face.key,
+        family: familyName(face),
+        scale: m?.substitute.scale ?? 1,
+        ...(m ? { faces: m.substitute.candidates } : {}),
+      },
     };
   }
   return out;
@@ -896,7 +1031,9 @@ export async function prepareParagraph(
   const raw = new RawText(target.access.module, target.access.memory);
   const { block, blocks, runs, generated } = findBlock(target, raw, ref, cache);
   const model = buildModel(raw, target, block, blocks, runs, generated);
-  const chars = new Set<string>([' ', '-']);
+  // The letters the x-height and cap height are read from, so the size of a substitute does
+  // not depend on the text typed.
+  const chars = new Set<string>([' ', '-', ...X_HEIGHT_LETTERS, ...CAP_HEIGHT_LETTERS]);
   for (const ch of block.text) chars.add(ch);
   for (const ch of wanted) chars.add(ch);
   let metrics = new Map<string, StyleMetrics>();

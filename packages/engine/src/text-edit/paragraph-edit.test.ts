@@ -300,7 +300,9 @@ describe('corpus edits', () => {
     const result = await h.editor.applyParagraphEdit(id, 0, edit, { commit: true });
     expect(result.tier).toBe(1);
     expect(result.honesty).toBe('font-substituted');
-    expect(result.substitutions).toEqual([{ char: 'ğ', font: 'Inter-Regular', family: 'Inter' }]);
+    expect(result.substitutions).toEqual([
+      { char: 'ğ', font: 'NotoSans-Regular', family: 'Noto Sans' },
+    ]);
     expect((await blocksOf(id))[0]?.text).toBe(edit.text);
     const runs = await h.editor.locateRuns(id, 0);
     const g = runs.find((r) => r.text.includes('ğ'));

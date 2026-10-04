@@ -60,6 +60,8 @@ export interface LayoutStyle {
   readonly substitute?: {
     readonly font: string;
     readonly advances: Readonly<Record<string, number>>;
+    /** Characters set in another bundled face than `font` (it lacks them): their face. */
+    readonly fonts?: Readonly<Record<string, string>>;
   };
 }
 
@@ -185,6 +187,11 @@ function glyphWidth(style: LayoutStyle, ch: string): { width: number; font: numb
   const sub = style.substitute?.advances[ch];
   if (sub !== undefined) return { width: sub, font: FONT_SUBSTITUTE };
   return { width: meanAdvance(style), font: FONT_NONE };
+}
+
+/** The bundled face a substituted character is set in. */
+function substituteFontOf(style: LayoutStyle | undefined, ch: string): string | undefined {
+  return style?.substitute?.fonts?.[ch] ?? style?.substitute?.font;
 }
 
 function buildTables(
@@ -663,7 +670,15 @@ function placeLine(
   const words: LayoutWord[] = [];
   const runs: LayoutRun[] = [];
   let run:
-    | { start: number; style: string; font: number; x: number; kerning: number[]; glyphs: number }
+    | {
+        start: number;
+        style: string;
+        font: number;
+        face?: string;
+        x: number;
+        kerning: number[];
+        glyphs: number;
+      }
     | undefined;
   let word: { start: number; x: number } | undefined;
   let x = x0;
@@ -673,7 +688,7 @@ function placeLine(
       run = undefined;
       return;
     }
-    const styleFont = input.styles[run.style]?.substitute?.font;
+    const styleFont = run.face;
     runs.push({
       start: run.start,
       end: at,
@@ -723,14 +738,22 @@ function placeLine(
     const font = t.font[i] ?? FONT_ORIGINAL;
     const cp = t.text.codePointAt(i) ?? 0;
     const ch = String.fromCodePoint(cp);
+    const face = font === FONT_SUBSTITUTE ? substituteFontOf(style, ch) : undefined;
     if (font === FONT_SUBSTITUTE) {
-      const name = style?.substitute?.font;
-      if (name !== undefined && !honesty.substituted.has(ch)) honesty.substituted.set(ch, name);
+      if (face !== undefined && !honesty.substituted.has(ch)) honesty.substituted.set(ch, face);
     } else if (font === FONT_NONE) {
       honesty.unsupported.add(ch);
     }
-    if (run && (run.style !== id || run.font !== font)) closeRun(i);
-    run ??= { start: i, style: id, font, x, kerning: [], glyphs: 0 };
+    if (run && (run.style !== id || run.font !== font || run.face !== face)) closeRun(i);
+    run ??= {
+      start: i,
+      style: id,
+      font,
+      ...(face === undefined ? {} : { face }),
+      x,
+      kerning: [],
+      glyphs: 0,
+    };
     word ??= { start: i, x };
     const unitEnd = cp > 0xffff ? i + 2 : i + 1;
     const kern = unitEnd < end && t.kind[unitEnd] === KIND_CHAR ? (t.kern[i] ?? 0) : 0;

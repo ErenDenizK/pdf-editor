@@ -148,3 +148,89 @@ test('type a word into a paragraph, preview, Esc commits once; the export reads 
   await expect(hits).toHaveCount(1, { timeout: 20_000 });
   await expect(hits.first()).toContainText(WORD);
 });
+
+/**
+ * Craft spec §4.5: on `text-edit-fonts.pdf` the first sentence is set in Helvetica (not
+ * embedded, WinAnsi), which cannot encode "ğ". Typing it into that paragraph sets it in the
+ * sans substitute, Noto Sans, and the header's honesty line names it; the export reads the
+ * character back.
+ */
+test('typing ‘ğ’ into a Helvetica paragraph names Noto Sans; the export reads it back', async ({
+  page,
+}) => {
+  const FOX = 'The quick brown fox jumps over the lazy dog';
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Open files' }).first().click();
+  await (await chooser).setFiles(fixturePath('text-edit-fonts.pdf'));
+  await expect(page.getByRole('tab', { name: 'text-edit-fonts' })).toBeVisible();
+  await showInspector(page);
+  await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
+    timeout: 20_000,
+  });
+  await page.locator('[data-read-viewport]').focus();
+  await page.keyboard.press('e');
+
+  // The Helvetica line is the first run reading the sentence.
+  const helvetica = page.locator(`[data-text-edit-layer="0"] [data-text-run="${FOX}"]`).first();
+  await expect(helvetica).toBeVisible({ timeout: 20_000 });
+  const box = await helvetica.boundingBox();
+  if (!box) throw new Error('line not laid out');
+  const at = (FOX.indexOf('fox') + 1) / FOX.length;
+  await page.mouse.click(box.x + box.width * at, box.y + box.height / 2);
+  const editor = page.getByRole('textbox', { name: 'Paragraph on page 1' });
+  await expect(editor).toBeFocused({ timeout: 20_000 });
+  await expect(editor).toHaveText(FOX);
+
+  // "fox" becomes "doğan": select it from the keyboard and type over it.
+  await page.keyboard.press('Home');
+  for (let i = 0; i < FOX.indexOf('fox'); i++) await page.keyboard.press('ArrowRight');
+  for (const _ of 'fox') await page.keyboard.press('Shift+ArrowRight');
+  await page.keyboard.type('doğan');
+  await expect(editor).toHaveText(FOX.replace('fox', 'doğan'));
+  const honesty = page.getByTestId('paragraph-honesty');
+  await expect(honesty).toHaveText(
+    '‘ğ’ uses Noto Sans because the original font in this file does not include it.',
+  );
+  // The settled preview (the dry run) keeps the line: what the writer used is what it says.
+  await expect(page.locator('[data-paragraph-editor]')).toHaveAttribute('data-preview', '', {
+    timeout: 20_000,
+  });
+  await expect(honesty).toHaveText(
+    '‘ğ’ uses Noto Sans because the original font in this file does not include it.',
+  );
+  await expect(page.getByTestId('paragraph-error')).toHaveCount(0);
+
+  await page.keyboard.press('Escape');
+  await expect(editor).toHaveCount(0, { timeout: 20_000 });
+  await expect(historyRows(page, 'Paragraph edited (some characters in Noto Sans)')).toHaveCount(
+    1,
+    { timeout: 20_000 },
+  );
+
+  // Export, re-open, search: the word with the substituted character reads back.
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Export document' }).click();
+  const exportDialog = page.getByTestId('export-dialog');
+  await expect(exportDialog).toBeVisible();
+  await exportDialog.getByRole('button', { name: 'Export', exact: true }).click();
+  await expect(exportDialog.getByTestId('export-verified')).toBeVisible({ timeout: 30_000 });
+  const downloadPromise = page.waitForEvent('download');
+  await exportDialog.getByRole('button', { name: 'Download' }).click();
+  const bytes = await readFile(await (await downloadPromise).path());
+  await page.keyboard.press('Escape');
+
+  const reopen = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Open files' }).first().click();
+  await (await reopen).setFiles({
+    name: 'turkish.pdf',
+    mimeType: 'application/pdf',
+    buffer: bytes,
+  });
+  await expect(page.getByRole('tab', { name: 'turkish' })).toBeVisible();
+  await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
+    timeout: 20_000,
+  });
+  const hits = await search(page, 'brown doğan jumps');
+  await expect(hits).toHaveCount(1, { timeout: 20_000 });
+  await expect(hits.first()).toContainText('doğan');
+});

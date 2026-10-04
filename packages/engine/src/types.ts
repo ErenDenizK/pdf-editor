@@ -2978,9 +2978,16 @@ export interface ParagraphStyleInfo {
   readonly renderMode: number;
   /**
    * The bundled face characters the font lacks are set in (`LayoutStyle.substitute.font` is
-   * its `face` key), its display family, and its size factor (x-heights matched).
+   * its `face` key), its display family, and its size factor (x-heights matched). `faces`:
+   * every face key a missing character tries, in order (`face` first; craft §4.5), so the
+   * overlay can draw with the same fallback chain.
    */
-  readonly substitute: { readonly face: string; readonly family: string; readonly scale: number };
+  readonly substitute: {
+    readonly face: string;
+    readonly family: string;
+    readonly scale: number;
+    readonly faces?: readonly string[];
+  };
 }
 
 /**

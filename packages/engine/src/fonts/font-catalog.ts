@@ -6,7 +6,10 @@
  * packages/engine/assets/fonts/LICENSES.md):
  * - Inter: regular and bold;
  * - JetBrains Mono: regular only (bold is synthesized: fill + stroke);
- * - Noto Serif: regular and bold.
+ * - Noto Serif: regular and bold;
+ * - Noto Sans: regular only, with a wider Latin, Greek and Cyrillic repertoire (IPA, Greek
+ *   Extended, Latin Extended C–E, Cyrillic Extended). It is not offered to page furniture
+ *   (`FONT_FAMILIES` in the app); the paragraph editor sets characters in it (craft §4.5).
  * No italic files are bundled: italic is synthesized by skewing the glyphs by
  * `SYNTHETIC_ITALIC_DEGREES`, in the PDF (text matrix) and in the preview (SVG skewX).
  *
@@ -16,7 +19,7 @@
  */
 import type { FontSpec } from '@pdf-editor/document-model';
 
-export type BundledFamilyId = 'inter' | 'jetbrains-mono' | 'noto-serif';
+export type BundledFamilyId = 'inter' | 'jetbrains-mono' | 'noto-serif' | 'noto-sans';
 
 export interface BundledFamily {
   readonly id: BundledFamilyId;
@@ -30,6 +33,7 @@ export const BUNDLED_FAMILIES: readonly BundledFamily[] = [
   { id: 'inter', name: 'Inter', generic: 'sans-serif' },
   { id: 'jetbrains-mono', name: 'JetBrains Mono', generic: 'monospace' },
   { id: 'noto-serif', name: 'Noto Serif', generic: 'serif' },
+  { id: 'noto-sans', name: 'Noto Sans', generic: 'sans-serif' },
 ];
 
 export interface BundledFace {
@@ -39,14 +43,29 @@ export interface BundledFace {
   readonly weight: 400 | 700;
   /** Cap height as a fraction of the font size (OS/2 sCapHeight / unitsPerEm). */
   readonly capHeight: number;
+  /** x-height as a fraction of the font size (OS/2 sxHeight / unitsPerEm). */
+  readonly xHeight: number;
 }
 
 export const BUNDLED_FACES: readonly BundledFace[] = [
-  { key: 'Inter-Regular', family: 'inter', weight: 400, capHeight: 1490 / 2048 },
-  { key: 'Inter-Bold', family: 'inter', weight: 700, capHeight: 1490 / 2048 },
-  { key: 'JetBrainsMono-Regular', family: 'jetbrains-mono', weight: 400, capHeight: 0.73 },
-  { key: 'NotoSerif-Regular', family: 'noto-serif', weight: 400, capHeight: 0.714 },
-  { key: 'NotoSerif-Bold', family: 'noto-serif', weight: 700, capHeight: 0.714 },
+  {
+    key: 'Inter-Regular',
+    family: 'inter',
+    weight: 400,
+    capHeight: 1490 / 2048,
+    xHeight: 1118 / 2048,
+  },
+  { key: 'Inter-Bold', family: 'inter', weight: 700, capHeight: 1490 / 2048, xHeight: 1118 / 2048 },
+  {
+    key: 'JetBrainsMono-Regular',
+    family: 'jetbrains-mono',
+    weight: 400,
+    capHeight: 0.73,
+    xHeight: 0.55,
+  },
+  { key: 'NotoSerif-Regular', family: 'noto-serif', weight: 400, capHeight: 0.714, xHeight: 0.536 },
+  { key: 'NotoSerif-Bold', family: 'noto-serif', weight: 700, capHeight: 0.714, xHeight: 0.536 },
+  { key: 'NotoSans-Regular', family: 'noto-sans', weight: 400, capHeight: 0.714, xHeight: 0.536 },
 ];
 
 /** Skew angle (degrees, glyph tops lean right) of synthesized italics. */

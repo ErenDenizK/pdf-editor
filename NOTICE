@@ -79,13 +79,16 @@ and are reproduced in the application's "About and licenses" view.
   Used by the paragraph editor to find where lines may break.
 
 - Fonts embedded in exported PDFs (page numbers, headers, footers, Bates numbers,
-  watermarks) and used by the live preview, bundled as subset static TTFs under
-  packages/engine/assets/fonts (see LICENSES.md and OFL.txt there):
+  watermarks, and characters the paragraph editor sets in a substitute face) and used by the
+  live preview, bundled as subset static TTFs under packages/engine/assets/fonts (see
+  LICENSES.md and OFL.txt there):
   - Inter Regular and Bold 4.001
     Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter).
   - JetBrains Mono Regular 2.211
     Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono).
   - Noto Serif Regular and Bold 2.015
+    Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic).
+  - Noto Sans Regular 2.015
     Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic).
   License: SIL Open Font License 1.1 (modified versions: subset, hinting removed).
 

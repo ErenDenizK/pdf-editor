@@ -38,6 +38,7 @@
  */
 import type { Rect, SourceId } from '@pdf-editor/document-model';
 
+import { substituteScale } from '../fonts/substitutes';
 import type { RawAccess } from '../pdfium/host/hosted-engine';
 import type { RawDocContext, RawPageContext } from '../pdfium/host/doc-context';
 import { type PageGeometry, userToDeviceRect } from '../pdfium/coords';
@@ -916,7 +917,10 @@ export class ParagraphWriter {
       }
 
       // Substitute fonts: one subset per face for every character it sets.
-      const subsetCodes = new Map<string, { font: number; codes: Map<string, number> }>();
+      const subsetCodes = new Map<
+        string,
+        { font: number; codes: Map<string, number>; scale: number }
+      >();
       for (const placement of plan.placements) {
         const { face } = placement.segment;
         if (face === undefined || subsetCodes.has(face)) continue;
@@ -927,7 +931,11 @@ export class ParagraphWriter {
           .filter((p) => p.segment.face === face)
           .flatMap((p) => p.segment.glyphs.map((g) => g.text))
           .join('');
-        const subset = buildSubset(style.substitute.font, text);
+        // The face the layout names; loaded here when the analysis did not need it.
+        const loaded = style.substitute.faces.get(face);
+        const faceFont = loaded?.font ?? (await this.faces.get(bundled));
+        const scale = loaded?.scale ?? substituteScale(style.substitute.heights, bundled);
+        const subset = buildSubset(faceFont, text);
         const font = raw.loadCidType2Font(
           access.docPtr,
           subset.program,
@@ -940,7 +948,7 @@ export class ParagraphWriter {
         Array.from(text).forEach((ch, k) => {
           if (!codes.has(ch)) codes.set(ch, subset.codes[k] ?? 0);
         });
-        subsetCodes.set(face, { font, codes });
+        subsetCodes.set(face, { font, codes, scale });
       }
 
       // Rewritten lines: containers in place, new objects inserted in page order: before the
@@ -999,7 +1007,7 @@ export class ParagraphWriter {
             obj = raw.createCharcodes(
               access.docPtr,
               font,
-              style.fontSize * style.substitute.scale,
+              style.fontSize * (subsetCodes.get(segment.face)?.scale ?? style.substitute.scale),
               piece.codes,
             );
             const base: TextMatrix = [linear[0], linear[1], linear[2], linear[3], 0, 0];

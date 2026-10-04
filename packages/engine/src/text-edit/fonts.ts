@@ -3,12 +3,12 @@
  * face that substitutes it in tier 1 (name and flag heuristics), and the fontkit subset
  * loaded into PDFium with `FPDFText_LoadCidType2Font` (research 05 §3 step 3).
  *
- * Faces are the M3 bundle (Inter, JetBrains Mono, Noto Serif; Latin, Greek, Cyrillic).
- * Noto Sans (spec §2.3, wider coverage) is a follow-up: the bundle is produced by a manual
- * `pyftsubset` run (assets/fonts/LICENSES.md), not by a script in the repository, so adding
- * a face is not reproducible here yet. A face listed in `BUNDLED_FACES` is used as soon as
- * it exists; characters no face covers fail with `unsupported-chars`. Italics are
- * synthesised (12° skew), as in page furniture.
+ * Faces are the bundle in assets/fonts (Inter, JetBrains Mono, Noto Serif, Noto Sans; Latin,
+ * Greek, Cyrillic; subset by the `pyftsubset` runs recorded in its LICENSES.md). The class
+ * decision and the per-character face order of the paragraph editor live in
+ * `fonts/substitutes.ts` (craft §4.5); the single-line editor keeps `substituteFace` and
+ * `faceCandidates` below. Characters no face covers fail with `unsupported-chars`. Italics
+ * are synthesised (12° skew), as in page furniture.
  */
 import fontkit, { type Font } from '@cantoo/fontkit';
 
@@ -21,12 +21,11 @@ import {
   bundledFace,
   SYNTHETIC_ITALIC_DEGREES,
 } from '../fonts/font-catalog';
+import { substituteClass } from '../fonts/substitutes';
 import type { TextFontKind, TextRunFont } from '../types';
-import type { FontFacts } from './raw';
+import type { FontFacts, RawText } from './raw';
 
 /** Font descriptor flags (ISO 32000-2 Table 121). */
-const FLAG_FIXED_PITCH = 1;
-const FLAG_SERIF = 2;
 const FLAG_ITALIC = 64;
 const FLAG_FORCE_BOLD = 1 << 18;
 
@@ -66,9 +65,6 @@ export function isSymbolicStandard(baseName: string): boolean {
   return name !== undefined && SYMBOLIC_STANDARD.has(name);
 }
 
-const MONO = /mono|courier|consol|menlo|typewriter|fixed|code/;
-const SERIF =
-  /times|serif|roman|georgia|garamond|cambria|minion|palatino|baskerville|caslon|century|didot|bodoni|charter|merriweather/;
 const BOLD = /bold|black|heavy|semibold|demibold|extrabold|ultrabold/;
 const ITALIC = /italic|oblique|slanted/;
 
@@ -80,9 +76,9 @@ export function classifyFont(facts: FontFacts): TextRunFont {
   else if (standardName(facts.baseName) !== undefined) kind = 'standard14';
   else kind = 'not-embedded';
   const name = `${stripSubsetTag(facts.baseName)} ${facts.familyName}`.toLowerCase();
-  const monospace = (facts.flags & FLAG_FIXED_PITCH) !== 0 || MONO.test(name);
-  const serif =
-    !monospace && !name.includes('sans') && ((facts.flags & FLAG_SERIF) !== 0 || SERIF.test(name));
+  const cls = substituteClass(facts);
+  const monospace = cls === 'mono';
+  const serif = cls === 'serif';
   return {
     baseName: facts.baseName,
     embedded: facts.embedded,
@@ -93,6 +89,45 @@ export function classifyFont(facts: FontFacts): TextRunFont {
     monospace,
     serif,
   };
+}
+
+/** Largest font program read for its PANOSE bytes (bigger programs are left unread). */
+const PANOSE_READ_LIMIT = 8 * 1024 * 1024;
+
+/**
+ * The PANOSE bytes of a TrueType or OpenType program (the `OS/2` table, offset 32), or
+ * undefined: bare CFF, Type 1, a missing table, or all zeros ("any").
+ */
+export function panoseOfProgram(bytes: Uint8Array): number[] | undefined {
+  if (bytes.length < 12) return undefined;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const tag = view.getUint32(0);
+  // 0x00010000 (TrueType), 'OTTO' (CFF-flavoured OpenType), 'true' (Apple TrueType).
+  if (tag !== 0x00010000 && tag !== 0x4f54544f && tag !== 0x74727565) return undefined;
+  const tables = view.getUint16(4);
+  for (let i = 0; i < tables; i++) {
+    const record = 12 + i * 16;
+    if (record + 16 > bytes.length) return undefined;
+    if (view.getUint32(record) !== 0x4f532f32) continue; // 'OS/2'
+    const offset = view.getUint32(record + 8);
+    if (offset + 42 > bytes.length) return undefined;
+    const panose = Array.from(bytes.subarray(offset + 32, offset + 42));
+    return panose.some((b) => b !== 0) ? panose : undefined;
+  }
+  return undefined;
+}
+
+/** The PANOSE bytes of `font`'s program as PDFium holds it (`FPDFFont_GetFontData`). */
+export function readPanose(raw: RawText, font: number, dataBytes: number): number[] | undefined {
+  if (dataBytes <= 0 || dataBytes > PANOSE_READ_LIMIT) return undefined;
+  const { mem, m } = raw;
+  return mem.withMem(dataBytes, (buffer) =>
+    mem.withMem(8, (length) => {
+      if (!m.FPDFFont_GetFontData(font, buffer, dataBytes, length)) return undefined;
+      const read = Math.min(dataBytes, mem.u32(length));
+      return panoseOfProgram(mem.heap().HEAPU8.slice(buffer, buffer + read));
+    }),
+  );
 }
 
 /** Characters WinAnsiEncoding can encode (ISO 32000-2 Annex D). */

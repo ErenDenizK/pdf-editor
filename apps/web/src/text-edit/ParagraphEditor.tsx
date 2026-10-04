@@ -30,7 +30,9 @@ import type {
   ParagraphEditRefusal,
   ParagraphLayoutAnalysis,
   ParagraphRef,
+  ParagraphStyleInfo,
 } from '@pdf-editor/engine';
+import { BUNDLED_FACES, faceFamilyName } from '@pdf-editor/engine/fonts';
 import { Info } from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -47,6 +49,7 @@ import {
 import type { PageTarget } from '../annotations/annotation-store';
 import { cssPointToUser, rectToCss } from '../annotations/geometry';
 import { getEngineService } from '../engine/engine-service';
+import { cssFamilyOf, ensureFace } from '../furniture/furniture-fonts';
 import { formatPercent, getLocale, m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { type PageOverlayProps, registerPageOverlay } from '../stage/page-overlays';
@@ -269,6 +272,18 @@ function quotedList(chars: readonly string[]): string {
   }
 }
 
+/**
+ * The CSS `font-family` the canvas draws a style's substituted characters with until the
+ * preview settles: the bundled faces in the order the engine tries them (each registered
+ * under its private family name once loaded), then the family's name and a generic family.
+ * The browser picks per character, as the writer does.
+ */
+export function substituteCssFamily(info: ParagraphStyleInfo, base: string): string {
+  const keys = info.substitute.faces ?? [info.substitute.face];
+  const faces = keys.flatMap((key) => BUNDLED_FACES.filter((face) => face.key === key));
+  return [...faces.map((face) => `"${cssFamilyOf(face)}"`), base].join(', ');
+}
+
 /** The honesty lines (spec §4.5): substituted characters grouped by the face setting them. */
 export function honestyLines(
   substitutions: readonly { readonly char: string; readonly family: string }[],
@@ -360,7 +375,15 @@ export function ParagraphEditor({
     () => glyphCacheFor(block.ref.source, block.ref.pageIndex, session.revision),
     [block.ref.source, block.ref.pageIndex, session.revision],
   );
-  const drawStyles = useMemo(() => (value ? drawStylesOf(value.analysis.styles) : {}), [value]);
+  const drawStyles = useMemo(() => {
+    if (!value) return {};
+    const out = { ...drawStylesOf(value.analysis.styles) };
+    for (const [id, info] of Object.entries(value.analysis.styles)) {
+      const base = out[id];
+      if (base) out[id] = { ...base, family: substituteCssFamily(info, base.family) };
+    }
+    return out;
+  }, [value]);
 
   // Open: the layout analysis and the layout functions, once per paragraph and revision.
   useEffect(() => {
@@ -975,11 +998,20 @@ export function ParagraphEditor({
       return preview.result.substitutions;
     }
     if (!laid || !value) return [];
-    return laid.result.layout.substituted.map((s) => {
-      const info = Object.values(value.analysis.styles).find((st) => st.substitute.face === s.font);
-      return { char: s.char, font: s.font, family: info?.substitute.family ?? s.font };
-    });
+    return laid.result.layout.substituted.map((s) => ({
+      char: s.char,
+      font: s.font,
+      family: faceFamilyName(s.font),
+    }));
   }, [preview, draft, laid, value]);
+  // The faces substituted characters are drawn in, loaded on first use.
+  const substitutedFaces = [...new Set(substitutions.map((s) => s.font))].join(' ');
+  useEffect(() => {
+    for (const key of substitutedFaces.split(' ')) {
+      const face = BUNDLED_FACES.find((f) => f.key === key);
+      if (face) ensureFace(face);
+    }
+  }, [substitutedFaces]);
   const honestyFacts = useMemo((): NonNullable<ParagraphCommit['honesty']> => {
     if (preview && draft !== null && preview.text === draft.text) return preview.result;
     const embedded = Object.values(value?.analysis.styles ?? {}).every((st) => st.font.embedded);

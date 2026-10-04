@@ -13,6 +13,7 @@ const URLS: Readonly<Record<string, string>> = {
     .href,
   'NotoSerif-Regular': new URL('../../assets/fonts/NotoSerif-Regular.ttf', import.meta.url).href,
   'NotoSerif-Bold': new URL('../../assets/fonts/NotoSerif-Bold.ttf', import.meta.url).href,
+  'NotoSans-Regular': new URL('../../assets/fonts/NotoSans-Regular.ttf', import.meta.url).href,
 };
 
 /** URL of a bundled face's TTF. */

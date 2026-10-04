@@ -12,6 +12,7 @@ import type {
   ParagraphLayoutAnalysis,
   ParagraphPreview,
 } from '@pdf-editor/engine';
+import { faceFamilyName } from '@pdf-editor/engine/fonts';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
@@ -22,7 +23,14 @@ import { useAnnouncer } from '../shell/announcer';
 import type { PageFrame } from '../viewer/geometry';
 import { ADVANCE, FONT, monoStyle, paragraph } from './paragraph-fixtures';
 import type * as Actions from './actions';
-import { honestyLines, ParagraphEditor, previewPlacement } from './ParagraphEditor';
+import { setLocale } from '../i18n';
+import {
+  honestyLines,
+  ParagraphEditor,
+  previewPlacement,
+  substituteCssFamily,
+  PREVIEW_DELAY_MS,
+} from './ParagraphEditor';
 import { type ParagraphSession, useTextEditStore } from './text-edit-store';
 
 const commits = vi.hoisted(() => ({ calls: [] as unknown[] }));
@@ -39,7 +47,6 @@ vi.mock('./actions', async (importOriginal) => {
 });
 
 const LINES = ['The quick brown fox', 'jumps over the lazy', 'dog and runs away.'];
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const SQUARE: GlyphOutlineSegment[] = [
   { kind: 'move', x: 0, y: 0, close: false },
   { kind: 'line', x: 0.5, y: 0, close: false },
@@ -56,12 +63,31 @@ const FRAME: PageFrame = {
 
 let serial = 0;
 
-function setupEngine(options: { substitute?: boolean } = {}) {
+function setupEngine(options: { substitute?: boolean; sans?: boolean } = {}) {
   const source = `src-paragraph-${++serial}` as SourceId;
   const fixture = paragraph(LINES, { width: 20 * ADVANCE, source });
-  const style = options.substitute
-    ? monoStyle({ substitute: { font: 'NotoSerif-Regular', advances: { ğ: ADVANCE, ş: ADVANCE } } })
-    : monoStyle();
+  const style = options.sans
+    ? // Noto Sans for what it has, Inter for the arrow it lacks (craft §4.5).
+      monoStyle({
+        substitute: {
+          font: 'NotoSans-Regular',
+          advances: { ğ: ADVANCE, '→': ADVANCE },
+          fonts: { '→': 'Inter-Regular' },
+        },
+      })
+    : options.substitute
+      ? monoStyle({
+          substitute: { font: 'NotoSerif-Regular', advances: { ğ: ADVANCE, ş: ADVANCE } },
+        })
+      : monoStyle();
+  const substitute = options.sans
+    ? {
+        face: 'NotoSans-Regular',
+        family: 'Noto Sans',
+        scale: 1,
+        faces: ['NotoSans-Regular', 'Inter-Regular'],
+      }
+    : { face: 'NotoSerif-Regular', family: 'Noto Serif', scale: 1 };
   const analysis: ParagraphLayoutAnalysis = {
     ref: fixture.block.ref,
     text: fixture.block.text,
@@ -75,7 +101,7 @@ function setupEngine(options: { substitute?: boolean } = {}) {
         matrix: [1, 0, 0, 1, 0, 0],
         fill: [0, 0, 0, 255],
         renderMode: 0,
-        substitute: { face: 'NotoSerif-Regular', family: 'Noto Serif', scale: 1 },
+        substitute,
       },
     },
     gapBelow: fixture.gapBelow,
@@ -93,10 +119,15 @@ function setupEngine(options: { substitute?: boolean } = {}) {
       .spyOn(service, 'renderParagraphPreview')
       .mockImplementation(async (_s, _p, edit) => {
         const bitmap = await createImageBitmap(new ImageData(8, 4));
+        // As the writer reports them: the layout's substitutions with each face's family.
+        const substitutions = (edit.layout?.substituted ?? []).map((sub) => ({
+          ...sub,
+          family: faceFamilyName(sub.font),
+        }));
         const result = {
           committed: false,
-          honesty: 'same-font',
-          substitutions: [],
+          honesty: substitutions.length > 0 ? 'font-substituted' : 'same-font',
+          substitutions,
           layout: edit.layout,
         } as unknown as ParagraphEditResult;
         const preview: ParagraphPreview = {
@@ -179,12 +210,25 @@ describe('ParagraphEditor', () => {
     const { session, spies } = setupEngine();
     const { mirror, container } = renderEditor(session);
     await ready(mirror);
-    await userEvent.keyboard('abc');
-    await sleep(150);
-    expect(spies.preview).not.toHaveBeenCalled();
-    await waitFor(() => expect(spies.preview).toHaveBeenCalledTimes(1), { timeout: 2000 });
-    const edit = spies.preview.mock.calls[0]?.[2];
-    expect(edit?.text).toBe('The abcquick brown fox jumps over the lazy dog and runs away.');
+    // Typed key by key: a loaded machine can stretch a gap past the pause, and a preview
+    // for that gap is correct. None comes while keys follow within the pause.
+    const times: number[] = [];
+    for (const key of 'abc') {
+      times.push(performance.now());
+      await userEvent.keyboard(key);
+    }
+    const pauses = times.slice(1).filter((t, k) => t - (times[k] ?? t) >= PREVIEW_DELAY_MS).length;
+    expect(spies.preview.mock.calls.length).toBeLessThanOrEqual(pauses);
+    await waitFor(
+      () =>
+        expect(spies.preview.mock.calls.at(-1)?.[2]?.text).toBe(
+          'The abcquick brown fox jumps over the lazy dog and runs away.',
+        ),
+      { timeout: 2000 },
+    );
+    const previews = spies.preview.mock.calls.length;
+    expect(previews).toBeLessThanOrEqual(1 + pauses);
+    const edit = spies.preview.mock.calls.at(-1)?.[2];
     expect(edit?.caretSpan).toEqual({ start: 4, end: 4 });
     expect(edit?.layout).toBeDefined();
     await waitFor(() =>
@@ -196,7 +240,7 @@ describe('ParagraphEditor', () => {
     expect(container.querySelector('[data-paragraph-editor]')).toHaveAttribute('data-preview');
     await userEvent.keyboard('d');
     expect(container.querySelector('[data-paragraph-editor]')).not.toHaveAttribute('data-preview');
-    expect(spies.preview).toHaveBeenCalledTimes(1);
+    expect(spies.preview).toHaveBeenCalledTimes(previews);
   });
 
   it('commits once on Esc after a change', async () => {
@@ -280,6 +324,30 @@ describe('ParagraphEditor', () => {
     expect(mirror.getAttribute('aria-describedby')).toBe(header.id);
   });
 
+  it('names, per character, the face the layout sets it in', async () => {
+    const { session } = setupEngine({ sans: true });
+    const { mirror } = renderEditor(session);
+    await ready(mirror);
+    await userEvent.keyboard('ğ→');
+    await waitFor(() =>
+      expect(screen.getAllByTestId('paragraph-honesty').map((p) => p.textContent)).toEqual([
+        '‘ğ’ uses Noto Sans because the original font in this file does not include it.',
+        '‘→’ uses Inter because the original font in this file does not include it.',
+      ]),
+    );
+  });
+
+  it('shows a character no bundled face has as unsupported in the header', async () => {
+    const { session } = setupEngine({ sans: true });
+    const { mirror } = renderEditor(session);
+    await ready(mirror);
+    await userEvent.keyboard('क');
+    await waitFor(() =>
+      expect(screen.getByTestId('paragraph-header')).toHaveTextContent('No available font has ‘क’'),
+    );
+    expect(screen.queryByTestId('paragraph-honesty')).toBeNull();
+  });
+
   it('takes IME composition through the mirror', async () => {
     const { session } = setupEngine();
     const { mirror, container } = renderEditor(session);
@@ -331,6 +399,60 @@ describe('helpers', () => {
       '‘ğ’ and ‘ş’ use Noto Serif because the original font in this file does not include them.',
     ]);
     expect(honestyLines([])).toEqual([]);
+    expect(
+      honestyLines([
+        { char: 'ğ', family: 'Noto Sans' },
+        { char: '→', family: 'Inter' },
+      ]),
+    ).toEqual([
+      '‘ğ’ uses Noto Sans because the original font in this file does not include it.',
+      '‘→’ uses Inter because the original font in this file does not include it.',
+    ]);
+  });
+
+  it('says the honesty line in Turkish', () => {
+    setLocale('tr');
+    try {
+      expect(honestyLines([{ char: 'ğ', family: 'Noto Serif' }])).toEqual([
+        '‘ğ’ için Noto Serif kullanılıyor, çünkü bu dosyadaki özgün yazı tipinde bu karakter yok.',
+      ]);
+      expect(
+        honestyLines([
+          { char: 'ğ', family: 'Noto Serif' },
+          { char: 'ş', family: 'Noto Serif' },
+        ]),
+      ).toEqual([
+        '‘ğ’ ve ‘ş’ için Noto Serif kullanılıyor, çünkü bu dosyadaki özgün yazı tipinde bu karakterler yok.',
+      ]);
+    } finally {
+      setLocale('en');
+    }
+  });
+
+  it('draws substitutes with the engine’s fallback chain of bundled faces', () => {
+    const info = {
+      font: FONT,
+      fontSize: 10,
+      size: 10,
+      matrix: [1, 0, 0, 1, 0, 0] as const,
+      renderMode: 0,
+      substitute: {
+        face: 'NotoSans-Regular',
+        family: 'Noto Sans',
+        scale: 1,
+        faces: ['NotoSans-Regular', 'Inter-Regular'],
+      },
+    };
+    expect(substituteCssFamily(info, '"Noto Sans", sans-serif')).toBe(
+      '"pdfe-furniture-NotoSans-Regular", "pdfe-furniture-Inter-Regular", "Noto Sans", sans-serif',
+    );
+    const serif = {
+      ...info,
+      substitute: { face: 'NotoSerif-Regular', family: 'Noto Serif', scale: 1 },
+    };
+    expect(substituteCssFamily(serif, '"Noto Serif", serif')).toBe(
+      '"pdfe-furniture-NotoSerif-Regular", "Noto Serif", serif',
+    );
   });
 
   it('places the preview at its clip, turned only by the view rotation', () => {
