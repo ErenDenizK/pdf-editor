@@ -242,7 +242,7 @@ const total = (counts: Readonly<Record<string, number>>) =>
  * from the original font to Noto Sans." (spec §2.1, §5.3: the export summary says how every
  * text edit was typeset).
  */
-function textEditFontsText(name: string, fonts: TextEditFonts): string {
+function textEditFontsText(name: string, fonts: TextEditFonts): string | undefined {
   const parts: string[] = [];
   const count = (n: number) => ({ count: n, countText: formatNumber(n) });
   if (fonts.sameFont > 0) parts.push(m.summary_text_edits_same_font(count(fonts.sameFont)));
@@ -267,33 +267,63 @@ function textEditFontsText(name: string, fonts: TextEditFonts): string {
   if (fonts.movedOutOfForm > 0) {
     parts.push(m.summary_text_edits_moved_out_of_form(count(fonts.movedOutOfForm)));
   }
+  if (parts.length === 0) return undefined;
   return m.summary_text_edits_fonts({ name, parts: parts.join('; ') });
 }
 
+/** "A, B and C" in the interface language. */
+function andList(parts: readonly string[]): string {
+  try {
+    return new Intl.ListFormat(getLocale(), { type: 'conjunction' }).format(parts);
+  } catch {
+    return parts.join(', ');
+  }
+}
+
+/** "1 paragraph and 2 lines of text edited". */
+function textEditsText(textEdits: TextEditExportSummary): string {
+  const paragraphs = textEdits.paragraphs ?? 0;
+  const lines = textEdits.edits - paragraphs;
+  const count = (n: number) => ({ count: n, countText: formatNumber(n) });
+  const what: string[] = [];
+  if (paragraphs > 0) what.push(m.summary_text_edits_paragraphs(count(paragraphs)));
+  if (lines > 0 || paragraphs === 0) what.push(m.summary_text_edits_lines(count(lines)));
+  return m.summary_text_edits_edited({ what: andList(what) });
+}
+
+/** What the export pass tidied after the edits, only the counters that are not zero. */
+function tidiedText(textEdits: TextEditExportSummary): string | undefined {
+  const parts: string[] = [];
+  const count = (n: number) => ({ countText: formatNumber(n) });
+  if (textEdits.fontsRenamed > 0) {
+    parts.push(m.summary_text_edits_tidied_fonts(count(textEdits.fontsRenamed)));
+  }
+  if (textEdits.mcidsReassigned > 0) {
+    parts.push(m.summary_text_edits_tidied_tags(count(textEdits.mcidsReassigned)));
+  }
+  if (textEdits.unreachableRemoved > 0) {
+    parts.push(m.summary_text_edits_tidied_objects(count(textEdits.unreachableRemoved)));
+  }
+  return parts.length > 0 ? m.summary_text_edits_tidied({ parts: parts.join(', ') }) : undefined;
+}
+
 function textEditItems(textEdits: TextEditExportSummary): SummaryItem[] {
+  const tidied = tidiedText(textEdits);
   return [
     {
+      // What the user did: not a warning.
       id: 'text-edits',
-      tone: 'changed',
-      text: m.summary_text_edits({
-        count: textEdits.edits,
-        countText: formatNumber(textEdits.edits),
-        fonts: formatNumber(textEdits.fontsRenamed),
-        mcids: formatNumber(textEdits.mcidsReassigned),
-        objects: formatNumber(textEdits.unreachableRemoved),
-      }),
-      details: textEdits.sources.map((s) =>
-        m.summary_text_edits_source({ name: s.name, count: formatNumber(s.edits) }),
-      ),
+      tone: 'kept',
+      text: textEditsText(textEdits),
+      ...(tidied ? { details: [tidied] } : {}),
     },
     // One visible line per source: which edits kept their font, which did not.
-    ...textEdits.sources.map(
-      (s, index): SummaryItem => ({
-        id: `text-edit-fonts-${index}`,
-        tone: s.fonts.sameFont === s.edits ? 'kept' : 'changed',
-        text: textEditFontsText(s.name, s.fonts),
-      }),
-    ),
+    ...textEdits.sources.flatMap((s, index): SummaryItem[] => {
+      const text = textEditFontsText(s.name, s.fonts);
+      if (text === undefined) return [];
+      const tone = s.fonts.sameFont === s.edits ? 'kept' : 'changed';
+      return [{ id: `text-edit-fonts-${index}`, tone, text }];
+    }),
   ];
 }
 

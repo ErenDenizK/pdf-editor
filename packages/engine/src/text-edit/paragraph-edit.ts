@@ -60,13 +60,15 @@ import type { ParagraphCache } from './blocks';
 import { type ClipRegion, clipOf, clipsContain } from './clip';
 import { textEditError } from './errors';
 import { buildSubset, type FaceCache, faceByKey, familyName, ITALIC_SKEW } from './fonts';
-import { type LayoutEdit, layoutParagraph } from './linebreak';
-import { decideOverflow } from './overflow';
+import { type LayoutEdit, type LayoutEditSpan, layoutParagraph } from './linebreak';
+import { decideOverflow, overflowOf } from './overflow';
 import {
+  type OldChar,
   type PageTarget,
   paragraphRefusalError,
   type PreparedParagraph,
   prepareParagraph,
+  textSpaceExtent,
   userPoint,
 } from './paragraph-input';
 import { multiply, PAGEOBJ_TEXT, type Point, RawText } from './raw';
@@ -79,6 +81,8 @@ export const PARAGRAPH_BOX_TOLERANCE = 0.05;
 const PIXEL_SCALE = 2;
 /** Margin around the paragraph's extent the pixel comparison leaves out (points). */
 const PIXEL_MARGIN = 1;
+/** A glyph may pass the page's visible box by this much (rounding), points. */
+const PAGE_TOLERANCE = 0.5;
 /** A displacement smaller than this needs no split of a segment (points). */
 const SPLIT_EPSILON = 0.001;
 /** `FPDF_ANNOT` and `FPDF_REVERSE_BYTE_ORDER` render flags. */
@@ -121,6 +125,13 @@ interface PlannedGlyph {
   readonly box?: Rect;
 }
 
+/** A planned glyph with the layout line and the style it is written in. */
+interface PlacedGlyph {
+  readonly glyph: PlannedGlyph;
+  readonly line: number;
+  readonly style: string;
+}
+
 interface Segment {
   /** Index in `layout.lines`. */
   readonly line: number;
@@ -152,8 +163,8 @@ interface WritePlan {
   readonly removed: readonly number[];
   /** Objects moved and their shift (reused lines). */
   readonly moved: ReadonlyMap<number, Point>;
-  /** Planned origin of each character of `layout.text` written on a rewritten line. */
-  readonly originAt: ReadonlyMap<number, Point>;
+  /** The planned glyph of each character of `layout.text` written on a rewritten line. */
+  readonly glyphAt: ReadonlyMap<number, PlacedGlyph>;
   /** Per original line its container objects in page order (rewritten lines). */
   readonly containers: readonly (readonly number[])[];
 }
@@ -204,11 +215,97 @@ export function layoutEditOf(old: string, edit: ParagraphEdit): LayoutEdit {
       `The paragraph text does not match the edit at ${start}..${end}`,
     );
   }
+  const text = edit.text.slice(start, start + inserted);
+  if (edit.spans !== undefined) checkEditSpans(old, start, end, text, edit.spans);
   return {
     start,
     end,
-    text: edit.text.slice(start, start + inserted),
+    text,
     ...(edit.style === undefined ? {} : { style: edit.style }),
+    ...(edit.spans === undefined ? {} : { spans: edit.spans }),
+  };
+}
+
+/**
+ * Refuses (`invalid-range`) spans that do not tile parts of the inserted text in order, or
+ * whose `source` does not name the same characters inside the replaced range.
+ */
+function checkEditSpans(
+  old: string,
+  start: number,
+  end: number,
+  text: string,
+  spans: readonly LayoutEditSpan[],
+): void {
+  let at = 0;
+  for (const span of spans) {
+    const ok =
+      Number.isInteger(span.start) &&
+      Number.isInteger(span.end) &&
+      span.start >= at &&
+      span.end > span.start &&
+      span.end <= text.length &&
+      typeof span.style === 'string' &&
+      span.style !== '';
+    const sourceOk =
+      span.source === undefined ||
+      (Number.isInteger(span.source) &&
+        span.source >= start &&
+        span.source + (span.end - span.start) <= end &&
+        old.slice(span.source, span.source + span.end - span.start) ===
+          text.slice(span.start, span.end));
+    if (!ok || !sourceOk) {
+      throw textEditError(
+        'invalid-range',
+        `The style spans of the edit do not match its text at ${span.start}..${span.end}`,
+      );
+    }
+    at = span.end;
+  }
+}
+
+/**
+ * Where the characters of the original text are after an edit, and the reverse: the prefix
+ * and suffix stay, the inserted text's untouched stretches (spans with a `source`) move; typed
+ * characters have no original.
+ */
+interface OffsetMap {
+  readonly start: number;
+  readonly end: number;
+  readonly insEnd: number;
+  readonly delta: number;
+  /** New offset of an original character, undefined when the edit replaced it. */
+  newOf(old: number): number | undefined;
+  /** Original offset of a character of the new text, undefined when it was typed. */
+  oldOf(offset: number): number | undefined;
+}
+
+function offsetMap(edit: LayoutEdit): OffsetMap {
+  const { start, end } = edit;
+  const insEnd = start + edit.text.length;
+  const delta = edit.text.length - (end - start);
+  const sourced = (edit.spans ?? []).filter((s) => s.source !== undefined);
+  return {
+    start,
+    end,
+    insEnd,
+    delta,
+    newOf: (old) => {
+      if (old < start) return old;
+      if (old >= end) return old + delta;
+      for (const s of sourced) {
+        const source = s.source as number;
+        if (old >= source && old < source + s.end - s.start) return start + s.start + old - source;
+      }
+      return undefined;
+    },
+    oldOf: (offset) => {
+      if (offset < start) return offset;
+      if (offset >= insEnd) return offset - delta;
+      const k = offset - start;
+      const s = sourced.find((x) => k >= x.start && k < x.end);
+      return s ? (s.source as number) + k - s.start : undefined;
+    },
   };
 }
 
@@ -217,9 +314,10 @@ export function classifyLayout(
   layout: ParagraphLayout,
   gapBelow: number,
   paragraphGap: number,
+  pageRoom = Number.POSITIVE_INFINITY,
 ): OverflowDecision {
   const growth = layout.height - layout.originalHeight;
-  if (layout.lineDelta <= 0 && growth <= 1e-6) return { kind: 'commit', layout };
+  // A tightened layout says so, also when it keeps the line count (that is what it is for).
   if (layout.wordSpacing < 1 || layout.leading < 1) {
     const reduction = Math.max(1 - layout.wordSpacing, 1 - layout.leading);
     return {
@@ -231,15 +329,140 @@ export function classifyLayout(
       growth,
     };
   }
+  if (layout.lineDelta <= 0 && growth <= 1e-6) return { kind: 'commit', layout };
   const room = Math.max(0, gapBelow - paragraphGap);
   if (growth <= room + 1e-6) return { kind: 'grow', layout, growth };
-  return {
-    kind: 'overflow',
-    layout,
-    growth,
-    excess: growth - room,
-    overlap: Math.max(0, growth - gapBelow),
+  return overflowOf(layout, growth, room, gapBelow, pageRoom);
+}
+
+/**
+ * Fails closed (`verification-failed`) when the layout would draw a character the user did
+ * not type in another style than the original paragraph gives it (font, size, colour or
+ * marked content), or a typed character in another style than the edit's spans give it.
+ */
+function checkPlannedStyles(
+  prepared: PreparedParagraph,
+  layout: ParagraphLayout,
+  map: OffsetMap,
+  edit: LayoutEdit,
+): void {
+  const { charStyles } = prepared.model;
+  const typedStyle = (offset: number): string | undefined => {
+    if (edit.spans === undefined) return undefined;
+    const k = offset - map.start;
+    return edit.spans.find((s) => k >= s.start && k < s.end)?.style;
   };
+  for (const line of layout.lines) {
+    if (line.status !== 'rewritten') continue;
+    for (const run of line.runs) {
+      let offset = run.start;
+      for (const ch of run.text) {
+        if (!/\s/u.test(ch)) {
+          const old = map.oldOf(offset);
+          const expected = old === undefined ? typedStyle(offset) : charStyles[old];
+          if (expected !== undefined && expected !== run.style) {
+            throw textEditError(
+              'verification-failed',
+              `Paragraph check failed: "${ch}" at ${offset} would change from ${expected} to ${run.style}`,
+            );
+          }
+        }
+        offset += ch.length;
+      }
+    }
+  }
+}
+
+/** How a text object is drawn: what a written object of its style must match. */
+interface ObjectLook {
+  readonly font: number;
+  readonly size: number;
+  readonly fill?: readonly number[];
+  readonly renderMode: number;
+  readonly mcid: number;
+}
+
+function lookOf(raw: RawText, obj: number): ObjectLook {
+  const fill = raw.fillColor(obj);
+  return {
+    font: raw.font(obj),
+    size: raw.fontSize(obj),
+    ...(fill ? { fill } : {}),
+    renderMode: raw.renderMode(obj),
+    mcid: raw.markedContentId(obj),
+  };
+}
+
+/** What differs between a written object and its style's look, or undefined. */
+function lookDifference(
+  actual: ObjectLook,
+  expected: ObjectLook,
+  otherColorSpace: boolean,
+): string | undefined {
+  if (actual.font !== expected.font) return 'font';
+  if (Math.abs(actual.size - expected.size) > 1e-3) return 'size';
+  if (actual.renderMode !== expected.renderMode) return 'render mode';
+  if (actual.mcid !== expected.mcid) return 'marked content';
+  // A colour space other than RGB is converted when copied (reported as colorSpaceChanged).
+  if (!otherColorSpace && actual.fill && expected.fill) {
+    if (actual.fill.some((v, i) => Math.abs(v - (expected.fill?.[i] ?? v)) > 1)) return 'colour';
+  }
+  return undefined;
+}
+
+/**
+ * Refuses (`off-page`) a plan that puts a glyph outside the page's visible box (CropBox ∩
+ * MediaBox, unrotated user space; the page's /Rotate turns the view, not the box), beyond
+ * where the paragraph already was.
+ */
+function checkPageBounds(prepared: PreparedParagraph, plan: WritePlan): void {
+  const { model, metrics } = prepared;
+  const allowed = expand(unionRect([model.pageBox, model.block.box]), PAGE_TOLERANCE);
+  const inside = (r: Rect) =>
+    r.x >= allowed.x &&
+    r.y >= allowed.y &&
+    r.x + r.width <= allowed.x + allowed.width &&
+    r.y + r.height <= allowed.y + allowed.height;
+  for (const placement of plan.placements) {
+    const size = metrics.get(placement.segment.style)?.fontSize ?? 10;
+    for (const g of placement.segment.glyphs) {
+      const box = plannedBox(g, model.u, size);
+      if (box.width <= 0 && box.height <= 0) continue;
+      if (!inside(box)) {
+        throw paragraphRefusalError('off-page', `"${g.text}" would be drawn outside the page`);
+      }
+    }
+  }
+  for (const [index, shift] of plan.moved) {
+    for (const c of model.chars) {
+      if (c.object !== index || c.box.width * c.box.height === 0) continue;
+      if (!inside(shiftedRect(c.box, shift))) {
+        throw paragraphRefusalError('off-page', 'a moved line would leave the page');
+      }
+    }
+  }
+}
+
+/** A planned glyph's box in user space (estimated from the size without a measured box). */
+function plannedBox(g: PlannedGlyph, u: Point, size: number): Rect {
+  if (g.box) {
+    return { x: g.origin.x + g.box.x, y: g.origin.y + g.box.y, ...sizeOf(g.box) };
+  }
+  const corners = [
+    userPoint(u, 0, -0.2 * size),
+    userPoint(u, Math.max(g.step, 0), -0.2 * size),
+    userPoint(u, 0, 0.9 * size),
+    userPoint(u, Math.max(g.step, 0), 0.9 * size),
+  ].map((p) => plus(g.origin, p));
+  const xs = corners.map((p) => p.x);
+  const ys = corners.map((p) => p.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+}
+
+function sizeOf(r: Rect): { width: number; height: number } {
+  return { width: r.width, height: r.height };
 }
 
 /** The glyphs of a rewritten line, cut into segments (see the module comment). */
@@ -247,7 +470,7 @@ function planLine(
   prepared: PreparedParagraph,
   layout: ParagraphLayout,
   lineIndex: number,
-  originAt: Map<number, Point>,
+  glyphAt: Map<number, PlacedGlyph>,
 ): Segment[] {
   const { model, metrics } = prepared;
   const line = layout.lines[lineIndex] as LayoutLine;
@@ -286,8 +509,9 @@ function planLine(
       const g = glyphFor(run.style, ch, run.font);
       const origin = userPoint(model.u, x, baseline);
       const step = g.spaced + kern;
-      current?.glyphs.push({ text: ch, offset, origin, step, ...g });
-      originAt.set(offset, origin);
+      const glyph: PlannedGlyph = { text: ch, offset, origin, step, ...g };
+      current?.glyphs.push(glyph);
+      glyphAt.set(offset, { glyph, line: lineIndex, style: run.style });
       x += step;
       offset += ch.length;
       // A displacement after this glyph: the next one starts a new segment.
@@ -369,7 +593,7 @@ function planWrite(prepared: PreparedParagraph, layout: ParagraphLayout): WriteP
 
   const replaced = fates.flatMap((f, li) => (f.kind === 'rewritten' ? [li] : []));
   const rewritten = layout.lines.flatMap((l, i) => (l.status === 'rewritten' ? [i] : []));
-  const originAt = new Map<number, Point>();
+  const glyphAt = new Map<number, PlacedGlyph>();
   const placements: Placement[] = [];
   const used = new Set<number>();
   const containers: number[][] = [];
@@ -383,7 +607,7 @@ function planWrite(prepared: PreparedParagraph, layout: ParagraphLayout): WriteP
       source === undefined ? [] : (model.lineObjects[source] ?? []).filter((o) => !used.has(o));
     containers.push(pool);
     let next = 0;
-    for (const segment of planLine(prepared, layout, lineIndex, originAt)) {
+    for (const segment of planLine(prepared, layout, lineIndex, glyphAt)) {
       const template = firstOfStyle.get(segment.style);
       if (template === undefined) {
         throw textEditError('verification-failed', `No object has style ${segment.style}`);
@@ -414,7 +638,7 @@ function planWrite(prepared: PreparedParagraph, layout: ParagraphLayout): WriteP
       if (!used.has(object) && !removed.includes(object)) removed.push(object);
     }
   }
-  return { fates, placements, removed, moved, originAt, containers };
+  return { fates, placements, removed, moved, glyphAt, containers };
 }
 
 // ---------------------------------------------------------------------------
@@ -590,88 +814,251 @@ function readAnnotations(raw: RawText, pagePtr: number): PageAnnotation[] {
   return out;
 }
 
+/** Where an annotation goes: its quads (each original quad's pieces, in order) and /Rect. */
 interface AnnotationMove {
   readonly annotation: PageAnnotation;
-  readonly shift: Point;
+  /** The new quads (8 numbers: top left, top right, bottom left, bottom right); none: /Rect only. */
+  readonly quads: readonly (readonly number[])[];
+  readonly rect: Rect;
+  /**
+   * Per new quad (the /Rect of an annotation without quads): the offsets in the new text of
+   * the characters it covers, checked against their read-back boxes.
+   */
+  readonly covers: readonly { readonly quad: readonly number[]; readonly offsets: number[] }[];
 }
 
-/** Annotations whose centre lies on a word that moves, and how far (see the module comment). */
+/** Text-space extent of the points of a quad (or of any point list). */
+function quadExtent(
+  q: readonly number[],
+  u: Point,
+): { x0: number; x1: number; y0: number; y1: number } {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i + 1 < q.length; i += 2) {
+    const x = q[i] ?? 0;
+    const y = q[i + 1] ?? 0;
+    xs.push(x * u.x + y * u.y);
+    ys.push(-x * u.y + y * u.x);
+  }
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+}
+
+/** A user-space rect as quad points. */
+function rectQuad(r: Rect): number[] {
+  return [r.x, r.y + r.height, r.x + r.width, r.y + r.height, r.x, r.y, r.x + r.width, r.y];
+}
+
+/** A text-space box as quad points in user space. */
+function textQuad(u: Point, x0: number, x1: number, y0: number, y1: number): number[] {
+  return [
+    userPoint(u, x0, y1),
+    userPoint(u, x1, y1),
+    userPoint(u, x0, y0),
+    userPoint(u, x1, y0),
+  ].flatMap((p) => [p.x, p.y]);
+}
+
+/** User-space bounds of quads. */
+function quadBounds(quads: readonly (readonly number[])[]): Rect {
+  return unionRect(
+    quads.map((q) => {
+      const e = quadExtent(q, { x: 1, y: 0 });
+      return { x: e.x0, y: e.y0, width: e.x1 - e.x0, height: e.y1 - e.y0 };
+    }),
+  );
+}
+
+function centerOf(r: Rect): Point {
+  return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+}
+
+/** A character's centre may lie this far outside the quad that marks it (points). */
+const COVER_TOLERANCE = 0.5;
+
+/**
+ * Where links, markup and widgets over the paragraph go (craft spec §4.4). Each quad (the
+ * /Rect of an annotation without quads) covers the characters whose centres it holds. When
+ * all of them move by one vector the quad moves by it; when they move apart (rewrapped onto
+ * other lines, or gaps that changed) the quad is rebuilt per line from the moved glyph boxes,
+ * keeping its margins around the text and its height around the baseline. /Rect follows the
+ * quads with its own margins. A widget is never split: it stays where it is.
+ */
 function annotationMoves(
   prepared: PreparedParagraph,
   plan: WritePlan,
-  edit: { readonly start: number; readonly end: number; readonly delta: number },
+  map: OffsetMap,
   annotations: readonly PageAnnotation[],
 ): AnnotationMove[] {
-  const { model } = prepared;
-  interface Word {
-    readonly line: number;
-    readonly start: number;
-    readonly end: number;
+  const { model, metrics } = prepared;
+  const { u } = model;
+  const toText = (p: Point) => ({ x: p.x * u.x + p.y * u.y, y: -p.x * u.y + p.y * u.x });
+  interface Moved {
+    readonly char: OldChar;
+    readonly offset: number;
     readonly origin: Point;
     readonly box: Rect;
+    /** The line it is drawn on after the edit. */
+    readonly line: string;
   }
-  const words: Word[] = [];
-  let current:
-    | { line: number; start: number; end: number; origin: Point; boxes: Rect[] }
-    | undefined;
-  const flush = () => {
-    if (current) words.push({ ...current, box: unionRect(current.boxes) });
-    current = undefined;
-  };
-  for (const c of model.chars) {
-    if (/\s/u.test(c.text) || c.offset < 0 || (current && current.line !== c.line)) {
-      flush();
-      if (/\s/u.test(c.text) || c.offset < 0) continue;
+  const after = new Map<OldChar, Moved | undefined>();
+  const movedOf = (c: OldChar): Moved | undefined => {
+    if (after.has(c)) return after.get(c);
+    let out: Moved | undefined;
+    const offset = map.newOf(c.offset);
+    const fate = plan.fates[c.line];
+    if (offset !== undefined && fate?.kind === 'kept') {
+      out = { char: c, offset, origin: c.origin, box: c.box, line: `o${c.line}` };
+    } else if (offset !== undefined && fate?.kind === 'reused') {
+      const shift = scaleVec(model.n, -fate.dy);
+      const box = shiftedRect(c.box, shift);
+      out = { char: c, offset, origin: plus(c.origin, shift), box, line: `o${c.line}` };
+    } else if (offset !== undefined) {
+      const placed = plan.glyphAt.get(offset);
+      if (placed) {
+        const size = metrics.get(placed.style)?.fontSize ?? model.block.size;
+        const box = plannedBox(placed.glyph, u, size);
+        out = { char: c, offset, origin: placed.glyph.origin, box, line: `r${placed.line}` };
+      }
     }
-    if (current && c.offset !== current.end) flush();
-    current ??= { line: c.line, start: c.offset, end: c.offset, origin: c.origin, boxes: [] };
-    current.end = c.offset + c.text.length;
-    current.boxes.push(c.box);
-  }
-  flush();
+    after.set(c, out);
+    return out;
+  };
+  const inked = model.chars.filter(
+    (c) => c.offset >= 0 && !/\s/u.test(c.text) && c.box.width > 0 && c.box.height > 0,
+  );
+
   const out: AnnotationMove[] = [];
   for (const annotation of annotations) {
-    const q = annotation.quads[0];
-    const center = q
-      ? {
-          x: ((q[0] ?? 0) + (q[2] ?? 0) + (q[4] ?? 0) + (q[6] ?? 0)) / 4,
-          y: ((q[1] ?? 0) + (q[3] ?? 0) + (q[5] ?? 0) + (q[7] ?? 0)) / 4,
-        }
-      : {
-          x: annotation.rect.x + annotation.rect.width / 2,
-          y: annotation.rect.y + annotation.rect.height / 2,
-        };
-    const word = words.find((w) => {
-      const b = expand(w.box, 1);
-      return (
-        center.x >= b.x &&
-        center.x <= b.x + b.width &&
-        center.y >= b.y &&
-        center.y <= b.y + b.height
-      );
-    });
-    if (!word) continue;
-    const fate = plan.fates[word.line];
-    let shift: Point | undefined;
-    if (fate?.kind === 'reused') shift = scaleVec(model.n, -fate.dy);
-    else if (fate?.kind === 'rewritten') {
-      const at =
-        word.end <= edit.start
-          ? word.start
-          : word.start >= edit.end
-            ? word.start + edit.delta
-            : undefined;
-      const target = at === undefined ? undefined : plan.originAt.get(at);
-      if (target) shift = { x: target.x - word.origin.x, y: target.y - word.origin.y };
+    const ownQuads = annotation.quads.length > 0;
+    const regions = ownQuads ? annotation.quads : [rectQuad(annotation.rect)];
+    const quads: (readonly number[])[] = [];
+    const covers: { quad: readonly number[]; offsets: number[] }[] = [];
+    let changed = false;
+    let split = false;
+    for (const q of regions) {
+      const e = quadExtent(q, u);
+      const covered = inked.filter((c) => {
+        const t = toText(centerOf(c.box));
+        return (
+          t.x >= e.x0 - COVER_TOLERANCE &&
+          t.x <= e.x1 + COVER_TOLERANCE &&
+          t.y >= e.y0 - COVER_TOLERANCE &&
+          t.y <= e.y1 + COVER_TOLERANCE
+        );
+      });
+      const moved = covered.flatMap((c) => {
+        const m = movedOf(c);
+        return m ? [m] : [];
+      });
+      const first = moved[0];
+      if (!first) {
+        quads.push(q);
+        continue;
+      }
+      const shifts = moved.map((m) => ({
+        x: m.origin.x - m.char.origin.x,
+        y: m.origin.y - m.char.origin.y,
+      }));
+      const shift = shifts[0] as Point;
+      if (shifts.every((v) => distance(v, shift) <= PARAGRAPH_ORIGIN_TOLERANCE)) {
+        const still = Math.hypot(shift.x, shift.y) <= SPLIT_EPSILON;
+        const next = still ? q : q.map((v, j) => v + (j % 2 === 0 ? shift.x : shift.y));
+        quads.push(next);
+        covers.push({ quad: next, offsets: moved.map((m) => m.offset) });
+        if (!still) changed = true;
+        continue;
+      }
+      // Rebuilt: one quad per line the characters are now on, with the old margins.
+      const oldExtents = moved.map((m) => textSpaceExtent(m.char.box, u));
+      const padLeft = Math.min(...oldExtents.map((x) => x.x0)) - e.x0;
+      const padRight = e.x1 - Math.max(...oldExtents.map((x) => x.x1));
+      const oldBase = toText(first.char.origin).y;
+      const lines = new Map<string, Moved[]>();
+      for (const m of [...moved].sort((a, b) => a.offset - b.offset)) {
+        const list = lines.get(m.line);
+        if (list) list.push(m);
+        else lines.set(m.line, [m]);
+      }
+      for (const group of lines.values()) {
+        const extents = group.map((m) => textSpaceExtent(m.box, u));
+        const base = toText((group[0] as Moved).origin).y;
+        const next = textQuad(
+          u,
+          Math.min(...extents.map((x) => x.x0)) - padLeft,
+          Math.max(...extents.map((x) => x.x1)) + padRight,
+          base + (e.y0 - oldBase),
+          base + (e.y1 - oldBase),
+        );
+        quads.push(next);
+        covers.push({ quad: next, offsets: group.map((m) => m.offset) });
+      }
+      changed = true;
+      split = true;
     }
-    if (shift && Math.hypot(shift.x, shift.y) > SPLIT_EPSILON) out.push({ annotation, shift });
+    if (!changed) continue;
+    // A form field is not cut in two.
+    if (split && annotation.subtype === 'widget') continue;
+    let rect: Rect;
+    if (ownQuads) {
+      // /Rect keeps its margins around the quads.
+      const before = quadBounds(annotation.quads);
+      const r = annotation.rect;
+      const left = Math.max(0, before.x - r.x);
+      const bottom = Math.max(0, before.y - r.y);
+      const right = Math.max(0, r.x + r.width - before.x - before.width);
+      const top = Math.max(0, r.y + r.height - before.y - before.height);
+      const now = quadBounds(quads);
+      rect = {
+        x: now.x - left,
+        y: now.y - bottom,
+        width: now.width + left + right,
+        height: now.height + bottom + top,
+      };
+    } else {
+      rect = quadBounds(quads);
+    }
+    out.push({ annotation, quads: ownQuads || split ? quads : [], rect, covers });
   }
   return out;
+}
+
+/** The first moved annotation not lying on the read-back glyphs it marks, described. */
+function annotationMismatch(
+  moves: readonly AnnotationMove[],
+  readAt: ReadonlyMap<number, Rect>,
+  u: Point,
+  text: string,
+): string | undefined {
+  for (const move of moves) {
+    for (const cover of move.covers) {
+      const e = quadExtent(cover.quad, u);
+      const slack = COVER_TOLERANCE + PARAGRAPH_ORIGIN_TOLERANCE + PARAGRAPH_BOX_TOLERANCE;
+      for (const offset of cover.offsets) {
+        const box = readAt.get(offset);
+        if (!box || box.width * box.height === 0) continue;
+        const c = centerOf(box);
+        const t = { x: c.x * u.x + c.y * u.y, y: -c.x * u.y + c.y * u.x };
+        if (t.x < e.x0 - slack || t.x > e.x1 + slack || t.y < e.y0 - slack || t.y > e.y1 + slack) {
+          const name = move.annotation.id ?? `${move.annotation.subtype} ${move.annotation.index}`;
+          return `annotation ${name} would not lie on "${text.slice(offset, offset + 1)}"`;
+        }
+      }
+    }
+  }
+  return undefined;
 }
 
 function shiftedRect(rect: Rect, shift: Point): Rect {
   return { ...rect, x: rect.x + shift.x, y: rect.y + shift.y };
 }
+
+/** Markup annotations whose appearance PDFium draws again from the moved quads. */
+const REGENERATED: ReadonlySet<ParagraphMovedAnnotation['subtype']> = new Set([
+  'highlight',
+  'underline',
+  'squiggly',
+  'strikeout',
+]);
 
 function applyAnnotationMoves(
   raw: RawText,
@@ -679,26 +1066,33 @@ function applyAnnotationMoves(
   moves: readonly AnnotationMove[],
 ): void {
   const { m, mem } = raw;
-  for (const { annotation, shift } of moves) {
+  for (const { annotation, quads, rect } of moves) {
     const annot = m.FPDFPage_GetAnnot(pagePtr, annotation.index);
-    if (!annot) continue;
+    if (!annot) throw new Error(`FPDFPage_GetAnnot failed for annotation ${annotation.index}`);
     try {
-      const r = shiftedRect(annotation.rect, shift);
-      mem.withMem(16, (p) => {
-        const f32 = mem.heap().HEAPF32;
-        f32.set([r.x, r.y + r.height, r.x + r.width, r.y], p >> 2);
-        m.FPDFAnnot_SetRect(annot, p);
-      });
-      annotation.quads.forEach((quad, k) => {
+      const count = annotation.quads.length;
+      quads.forEach((quad, k) => {
         mem.withMem(32, (p) => {
-          const f32 = mem.heap().HEAPF32;
-          f32.set(
-            quad.map((v, j) => v + (j % 2 === 0 ? shift.x : shift.y)),
-            p >> 2,
-          );
-          m.FPDFAnnot_SetAttachmentPoints(annot, k, p);
+          mem.heap().HEAPF32.set(quad, p >> 2);
+          const ok =
+            k < count
+              ? m.FPDFAnnot_SetAttachmentPoints(annot, k, p)
+              : m.FPDFAnnot_AppendAttachmentPoints(annot, p);
+          // A link without quads that cannot take them keeps the /Rect around every piece.
+          if (!ok && (k < count || REGENERATED.has(annotation.subtype))) {
+            throw new Error('FPDFAnnot_SetAttachmentPoints failed');
+          }
         });
       });
+      mem.withMem(16, (p) => {
+        mem.heap().HEAPF32.set([rect.x, rect.y + rect.height, rect.x + rect.width, rect.y], p >> 2);
+        if (!m.FPDFAnnot_SetRect(annot, p)) throw new Error('FPDFAnnot_SetRect failed');
+      });
+      // The old appearance was drawn for the old quads: PDFium draws markup again from the
+      // new ones (and their colour and opacity) when the page is next loaded.
+      if (REGENERATED.has(annotation.subtype) && m.FPDFAnnot_HasKey(annot, 'AP')) {
+        if (!m.FPDFAnnot_SetAP(annot, 0, 0)) throw new Error('FPDFAnnot_SetAP failed');
+      }
     } finally {
       m.FPDFPage_CloseAnnot(annot);
     }
@@ -798,6 +1192,7 @@ export class ParagraphWriter {
       styles: prepared.infos,
       gapBelow: prepared.gapBelow,
       paragraphGap: prepared.paragraphGap,
+      pageRoom: prepared.pageRoom,
       ...(prepared.refusal ? { refusal: prepared.refusal } : {}),
     };
   }
@@ -863,15 +1258,28 @@ export class ParagraphWriter {
         throw textEditError('invalid-range', 'The layout was made for another text');
       }
       layout = edit.layout;
-      decision = classifyLayout(layout, prepared.gapBelow, prepared.paragraphGap);
+      decision = classifyLayout(
+        layout,
+        prepared.gapBelow,
+        prepared.paragraphGap,
+        prepared.pageRoom,
+      );
     } else {
       const base = layoutParagraph(prepared.input, layoutEdit);
       decision = decideOverflow(
         base,
-        { input: prepared.input, edit: layoutEdit, paragraphGap: prepared.paragraphGap },
+        {
+          input: prepared.input,
+          edit: layoutEdit,
+          paragraphGap: prepared.paragraphGap,
+          pageRoom: prepared.pageRoom,
+        },
         prepared.gapBelow,
       );
       layout = decision.layout;
+    }
+    if (decision.kind === 'overflow' && decision.offPage) {
+      throw paragraphRefusalError('off-page', 'the text would run past the edge of the page');
     }
     if (layout.unsupported.length > 0) {
       const own = new Set(model.chars.map((c) => c.text));
@@ -881,7 +1289,10 @@ export class ParagraphWriter {
         layout.unsupported.join(' '),
       );
     }
+    const map = offsetMap(layoutEdit);
+    checkPlannedStyles(prepared, layout, map, layoutEdit);
     const plan = planWrite(prepared, layout);
+    checkPageBounds(prepared, plan);
 
     const { m } = raw;
     const page = access.doc.acquirePage(target.pageIndex);
@@ -905,6 +1316,9 @@ export class ParagraphWriter {
     try {
       // Refusals that need the page: clips.
       this.checkClips(raw, prepared, plan, ptr);
+      // How each style is drawn before the edit: written objects must read back the same.
+      const looks = new Map<string, ObjectLook>();
+      for (const style of model.styles) looks.set(style.id, lookOf(raw, ptr(style.object)));
 
       const before = renderArea(raw, pagePtr, PIXEL_SCALE);
       const annotations = readAnnotations(raw, pagePtr);
@@ -1056,13 +1470,14 @@ export class ParagraphWriter {
         order.splice(order.indexOf(obj), 1);
       }
 
-      let verification = this.verify(raw, pagePtr, prepared, plan, layout, written, ptr);
+      const check = { prepared, plan, layout, written, map, looks };
+      let verification = this.verify(raw, pagePtr, check, ptr);
       if (verification.settle.length > 0) {
         for (const { obj, shift } of verification.settle) {
           const mx = raw.matrix(obj);
           raw.setMatrix(obj, [mx[0], mx[1], mx[2], mx[3], mx[4] - shift.x, mx[5] - shift.y]);
         }
-        verification = this.verify(raw, pagePtr, prepared, plan, layout, written, ptr);
+        verification = this.verify(raw, pagePtr, check, ptr);
       }
 
       // Nothing may change outside the paragraph's old and new extent.
@@ -1083,13 +1498,12 @@ export class ParagraphWriter {
           : undefined);
       if (failure) throw textEditError('verification-failed', `Paragraph check failed: ${failure}`);
 
-      const delta = layoutEdit.text.length - (layoutEdit.end - layoutEdit.start);
-      const moves = annotationMoves(
-        prepared,
-        plan,
-        { start: layoutEdit.start, end: layoutEdit.end, delta },
-        annotations,
-      );
+      // Links, markup and widgets follow their words; checked against the read-back glyphs.
+      const moves = annotationMoves(prepared, plan, map, annotations);
+      const misplaced = annotationMismatch(moves, verification.readAt, model.u, layout.text);
+      if (misplaced) {
+        throw textEditError('verification-failed', `Paragraph check failed: ${misplaced}`);
+      }
       let image: RgbaImage | undefined;
       // An edit that changes nothing (the same text) writes nothing.
       const changes = plan.placements.length > 0 || plan.removed.length > 0 || plan.moved.size > 0;
@@ -1119,12 +1533,12 @@ export class ParagraphWriter {
         honesty:
           tier === 1 ? 'font-substituted' : embedded ? 'same-font' : 'same-font-not-embedded',
         substitutions,
-        moved: moves.map(({ annotation, shift }) => ({
+        moved: moves.map(({ annotation, rect }) => ({
           index: annotation.index,
           ...(annotation.id ? { id: annotation.id } : {}),
           subtype: annotation.subtype,
           from: annotation.rect,
-          to: shiftedRect(annotation.rect, shift),
+          to: rect,
         })),
         ...(colorSpaceChanged ? { colorSpaceChanged: true } : {}),
         verification: report,
@@ -1191,10 +1605,14 @@ export class ParagraphWriter {
   private verify(
     raw: RawText,
     pagePtr: number,
-    prepared: PreparedParagraph,
-    plan: WritePlan,
-    layout: ParagraphLayout,
-    written: readonly Written[],
+    check: {
+      readonly prepared: PreparedParagraph;
+      readonly plan: WritePlan;
+      readonly layout: ParagraphLayout;
+      readonly written: readonly Written[];
+      readonly map: OffsetMap;
+      readonly looks: ReadonlyMap<string, ObjectLook>;
+    },
     ptr: (index: number) => number,
   ): {
     report: Omit<
@@ -1204,7 +1622,10 @@ export class ParagraphWriter {
     failure?: string;
     settle: { obj: number; shift: Point }[];
     boxes: Rect[];
+    /** The read-back glyph box of each character of the new text that has one. */
+    readAt: Map<number, Rect>;
   } {
+    const { prepared, plan, layout, written, map, looks } = check;
     const { model } = prepared;
     const keptObjects = new Map<number, number>(); // pointer → page object index
     model.lineObjects.forEach((objects, li) => {
@@ -1227,6 +1648,7 @@ export class ParagraphWriter {
     let failure: string | undefined;
     const settle: { obj: number; shift: Point }[] = [];
     const boxes: Rect[] = [];
+    const readAt = new Map<number, Rect>();
     const readOfLine = new Map<number, string[]>();
     const expectedOfLine = new Map<number, string[]>();
     const push = (map: Map<number, string[]>, line: number, text: string) => {
@@ -1237,7 +1659,25 @@ export class ParagraphWriter {
 
     for (const w of written) {
       const mine = byObject.get(w.obj) ?? [];
-      const { glyphs } = w.placement.segment;
+      const { glyphs, style, face } = w.placement.segment;
+      // Every written object is drawn as its style: font, size, colour, marked content.
+      const expected = looks.get(style);
+      if (expected) {
+        const actual = lookOf(raw, w.obj);
+        const differs =
+          face === undefined
+            ? lookDifference(
+                actual,
+                expected,
+                prepared.metrics.get(style)?.otherColorSpace === true,
+              )
+            : actual.mcid !== expected.mcid
+              ? 'marked content'
+              : actual.renderMode !== expected.renderMode
+                ? 'render mode'
+                : undefined;
+        if (differs) failure ??= `an object of style ${style} reads back in another ${differs}`;
+      }
       const texts = glyphs.map((g) => g.text);
       push(readOfLine, w.placement.segment.line, mine.map((c) => c.text).join(''));
       push(expectedOfLine, w.placement.segment.line, texts.join(''));
@@ -1253,6 +1693,7 @@ export class ParagraphWriter {
         if (!c || !g) return;
         offsets.push({ x: c.origin.x - g.origin.x, y: c.origin.y - g.origin.y });
         drift = Math.max(drift, distance(c.origin, g.origin));
+        if (g.offset >= 0) readAt.set(g.offset, c.box);
         if (c.box.width > 0 || c.box.height > 0) boxes.push(c.box);
         if (g.box && (g.box.width > 0 || g.box.height > 0)) {
           const error = Math.max(
@@ -1294,6 +1735,8 @@ export class ParagraphWriter {
         const o = old[k];
         if (!c || !o) return;
         maxDrift = Math.max(maxDrift, distance(c.origin, plus(o.origin, shift)));
+        const at = o.offset >= 0 ? map.newOf(o.offset) : undefined;
+        if (at !== undefined) readAt.set(at, c.box);
         if (plan.moved.has(index) && (c.box.width > 0 || c.box.height > 0)) boxes.push(c.box);
       });
     }
@@ -1321,6 +1764,7 @@ export class ParagraphWriter {
       ...(failure ? { failure } : {}),
       settle,
       boxes,
+      readAt,
     };
   }
 }

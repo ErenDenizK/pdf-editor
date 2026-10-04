@@ -17,14 +17,22 @@ import type {
   LocatedRun,
   ParagraphBlock,
   ParagraphEditResult,
+  ParagraphEditSpan,
   ParagraphLayoutAnalysis,
   TextRunAnalysis,
 } from '@pdf-editor/engine';
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 
 import type { PageTarget } from '../annotations/annotation-store';
+import { rectToCss } from '../annotations/geometry';
 import { getEngineService } from '../engine/engine-service';
+import { m } from '../i18n';
+import { announce } from '../shell/announcer';
 import { GlyphCache } from './glyph-canvas';
+import type { ParagraphState } from './paragraph-model';
+import { pageRevision } from './runs';
+import type { Box, PageFrame } from '../viewer/geometry';
 
 export interface TextEditSession {
   readonly target: PageTarget;
@@ -67,6 +75,20 @@ export interface ParagraphDraft {
   /** The replaced range of the original text and the inserted text's style. */
   readonly caretSpan: { readonly start: number; readonly end: number };
   readonly style?: string;
+  /** Per-character styles of the inserted text (`ParagraphEdit.spans`). */
+  readonly spans?: readonly ParagraphEditSpan[];
+}
+
+/**
+ * A draft whose editor unmounted without committing it (its page scrolled out of the view
+ * with an overlap still undecided, or a commit that failed): the editor restores it, with
+ * the error, when it mounts again for the same session. Closing the session discards it
+ * with an announcement.
+ */
+export interface KeptParagraph {
+  readonly session: ParagraphSession;
+  readonly state: ParagraphState;
+  readonly error?: string;
 }
 
 /** The engine's settled preview of a draft (spec §4.7: the dry run rendered). */
@@ -90,6 +112,9 @@ interface TextEditState {
   /** The open paragraph's change, null while its text is unchanged. */
   readonly paragraphDraft: ParagraphDraft | null;
   readonly paragraphPreview: ParagraphPreviewState | null;
+  readonly paragraphKept: KeptParagraph | null;
+  /** Keeps (or forgets) the draft of the open session's unmounted editor. */
+  keepParagraph: (kept: KeptParagraph | null) => void;
   /** Opens the paragraph editor (closing a line editor). */
   openParagraph: (session: ParagraphSession) => void;
   setParagraphDraft: (draft: ParagraphDraft | null) => void;
@@ -113,23 +138,48 @@ interface TextEditState {
   clearFocusReturn: () => void;
 }
 
-const NO_PARAGRAPH = { paragraph: null, paragraphDraft: null, paragraphPreview: null } as const;
+const NO_PARAGRAPH = {
+  paragraph: null,
+  paragraphDraft: null,
+  paragraphPreview: null,
+  paragraphKept: null,
+} as const;
+
+/** A kept draft is dropped with the session: say so. */
+function dropKept(s: TextEditState): void {
+  if (s.paragraphKept !== null) {
+    announce(m.paragraph_kept_discarded({ page: s.paragraphKept.session.target.position }));
+  }
+}
 
 export const useTextEditStore = create<TextEditState>()((set) => ({
   session: null,
   focusReturn: null,
   ...NO_PARAGRAPH,
+  keepParagraph: (paragraphKept) =>
+    set((s) =>
+      paragraphKept !== null && s.paragraph !== paragraphKept.session ? s : { paragraphKept },
+    ),
   openParagraph: (paragraph) =>
-    set({ ...NO_PARAGRAPH, paragraph, session: null, focusReturn: null }),
+    set((s) => {
+      dropKept(s);
+      return { ...NO_PARAGRAPH, paragraph, session: null, focusReturn: null };
+    }),
   setParagraphDraft: (paragraphDraft) =>
     set((s) => (s.paragraph === null ? s : { paragraphDraft, paragraphPreview: null })),
   setParagraphPreview: (paragraphPreview) =>
     set((s) => (s.paragraph === null ? s : { paragraphPreview })),
-  closeParagraph: () => set((s) => (s.paragraph === null ? s : NO_PARAGRAPH)),
+  closeParagraph: () =>
+    set((s) => {
+      if (s.paragraph === null) return s;
+      dropKept(s);
+      return NO_PARAGRAPH;
+    }),
   finishParagraph: (committed) =>
     set((s) => {
       const { paragraph } = s;
       if (paragraph === null) return s;
+      dropKept(s);
       const run = paragraph.fallback?.run;
       return {
         ...NO_PARAGRAPH,
@@ -142,13 +192,17 @@ export const useTextEditStore = create<TextEditState>()((set) => ({
           : null,
       };
     }),
-  open: (session) => set({ ...NO_PARAGRAPH, session, focusReturn: null }),
+  open: (session) =>
+    set((s) => {
+      dropKept(s);
+      return { ...NO_PARAGRAPH, session, focusReturn: null };
+    }),
   close: () =>
-    set((s) =>
-      s.session === null && s.focusReturn === null && s.paragraph === null
-        ? s
-        : { session: null, focusReturn: null, ...NO_PARAGRAPH },
-    ),
+    set((s) => {
+      if (s.session === null && s.focusReturn === null && s.paragraph === null) return s;
+      dropKept(s);
+      return { session: null, focusReturn: null, ...NO_PARAGRAPH };
+    }),
   finish: (committed) =>
     set((s) =>
       s.session === null
@@ -245,6 +299,54 @@ function cached<V>(map: Map<string, Promise<V>>, key: string, load: () => Promis
     });
   }
   return value;
+}
+
+/**
+ * The CSS box (on the page) of the detected paragraph under `point` (CSS px on the page), for
+ * the idle hover outline (craft §3.5): the page's paragraphs are asked for once per revision
+ * while something is hovered; undefined until they are known, off any paragraph, or for a
+ * paragraph that refuses paragraph mode (the line is outlined then).
+ */
+export function useParagraphBoxAt(
+  source: SourceId | undefined,
+  pageIndex: number,
+  frame: PageFrame,
+  point: { readonly x: number; readonly y: number } | undefined,
+): Box | undefined {
+  const [known, setKnown] = useState<{
+    readonly page: string;
+    readonly blocks: readonly ParagraphBlock[];
+  } | null>(null);
+  const page =
+    source === undefined ? '' : `${source}:${pageIndex}:${pageRevision(source, pageIndex)}`;
+  const wanted = point !== undefined && source !== undefined;
+  useEffect(() => {
+    if (!wanted || source === undefined || known?.page === page) return;
+    let live = true;
+    pageParagraphs(source, pageIndex).then(
+      (blocks) => {
+        if (live) setKnown({ page, blocks });
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [wanted, source, pageIndex, page, known?.page]);
+  if (!point || known?.page !== page) return undefined;
+  for (const block of known.blocks) {
+    if (block.refusal) continue;
+    const box = rectToCss(frame, block.box);
+    if (
+      point.x >= box.left &&
+      point.x <= box.left + box.width &&
+      point.y >= box.top &&
+      point.y <= box.top + box.height
+    ) {
+      return box;
+    }
+  }
+  return undefined;
 }
 
 /** The page's detected paragraphs at its current revision. */

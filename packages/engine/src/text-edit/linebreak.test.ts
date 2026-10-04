@@ -400,6 +400,48 @@ describe('overflow policy', () => {
     const decision = decideOverflow(layout, box(input, edit, 4), 4);
     expect(decision).toMatchObject({ kind: 'overflow', growth: 10, excess: 10, overlap: 6 });
     if (decision.kind === 'overflow') expect(decision.layout).toBe(layout);
+    expect(decision).toMatchObject({ offPage: false });
+    expect(decision).not.toHaveProperty('fit');
+  });
+
+  test('a run-over past the edge of the page is marked off the page', () => {
+    const { input, edit, layout } = tallParagraph();
+    expect(decideOverflow(layout, { ...box(input, edit, 4), pageRoom: 12 }, 4)).toMatchObject({
+      kind: 'overflow',
+      offPage: false,
+    });
+    expect(decideOverflow(layout, { ...box(input, edit, 4), pageRoom: 9 }, 4)).toMatchObject({
+      kind: 'overflow',
+      offPage: true,
+    });
+  });
+
+  test('when only tightening the whole paragraph fits, it is offered as the fit', () => {
+    const style = monoStyle({}, 2);
+    // Full lines of one-letter words: each takes one more word at a factor of 19/22.
+    const input = para(
+      ['a b c d e f g h i j k', 'l m n o p q r s t u v', 'w x y z A B C D E F G'],
+      { width: 31, style },
+    );
+    const edit: LayoutEdit = { start: input.text.length, end: input.text.length, text: ' HHHH' };
+    const layout = layoutParagraph(input, edit);
+    expect(layout.lineDelta).toBe(1);
+    const decision = decideOverflow(layout, box(input, edit, 0), 0);
+    expect(decision.kind).toBe('overflow');
+    if (decision.kind !== 'overflow') return;
+    expect(decision.layout).toBe(layout);
+    const fit = decision.fit;
+    expect(fit?.kind).toBe('tighten');
+    expect(fit?.layout.lineDelta).toBe(0);
+    expect(fit?.layout.lines.every((l) => l.status === 'rewritten')).toBe(true);
+    expect(fit?.wordSpacing).toBeCloseTo(19 / 22, 10);
+    expect(fit?.percent).toBe(14);
+    expect(fit?.layout.text).toBe(layout.text);
+    expect(fit?.layout.lines.map((l) => l.text)).toEqual([
+      'a b c d e f g h i j k l',
+      'm n o p q r s t u v w x',
+      'y z A B C D E F G HHHH',
+    ]);
   });
 });
 

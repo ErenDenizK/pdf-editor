@@ -166,8 +166,10 @@ export interface TextEditFonts {
 
 /** What `finalizeTextEdits` did for the sources with text edits (summary data). */
 export interface TextEditExportSummary {
-  /** `text.edit` edits in the exported sources. */
+  /** `text.edit` and `text.editParagraph` edits in the exported sources. */
   readonly edits: number;
+  /** Of which `text.editParagraph` (the rest edited one line each). */
+  readonly paragraphs?: number;
   readonly fontsRenamed: number;
   readonly mcidsReassigned: number;
   readonly unreachableRemoved: number;
@@ -177,6 +179,8 @@ export interface TextEditExportSummary {
 export interface TextEditSourceSummary {
   readonly name: string;
   readonly edits: number;
+  /** Of which `text.editParagraph`. */
+  readonly paragraphs?: number;
   readonly fontsRenamed: number;
   readonly mcidsReassigned: number;
   readonly unreachableRemoved: number;
@@ -503,9 +507,10 @@ const HONESTY: readonly string[] = [
 ];
 
 /**
- * The font outcome of recorded `text.edit` edits: the `honesty`, `fellBack` and `face` the
- * edit runner records with each applied edit. An edit recorded without them counts by its
- * tier (2: same font; 1: font substituted).
+ * The font outcome of recorded `text.edit` and `text.editParagraph` edits: the `honesty`,
+ * `fellBack` and `face` (a paragraph edit: `substitutions`, counted under the face of its
+ * first substituted character) the edit runner records with each applied edit. An edit
+ * recorded without them counts by its tier (2: same font; 1: font substituted).
  */
 export function textEditFontsOf(edits: readonly EngineEdit[]): TextEditFonts {
   let sameFont = 0;
@@ -514,12 +519,13 @@ export function textEditFontsOf(edits: readonly EngineEdit[]): TextEditFonts {
   const substituted: Record<string, number> = {};
   const fellBack: Record<string, number> = {};
   for (const edit of edits) {
-    if (edit.kind !== 'text.edit') continue;
+    if (edit.kind !== 'text.edit' && edit.kind !== 'text.editParagraph') continue;
     const payload = (edit.payload ?? {}) as {
       readonly tier?: unknown;
       readonly face?: unknown;
       readonly honesty?: unknown;
       readonly fellBack?: unknown;
+      readonly substitutions?: unknown;
     };
     const honesty: Honesty =
       typeof payload.honesty === 'string' && HONESTY.includes(payload.honesty)
@@ -531,12 +537,26 @@ export function textEditFontsOf(edits: readonly EngineEdit[]): TextEditFonts {
     else if (honesty === 'same-font-not-embedded') sameFontNotEmbedded += 1;
     else if (honesty === 'moved-out-of-form') movedOutOfForm += 1;
     else {
-      const face = typeof payload.face === 'string' ? payload.face : '';
+      const face =
+        typeof payload.face === 'string'
+          ? payload.face
+          : edit.kind === 'text.editParagraph'
+            ? firstSubstituteFace(payload.substitutions)
+            : '';
       const into = payload.fellBack === true ? fellBack : substituted;
       into[face] = (into[face] ?? 0) + 1;
     }
   }
   return { sameFont, sameFontNotEmbedded, substituted, fellBack, movedOutOfForm };
+}
+
+/** The face key of a paragraph edit's first substituted character ('' when unknown). */
+function firstSubstituteFace(substitutions: unknown): string {
+  if (!Array.isArray(substitutions)) return '';
+  const first: unknown = substitutions[0];
+  if (typeof first !== 'object' || first === null) return '';
+  const font = (first as { readonly font?: unknown }).font;
+  return typeof font === 'string' ? font : '';
 }
 
 /** Captured strings of recorded `redaction.apply` edits kept to their areas (deduplicated). */
@@ -698,11 +718,15 @@ async function prepareExportNow(
       let bytes = read.value;
       if (edits > 0) {
         // Where the edited bytes are produced: fonts renamed, MCIDs repaired, GC.
-        const finalized = await finalizeTextEdits(bytes);
+        // Only the pages the edits wrote have their marked content repaired.
+        const finalized = await finalizeTextEdits(bytes, {
+          pages: [...new Set(textEdits.map((e) => e.pageIndex))],
+        });
         bytes = finalized.bytes;
         textEditSources.push({
           name,
           edits,
+          paragraphs: textEdits.filter((e) => e.kind === 'text.editParagraph').length,
           fontsRenamed: finalized.fontsRenamed,
           mcidsReassigned: finalized.mcidsReassigned,
           unreachableRemoved: finalized.unreachableRemoved,
@@ -888,6 +912,7 @@ async function prepareExportNow(
       textEditSources.length > 0
         ? {
             edits: textEditSources.reduce((n, s) => n + s.edits, 0),
+            paragraphs: textEditSources.reduce((n, s) => n + (s.paragraphs ?? 0), 0),
             fontsRenamed: textEditSources.reduce((n, s) => n + s.fontsRenamed, 0),
             mcidsReassigned: textEditSources.reduce((n, s) => n + s.mcidsReassigned, 0),
             unreachableRemoved: textEditSources.reduce((n, s) => n + s.unreachableRemoved, 0),

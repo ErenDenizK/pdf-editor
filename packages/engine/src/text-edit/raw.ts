@@ -17,6 +17,7 @@ export interface Point {
 
 /** `FPDF_PAGEOBJ_*` constants. */
 export const PAGEOBJ_TEXT = 1;
+export const PAGEOBJ_PATH = 2;
 export const PAGEOBJ_FORM = 5;
 
 /** `FPDF_OBJECT_*` constants (mark parameter value types). */
@@ -216,6 +217,33 @@ export class RawText {
       const top = this.mem.f32(p + 12);
       return { x: left, y: bottom, width: right - left, height: top - bottom };
     });
+  }
+
+  /**
+   * How a path object is painted (`FPDFPath_GetDrawMode`): `fill` is the fill mode
+   * (`FPDF_FILLMODE_*`: 0 none, 1 even-odd, 2 winding), `stroke` whether it is stroked.
+   */
+  pathDrawMode(obj: number): { readonly fill: number; readonly stroke: boolean } | undefined {
+    return this.mem.withMem(8, (p) => {
+      if (!this.m.FPDFPath_GetDrawMode(obj, p, p + 4)) return undefined;
+      return { fill: this.mem.i32(p), stroke: this.mem.i32(p + 4) !== 0 };
+    });
+  }
+
+  /**
+   * Bounds (page space) of the page's top-level path objects that are filled or stroked: the
+   * boxes a paragraph can sit in (shaded panels, framed cells).
+   */
+  paintedPathBounds(pagePtr: number): Rect[] {
+    const out: Rect[] = [];
+    for (const obj of this.pageObjects(pagePtr)) {
+      if (this.objectType(obj) !== PAGEOBJ_PATH) continue;
+      const mode = this.pathDrawMode(obj);
+      if (!mode || (mode.fill === 0 && !mode.stroke)) continue;
+      const b = this.bounds(obj);
+      if (b && b.width > 0 && b.height > 0) out.push(b);
+    }
+    return out;
   }
 
   matrix(obj: number): TextMatrix {

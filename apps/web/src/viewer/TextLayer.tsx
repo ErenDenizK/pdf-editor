@@ -18,7 +18,9 @@
  * layer's own text model; a target above the text in the hit order (annotation, field,
  * image) shows none, and none shows while a paragraph editor is open. Until the first such
  * double-click, the outline brings a one-line hint, "Double-click to edit text", once per
- * device (`edit-policy-store.ts`).
+ * device (`edit-policy-store.ts`). A single click on page text with Select brings the same
+ * hint at once, below the clicked line, so a person who expects a click to open the
+ * paragraph learns the gesture (review finding 3).
  */
 import type { TextRun } from '@pdf-editor/engine';
 import {
@@ -39,7 +41,7 @@ import { useEditPolicyStore } from '../state/edit-policy-store';
 import { useCanEdit } from '../state/ui-store';
 import { distanceFromView, useViewStore } from '../state/view-store';
 import { openTextEditorAt } from '../text-edit/entry';
-import { useTextEditStore } from '../text-edit/text-edit-store';
+import { useParagraphBoxAt, useTextEditStore } from '../text-edit/text-edit-store';
 import { penDrawsNow, pointerLog } from './edit-policy';
 import {
   HOVER_DELAY_MS,
@@ -132,6 +134,12 @@ export function TextLayer(props: PageOverlayProps) {
   const hovering = editable && (mode === 'select' || mode === 'edit-text') && !paragraphOpen;
   const hintShown = useEditPolicyStore((s) => s.editTextHintShown);
   const [hover, setHover] = useState<{ readonly key: string; readonly line: number } | null>(null);
+  // The first-click hint (module header): where it shows, until the next press.
+  const [clickHint, setClickHint] = useState<{
+    readonly key: string;
+    readonly left: number;
+    readonly top: number;
+  } | null>(null);
   const [built, setBuilt] = useState(false);
   const [runs, setRuns] = useState<{
     key: string;
@@ -203,6 +211,14 @@ export function TextLayer(props: PageOverlayProps) {
     };
   }, [hovering, hasLayer, key]);
 
+  // The first-click hint goes with the next press anywhere.
+  useEffect(() => {
+    if (clickHint === null) return;
+    const clear = () => setClickHint(null);
+    document.addEventListener('pointerdown', clear, { capture: true, passive: true });
+    return () => document.removeEventListener('pointerdown', clear, { capture: true });
+  }, [clickHint]);
+
   // While dragging a selection, the whole layer catches the pointer so the selection does
   // not jump to the page gap or to other elements (pdf.js "endOfContent").
   useEffect(() => {
@@ -240,6 +256,36 @@ export function TextLayer(props: PageOverlayProps) {
   useEffect(() => {
     linesRef.current = lines;
   });
+  // The hover outline marks the paragraph that would open, once the page's paragraphs are
+  // known; the line until then (review finding 11).
+  const hoveredBox = hover?.key === key && hovering ? lines[hover.line]?.box : undefined;
+  const paragraphBox = useParagraphBoxAt(
+    sourceId,
+    sourceIndex,
+    frame,
+    hoveredBox
+      ? { x: hoveredBox.left + hoveredBox.width / 2, y: hoveredBox.top + hoveredBox.height / 2 }
+      : undefined,
+  );
+
+  // Select, in Edit, before the first double-click: a plain click on text shows the hint.
+  const clickHints = hovering && mode === 'select' && !hintShown;
+  const layerShown = lines.length > 0;
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!clickHints || !layerShown || !layer) return;
+    const onClick = (event: MouseEvent) => {
+      if (event.detail !== 1 || event.button !== 0) return;
+      if (!window.getSelection()?.isCollapsed) return;
+      if (hitAt(event.clientX, event.clientY)?.kind !== 'text-selection') return;
+      const r = layer.getBoundingClientRect();
+      const p = { x: event.clientX - r.left, y: event.clientY - r.top };
+      const box = linesRef.current[lineAt(linesRef.current, p)]?.box;
+      if (box) setClickHint({ key, left: p.x, top: box.top + box.height + HINT_GAP_PX });
+    };
+    layer.addEventListener('click', onClick);
+    return () => layer.removeEventListener('click', onClick);
+  }, [clickHints, layerShown, key]);
 
   // A new revision keeps showing the previous text until the new text arrives.
   if (!hasLayer || lines.length === 0) return null;
@@ -296,11 +342,12 @@ export function TextLayer(props: PageOverlayProps) {
               data-testid="text-hover-outline"
               aria-hidden="true"
               style={{
-                left: outlined.box.left,
-                top: outlined.box.top,
-                width: outlined.box.width,
-                height: outlined.box.height,
+                left: (paragraphBox ?? outlined.box).left,
+                top: (paragraphBox ?? outlined.box).top,
+                width: (paragraphBox ?? outlined.box).width,
+                height: (paragraphBox ?? outlined.box).height,
               }}
+              data-unit={paragraphBox ? 'paragraph' : 'line'}
             />
           ) : null}
           {mode === 'select' && !hintShown ? (
@@ -318,6 +365,15 @@ export function TextLayer(props: PageOverlayProps) {
               ) : null}
             </div>
           ) : null}
+        </div>
+      ) : null}
+      {clickHint?.key === key && hovering && mode === 'select' && !hintShown && !hint ? (
+        <div className={styles.hover} data-text-click-hint="">
+          <div className={styles.hintStatus} role="status">
+            <span className={styles.hint} style={{ left: clickHint.left, top: clickHint.top }}>
+              {m.edit_text_hint()}
+            </span>
+          </div>
         </div>
       ) : null}
     </>

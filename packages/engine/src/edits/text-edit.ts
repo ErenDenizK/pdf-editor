@@ -7,7 +7,8 @@
  * | `text.edit`          | `TextEditPayload`: the run (object path, char start/count,  | replay required |
  * |                      | text) + start/end + replacement + tier + face + fit + size  |                 |
  * | `text.editParagraph` | `TextEditParagraphPayload`: the paragraph (index, runs) +   | replay required |
- * |                      | new text + caret span + the layout written + tier           |                 |
+ * |                      | new text + caret span + style spans + the layout written +  |                 |
+ * |                      | tier                                                        |                 |
  *
  * PDFium cannot restore a content stream, so a text edit has no exact inverse: undo is
  * "reopen the source's original bytes and replay the remaining edits". The inverse recorded
@@ -25,6 +26,7 @@ import {
   EngineError,
   type ParagraphEdit,
   type ParagraphEditResult,
+  type ParagraphEditSpan,
   type ParagraphLayout,
   type PdfParagraphEditor,
   type PdfTextEditor,
@@ -207,8 +209,14 @@ export interface TextEditParagraphPayload {
   /** The paragraph's text after the edit, and the replaced range of the original text. */
   readonly text: string;
   readonly caretSpan: { readonly start: number; readonly end: number };
-  /** Style id of the inserted text. */
+  /** Style id of the inserted text (where `spans` gives none). */
   readonly style?: string;
+  /**
+   * Per-character styles of the inserted text (`ParagraphEdit.spans`): typed stretches and the
+   * untouched original characters between separate changes, with their source offset.
+   * Payloads recorded before it existed have none and replay as they were written.
+   */
+  readonly spans?: readonly ParagraphEditSpan[];
   /** The layout written; recorded by the first application, written again on replay. */
   readonly layout?: ParagraphLayout;
   /** Once applied: 2 (original font only) or 1 (some characters in a bundled substitute). */
@@ -244,7 +252,7 @@ export function readParagraphEditPayload(payload: unknown): TextEditParagraphPay
   if (!isObject(payload) || !isObject(payload.paragraph) || !isObject(payload.caretSpan)) {
     throw invalidParagraph('expected { paragraph, text, caretSpan, … }');
   }
-  const { paragraph, text, caretSpan, style, layout, tier } = payload;
+  const { paragraph, text, caretSpan, style, spans, layout, tier } = payload;
   if (!Number.isInteger(paragraph.index) || (paragraph.index as number) < 0) {
     throw invalidParagraph('paragraph.index must be a non-negative integer');
   }
@@ -256,6 +264,7 @@ export function readParagraphEditPayload(payload: unknown): TextEditParagraphPay
     throw invalidParagraph('caretSpan needs integer start and end');
   }
   if (style !== undefined && typeof style !== 'string') throw invalidParagraph('bad style');
+  const readSpans = spans === undefined ? undefined : readEditSpans(spans);
   if (
     layout !== undefined &&
     (!isObject(layout) || layout.text !== text || !Array.isArray(layout.lines))
@@ -268,9 +277,39 @@ export function readParagraphEditPayload(payload: unknown): TextEditParagraphPay
     text,
     caretSpan: { start: caretSpan.start as number, end: caretSpan.end as number },
     ...(style === undefined ? {} : { style }),
+    ...(readSpans === undefined ? {} : { spans: readSpans }),
     ...(layout === undefined ? {} : { layout: layout as unknown as ParagraphLayout }),
     ...(tier === undefined ? {} : { tier }),
   };
+}
+
+/** The recorded style spans: sorted, non-empty stretches with a style and an optional source. */
+function readEditSpans(spans: unknown): ParagraphEditSpan[] {
+  if (!Array.isArray(spans)) throw invalidParagraph('spans must be an array');
+  let at = 0;
+  return spans.map((span: unknown) => {
+    if (
+      !isObject(span) ||
+      !Number.isInteger(span.start) ||
+      !Number.isInteger(span.end) ||
+      (span.start as number) < at ||
+      (span.end as number) <= (span.start as number) ||
+      typeof span.style !== 'string' ||
+      span.style === '' ||
+      (span.source !== undefined && (!Number.isInteger(span.source) || (span.source as number) < 0))
+    ) {
+      throw invalidParagraph(
+        'spans need sorted integer start < end, a style and an optional source',
+      );
+    }
+    at = span.end as number;
+    return {
+      start: span.start as number,
+      end: span.end as number,
+      style: span.style,
+      ...(span.source === undefined ? {} : { source: span.source as number }),
+    };
+  });
 }
 
 /** The paragraph edit a recorded payload stands for (on the edit's source and page). */
@@ -292,6 +331,7 @@ export function paragraphEditOf(
     text: payload.text,
     caretSpan: payload.caretSpan,
     ...(payload.style === undefined ? {} : { style: payload.style }),
+    ...(payload.spans === undefined ? {} : { spans: payload.spans }),
     ...(payload.layout === undefined ? {} : { layout: payload.layout }),
   };
 }
@@ -318,6 +358,7 @@ export function paragraphEditPayloadOf(
     text: edit.text,
     caretSpan: { start: edit.caretSpan.start, end: edit.caretSpan.end },
     ...(edit.style === undefined ? {} : { style: edit.style }),
+    ...(edit.spans === undefined ? {} : { spans: edit.spans.map((span) => ({ ...span })) }),
     ...(layout === undefined ? {} : { layout }),
     ...(result ? { tier: result.tier } : {}),
   };

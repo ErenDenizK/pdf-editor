@@ -1,8 +1,9 @@
 /*
  * The paragraph editor (craft spec §4.7): a canvas over the paragraph that looks like the
- * page (glyphs from the PDF font on a page-white plate, our caret and selection), the
- * dry run's bitmap under it once typing pauses, a hidden mirror that holds the focus, and a
- * glass header with the honesty and overflow lines. The page is never themed (DESIGN.md §3):
+ * page (glyphs from the PDF font on a plate of the page under the paragraph, our caret and
+ * selection), the dry run's bitmap under it once typing pauses, a hidden mirror that holds
+ * the focus, and a glass header beside the paragraph (or above the bar) with the honesty and
+ * overflow lines and, when leaving with an overlap, the choice. The page is never themed (DESIGN.md §3):
  * the canvas draws page colours whatever the chrome's theme.
  */
 .layer {
@@ -77,8 +78,32 @@
   cursor: default;
 }
 
-.header[data-side='above'] {
-  transform: translateY(-100%);
+/* In the left margin the header ends at the paragraph's left edge. */
+.header[data-side='left'] {
+  transform: translateX(-100%);
+}
+
+/* Leaving with an overlap: the choice (craft §4.6), "Keep editing" first in focus. */
+.choice {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-hairline);
+}
+
+.choiceText {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.choiceActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.action[data-default] {
+  border-color: var(--accent);
 }
 
 .lines {

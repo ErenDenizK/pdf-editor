@@ -110,13 +110,36 @@ export interface LayoutInput {
   readonly hyphenChar?: string;
 }
 
-/** A replacement of `text.slice(start, end)` by `text`, typed in the caret's span style. */
+/**
+ * A stretch of a replacement's text in one style (UTF-16 offsets into `LayoutEdit.text`).
+ * `source`: the stretch is original characters the user did not type, starting at this
+ * offset of the original text (they keep their original style); absent for typed text, which
+ * takes the style before the caret at the time it was typed.
+ */
+export interface LayoutEditSpan {
+  readonly start: number;
+  readonly end: number;
+  readonly style: string;
+  readonly source?: number;
+}
+
+/**
+ * A replacement of `text.slice(start, end)` by `text`. Several separate changes in one
+ * session are one replacement from the first change to the last; `spans` then gives every
+ * character of `text` its own style (the untouched characters between the changes keep
+ * theirs), so no character is restyled by a change elsewhere.
+ */
 export interface LayoutEdit {
   readonly start: number;
   readonly end: number;
   readonly text: string;
-  /** Style id of the inserted text (default: the style of the character before the edit). */
+  /**
+   * Style id of the inserted text where `spans` gives none (default: the style of the
+   * character before the edit).
+   */
   readonly style?: string;
+  /** Per-character styles of `text` (see `LayoutEditSpan`); sorted, not overlapping. */
+  readonly spans?: readonly LayoutEditSpan[];
 }
 
 /** Tightening factors (spec craft §4.6), applied to rewritten lines only. */
@@ -125,6 +148,12 @@ export interface LayoutOptions {
   readonly wordSpacing?: number;
   /** Factor on the leading of rewritten lines (default 1). */
   readonly leading?: number;
+  /**
+   * Rewrap the whole paragraph (every line `rewritten`, the factors on all of them): the
+   * overflow policy's last resort before a run-over (spec craft §4.6). Default: from the
+   * edited line, stopping where the rewrap converges.
+   */
+  readonly whole?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -387,15 +416,28 @@ export function layoutWithThresholds(
       spans.push({ start: Math.max(s.start, end) + delta, end: s.end + delta, style: s.style });
     }
   }
-  if (edit.text.length > 0) spans.push({ start, end: insEnd, style: insertStyle });
+  if (edit.text.length > 0) {
+    // The inserted text's own styles where the edit gives them, else the caret's.
+    let at = start;
+    for (const s of edit.spans ?? []) {
+      const from = Math.max(at, start + Math.max(0, s.start));
+      const to = Math.min(insEnd, start + s.end);
+      if (to <= from) continue;
+      if (from > at) spans.push({ start: at, end: from, style: insertStyle });
+      spans.push({ start: from, end: to, style: s.style });
+      at = to;
+    }
+    if (at < insEnd) spans.push({ start: at, end: insEnd, style: insertStyle });
+  }
   const t = buildTables(text, spans, input.styles, insertStyle);
 
-  const noChange = edit.text.length === 0 && start === end;
+  const whole = options.whole === true;
+  const noChange = edit.text.length === 0 && start === end && !whole;
   // The edited line, and the one the rewrap starts at.
   let k = 0;
   for (let i = 0; i < oldCount; i++) if ((oldLines[i]?.start ?? 0) <= start) k = i;
-  let first = k;
-  if (k > 0 && !noChange) {
+  let first = whole ? 0 : k;
+  if (k > 0 && !noChange && !whole) {
     let wordEnd = oldLines[k]?.start ?? 0;
     const limit = oldNext(k);
     while (wordEnd < limit && kindOf(old[wordEnd] ?? ' ') === KIND_CHAR) wordEnd++;
@@ -474,6 +516,7 @@ export function layoutWithThresholds(
       const next = chosen.position;
       const source = oldLines[index];
       const kept =
+        !whole &&
         index < oldCount &&
         source?.start === lineStart &&
         next <= start &&
@@ -489,7 +532,7 @@ export function layoutWithThresholds(
       });
       lineStart = next;
       // Convergence: this line ends where an original one did, after the edit.
-      if (next >= insEnd && next < n) {
+      if (!whole && next >= insEnd && next < n) {
         const j = sourceEndingAt.get(next - delta);
         if (j !== undefined && j >= first && chosen.hyphen === (oldLines[j]?.hyphenated === true)) {
           converged = { at: broken.length - 1, source: j };

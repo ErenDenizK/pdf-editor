@@ -67,13 +67,39 @@
  *    `FPDFText_IsHyphen`, or a hyphen after a letter) before a lower-case start is dropped
  *    and the word joined; before anything else it stays, with no space (`Jean-Paul`); a
  *    soft hyphen always joins. This is the Markdown converter's rule (`convert/markdown.ts`).
+ * 10. **Wrap measure** (`wrapRight`, left-aligned blocks only; others keep their own). The
+ *    smallest filled or stroked path whose bounds hold the block's lines and glyphs (within
+ *    0.5 pt) bounds it: its right edge minus the inset the text has from its left edge
+ *    (padding taken equal on both sides), unless another block in that box overlaps the
+ *    block's lines vertically (a page-wide background behind two columns). Without such a
+ *    box, the column's: the furthest right edge of the blocks that share its horizontal
+ *    extent. Either way it stops one size short of a block beside it (to its right, with
+ *    lines at the same height), never passes the page, and is never left of the block's own
+ *    longest line.
+ * 11. **Hard line breaks** (`end: 'forced'`, `\n` in the text instead of the space). The
+ *    measure runs from the block's left edge to its box's inner edge (step 10), or without
+ *    a box to the end of its own longest line (a column's edge is too weak a hint: a
+ *    footnote across two columns widens it). A line that is not the last and reaches less
+ *    than 85 % of it ends in a hard break when the next line's first word would have
+ *    fitted after it (a typesetter would have put it there), or when
+ *    the next line is one word that is itself short (an e-mail address or URL in an
+ *    address), which counts before the last line only when the block has another hard
+ *    break. A line ending in a hyphen never does. Tagged and geometric blocks alike; a
+ *    tagged block's hard-break lines are left out of the justification test (step 8).
  *
  * Known failure modes (research 11 §3.4) and what the user sees:
  * - Two columns with a gutter under 2 × space, or with fewer than 3 lines: no channel; lines
  *   still break at gaps over 3 × space, and the join rules rarely join across (left edges
  *   differ), but reading order may interleave. "Split here" / "Join with next" correct it.
  * - Short lines of similar length (addresses, verse, a list without markers) join into one
- *   paragraph: each line reaches 85 % of the others.
+ *   paragraph: each line reaches 85 % of the others. Step 11 then marks their breaks hard
+ *   (all of them inside a box wider than the lines), so a rewrap keeps them.
+ * - Without a box, hard breaks are judged on the block's own longest line: an address whose
+ *   longest line is followed by another keeps that break soft, and a line before a word too
+ *   long to fit that is followed by more words too. Editing such a line can pull words up.
+ * - A soft break is taken for a hard one when a paragraph was wrapped narrower than its box
+ *   allows (a right padding larger than the left): the paragraph then keeps its lines, and
+ *   only the edited line grows.
  * - A justified line with a gap wider than 3 × space and no space glyph, next to lines with
  *   their own gaps at that place, splits in two.
  * - A heading in the body size and weight is a paragraph; a bold single line of up to 80
@@ -137,6 +163,8 @@ const LEADING_TOLERANCE = 0.15;
 const SIZE_TOLERANCE = 0.5;
 /** A line shorter than this share of the measure ends a left-aligned paragraph. */
 const SHORT_LINE = 0.85;
+/** A box holds a paragraph when it reaches this close (points) to its lines' extent. */
+const BOX_TOLERANCE = 0.5;
 /** Edges varying less than this (points) are justified. */
 const JUSTIFY_TOLERANCE = 0.5;
 /**
@@ -977,6 +1005,17 @@ function columnStats(rows: readonly Row[]): ColumnStats {
   return { gap, bounds, flushRight };
 }
 
+/**
+ * `row` ends short of the measure (`left` to `right`) although `next`'s first word would have
+ * fitted after it: the producer broke the line on purpose.
+ */
+function shortBreak(row: Row, next: Row, left: number, right: number): boolean {
+  return (
+    row.x1 - left < SHORT_LINE * (right - left) &&
+    row.x1 + row.space + firstWordWidth(next) <= right
+  );
+}
+
 function alignOf(
   group: Group,
   stats: ColumnStats,
@@ -999,11 +1038,24 @@ function alignOf(
   const body = rows.slice(0, -1);
   const indented = rows.length > 1 && Math.abs(head.x0 - (rows[1] as Row).x0) > space;
   const lefts = body.flatMap((r, i) => (i === 0 && indented ? [] : [r.x0]));
-  const rights = body.map((r) => r.x1);
+  // A tagged paragraph's hard line breaks end short of the edge, as typesetters leave them.
+  const ownLeft = Math.min(...rows.map((r) => r.x0));
+  const ownRight = Math.max(...rows.map((r) => r.x1));
+  const flowing =
+    group.source === 'tags'
+      ? body.filter((r, i) => !shortBreak(r, rows[i + 1] as Row, ownLeft, ownRight))
+      : body;
+  const rights = flowing.map((r) => r.x1);
   const has = (a: ParagraphAlign) => group.candidates.has(a);
   if (has('justify') || group.source === 'tags') {
     if (body.length >= 2) {
-      if (range(lefts) < JUSTIFY_TOLERANCE && range(rights) < JUSTIFY_TOLERANCE) return 'justify';
+      if (
+        rights.length >= 2 &&
+        range(lefts) < JUSTIFY_TOLERANCE &&
+        range(rights) < JUSTIFY_TOLERANCE
+      ) {
+        return 'justify';
+      }
     } else {
       const bounds = stats.bounds.get(head.column);
       const flush = stats.flushRight.get(head.column) ?? 0;
@@ -1076,6 +1128,14 @@ interface DraftBlock {
   readonly block: Omit<ParagraphBlock, 'ref'>;
   readonly runs: readonly LocatedRun[];
   readonly rank: number;
+  /** Per line, what the hard-break test needs (absent: no line can end in one). */
+  readonly facts?: readonly LineFacts[];
+}
+
+/** A line's space width and the width of its first word (text space). */
+interface LineFacts {
+  readonly space: number;
+  readonly firstWord: number;
 }
 
 function toBlock(group: Group, ctx: BlockContext): DraftBlock {
@@ -1188,7 +1248,8 @@ function toBlock(group: Group, ctx: BlockContext): DraftBlock {
     box: rects.length > 0 ? unionRects(rects) : unionRects(runs.map((r) => r.lineBox)),
     ...(refusal ? { refusal } : {}),
   };
-  return { block, runs, rank: Math.min(...rows.map((r) => r.rank)) };
+  const facts = rows.map((r) => ({ space: r.space, firstWord: firstWordWidth(r) }));
+  return { block, runs, rank: Math.min(...rows.map((r) => r.rank)), facts };
 }
 
 // ---------------------------------------------------------------------------
@@ -1482,14 +1543,188 @@ function verticalBlock(prep: Prepared): DraftBlock {
   return { block, runs: [run], rank: Number.POSITIVE_INFINITY };
 }
 
+// ---------------------------------------------------------------------------
+// Measures and hard line breaks
+// ---------------------------------------------------------------------------
+
+/** A text-space rectangle. */
+interface Extent {
+  readonly x0: number;
+  readonly x1: number;
+  readonly y0: number;
+  readonly y1: number;
+}
+
+const sameDirection = (
+  a: Pick<ParagraphBlock, 'direction'>,
+  b: Pick<ParagraphBlock, 'direction'>,
+) =>
+  Math.abs(a.direction.x - b.direction.x) < 1e-6 && Math.abs(a.direction.y - b.direction.y) < 1e-6;
+
+/** The block's lines along the measure, its glyphs across (text space). */
+function blockExtent(block: Omit<ParagraphBlock, 'ref'>): Extent {
+  const { y0, y1 } = projectRect(block.box, block.direction);
+  return { x0: block.measure.left, x1: block.measure.right, y0, y1 };
+}
+
+/** The smallest of `boxes` that holds `inner` (within `BOX_TOLERANCE`). */
+function enclosingBox(inner: Extent, boxes: readonly Extent[]): Extent | undefined {
+  let best: Extent | undefined;
+  let bestArea = Number.POSITIVE_INFINITY;
+  for (const b of boxes) {
+    if (
+      b.x0 > inner.x0 + BOX_TOLERANCE ||
+      b.x1 < inner.x1 - BOX_TOLERANCE ||
+      b.y0 > inner.y0 + BOX_TOLERANCE ||
+      b.y1 < inner.y1 - BOX_TOLERANCE
+    ) {
+      continue;
+    }
+    const area = (b.x1 - b.x0) * (b.y1 - b.y0);
+    if (area < bestArea) {
+      best = b;
+      bestArea = area;
+    }
+  }
+  return best;
+}
+
+/**
+ * The right edge a rewrap of a left-aligned block may fill (step 10 of the module comment):
+ * the inner edge of the smallest filled or stroked box holding it, when no other block in
+ * that box stands beside it; else the column's (the furthest right edge of the blocks that
+ * share its horizontal extent, as the paragraph editor's input had it); never left of its
+ * own longest line nor past the page. `boxed`: a box set it.
+ */
+function wrapRightOf(
+  draft: DraftBlock,
+  drafts: readonly DraftBlock[],
+  boxes: readonly Rect[],
+  page: PageGeometry,
+): { readonly right: number; readonly boxed: boolean } {
+  const { block } = draft;
+  const own = block.measure.right;
+  if (block.align !== 'left' || block.refusal || block.lines.length === 0) {
+    return { right: own, boxed: false };
+  }
+  const u = block.direction;
+  const mine = blockExtent(block);
+  const others = drafts.filter((d) => d !== draft && sameDirection(d.block, block));
+  const box = enclosingBox(
+    mine,
+    boxes.map((r) => projectRect(r, u)),
+  );
+  const beside =
+    box !== undefined &&
+    others.some((d) => {
+      const e = blockExtent(d.block);
+      const inBox =
+        Math.min(e.x1, box.x1) > Math.max(e.x0, box.x0) &&
+        Math.min(e.y1, box.y1) > Math.max(e.y0, box.y0);
+      return inBox && Math.min(e.y1, mine.y1) - Math.max(e.y0, mine.y0) > BOX_TOLERANCE;
+    });
+  let right: number;
+  const boxed = box !== undefined && !beside;
+  if (box && boxed) {
+    right = box.x1 - Math.max(0, mine.x0 - box.x0);
+  } else {
+    right = own;
+    for (const d of others) {
+      const o = d.block;
+      if (o.refusal) continue;
+      const overlap = Math.min(o.measure.right, own) - Math.max(o.measure.left, block.measure.left);
+      if (overlap > 0) right = Math.max(right, o.measure.right);
+    }
+  }
+  // Never into text beside it (the next column): one size short of its left edge.
+  for (const d of others) {
+    const e = blockExtent(d.block);
+    if (e.x0 < mine.x1 || Math.min(e.y1, mine.y1) - Math.max(e.y0, mine.y0) <= BOX_TOLERANCE) {
+      continue;
+    }
+    right = Math.min(right, e.x0 - block.size);
+  }
+  const pageBox = projectRect(
+    { x: page.x ?? 0, y: page.y ?? 0, width: page.width, height: page.height },
+    u,
+  );
+  return { right: Math.max(own, Math.min(right, pageBox.x1)), boxed };
+}
+
+/**
+ * The block with its hard line breaks (step 11 of the module comment): such a line ends in
+ * `forced`, and `\n` replaces the space that joined it to the next line in `text`.
+ */
+function withHardBreaks(
+  block: Omit<ParagraphBlock, 'ref'>,
+  facts: readonly LineFacts[],
+  right: number,
+): Omit<ParagraphBlock, 'ref'> {
+  const left = block.measure.left;
+  const width = right - left;
+  const { lines } = block;
+  if (width <= 0 || lines.length < 2) return block;
+  const short = (line: ParagraphLine) => line.x1 - left < SHORT_LINE * width;
+  // A short line before a line of one short word (an e-mail address, a URL): a soft break
+  // leaves one only before the last line, unless the paragraph has other hard breaks.
+  const hardAt = (i: number, beforeLast: boolean): boolean => {
+    const line = lines[i] as ParagraphLine;
+    const next = lines[i + 1];
+    const f = facts[i];
+    const g = facts[i + 1];
+    if (!next || !f || !g || line.end !== 'space' || !short(line)) return false;
+    if (line.x1 + f.space + g.firstWord <= right) return true;
+    return (beforeLast || i + 2 < lines.length) && !/\s/u.test(next.text) && short(next);
+  };
+  let hard = lines.map((_, i) => hardAt(i, false));
+  if (hard.some(Boolean)) hard = lines.map((_, i) => hardAt(i, true));
+  let text = block.text;
+  let changed = false;
+  const out = lines.map((line, i): ParagraphLine => {
+    if (!hard[i]) return line;
+    const at = line.start + line.text.length;
+    if (text[at] !== ' ') return line;
+    text = `${text.slice(0, at)}\n${text.slice(at + 1)}`;
+    changed = true;
+    return { ...line, end: 'forced' };
+  });
+  return changed ? { ...block, lines: out, text } : block;
+}
+
+/** Every block with its `wrapRight` and hard line breaks. */
+function settleMeasures(
+  drafts: readonly DraftBlock[],
+  boxes: readonly Rect[],
+  page: PageGeometry,
+): DraftBlock[] {
+  return drafts.map((draft) => {
+    if (!draft.facts) return draft;
+    const { right, boxed } = wrapRightOf(draft, drafts, boxes, page);
+    // A column's edge is a weaker hint than a box: hard breaks are judged on the block's own
+    // measure unless a box gives one.
+    const block = withHardBreaks(
+      draft.block,
+      draft.facts,
+      boxed ? right : draft.block.measure.right,
+    );
+    return {
+      ...draft,
+      block: right > block.measure.right ? { ...block, wrapRight: right } : block,
+    };
+  });
+}
+
 /**
  * The paragraphs of a page from its located runs (`locatePage`) and paragraph tags
- * (`readParagraphTags`), in reading order. See the module comment for the rules.
+ * (`readParagraphTags`), in reading order. `boxes` are the bounds of the page's filled or
+ * stroked paths (unrotated user space), which bound a rewrap's measure. See the module
+ * comment for the rules.
  */
 export function detectParagraphs(
   runs: readonly LocatedRun[],
   tags: readonly ParagraphTag[],
   page: PageGeometry,
+  boxes: readonly Rect[] = [],
 ): ParagraphBlock[] {
   const preps = runs.filter((r) => r.glyphs.length > 0).map(prepare);
   const sizes = new Map<number, number>();
@@ -1538,7 +1773,7 @@ export function detectParagraphs(
     drafts.push(...blocks.sort((a, b) => a.rank - b.rank));
   }
   for (const p of vertical) drafts.push(verticalBlock(p));
-  return drafts.map(({ block, runs: blockRuns }, index) => {
+  return settleMeasures(drafts, boxes, page).map(({ block, runs: blockRuns }, index) => {
     const first = blockRuns[0] as LocatedRun;
     return {
       ...block,
@@ -1631,13 +1866,18 @@ export function analyzePageParagraphs(
     const runs = locatePage(raw, pagePtr, textPage, source, pageIndex);
     const tags = readParagraphTags(raw, pagePtr);
     const box = raw.pageBox(pagePtr);
-    const blocks = detectParagraphs(runs, tags, {
-      width: box.width,
-      height: box.height,
-      x: box.x,
-      y: box.y,
-      rotation: raw.m.FPDFPage_GetRotation(pagePtr) * 90,
-    });
+    const blocks = detectParagraphs(
+      runs,
+      tags,
+      {
+        width: box.width,
+        height: box.height,
+        x: box.x,
+        y: box.y,
+        rotation: raw.m.FPDFPage_GetRotation(pagePtr) * 90,
+      },
+      raw.paintedPathBounds(pagePtr),
+    );
     cache?.set(source, pageIndex, digest, blocks);
     return blocks;
   });

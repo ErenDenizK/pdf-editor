@@ -2,9 +2,9 @@
  * The paragraph editor's canvas (craft spec §4.7, ADR-0020 §7, research 11 §6): rewritten
  * lines drawn from the PDF font's own glyph outlines (`FPDFFont_GetGlyphPath`, em units)
  * on the real baselines, scaled by the span's size and matrix, in the span's colour, over a
- * plate that hides the old glyphs (page white: decision §13 #8's fallback, the engine has no
- * cheap "page without this paragraph" render). Lines before the edit are not drawn: the page
- * shows through. Caret, selection, composition underline and the overlap warning are drawn
+ * plate that hides the old glyphs: page white, with the page under the paragraph painted in
+ * where the editor has it (one dry run at open that empties the paragraph, rendered; craft
+ * §4.7). Lines before the edit are not drawn: the page shows through. Caret, selection, composition underline and the overlap warning are drawn
  * here too.
  *
  * Coordinates: the scene is in the paragraph's text space (`ParagraphBlock` convention:
@@ -261,6 +261,18 @@ export interface DrawOptions {
     readonly width: number;
     readonly height: number;
   };
+  /**
+   * The page under the paragraph (its area rendered without the paragraph's text), in canvas
+   * device pixels: painted inside the plates over the plate colour, so coloured boxes, rules
+   * and what lies below show under the rewritten lines.
+   */
+  readonly plateImage?: {
+    readonly image: CanvasImageSource;
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
 }
 
 /** The subset of a 2D context the drawing uses (tests pass a recorder). */
@@ -280,6 +292,7 @@ export type DrawContext = Pick<
   | 'restore'
   | 'clip'
   | 'rect'
+  | 'drawImage'
 > & {
   fillStyle: CanvasRenderingContext2D['fillStyle'];
   strokeStyle: CanvasRenderingContext2D['strokeStyle'];
@@ -309,6 +322,25 @@ function fillRects(ctx: DrawContext, m: Affine, rects: readonly TextRect[], fill
   ctx.beginPath();
   for (const r of rects) rectPath(ctx, m, r);
   ctx.fill();
+}
+
+/** The plates: the plate colour, then the page under the paragraph where it was rendered. */
+function paintPlates(
+  ctx: DrawContext,
+  m: Affine,
+  rects: readonly TextRect[],
+  fill: string,
+  image: DrawOptions['plateImage'],
+): void {
+  fillRects(ctx, m, rects, fill);
+  if (!image || rects.length === 0) return;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.beginPath();
+  for (const r of rects) rectPath(ctx, m, r);
+  ctx.clip();
+  ctx.drawImage(image.image, image.x, image.y, image.width, image.height);
+  ctx.restore();
 }
 
 /**
@@ -387,10 +419,10 @@ export function drawScene(
       y1: preview.y + preview.height,
     });
     ctx.clip('evenodd');
-    fillRects(ctx, textToDevice, scene.plates, colors.plate);
+    paintPlates(ctx, textToDevice, scene.plates, colors.plate, options.plateImage);
     ctx.restore();
   } else {
-    fillRects(ctx, textToDevice, scene.plates, colors.plate);
+    paintPlates(ctx, textToDevice, scene.plates, colors.plate, options.plateImage);
   }
   fillRects(ctx, textToDevice, scene.selection, colors.selection);
   if (!preview) {

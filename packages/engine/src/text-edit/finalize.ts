@@ -11,7 +11,9 @@
  *    sit on the same baseline (the objects of one written paragraph line, craft spec §4.4)
  *    are first merged into one sequence; then repeats get fresh MCIDs, registered in the
  *    page's /ParentTree array and in the /K of the structure element that owned the id, so
- *    a rewritten paragraph has one MCID per written line under its original /P.
+ *    a rewritten paragraph has one MCID per written line under its original /P. Only the
+ *    pages the edits wrote are repaired (`pages`); property lists are read with a small
+ *    lexer, so strings and nested dictionaries after the /MCID do not hide it.
  * 3. Garbage collection (ADR-0011 §5): a second `GenerateContent` on a page leaves the
  *    previous content stream unreachable in the file; `dropUnreachable` removes it.
  */
@@ -39,6 +41,11 @@ export interface FinalizeTextEditsOptions {
   readonly dropUnreachable?: boolean;
   /** Loads bundled face programs to recognise renamed fonts (default: bundled files). */
   readonly loadFace?: FaceLoader;
+  /**
+   * The pages (0-based) the text edits wrote: only their marked content is repaired.
+   * Default: every page.
+   */
+  readonly pages?: readonly number[];
 }
 
 export interface FinalizeTextEditsResult {
@@ -83,7 +90,7 @@ export async function finalizeTextEdits(
 ): Promise<FinalizeTextEditsResult> {
   const doc = await PDFDocument.load(bytes, { updateMetadata: false });
   const fontsRenamed = await renameUntitledFonts(doc, new FaceCache(options.loadFace));
-  const mcidsReassigned = repairMarkedContent(doc);
+  const mcidsReassigned = repairMarkedContent(doc, options.pages);
   let unreachableRemoved = 0;
   if (options.dropUnreachable ?? true) {
     const before = doc.context.enumerateIndirectObjects().length;
@@ -254,8 +261,118 @@ function numberTreeGet(
   return undefined;
 }
 
-/** Positions of inline `/MCID n` in BDC property lists of a content stream. */
-const MCID_PATTERN = /(\/MCID\s+)(\d+)(?=[^>]*>>\s*BDC)/g;
+/** An inline `/MCID n` of a BDC property list: where its digits are, and the id. */
+interface McidAt {
+  readonly start: number;
+  readonly end: number;
+  readonly id: number;
+}
+
+const WHITESPACE = /[\0\t\n\f\r ]/;
+const DELIMITER = /[\0\t\n\f\r ()<>[\]{}/%]/;
+
+/** End of the literal string starting at `i` (`(`), nested parentheses and escapes included. */
+function skipLiteral(text: string, i: number): number {
+  let depth = 0;
+  for (let k = i; k < text.length; k++) {
+    const ch = text[k];
+    if (ch === '\\') k++;
+    else if (ch === '(') depth++;
+    else if (ch === ')' && --depth === 0) return k + 1;
+  }
+  return text.length;
+}
+
+/**
+ * Every inline `/MCID n` of a BDC property list in a content stream, found with a small
+ * lexer rather than a pattern: the list may hold strings (`/ActualText <FEFF…>` or `(a>b)`),
+ * nested dictionaries and comments, which a pattern over `[^>]` cannot see past. Inline
+ * image data (`BI … ID … EI`) and strings outside property lists are skipped.
+ */
+function mcidsOf(text: string): McidAt[] {
+  const out: McidAt[] = [];
+  let i = 0;
+  const n = text.length;
+  /** Reads the dictionary starting at `i` (`<<`); returns its end and its top-level MCID. */
+  const dict = (from: number): { end: number; mcid?: McidAt } => {
+    let k = from + 2;
+    let depth = 1;
+    let mcid: McidAt | undefined;
+    while (k < n && depth > 0) {
+      const ch = text[k] ?? '';
+      if (ch === '(') k = skipLiteral(text, k);
+      else if (ch === '%') {
+        while (k < n && text[k] !== '\n' && text[k] !== '\r') k++;
+      } else if (ch === '<' && text[k + 1] === '<') {
+        depth++;
+        k += 2;
+      } else if (ch === '>' && text[k + 1] === '>') {
+        depth--;
+        k += 2;
+      } else if (ch === '<') {
+        const close = text.indexOf('>', k + 1);
+        k = close < 0 ? n : close + 1;
+      } else if (
+        ch === '/' &&
+        depth === 1 &&
+        text.startsWith('/MCID', k) &&
+        DELIMITER.test(text[k + 5] ?? ' ')
+      ) {
+        let d = k + 5;
+        while (d < n && WHITESPACE.test(text[d] ?? '')) d++;
+        let e = d;
+        while (e < n && /\d/.test(text[e] ?? '')) e++;
+        if (e > d && mcid === undefined) mcid = { start: d, end: e, id: Number(text.slice(d, e)) };
+        k = Math.max(e, k + 5);
+      } else {
+        k++;
+      }
+    }
+    return mcid ? { end: k, mcid } : { end: k };
+  };
+  while (i < n) {
+    const ch = text[i] ?? '';
+    if (ch === '(') {
+      i = skipLiteral(text, i);
+    } else if (ch === '%') {
+      while (i < n && text[i] !== '\n' && text[i] !== '\r') i++;
+    } else if (ch === '<' && text[i + 1] === '<') {
+      const { end, mcid } = dict(i);
+      let k = end;
+      while (k < n && WHITESPACE.test(text[k] ?? '')) k++;
+      if (mcid && text.startsWith('BDC', k) && DELIMITER.test(text[k + 3] ?? ' ')) out.push(mcid);
+      i = end;
+    } else if (ch === '<') {
+      const close = text.indexOf('>', i + 1);
+      i = close < 0 ? n : close + 1;
+    } else if (
+      ch === 'I' &&
+      text[i + 1] === 'D' &&
+      WHITESPACE.test(text[i + 2] ?? '') &&
+      (i === 0 || WHITESPACE.test(text[i - 1] ?? ''))
+    ) {
+      // Inline image data runs to the `EI` operator.
+      const m = /\sEI(?=[\0\t\n\f\r ]|$)/.exec(text.slice(i + 3));
+      i = m ? i + 3 + m.index + 3 : n;
+    } else {
+      i++;
+    }
+  }
+  return out;
+}
+
+/** `text` with each MCID's digits replaced by `replace(id)` (the same id keeps them). */
+function replaceMcids(text: string, replace: (id: number) => number): string {
+  let out = '';
+  let at = 0;
+  for (const m of mcidsOf(text)) {
+    const fresh = replace(m.id);
+    if (fresh === m.id) continue;
+    out += `${text.slice(at, m.start)}${fresh}`;
+    at = m.end;
+  }
+  return at === 0 ? text : out + text.slice(at);
+}
 
 /** `/Tag <<… /MCID n …>> BDC` operations. */
 const BDC_PATTERN = /\/([^\s/<>[\]()]+)\s*<<([^>]*?)\/MCID\s+(\d+)([^>]*)>>\s*BDC\b/g;
@@ -407,13 +524,16 @@ function addKid(
   element.set(N.K, context.obj([first, entryFor(kResolved)]));
 }
 
-function repairMarkedContent(doc: PDFDocument): number {
+function repairMarkedContent(doc: PDFDocument, pages?: readonly number[]): number {
   const { context } = doc;
   const root = doc.catalog.lookupMaybe(N.StructTreeRoot, PDFDict);
   const parentTree = root?.lookupMaybe(N.ParentTree, PDFDict);
   if (!parentTree) return 0;
   let reassigned = 0;
-  for (const page of doc.getPages()) {
+  const wanted = pages === undefined ? undefined : new Set(pages);
+  for (const [index, page] of doc.getPages().entries()) {
+    // Only the pages the edits wrote: a repeat the producer left elsewhere is not ours.
+    if (wanted && !wanted.has(index)) continue;
     const key = page.node.lookupMaybe(N.StructParents, PDFNumber)?.asNumber();
     if (key === undefined) continue;
     const entry = numberTreeGet(doc, parentTree, key);
@@ -440,19 +560,17 @@ function repairMarkedContent(doc: PDFDocument): number {
       );
       return { ref, text: merged.text, merged: merged.merged > 0 };
     });
-    for (const s of streams)
-      for (const m of s.text.matchAll(MCID_PATTERN)) next = Math.max(next, Number(m[2]) + 1);
+    for (const s of streams) for (const m of mcidsOf(s.text)) next = Math.max(next, m.id + 1);
     for (const stream of streams) {
       if (!stream.ref) continue;
       let changed = false;
-      const text = stream.text.replace(MCID_PATTERN, (whole, prefix: string, digits: string) => {
-        const id = Number(digits);
+      const text = replaceMcids(stream.text, (id) => {
         if (!seen.has(id)) {
           seen.add(id);
-          return whole;
+          return id;
         }
         const element = ids.lookup(id);
-        if (!(element instanceof PDFDict)) return whole;
+        if (!(element instanceof PDFDict)) return id;
         const fresh = next++;
         while (ids.size() < fresh) ids.push(context.obj(null));
         const owner = ids.get(id);
@@ -461,7 +579,7 @@ function repairMarkedContent(doc: PDFDocument): number {
         lastOf.set(id, fresh);
         reassigned += 1;
         changed = true;
-        return `${prefix}${fresh}`;
+        return fresh;
       });
       if (!changed && !stream.merged) continue;
       const out = new Uint8Array(text.length);

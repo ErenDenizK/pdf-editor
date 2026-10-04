@@ -25,14 +25,17 @@
  *   else the outline of "x" (or z, v, w; the cap height of H, E, I, T without one), read only
  *   for letters the font was shown to set (factor 0.8–1.25, `substituteScale`).
  * - **Measure.** A left-aligned paragraph may extend to the right edge of its column (the
- *   furthest right edge of the blocks that share its horizontal extent): its own longest line
- *   is not where the producer wrapped. Justified, centred and right-aligned paragraphs keep
- *   theirs.
+ *   furthest right edge of the blocks that share its horizontal extent), or, inside a filled
+ *   or stroked box, to the box's inner edge (`ParagraphBlock.wrapRight`, from detection): its
+ *   own longest line is not where the producer wrapped. Justified, centred and right-aligned
+ *   paragraphs keep theirs. Hard line breaks arrive as `\n` in the text.
  * - **Overflow facts.** `gapBelow`: the empty space below the paragraph's ink down to the
  *   nearest block or graphic below it that overlaps it horizontally, else down to the bottom
  *   margin (taken equal to the top margin, at least 36 pt). `paragraphGap`: with a block
  *   below, the page's typical gap between vertically adjacent blocks of a column (at most
- *   `gapBelow`), so growth keeps it; 0 at the margin.
+ *   `gapBelow`), so growth keeps it; 0 at the margin. `pageRoom`: the space from the ink
+ *   down to the edge of the page's visible box (CropBox ∩ MediaBox), which growth must never
+ *   cross (craft §4.6).
  */
 import type { Font } from '@cantoo/fontkit';
 import type { Rect, SourceId } from '@pdf-editor/document-model';
@@ -213,6 +216,8 @@ export interface PreparedParagraph {
   readonly infos: Readonly<Record<string, ParagraphStyleInfo>>;
   readonly gapBelow: number;
   readonly paragraphGap: number;
+  /** Space from the paragraph's ink to the visible box's edge below it (points). */
+  readonly pageRoom: number;
   readonly refusal?: ParagraphEditRefusal;
 }
 
@@ -267,7 +272,11 @@ function sameRef(a: TextRunRef, b: TextRunRef): boolean {
 /** A refusal as the error `applyParagraphEdit` fails with. */
 export function paragraphRefusalError(refusal: ParagraphEditRefusal, detail = ''): Error {
   return textEditError(
-    refusal === 'unsupported-chars' ? 'unsupported-chars' : 'not-editable',
+    refusal === 'unsupported-chars'
+      ? 'unsupported-chars'
+      : refusal === 'off-page'
+        ? 'does-not-fit'
+        : 'not-editable',
     `(paragraph:${refusal}) This paragraph cannot be edited as a paragraph${detail ? `: ${detail}` : ''}`,
   );
 }
@@ -920,7 +929,8 @@ function layoutInputOf(
     styles,
     measure: {
       left: block.measure.left,
-      right: columnRight(model),
+      // Detection's measure: the enclosing box's inner edge, else the column's (`wrapRight`).
+      right: block.wrapRight ?? block.measure.right,
       ...(block.indent !== 0 ? { firstIndent: block.indent } : {}),
     },
     align: block.align,
@@ -928,13 +938,20 @@ function layoutInputOf(
   };
 }
 
-/** `gapBelow` and `paragraphGap` (see the module comment). */
-export function overflowFacts(model: ParagraphModel): { gapBelow: number; paragraphGap: number } {
+/** `gapBelow`, `paragraphGap` and `pageRoom` (see the module comment). */
+export function overflowFacts(model: ParagraphModel): {
+  gapBelow: number;
+  paragraphGap: number;
+  pageRoom: number;
+} {
   const { block, blocks, u } = model;
   const sameFrame = (b: ParagraphBlock) =>
     Math.abs(b.direction.x - u.x) < 1e-6 && Math.abs(b.direction.y - u.y) < 1e-6;
   const extent = (b: ParagraphBlock) => textSpaceExtent(b.box, u);
   const mine = extent(block);
+  const page = textSpaceExtent(model.pageBox, u);
+  // Down to the visible box's edge, never below the paragraph's own ink (already off the page).
+  const pageRoom = Math.max(0, mine.y0 - page.y0);
   const left = block.measure.left;
   const right = Math.max(block.measure.right, columnRight(model));
   const overlaps = (x0: number, x1: number, l: number, r: number) =>
@@ -974,12 +991,15 @@ export function overflowFacts(model: ParagraphModel): { gapBelow: number; paragr
     }
     const gapBelow = Math.max(0, mine.y0 - nearest);
     const typical = median(gaps) ?? Math.max(0, block.leading - block.size);
-    return { gapBelow, paragraphGap: Math.min(gapBelow, Math.max(0, typical)) };
+    return {
+      gapBelow: Math.min(gapBelow, pageRoom),
+      paragraphGap: Math.min(gapBelow, pageRoom, Math.max(0, typical)),
+      pageRoom,
+    };
   }
-  const page = textSpaceExtent(model.pageBox, u);
   const contentTop = Math.max(...blocks.filter(sameFrame).map((b) => extent(b).y1), mine.y1);
   const margin = Math.max(MIN_MARGIN, page.y1 - contentTop);
-  return { gapBelow: Math.max(0, mine.y0 - (page.y0 + margin)), paragraphGap: 0 };
+  return { gapBelow: Math.max(0, mine.y0 - (page.y0 + margin)), paragraphGap: 0, pageRoom };
 }
 
 function styleInfos(
@@ -1044,7 +1064,7 @@ export async function prepareParagraph(
     refusal = measured.refusal;
   }
   const input = layoutInputOf(model, metrics);
-  const { gapBelow, paragraphGap } = overflowFacts(model);
+  const { gapBelow, paragraphGap, pageRoom } = overflowFacts(model);
   return {
     model,
     metrics,
@@ -1052,6 +1072,7 @@ export async function prepareParagraph(
     infos: styleInfos(model, metrics),
     gapBelow,
     paragraphGap,
+    pageRoom,
     ...(refusal ? { refusal } : {}),
   };
 }

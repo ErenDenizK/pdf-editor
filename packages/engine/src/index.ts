@@ -97,6 +97,7 @@ export {
 export {
   type LayoutAlign,
   type LayoutEdit,
+  type LayoutEditSpan,
   type LayoutInput,
   type LayoutOptions,
   layoutParagraph,

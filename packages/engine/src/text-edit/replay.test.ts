@@ -4,7 +4,15 @@
  * the export post-pass renames subset fonts, repairs repeated MCIDs (tagged.pdf) and drops
  * the content stream a second edit orphaned. Also the worker round trip through the proxy.
  */
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef, StandardFonts } from '@cantoo/pdf-lib';
+import {
+  PDFArray,
+  PDFDict,
+  PDFDocument,
+  PDFName,
+  type PDFObject,
+  PDFRef,
+  StandardFonts,
+} from '@cantoo/pdf-lib';
 import type { EngineEdit, SourceId } from '@pdf-editor/document-model';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
@@ -294,6 +302,66 @@ describe('finalizeTextEdits (export post-pass)', () => {
       'Tagged sentence on page 1 of tagged.',
     );
     await h.adapter.close(reopened);
+  });
+});
+
+/**
+ * A tagged two-page file whose pages each repeat MCID 0 in two marked-content sequences, the
+ * second with `/ActualText` as a hex string after the id (`/MCID 0 /ActualText <FEFF…>>> BDC`),
+ * on separate baselines (so they are not merged as one line).
+ */
+async function repeatedMcids(): Promise<ArrayBuffer> {
+  const doc = await PDFDocument.create();
+  const ctx = doc.context;
+  const font = ctx.register(
+    ctx.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: 'Helvetica', Encoding: 'WinAnsiEncoding' }),
+  );
+  const root = ctx.register(ctx.obj({ Type: 'StructTreeRoot' }));
+  const doc0 = ctx.register(ctx.obj({ Type: 'StructElem', S: 'Document', P: root }));
+  const nums: PDFObject[] = [];
+  const kids: PDFRef[] = [];
+  for (let index = 0; index < 2; index++) {
+    const page = doc.addPage([300, 200]);
+    const content = [
+      '/P <</MCID 0>> BDC BT /F1 12 Tf 1 0 0 1 20 150 Tm (First line) Tj ET EMC',
+      '/P <</MCID 0 /ActualText <FEFF005300650063006F006E0064>>> BDC BT /F1 12 Tf 1 0 0 1 20 120 Tm (Second) Tj ET EMC',
+    ].join('\n');
+    page.node.set(PDFName.of('Resources'), ctx.obj({ Font: { F1: font } }));
+    page.node.set(PDFName.of('Contents'), ctx.register(ctx.stream(content)));
+    page.node.set(PDFName.of('StructParents'), ctx.obj(index));
+    const p = ctx.register(ctx.obj({ Type: 'StructElem', S: 'P', P: doc0, Pg: page.ref, K: 0 }));
+    kids.push(p);
+    nums.push(ctx.obj(index), ctx.obj([p]));
+  }
+  const docElem = ctx.lookup(doc0, PDFDict);
+  docElem.set(PDFName.of('K'), ctx.obj(kids));
+  const rootDict = ctx.lookup(root, PDFDict);
+  rootDict.set(PDFName.of('K'), doc0);
+  rootDict.set(PDFName.of('ParentTree'), ctx.obj({ Nums: nums }));
+  doc.catalog.set(PDFName.of('StructTreeRoot'), root);
+  doc.catalog.set(PDFName.of('MarkInfo'), ctx.obj({ Marked: true }));
+  return toBuffer(await doc.save({ useObjectStreams: false }));
+}
+
+describe('finalizeTextEdits marked-content repair', () => {
+  test('a repeated MCID followed by a hex string in its property list is reassigned', async () => {
+    const finalized = await finalizeTextEdits(await repeatedMcids(), { pages: [0] });
+    expect(finalized.mcidsReassigned).toBe(1);
+    const page = (await inflatedContent(finalized.bytes, 0)).page;
+    expect(page.match(/MCID \d+/g)).toEqual(['MCID 0', 'MCID 1']);
+    expect(page).toContain('/ActualText <FEFF005300650063006F006E0064>');
+  });
+
+  test('pages the edits did not write are left alone, repeats and all', async () => {
+    const bytes = await repeatedMcids();
+    const finalized = await finalizeTextEdits(bytes, { pages: [0] });
+    expect((await inflatedContent(finalized.bytes, 1)).page.match(/MCID \d+/g)).toEqual([
+      'MCID 0',
+      'MCID 0',
+    ]);
+    // Without the list (older callers), every page is repaired as before.
+    const all = await finalizeTextEdits(bytes);
+    expect(all.mcidsReassigned).toBe(2);
   });
 });
 

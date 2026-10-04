@@ -343,6 +343,34 @@ describe('dry runs and previews', () => {
     await h.adapter.close(id);
   });
 
+  test('a dry run that empties the paragraph renders the page under it (the editor plate)', async () => {
+    const id = await h.open(await rawPdf({ size: [400, 300], content: THREE_LINES }));
+    const [block] = await blocksOf(id);
+    if (!block) throw new Error('no paragraph');
+    const preview = await h.editor.renderParagraphPreview(
+      id,
+      0,
+      { ref: block.ref, text: '', caretSpan: { start: 0, end: block.text.length } },
+      2,
+    );
+    expect(preview.result.committed).toBe(false);
+    expect(preview.result.verification.readback).toBe('');
+    expect(preview.clip.width).toBeGreaterThan(0);
+    const canvas = new OffscreenCanvas(preview.width, preview.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('no 2d context');
+    ctx.drawImage(preview.bitmap, 0, 0);
+    preview.bitmap.close();
+    const data = ctx.getImageData(0, 0, preview.width, preview.height).data;
+    // No ink is left: the paragraph's area is page white.
+    let dark = 0;
+    for (let i = 0; i < data.length; i += 4) if ((data[i] ?? 255) < 128) dark++;
+    expect(dark).toBe(0);
+    // The source is untouched.
+    expect((await blocksOf(id))[0]?.text).toBe(block.text);
+    await h.adapter.close(id);
+  });
+
   test('the preview renders the paragraph area of the dry-run page', async () => {
     const id = await h.open(await fixture(wordUrl));
     const [, block] = await blocksOf(id);
@@ -700,5 +728,509 @@ describe('timings and the worker', () => {
     } finally {
       await proxy.destroy();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Several changes in one session, the page edge, annotations over several lines
+// ---------------------------------------------------------------------------
+
+const THREE_LINES = [
+  'BT /F1 12 Tf 1 0 0 1 40 250 Tm (The harbour master walked along the quay) Tj ET',
+  'BT /F1 12 Tf 1 0 0 1 40 235.6 Tm (and counted the boats that came in with) Tj ET',
+  'BT /F1 12 Tf 1 0 0 1 40 221.2 Tm (the evening tide.) Tj ET',
+].join('\n');
+
+/** A page with Helvetica as /F1 and Helvetica-Bold as /F2. */
+async function twoFontPdf(content: string): Promise<ArrayBuffer> {
+  const doc = await PDFDocument.create();
+  const ctx = doc.context;
+  const page = doc.addPage([400, 300]);
+  const font = (name: string) =>
+    ctx.register(
+      ctx.obj({ Type: 'Font', Subtype: 'Type1', BaseFont: name, Encoding: 'WinAnsiEncoding' }),
+    );
+  page.node.set(
+    PDFName.of('Resources'),
+    ctx.obj({ Font: { F1: font('Helvetica'), F2: font('Helvetica-Bold') } }),
+  );
+  page.node.set(PDFName.of('Contents'), ctx.register(ctx.stream(content)));
+  return toBuffer(await doc.save());
+}
+
+/**
+ * Several separate changes typed in one editor session, sent as the web editor sends them:
+ * one replacement from the first change to the last, with per-character style spans (typed
+ * text in the style before the caret, untouched characters with their source offset).
+ */
+function sessionEdit(
+  block: ParagraphBlock,
+  spans: readonly { readonly start: number; readonly end: number; readonly style: string }[],
+  changes: readonly (readonly [string, string])[],
+): ParagraphEdit {
+  const original = block.text;
+  let text = original;
+  let styles = Array.from(
+    original,
+    (_, i) => spans.find((s) => s.start <= i && i < s.end)?.style ?? 's0',
+  );
+  let origins = Array.from(original, (_, i) => i);
+  for (const [word, replacement] of changes) {
+    const at = text.indexOf(word);
+    if (at < 0) throw new Error(`"${word}" not in "${text}"`);
+    const typed = styles[at - 1] ?? styles[at] ?? 's0';
+    text = text.slice(0, at) + replacement + text.slice(at + word.length);
+    styles = [
+      ...styles.slice(0, at),
+      ...Array.from(replacement, () => typed),
+      ...styles.slice(at + word.length),
+    ];
+    origins = [
+      ...origins.slice(0, at),
+      ...Array.from(replacement, () => -1),
+      ...origins.slice(at + word.length),
+    ];
+  }
+  let start = 0;
+  while (start < text.length && origins[start] === start) start++;
+  let suffix = 0;
+  while (
+    suffix < text.length - start &&
+    origins[text.length - 1 - suffix] === original.length - 1 - suffix
+  ) {
+    suffix++;
+  }
+  const end = original.length - suffix;
+  const out: { start: number; end: number; style: string; source?: number }[] = [];
+  for (let i = start; i < text.length - suffix; i++) {
+    const k = i - start;
+    const style = styles[i] ?? 's0';
+    const source = (origins[i] ?? -1) >= 0 ? origins[i] : undefined;
+    const last = out[out.length - 1];
+    const follows =
+      last?.end === k &&
+      last.style === style &&
+      (source === undefined
+        ? last.source === undefined
+        : last.source !== undefined && last.source + (last.end - last.start) === source);
+    if (last && follows) last.end = k + 1;
+    else out.push({ start: k, end: k + 1, style, ...(source === undefined ? {} : { source }) });
+  }
+  return {
+    ref: block.ref,
+    text,
+    caretSpan: { start, end },
+    ...(out[0] ? { style: out[0].style } : {}),
+    spans: out,
+  };
+}
+
+/** The layout's view of a paragraph edit: the replaced range and the inserted text. */
+function layoutEditFor(block: ParagraphBlock, edit: ParagraphEdit) {
+  const { start, end } = edit.caretSpan;
+  const inserted = edit.text.length - (block.text.length - (end - start));
+  return { start, end, text: edit.text.slice(start, start + inserted) };
+}
+
+describe('several changes in one session', () => {
+  const BOLD_LINE = [
+    'BT /F1 12 Tf 1 0 0 1 40 250 Tm (The harbour ) Tj /F2 12 Tf (master) Tj /F1 12 Tf ( walked along the quay) Tj ET',
+    'BT /F1 12 Tf 1 0 0 1 40 235.6 Tm (and counted the boats that came in with) Tj ET',
+    'BT /F1 12 Tf 1 0 0 1 40 221.2 Tm (the evening tide.) Tj ET',
+  ].join('\n');
+
+  test('two fixes around a bold word keep the bold word bold, and replay byte-identically', async () => {
+    const bytes = await twoFontPdf(BOLD_LINE);
+    const id = await h.open(bytes);
+    const [block] = await blocksOf(id);
+    if (!block) throw new Error('no paragraph');
+    const analysis = await h.editor.analyzeParagraphLayout(block.ref);
+    const edit = sessionEdit(block, analysis.input.spans, [
+      ['The', 'A'],
+      ['quay', 'pier'],
+    ]);
+    expect(edit.caretSpan).toEqual({ start: 0, end: block.text.indexOf('quay') + 4 });
+    const applied = await applyEngineEditWithResult(target, {
+      id: 'two-fixes',
+      source: id,
+      pageIndex: 0,
+      kind: 'text.editParagraph',
+      payload: paragraphEditPayloadOf(edit),
+    });
+    expect(applied.paragraphEdit?.committed).toBe(true);
+    const runs = await h.editor.locateRuns(id, 0);
+    const fontOf = (word: string) => runs.find((r) => r.text.includes(word))?.font.baseName;
+    expect(fontOf('master')).toBe('Helvetica-Bold');
+    expect(fontOf('pier')).toBe('Helvetica');
+    expect(fontOf('harbour')).toBe('Helvetica');
+    expect((await blocksOf(id))[0]?.text).toBe(edit.text);
+    const session = await h.adapter.save(id);
+    await h.adapter.close(id);
+
+    // The recorded spans survive JSON and replay writes the same bytes.
+    const log = JSON.parse(JSON.stringify([applied.applied])) as EngineEdit[];
+    expect(readParagraphEditPayload(log[0]?.payload).spans).toEqual(edit.spans);
+    const fresh = await h.open(bytes);
+    const replayed = await replayEngineEdits(
+      target,
+      log.map((e) => ({ ...e, source: fresh })),
+    );
+    expect(replayed.failed).toEqual([]);
+    expect(sameBytes(await h.adapter.save(fresh), session)).toBe(true);
+    await h.adapter.close(fresh);
+  });
+
+  test('a coloured, Span-tagged word between two fixes keeps its colour and MCID', async () => {
+    const content = [
+      'BT /F1 12 Tf 1 0 0 1 40 250 Tm /P <</MCID 0>> BDC (The harbour ) Tj EMC',
+      '/Span <</MCID 1>> BDC 1 0 0 rg (master) Tj 0 g EMC',
+      '/P <</MCID 2>> BDC ( walked along the quay) Tj EMC ET',
+      'BT /F1 12 Tf 1 0 0 1 40 235.6 Tm /P <</MCID 3>> BDC (and counted the boats that came in with) Tj EMC ET',
+      'BT /F1 12 Tf 1 0 0 1 40 221.2 Tm /P <</MCID 4>> BDC (the evening tide.) Tj EMC ET',
+    ].join('\n');
+    const id = await h.open(await rawPdf({ size: [400, 300], content }));
+    const [block] = await blocksOf(id);
+    if (!block) throw new Error('no paragraph');
+    const analysis = await h.editor.analyzeParagraphLayout(block.ref);
+    const edit = sessionEdit(block, analysis.input.spans, [
+      ['The', 'A'],
+      ['quay', 'pier'],
+    ]);
+    const result = await h.editor.applyParagraphEdit(id, 0, edit, { commit: true });
+    expect(result.committed).toBe(true);
+    const runs = await h.editor.locateRuns(id, 0);
+    const master = runs.find((r) => r.text.includes('master'));
+    expect(master?.mcid).toBe(1);
+    expect(master?.fill?.slice(0, 3)).toEqual([255, 0, 0]);
+    const pier = runs.find((r) => r.text.includes('pier'));
+    expect(pier?.mcid).not.toBe(1);
+    expect(pier?.fill?.slice(0, 3)).toEqual([0, 0, 0]);
+    await h.adapter.close(id);
+  });
+
+  test('a layout that restyles an untouched character is refused before anything is written', async () => {
+    const id = await h.open(await twoFontPdf(BOLD_LINE));
+    const [block] = await blocksOf(id);
+    if (!block) throw new Error('no paragraph');
+    const analysis = await h.editor.analyzeParagraphLayout(block.ref);
+    const edit = sessionEdit(block, analysis.input.spans, [
+      ['The', 'A'],
+      ['quay', 'pier'],
+    ]);
+    // The single-replacement model of the first release: one style for the whole range.
+    const flattened = layoutParagraph(analysis.input, {
+      ...layoutEditFor(block, edit),
+      style: 's0',
+    });
+    const before = await h.adapter.save(id);
+    const error = await rejection(
+      h.editor.applyParagraphEdit(id, 0, { ...edit, layout: flattened }, { commit: true }),
+    );
+    expect(textEditFailureReason(error)).toBe('verification-failed');
+    expect(String(error)).toMatch(/would change from s1 to s0/);
+    // Spans claiming a source with another style are refused the same way.
+    const lying: ParagraphEdit = {
+      ...edit,
+      spans: (edit.spans ?? []).map((s) => (s.style === 's1' ? { ...s, style: 's0' } : s)),
+    };
+    expect(
+      textEditFailureReason(
+        await rejection(h.editor.applyParagraphEdit(id, 0, lying, { commit: true })),
+      ),
+    ).toBe('verification-failed');
+    // Spans naming characters the original does not have there are an invalid range.
+    const shifted: ParagraphEdit = {
+      ...edit,
+      spans: (edit.spans ?? []).map((s) =>
+        s.source === undefined ? s : { ...s, source: s.source + 1 },
+      ),
+    };
+    expect(
+      textEditFailureReason(
+        await rejection(h.editor.applyParagraphEdit(id, 0, shifted, { commit: true })),
+      ),
+    ).toBe('invalid-range');
+    expect(sameBytes(await h.adapter.save(id), before)).toBe(true);
+    await h.adapter.close(id);
+  });
+
+  test('payloads with spans are validated; payloads without them still read', () => {
+    const good = {
+      paragraph: { index: 0, runs: [{ objectPath: [0], charStart: 0, charCount: 3, text: 'abc' }] },
+      text: 'xbc',
+      caretSpan: { start: 0, end: 1 },
+      style: 's0',
+    };
+    expect(readParagraphEditPayload(good)).toEqual(good);
+    const withSpans = { ...good, spans: [{ start: 0, end: 1, style: 's0' }] };
+    expect(readParagraphEditPayload(withSpans)).toEqual(withSpans);
+    for (const spans of [
+      'nope',
+      [{ start: 1, end: 1, style: 's0' }],
+      [{ start: 0, end: 1, style: '' }],
+      [{ start: 0, end: 1, style: 's0', source: -1 }],
+      [
+        { start: 0, end: 2, style: 's0' },
+        { start: 1, end: 3, style: 's0' },
+      ],
+    ]) {
+      expect(() => readParagraphEditPayload({ ...good, spans })).toThrow(
+        /Invalid text.editParagraph payload/,
+      );
+    }
+  });
+});
+
+describe('the page edge', () => {
+  test('a paragraph near the bottom that would grow off the page is refused, nothing written', async () => {
+    const content = [
+      'BT /F1 12 Tf 1 0 0 1 40 40 Tm (The harbour master walked along the quay) Tj ET',
+      'BT /F1 12 Tf 1 0 0 1 40 25.6 Tm (and counted the boats that came in with) Tj ET',
+      'BT /F1 12 Tf 1 0 0 1 40 11.2 Tm (the evening tide.) Tj ET',
+    ].join('\n');
+    const id = await h.open(await rawPdf({ size: [400, 300], content }));
+    const [block] = await blocksOf(id);
+    if (!block) throw new Error('no paragraph');
+    const analysis = await h.editor.analyzeParagraphLayout(block.ref);
+    expect(analysis.pageRoom).toBeGreaterThan(0);
+    expect(analysis.pageRoom).toBeLessThan(11.2);
+    const edit = replace(
+      block,
+      'tide.',
+      'tide, and then the fishing boats, and the ferry, and the small dinghies of the boys who rowed out to the buoys every evening to fish for mackerel.',
+    );
+    // The overflow policy says so before any write.
+    const layoutEdit = layoutEditFor(block, edit);
+    const layout = layoutParagraph(analysis.input, layoutEdit);
+    const decision = decideOverflow(
+      layout,
+      {
+        input: analysis.input,
+        edit: layoutEdit,
+        paragraphGap: analysis.paragraphGap,
+        pageRoom: analysis.pageRoom,
+      },
+      analysis.gapBelow,
+    );
+    expect(decision).toMatchObject({ kind: 'overflow', offPage: true });
+    const before = await h.adapter.save(id);
+    for (const commit of [false, true]) {
+      const error = await rejection(h.editor.applyParagraphEdit(id, 0, edit, { commit }));
+      expect(paragraphRefusalReason(error)).toBe('off-page');
+      expect(textEditFailureReason(error)).toBe('does-not-fit');
+    }
+    // A layout passed in (the overlay's) is checked against the page box as well.
+    const forced = await rejection(
+      h.editor.applyParagraphEdit(id, 0, { ...edit, layout }, { commit: true }),
+    );
+    expect(paragraphRefusalReason(forced)).toBe('off-page');
+    expect(sameBytes(await h.adapter.save(id), before)).toBe(true);
+    // A shorter text that stays on the page still commits.
+    const short = replace(block, 'tide.', 'tide again.');
+    expect((await h.editor.applyParagraphEdit(id, 0, short, { commit: true })).committed).toBe(
+      true,
+    );
+    await h.adapter.close(id);
+  });
+
+  test('running over into content below that stays on the page keeps the warning', async () => {
+    const content = [
+      THREE_LINES,
+      'BT /F1 12 Tf 1 0 0 1 40 190 Tm (A second paragraph sits right below the first one.) Tj ET',
+    ].join('\n');
+    const id = await h.open(await rawPdf({ size: [400, 300], content }));
+    const [block] = await blocksOf(id);
+    if (!block) throw new Error('no paragraph');
+    const edit = replace(
+      block,
+      'tide.',
+      'tide, and then the fishing boats, and the ferry, and the small dinghies of the boys who rowed out to the buoys every evening to fish for mackerel and herring.',
+    );
+    const result = await h.editor.applyParagraphEdit(id, 0, edit, { commit: false });
+    expect(result.decision).toMatchObject({ kind: 'overflow', offPage: false });
+    await h.adapter.close(id);
+  });
+});
+
+describe('annotations over several lines', () => {
+  test('a highlight over two words on two lines moves per quad with each word', async () => {
+    const doc = await PDFDocument.load(await rawPdf({ size: [400, 300], content: THREE_LINES }));
+    const page = doc.getPage(0);
+    // Quads over "quay" (end of line 1) and "and" (start of line 2).
+    const annot = doc.context.obj({
+      Type: 'Annot',
+      Subtype: 'Highlight',
+      Rect: [40, 232, 275, 259],
+      QuadPoints: [
+        241, 259, 275, 259, 241, 247, 275, 247, 40, 244.6, 60, 244.6, 40, 232.6, 60, 232.6,
+      ],
+      C: [1, 1, 0],
+      NM: PDFString.of('hl-1'),
+    });
+    page.node.set(PDFName.of('Annots'), doc.context.obj([doc.context.register(annot)]));
+    const id = await h.open(toBuffer(await doc.save()));
+    const [block] = await blocksOf(id);
+    if (!block) throw new Error('no paragraph');
+    // Deleting "harbour " moves "quay" left and pulls "and" up onto line 1.
+    const result = await h.editor.applyParagraphEdit(id, 0, replace(block, 'harbour ', ''), {
+      commit: true,
+    });
+    expect(result.moved.map((m) => m.id)).toEqual(['hl-1']);
+    const runs = await h.editor.locateRuns(id, 0);
+    const glyphOf = (word: string) => {
+      const run = runs.find((r) => r.text.includes(word));
+      const at = run?.text.indexOf(word) ?? -1;
+      return run?.glyphs.slice(at, at + word.length) ?? [];
+    };
+    const marked = (await h.adapter.listAnnotations(id, 0)).find((a) => a.id === 'hl-1');
+    const quads = marked?.kind === 'highlight' ? marked.quads : [];
+    expect(quads.length).toBeGreaterThanOrEqual(2);
+    for (const word of ['quay', 'and ']) {
+      for (const g of glyphOf(word.trim())) {
+        const cx = g.rect.x + g.rect.width / 2;
+        const cy = g.rect.y + g.rect.height / 2;
+        const inside = quads.some(
+          (q) =>
+            cx >= q.x - 0.5 &&
+            cx <= q.x + q.width + 0.5 &&
+            cy >= q.y - 0.5 &&
+            cy <= q.y + q.height + 0.5,
+        );
+        expect(inside, `"${g.text}" of "${word}" under a quad`).toBe(true);
+      }
+    }
+    // The appearance is drawn again from the moved quads: yellow under every quad.
+    const { bitmap, width, height } = await h.adapter.renderPage(id, 0, {
+      scale: 2,
+      withAnnotations: true,
+    });
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('no 2d context');
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const image = ctx.getImageData(0, 0, width, height);
+    for (const q of quads) {
+      let yellow = 0;
+      let total = 0;
+      for (let y = Math.ceil((300 - q.y - q.height) * 2); y < (300 - q.y) * 2; y++) {
+        for (let x = Math.ceil(q.x * 2); x < (q.x + q.width) * 2; x++) {
+          const i = (y * width + x) * 4;
+          total++;
+          const [r, g, b] = [image.data[i] ?? 0, image.data[i + 1] ?? 0, image.data[i + 2] ?? 0];
+          if (r > 200 && g > 200 && b < 120) yellow++;
+        }
+      }
+      expect(yellow / total, `quad at ${q.x.toFixed(1)} is highlighted`).toBeGreaterThan(0.3);
+    }
+    // Every quad and the /Rect stay on the page, the /Rect around the quads.
+    const rect = marked?.rect;
+    for (const q of quads) {
+      expect(q.x).toBeGreaterThanOrEqual(0);
+      expect(rect!.x).toBeLessThanOrEqual(q.x + 0.01);
+      expect(rect!.x + rect!.width).toBeGreaterThanOrEqual(q.x + q.width - 0.01);
+    }
+    await h.adapter.close(id);
+  });
+
+  test('a link whose words rewrap onto two lines gets a quad per line', async () => {
+    const doc = await PDFDocument.load(await rawPdf({ size: [400, 300], content: THREE_LINES }));
+    const page = doc.getPage(0);
+    // A link with quads over "along the quay" at the end of line 1.
+    const link = doc.context.obj({
+      Type: 'Annot',
+      Subtype: 'Link',
+      Rect: [168, 246, 262, 260],
+      QuadPoints: [168, 260, 262, 260, 168, 246, 262, 246],
+      Border: [0, 0, 0],
+      NM: PDFString.of('link-2'),
+    });
+    page.node.set(PDFName.of('Annots'), doc.context.obj([doc.context.register(link)]));
+    const id = await h.open(toBuffer(await doc.save()));
+    const [block] = await blocksOf(id);
+    if (!block) throw new Error('no paragraph');
+    // A longer word early in line 1 pushes "quay" (and perhaps "the") onto line 2.
+    const edit = replace(block, 'master', 'harbourmaster');
+    const result = await h.editor.applyParagraphEdit(id, 0, edit, { commit: true });
+    expect(result.moved.map((m) => m.id)).toEqual(['link-2']);
+    const runs = await h.editor.locateRuns(id, 0);
+    const marked = (await h.adapter.listAnnotations(id, 0)).find((a) => a.id === 'link-2');
+    const rect = marked?.rect;
+    expect(rect).toBeDefined();
+    for (const word of ['along', 'quay']) {
+      const run = runs.find((r) => r.text.includes(word));
+      const at = run?.text.indexOf(word) ?? -1;
+      for (const g of run?.glyphs.slice(at, at + word.length) ?? []) {
+        const cx = g.rect.x + g.rect.width / 2;
+        const cy = g.rect.y + g.rect.height / 2;
+        expect(cx).toBeGreaterThanOrEqual(rect!.x - 0.5);
+        expect(cx).toBeLessThanOrEqual(rect!.x + rect!.width + 0.5);
+        expect(cy).toBeGreaterThanOrEqual(rect!.y - 0.5);
+        expect(cy).toBeLessThanOrEqual(rect!.y + rect!.height + 0.5);
+      }
+    }
+    // "along" and "quay" are now on different lines.
+    const lineOf = (word: string) => runs.find((r) => r.text.includes(word))?.baseline;
+    expect(lineOf('along')).not.toBe(lineOf('quay'));
+    await h.adapter.close(id);
+  });
+});
+
+describe('tightening the whole paragraph', () => {
+  test('when only the whole paragraph fits tightened, the overflow offers it and the writer takes it', async () => {
+    const line = (y: number) =>
+      `BT /F1 12 Tf 1 0 0 1 40 ${y} Tm (${Array.from({ length: 30 }, () => 'o').join(' ')}) Tj ET`;
+    const content = [
+      line(250),
+      line(235.6),
+      line(221.2),
+      'BT /F1 12 Tf 1 0 0 1 40 191.2 Tm (The next paragraph starts here and stays put.) Tj ET',
+    ].join('\n');
+    const id = await h.open(await rawPdf({ size: [400, 300], content }));
+    const [block] = await blocksOf(id);
+    if (!block) throw new Error('no paragraph');
+    expect(block.lines).toHaveLength(3);
+    const analysis = await h.editor.analyzeParagraphLayout(block.ref);
+    const at = block.text.length;
+    const edit: ParagraphEdit = {
+      ref: block.ref,
+      text: `${block.text} o o`,
+      caretSpan: { start: at, end: at },
+    };
+    const layoutEdit = layoutEditFor(block, edit);
+    const decision = decideOverflow(
+      layoutParagraph(analysis.input, layoutEdit),
+      {
+        input: analysis.input,
+        edit: layoutEdit,
+        paragraphGap: analysis.paragraphGap,
+        pageRoom: analysis.pageRoom,
+      },
+      analysis.gapBelow,
+    );
+    expect(decision.kind).toBe('overflow');
+    if (decision.kind !== 'overflow') return;
+    expect(decision.offPage).toBe(false);
+    const fit = decision.fit;
+    if (!fit) throw new Error('no whole-paragraph fit');
+    expect(fit.layout.lineDelta).toBe(0);
+    expect(fit.layout.lines.every((l) => l.status === 'rewritten')).toBe(true);
+    // The engine on its own runs over (the fit is the user's choice) ...
+    const dry = await h.editor.applyParagraphEdit(id, 0, edit, { commit: false });
+    expect(dry.decision.kind).toBe('overflow');
+    // ... and writes the fit when it is chosen, verified, as a tightening.
+    const result = await h.editor.applyParagraphEdit(
+      id,
+      0,
+      { ...edit, layout: fit.layout },
+      { commit: true },
+    );
+    expect(result.committed).toBe(true);
+    expect(result.decision).toMatchObject({ kind: 'tighten', percent: fit.percent });
+    const after = await blocksOf(id);
+    expect(after[0]?.text).toBe(edit.text);
+    expect(after[0]?.lines).toHaveLength(3);
+    expect(after[1]?.text).toBe('The next paragraph starts here and stays put.');
+    await h.adapter.close(id);
   });
 });

@@ -15,6 +15,7 @@ import type {
   ParagraphBlock,
   ParagraphEdit,
   ParagraphEditResult,
+  ParagraphEditSpan,
   ParagraphLayout,
   TextEditFailure,
   TextEditRequest,
@@ -100,6 +101,11 @@ export interface ParagraphCommit {
   readonly caretSpan: { readonly start: number; readonly end: number };
   /** Style id of the inserted text. */
   readonly style?: string;
+  /**
+   * Per-character styles of the inserted text: typed stretches, and the untouched original
+   * characters between separate changes with their source offset (`ParagraphEdit.spans`).
+   */
+  readonly spans?: readonly ParagraphEditSpan[];
   /** The layout the editor showed; omitted, the engine lays the paragraph out. */
   readonly layout?: ParagraphLayout;
   /** What the editor told the user about it (the last dry run, else the layout): the label. */
@@ -131,6 +137,7 @@ export function paragraphEditFor(commit: ParagraphCommit): ParagraphEdit {
     text: commit.text,
     caretSpan: commit.caretSpan,
     ...(commit.style === undefined ? {} : { style: commit.style }),
+    ...(commit.spans === undefined ? {} : { spans: commit.spans }),
     ...(commit.layout === undefined ? {} : { layout: commit.layout }),
   };
 }
@@ -172,6 +179,9 @@ export async function commitParagraphEdit(commit: ParagraphCommit): Promise<Para
   return {
     ok: false,
     ...(reason === undefined ? {} : { reason }),
-    message: failureMessage(reason),
+    message:
+      engine.paragraphRefusalReason(failure) === 'off-page'
+        ? m.paragraph_off_page()
+        : failureMessage(reason),
   };
 }

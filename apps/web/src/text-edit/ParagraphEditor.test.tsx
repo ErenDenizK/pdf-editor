@@ -13,7 +13,7 @@ import type {
   ParagraphPreview,
 } from '@pdf-editor/engine';
 import { faceFamilyName } from '@pdf-editor/engine/fonts';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 
@@ -31,9 +31,14 @@ import {
   substituteCssFamily,
   PREVIEW_DELAY_MS,
 } from './ParagraphEditor';
-import { type ParagraphSession, useTextEditStore } from './text-edit-store';
+import { type ParagraphSession, useParagraphBoxAt, useTextEditStore } from './text-edit-store';
+import { rectToCss } from '../annotations/geometry';
 
-const commits = vi.hoisted(() => ({ calls: [] as unknown[] }));
+const commits = vi.hoisted(() => ({
+  calls: [] as unknown[],
+  /** The outcome the next commits resolve to (default: a success). */
+  outcome: undefined as Promise<unknown> | undefined,
+}));
 
 vi.mock('./actions', async (importOriginal) => {
   const actual = await importOriginal<typeof Actions>();
@@ -41,7 +46,9 @@ vi.mock('./actions', async (importOriginal) => {
     ...actual,
     commitParagraphEdit: (commit: unknown) => {
       commits.calls.push(commit);
-      return Promise.resolve({ ok: true, label: 'Paragraph edited (same font)' });
+      return (
+        commits.outcome ?? Promise.resolve({ ok: true, label: 'Paragraph edited (same font)' })
+      );
     },
   };
 });
@@ -63,9 +70,15 @@ const FRAME: PageFrame = {
 
 let serial = 0;
 
-function setupEngine(options: { substitute?: boolean; sans?: boolean } = {}) {
+function setupEngine(
+  options: { substitute?: boolean; sans?: boolean; gapBelow?: number; pageRoom?: number } = {},
+) {
   const source = `src-paragraph-${++serial}` as SourceId;
-  const fixture = paragraph(LINES, { width: 20 * ADVANCE, source });
+  const fixture = paragraph(LINES, {
+    width: 20 * ADVANCE,
+    source,
+    ...(options.gapBelow === undefined ? {} : { gapBelow: options.gapBelow }),
+  });
   const style = options.sans
     ? // Noto Sans for what it has, Inter for the arrow it lacks (craft §4.5).
       monoStyle({
@@ -106,6 +119,7 @@ function setupEngine(options: { substitute?: boolean; sans?: boolean } = {}) {
     },
     gapBelow: fixture.gapBelow,
     paragraphGap: fixture.paragraphGap,
+    pageRoom: options.pageRoom ?? fixture.gapBelow + 100,
   };
   const service = getEngineService();
   const spies = {
@@ -166,6 +180,7 @@ async function ready(mirror: HTMLElement) {
 describe('ParagraphEditor', () => {
   beforeEach(() => {
     commits.calls.length = 0;
+    commits.outcome = undefined;
     useTextEditStore.getState().close();
   });
   afterEach(() => {
@@ -202,7 +217,8 @@ describe('ParagraphEditor', () => {
     // The rewritten lines are drawn from the glyph outlines.
     expect(fill.mock.calls.length).toBeGreaterThan(0);
     expect(spies.analyze.mock.calls.length).toBe(calls);
-    expect(spies.preview).not.toHaveBeenCalled();
+    // The one dry run at open renders the plate (the paragraph emptied); none per keystroke.
+    expect(spies.preview.mock.calls.map((c) => c[2]?.text)).toEqual(['']);
     expect(spies.dryRun).not.toHaveBeenCalled();
   });
 
@@ -218,17 +234,19 @@ describe('ParagraphEditor', () => {
       await userEvent.keyboard(key);
     }
     const pauses = times.slice(1).filter((t, k) => t - (times[k] ?? t) >= PREVIEW_DELAY_MS).length;
-    expect(spies.preview.mock.calls.length).toBeLessThanOrEqual(pauses);
+    // The plate's dry run (text '') is not a preview of the draft.
+    const drafts = () => spies.preview.mock.calls.filter((c) => c[2]?.text !== '');
+    expect(drafts().length).toBeLessThanOrEqual(pauses);
     await waitFor(
       () =>
-        expect(spies.preview.mock.calls.at(-1)?.[2]?.text).toBe(
+        expect(drafts().at(-1)?.[2]?.text).toBe(
           'The abcquick brown fox jumps over the lazy dog and runs away.',
         ),
       { timeout: 2000 },
     );
     const previews = spies.preview.mock.calls.length;
-    expect(previews).toBeLessThanOrEqual(1 + pauses);
-    const edit = spies.preview.mock.calls.at(-1)?.[2];
+    expect(drafts().length).toBeLessThanOrEqual(1 + pauses);
+    const edit = drafts().at(-1)?.[2];
     expect(edit?.caretSpan).toEqual({ start: 4, end: 4 });
     expect(edit?.layout).toBeDefined();
     await waitFor(() =>
@@ -387,6 +405,193 @@ describe('ParagraphEditor', () => {
   });
 });
 
+describe('leaving safely', () => {
+  beforeEach(() => {
+    commits.calls.length = 0;
+    commits.outcome = undefined;
+    useTextEditStore.getState().close();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    useTextEditStore.getState().close();
+  });
+
+  /** Enough text to add two lines to the three-line paragraph. */
+  const LONG = 'many more words than the paragraph has room for ';
+
+  it('two separate fixes send per-character spans: untouched text keeps its source', async () => {
+    const { session } = setupEngine();
+    const { mirror } = renderEditor(session);
+    await ready(mirror);
+    // "The" → "A" at the start and "away" → "off" at the end.
+    await userEvent.keyboard('{Backspace}{Backspace}{Backspace}{Backspace}A ');
+    await userEvent.keyboard('{Control>}{End}{/Control}');
+    await userEvent.keyboard('{Backspace}{Backspace}{Backspace}{Backspace}{Backspace}off.');
+    await waitFor(() =>
+      expect(mirror.textContent).toBe('A quick brown fox jumps over the lazy dog and runs off.'),
+    );
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(commits.calls).toHaveLength(1));
+    const commit = commits.calls[0] as {
+      caretSpan: { start: number; end: number };
+      spans: { start: number; end: number; style: string; source?: number }[];
+    };
+    const original = LINES.join(' ');
+    // The final "." is common to both: the replacement ends before it.
+    expect(commit.caretSpan).toEqual({ start: 0, end: original.length - 1 });
+    // Typed "A " and "off", the untouched middle with its source offset.
+    const middle = original.length - 9;
+    expect(commit.spans).toEqual([
+      { start: 0, end: 2, style: 's0' },
+      { start: 2, end: 2 + middle, style: 's0', source: 4 },
+      { start: 2 + middle, end: 2 + middle + 3, style: 's0' },
+    ]);
+  });
+
+  it('an overlap is never committed on Esc: the header offers a choice, Keep editing first', async () => {
+    const { session } = setupEngine({ gapBelow: 0 });
+    const { mirror } = renderEditor(session);
+    await ready(mirror);
+    await userEvent.keyboard('{Control>}{End}{/Control}');
+    await userEvent.keyboard(` ${LONG}${LONG}`);
+    await waitFor(() =>
+      expect(screen.getByTestId('paragraph-overflow')).toHaveAttribute('data-kind', 'overflow'),
+    );
+    await userEvent.keyboard('{Escape}');
+    const choice = await screen.findByTestId('paragraph-choice');
+    expect(commits.calls).toHaveLength(0);
+    expect(useTextEditStore.getState().paragraph).toBe(session);
+    await waitFor(() => expect(screen.getByTestId('paragraph-keep-editing')).toHaveFocus());
+    await waitFor(() =>
+      expect(useAnnouncer.getState().alert).toMatch(/runs into the content below/),
+    );
+    // Esc on the choice keeps editing.
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(choice).not.toBeInTheDocument());
+    await waitFor(() => expect(mirror).toHaveFocus());
+    // A press outside asks again; "Let it overlap" commits the layout as shown.
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(await screen.findByTestId('paragraph-overlap'));
+    await waitFor(() => expect(commits.calls).toHaveLength(1));
+    const commit = commits.calls[0] as { layout: { lineDelta: number } };
+    expect(commit.layout.lineDelta).toBeGreaterThan(0);
+    await waitFor(() => expect(useTextEditStore.getState().paragraph).toBeNull());
+  });
+
+  it('text that would leave the page is not committed; the editor keeps it and says why', async () => {
+    const { session } = setupEngine({ gapBelow: 0, pageRoom: 2 });
+    const { mirror } = renderEditor(session);
+    await ready(mirror);
+    await userEvent.keyboard('{Control>}{End}{/Control}');
+    await userEvent.keyboard(` ${LONG}${LONG}`);
+    const message = 'This text no longer fits on the page; shorten it or move content';
+    await waitFor(() =>
+      expect(screen.getByTestId('paragraph-overflow')).toHaveTextContent(message),
+    );
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.getByTestId('paragraph-error')).toHaveTextContent(message));
+    expect(screen.queryByTestId('paragraph-choice')).toBeNull();
+    expect(commits.calls).toHaveLength(0);
+    expect(mirror.textContent).toContain(LONG);
+    expect(useTextEditStore.getState().paragraph).toBe(session);
+  });
+
+  it('a commit in flight never closes the paragraph opened meanwhile', async () => {
+    const { session } = setupEngine();
+    const other = setupEngine().session;
+    let resolve: (value: unknown) => void = () => undefined;
+    commits.outcome = new Promise((r) => {
+      resolve = r;
+    });
+    const { mirror } = renderEditor(session);
+    await ready(mirror);
+    await userEvent.keyboard('X');
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(commits.calls).toHaveLength(1));
+    act(() => useTextEditStore.getState().openParagraph(other));
+    await act(async () => {
+      resolve({ ok: true, label: 'Paragraph edited (same font)' });
+      await Promise.resolve();
+    });
+    expect(useTextEditStore.getState().paragraph).toBe(other);
+  });
+
+  it('an editor scrolled away keeps an undecided overlap and gives it back on return', async () => {
+    const { session } = setupEngine({ gapBelow: 0 });
+    const view = renderEditor(session);
+    await ready(view.mirror);
+    await userEvent.keyboard('{Control>}{End}{/Control}');
+    await userEvent.keyboard(` ${LONG}${LONG}`);
+    const typed = view.mirror.textContent;
+    await waitFor(() => expect(screen.getByTestId('paragraph-overflow')).toBeInTheDocument());
+    view.unmount();
+    expect(commits.calls).toHaveLength(0);
+    expect(useTextEditStore.getState().paragraphKept?.state.text).toBe(typed);
+    await waitFor(() =>
+      expect(useAnnouncer.getState().message).toMatch(/is kept until you return/),
+    );
+    // The page comes back: the same session's editor opens with the typed text.
+    render(<ParagraphEditor session={session} frame={FRAME} revision={0} />);
+    const mirror = screen.getByRole('textbox', { name: 'Paragraph on page 1' });
+    await waitFor(() => expect(mirror.textContent).toBe(typed));
+    expect(useTextEditStore.getState().paragraphKept).toBeNull();
+    await waitFor(() => expect(useAnnouncer.getState().message).toMatch(/is open again/));
+  });
+
+  it('a commit on unmount that fails keeps the text with the failure and says so', async () => {
+    const { session } = setupEngine();
+    commits.outcome = Promise.resolve({ ok: false, message: 'The page changed' });
+    const view = renderEditor(session);
+    await ready(view.mirror);
+    await userEvent.keyboard('X');
+    const typed = view.mirror.textContent;
+    view.unmount();
+    await waitFor(() => expect(commits.calls).toHaveLength(1));
+    await waitFor(() =>
+      expect(useTextEditStore.getState().paragraphKept).toMatchObject({
+        state: { text: typed },
+        error: 'The page changed',
+      }),
+    );
+    await waitFor(() =>
+      expect(useAnnouncer.getState().alert).toMatch(/was not saved: The page changed/),
+    );
+    // Closing the session drops the kept text, with an announcement.
+    act(() => useTextEditStore.getState().closeParagraph());
+    await waitFor(() => expect(useAnnouncer.getState().message).toMatch(/was discarded/));
+  });
+});
+
+describe('the hover outline', () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('gives the detected paragraph box under a point once the page is analysed', async () => {
+    const source = `src-hover-${++serial}` as SourceId;
+    const fixture = paragraph(LINES, { width: 20 * ADVANCE, source });
+    const analyze = vi
+      .spyOn(getEngineService(), 'analyzeParagraphs')
+      .mockResolvedValue([fixture.block]);
+    const inside = rectToCss(FRAME, fixture.block.box);
+    const at = { x: inside.left + 2, y: inside.top + 2 };
+    const { result, rerender } = renderHook(
+      ({ point }: { point: { x: number; y: number } | undefined }) =>
+        useParagraphBoxAt(source, 0, FRAME, point),
+      { initialProps: { point: undefined as { x: number; y: number } | undefined } },
+    );
+    expect(result.current).toBeUndefined();
+    expect(analyze).not.toHaveBeenCalled();
+    rerender({ point: at });
+    await waitFor(() => expect(result.current).toEqual(inside));
+    rerender({ point: { x: inside.left - 50, y: inside.top - 50 } });
+    expect(result.current).toBeUndefined();
+    expect(analyze).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('helpers', () => {
   it('groups the honesty line by substitute face, in the spec’s words', () => {
     expect(
@@ -464,5 +669,13 @@ describe('helpers', () => {
     // A view rotation turns it about the box centre.
     const viewed = previewPlacement({ ...FRAME, rotation: 90 as const }, clip);
     expect(viewed).toMatchObject({ width: 200, height: 50, transform: 'rotate(90deg)' });
+    // With the bitmap: on the device pixels the engine rendered (the clip floored), one
+    // bitmap pixel per device pixel.
+    const odd = { x: 72.3, y: 600.2, width: 200, height: 50 };
+    const placed = previewPlacement(FRAME, odd, { width: 402, height: 102 }, 2);
+    const css = previewPlacement(FRAME, odd);
+    expect(placed.left).toBe(Math.floor(css.left * 2) / 2);
+    expect(placed.top).toBe(Math.floor(css.top * 2) / 2);
+    expect(placed).toMatchObject({ width: 201, height: 51 });
   });
 });

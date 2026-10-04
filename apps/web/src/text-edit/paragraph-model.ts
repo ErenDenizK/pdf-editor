@@ -11,13 +11,17 @@
  *   the character before the caret (the first character's at the start).
  * - **One edit.** However many keys were typed, the layout and the writer see one
  *   replacement of the original text (`paragraphEdit`: common prefix and suffix), so lines
- *   before the first change stay byte-identical (spec §4.3).
+ *   before the first change stay byte-identical (spec §4.3). The replacement carries a style
+ *   per character (`LayoutEdit.spans`): typed text in the style it was typed in, and the
+ *   untouched characters between separate changes with their original offset (`origins`), so
+ *   they keep their own font, colour and marked content.
  * - **Caret geometry** (`caretLines`): per laid-out line, the x of every caret position in
  *   paragraph text space (the layout's runs and kerning for rewritten lines; the original
  *   line's edges for kept and reused lines, whose glyphs the writer leaves alone).
  */
 import type {
   LayoutEdit,
+  LayoutEditSpan,
   LayoutInput,
   LayoutLineStatus,
   LayoutOptions,
@@ -37,6 +41,11 @@ export interface ParagraphState {
   readonly text: string;
   /** Style id (a key of `LayoutInput.styles`) of each UTF-16 unit of `text`. */
   readonly styles: readonly string[];
+  /**
+   * Offset in the original text of each UTF-16 unit of `text`, -1 for typed ones. Absent: no
+   * unit is known to be original (the edit then gives every character its style only).
+   */
+  readonly origins?: readonly number[];
   /** Selection ends (UTF-16 offsets): `anchor` stays, `focus` moves; equal for a caret. */
   readonly anchor: number;
   readonly focus: number;
@@ -78,7 +87,13 @@ function isTrail(text: string, at: number): boolean {
 
 export function initialState(input: LayoutInput, caret: number): ParagraphState {
   const at = clampOffset(input.text, caret);
-  return { text: input.text, styles: stylesOf(input), anchor: at, focus: at };
+  return {
+    text: input.text,
+    styles: stylesOf(input),
+    origins: Array.from({ length: input.text.length }, (_, i) => i),
+    anchor: at,
+    focus: at,
+  };
 }
 
 export function selectionOf(state: ParagraphState): TextRange {
@@ -114,7 +129,14 @@ export function replaceRange(
     ...state.styles.slice(end),
   ];
   const caret = start + insert.length;
-  return { text, styles, anchor: caret, focus: caret };
+  const origins = state.origins
+    ? [
+        ...state.origins.slice(0, start),
+        ...new Array<number>(insert.length).fill(-1),
+        ...state.origins.slice(end),
+      ]
+    : undefined;
+  return { text, styles, ...(origins ? { origins } : {}), anchor: caret, focus: caret };
 }
 
 /** Types `insert` over the selection. */
@@ -235,20 +257,27 @@ export function moveHorizontal(
 }
 
 /**
- * The change from the original text as one replacement (common prefix and suffix), typed
- * in the style of its first inserted character; null when the text is unchanged.
+ * The change from the original text as one replacement (common prefix and suffix: characters
+ * equal to the original's, in its style), with a style span per stretch of the inserted text
+ * (`LayoutEdit.spans`: untouched characters keep their source offset); null when nothing
+ * changed. `originalStyles` (`stylesOf(input)`) lets a retyped character in another style
+ * count as a change.
  */
-export function paragraphEdit(original: string, state: ParagraphState): LayoutEdit | null {
-  const { text } = state;
-  if (text === original) return null;
+export function paragraphEdit(
+  original: string,
+  state: ParagraphState,
+  originalStyles?: readonly string[],
+): LayoutEdit | null {
+  const { text, styles, origins } = state;
+  const same = (i: number, j: number) =>
+    text.charCodeAt(i) === original.charCodeAt(j) &&
+    (originalStyles === undefined || styles[i] === originalStyles[j]);
   let start = 0;
   const max = Math.min(text.length, original.length);
-  while (start < max && text.charCodeAt(start) === original.charCodeAt(start)) start += 1;
+  while (start < max && same(start, start)) start += 1;
+  if (start === text.length && text.length === original.length) return null;
   let suffix = 0;
-  while (
-    suffix < max - start &&
-    text.charCodeAt(text.length - 1 - suffix) === original.charCodeAt(original.length - 1 - suffix)
-  ) {
+  while (suffix < max - start && same(text.length - 1 - suffix, original.length - 1 - suffix)) {
     suffix += 1;
   }
   // Keep surrogate pairs whole on both sides.
@@ -260,8 +289,38 @@ export function paragraphEdit(original: string, state: ParagraphState): LayoutEd
     insertEnd += 1;
   }
   const insert = text.slice(start, insertEnd);
-  const style = insert.length > 0 ? state.styles[start] : undefined;
-  return { start, end, text: insert, ...(style === undefined ? {} : { style }) };
+  // A unit is original when it sits on its source character in the replaced range, in the
+  // style the original gives it.
+  const sourceOf = (i: number): number | undefined => {
+    const o = origins?.[i];
+    if (o === undefined || o < start || o >= end) return undefined;
+    if (text.charCodeAt(i) !== original.charCodeAt(o)) return undefined;
+    if (originalStyles !== undefined && originalStyles[o] !== styles[i]) return undefined;
+    return o;
+  };
+  const spans: LayoutEditSpan[] = [];
+  for (let i = start; i < insertEnd; i++) {
+    const k = i - start;
+    const style = styles[i] ?? styles[start] ?? '';
+    const source = sourceOf(i);
+    const last = spans[spans.length - 1];
+    const follows =
+      last?.end === k &&
+      last.style === style &&
+      (source === undefined
+        ? last.source === undefined
+        : last.source !== undefined && last.source + (last.end - last.start) === source);
+    if (last && follows) spans[spans.length - 1] = { ...last, end: k + 1 };
+    else spans.push({ start: k, end: k + 1, style, ...(source === undefined ? {} : { source }) });
+  }
+  const style = insert.length > 0 ? styles[start] : undefined;
+  return {
+    start,
+    end,
+    text: insert,
+    ...(style === undefined ? {} : { style }),
+    ...(spans.length > 0 ? { spans } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +349,8 @@ export interface ParagraphSetup {
   readonly paragraphGap: number;
   /** Empty space below the paragraph's last line down to the next block (points). */
   readonly gapBelow: number;
+  /** Space below the paragraph's ink to the page's visible edge (points); unbounded when absent. */
+  readonly pageRoom?: number;
 }
 
 export interface ParagraphRelayout {
@@ -301,13 +362,25 @@ export interface ParagraphRelayout {
 
 const NO_EDIT: LayoutEdit = { start: 0, end: 0, text: '' };
 
+const originalStyles = new WeakMap<LayoutInput, readonly string[]>();
+
+/** `stylesOf(input)`, computed once per input. */
+export function originalStylesOf(input: LayoutInput): readonly string[] {
+  let styles = originalStyles.get(input);
+  if (!styles) {
+    styles = stylesOf(input);
+    originalStyles.set(input, styles);
+  }
+  return styles;
+}
+
 /** Lays the paragraph out for the state's text and applies the overflow policy. */
 export function relayout(
   fns: LayoutFunctions,
   setup: ParagraphSetup,
   state: ParagraphState,
 ): ParagraphRelayout {
-  const edit = paragraphEdit(setup.input.text, state);
+  const edit = paragraphEdit(setup.input.text, state, originalStylesOf(setup.input));
   const used = edit ?? NO_EDIT;
   const natural = fns.layoutParagraph(setup.input, used);
   const decision =
@@ -315,7 +388,12 @@ export function relayout(
       ? ({ kind: 'commit', layout: natural } as const)
       : fns.decideOverflow(
           natural,
-          { input: setup.input, edit: used, paragraphGap: setup.paragraphGap },
+          {
+            input: setup.input,
+            edit: used,
+            paragraphGap: setup.paragraphGap,
+            ...(setup.pageRoom === undefined ? {} : { pageRoom: setup.pageRoom }),
+          },
           setup.gapBelow,
         );
   return { edit, layout: decision.layout, decision };

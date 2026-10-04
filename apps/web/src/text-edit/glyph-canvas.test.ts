@@ -84,6 +84,7 @@ function recorder() {
     restore: record('restore'),
     clip: record('clip'),
     rect: record('rect'),
+    drawImage: record('drawImage'),
     fillStyle: '',
     strokeStyle: '',
     lineWidth: 1,
@@ -327,6 +328,45 @@ describe('scene over the settled preview', () => {
     expect(calls.filter((c) => c.name === 'fill')).toHaveLength(1);
     expect(names.indexOf('restore')).toBeGreaterThan(names.indexOf('fill'));
     expect(names[names.length - 1]).toBe('stroke');
+  });
+
+  it('paints the page under the paragraph inside the plates, over the plate colour', () => {
+    const setup = paragraph(['The quick brown fox', 'jumps over the lazy'], {
+      width: 20 * ADVANCE,
+    });
+    const state = insertText(initialState(setup.input, 30), 'x');
+    const result = relayout(fns, setup, state);
+    const lines = caretLines(setup, state, result.layout);
+    const scene = buildScene({
+      setup,
+      state,
+      relayout: result,
+      lines,
+      styles: { s0: STYLE },
+      focused: false,
+    });
+    const { ctx, calls } = recorder();
+    const image = new OffscreenCanvas(4, 4);
+    drawScene(
+      ctx,
+      { width: 100, height: 100 },
+      scene,
+      new GlyphCache(),
+      userFromText({ x: 1, y: 0 }),
+      cssFromUser(FRAME),
+      {
+        colors: { plate: '#fff', selection: 'blue', caret: 'red', overlap: 'pink' },
+        dpr: 1,
+        plateImage: { image, x: 3, y: 4, width: 40, height: 20 },
+      },
+    );
+    const names = calls.map((c) => c.name);
+    const at = names.indexOf('drawImage');
+    expect(calls[at]?.args).toEqual([image, 3, 4, 40, 20]);
+    // Plate colour first, then the image clipped to the plates, before any glyph.
+    expect(names.indexOf('fill')).toBeLessThan(at);
+    expect(names.lastIndexOf('clip', at)).toBeGreaterThan(names.indexOf('fill'));
+    expect(names.indexOf('restore', at)).toBeGreaterThan(at);
   });
 });
 

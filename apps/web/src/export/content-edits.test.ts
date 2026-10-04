@@ -144,8 +144,8 @@ describe('export of text-edited sources', () => {
       prepared.value.textEdits ? { textEdits: prepared.value.textEdits } : {},
     );
     expect(items[0]?.id).toBe('text-edits');
-    expect(items[0]?.text).toMatch(/^Text edits: 3 \(fonts renamed: [1-9]/);
-    expect(items[0]?.details).toEqual(['text-edit-fonts.pdf: 3']);
+    expect(items[0]?.text).toBe('3 lines of text edited');
+    expect(items[0]?.details?.[0]).toMatch(/^Tidied up after editing: renamed fonts [1-9]/);
     expect(items[1]).toEqual({
       id: 'text-edit-fonts-0',
       tone: 'changed',

@@ -3,31 +3,45 @@
  * detected paragraph edited in place, laid out on the main thread at every keystroke and
  * drawn from the PDF font's own glyph outlines, so it looks like the page while you type.
  *
- * - **Canvas** (`glyph-canvas.ts`): at device pixel ratio over the paragraph, the rewritten
- *   and moved lines from glyph paths on their real baselines, over a page-white plate (the
- *   engine renders no "page without this paragraph" cheaply: decision §13 #8's fallback);
- *   lines before the edit are the page itself. Caret, selection, composition underline and
- *   the overlap warning are drawn there too.
+ * - **Canvas** (`glyph-canvas.ts`): on the device pixel grid over the paragraph, the
+ *   rewritten and moved lines from glyph paths on their real baselines, over a plate: page
+ *   white with the page under the paragraph painted in (one dry run at open that empties the
+ *   paragraph, rendered), so coloured boxes and what lies below do not flash white; lines
+ *   before the edit are the page itself. Caret, selection, composition underline and the
+ *   overlap warning are drawn there too.
  * - **Mirror**: a hidden `contenteditable` (`role="textbox"`, multi-line, "Paragraph on
  *   page N") holds the paragraph's text and the focus. It takes keys, IME composition,
  *   clipboard and assistive technology; `beforeinput` becomes model operations
  *   (`paragraph-model.ts`), so the DOM never edits itself outside a composition.
  * - **Per keystroke**: `layoutParagraph` and `decideOverflow` (pure, from the engine chunk)
  *   on the advances asked for once at open (`analyzeParagraphLayout`), then a redraw. No
- *   worker round trip.
+ *   worker round trip. The draft is one replacement with a style per character: separate
+ *   changes never restyle the text between them.
  * - **After a 300 ms pause**: one dry run, rendered (`renderParagraphPreview`, which runs
  *   the dry run and returns its result with the bitmap), replaces the drawn glyphs with
- *   exactly what will be saved; typing again returns to the canvas.
- * - **Leaving** (Esc, a press outside, the focus leaving, the tool or document changing)
- *   commits a change as one history entry (decision §13 #9); with no change nothing happens.
- * - **Header**: the honesty line (spec §4.5), the overflow line (§4.6), "Join with next" and
- *   "Split here" (Alt+J, Alt+S: shown but unavailable, detection takes no hints yet), and an
- *   info popover with the §4.10 text. No font, size or colour controls.
+ *   exactly what will be saved, on the device pixels it was rendered for; typing again
+ *   returns to the canvas.
+ * - **Leaving** (Esc, a press outside, the focus leaving) commits a change as one history
+ *   entry (decision §13 #9); with no change nothing happens. Text that would leave the page
+ *   is never written: the editor keeps it and asks to shorten it. Text that runs into the
+ *   content below is never written silently: the header offers "Tighten to fit" (the whole
+ *   paragraph, when that fits), "Let it overlap" and "Keep editing" (the default).
+ * - **Unmounting** (the page scrolled away, the Read lock, another paragraph opened) never
+ *   loses text silently: an undecided overlap is kept for the session's return (or
+ *   discarded with an announcement when the session is gone); any other draft is committed,
+ *   and a failure keeps the text and says so.
+ * - **Header**: in the page margin beside the paragraph, else docked above the floating
+ *   bar, never over the text above: the honesty line (spec §4.5), the overflow line (§4.6)
+ *   and an info popover with the §4.10 text. No font, size or colour controls; "Join with
+ *   next" and "Split here" stay hidden until detection takes hints.
  */
 import { Popover } from '@base-ui/react/popover';
 import type {
+  LayoutEdit,
+  LayoutEditSpan,
   ParagraphBlock,
   ParagraphEditRefusal,
+  ParagraphLayout,
   ParagraphLayoutAnalysis,
   ParagraphRef,
   ParagraphStyleInfo,
@@ -55,7 +69,6 @@ import { announce } from '../shell/announcer';
 import { type PageOverlayProps, registerPageOverlay } from '../stage/page-overlays';
 import { useCanEdit } from '../state/ui-store';
 import popoverStyles from '../ui/Popover.module.css';
-import { Tooltip } from '../ui/Tooltip';
 import type { PageFrame } from '../viewer/geometry';
 import { pageFrame } from '../viewer/page-frame';
 import { useToolStore } from '../viewer/tool-store';
@@ -90,6 +103,7 @@ import {
   offsetAtPoint,
   offsetNearPoint,
   type ParagraphSetup,
+  originalStylesOf,
   type ParagraphState,
   paragraphEdit,
   paragraphOfRun,
@@ -115,6 +129,45 @@ import {
 export const PREVIEW_DELAY_MS = 300;
 /** Gap between the paragraph and the header, CSS pixels. */
 const HEADER_GAP = 8;
+/** The header goes in a page margin at least this wide (CSS pixels), at most this wide. */
+const MARGIN_HEADER_WIDTH = 180;
+const MAX_HEADER_WIDTH = 340;
+
+/** Where the header sits (layer CSS pixels): beside the paragraph, docked above the bar, or below. */
+interface HeaderPlace {
+  readonly side: 'right' | 'left' | 'dock' | 'below';
+  readonly left: number;
+  readonly top: number;
+  readonly maxWidth?: number;
+}
+
+/** The paragraph's area rendered without its text (the plate) at a device scale. */
+interface PlateImage {
+  readonly bitmap: ImageBitmap;
+  readonly clip: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
+  readonly scale: number;
+}
+
+/** What a draft sends to the engine: its text, replaced range and style spans. */
+function draftPayload(draft: { readonly text: string; readonly edit: LayoutEdit }): {
+  text: string;
+  caretSpan: { start: number; end: number };
+  style?: string;
+  spans?: readonly LayoutEditSpan[];
+} {
+  const { edit } = draft;
+  return {
+    text: draft.text,
+    caretSpan: { start: edit.start, end: edit.end },
+    ...(edit.style === undefined ? {} : { style: edit.style }),
+    ...(edit.spans === undefined ? {} : { spans: edit.spans }),
+  };
+}
 /** Room kept around the drawn area on the canvas, CSS pixels. */
 const CANVAS_PAD = 4;
 /** Characters whose outlines are asked for at open besides the paragraph's own. */
@@ -218,9 +271,34 @@ export function ParagraphEditLayer(props: PageOverlayProps) {
   if (!session || !editable || sourceId === undefined) return null;
   return (
     <div className={styles.layer} data-paragraph-layer={props.pageIndex}>
-      <ParagraphEditor session={session} frame={pageFrame(props)} revision={revision} />
+      {/* One editor per session: a commit in flight never closes the next paragraph's editor. */}
+      <ParagraphEditor
+        key={sessionKey(session)}
+        session={session}
+        frame={pageFrame(props)}
+        revision={revision}
+      />
     </div>
   );
+}
+
+const sessionKeys = new WeakMap<ParagraphSession, number>();
+let nextSessionKey = 0;
+
+/** A key per paragraph session (sessions are compared by identity). */
+function sessionKey(session: ParagraphSession): number {
+  let key = sessionKeys.get(session);
+  if (key === undefined) {
+    nextSessionKey += 1;
+    key = nextSessionKey;
+    sessionKeys.set(session, key);
+  }
+  return key;
+}
+
+/** The open session is still `session` (not closed, not replaced by another paragraph). */
+function isCurrent(session: ParagraphSession): boolean {
+  return useTextEditStore.getState().paragraph === session;
 }
 
 registerPageOverlay(Object.assign(ParagraphEditLayer, { displayName: 'ParagraphEditLayer' }));
@@ -257,6 +335,8 @@ export function paragraphRefusalLabel(reason: ParagraphEditRefusal): string {
       return m.text_edit_reason_unreadable_encoding();
     case 'unsupported-chars':
       return m.text_edit_error_unsupported_chars();
+    case 'off-page':
+      return m.paragraph_off_page();
     default:
       return blockerLabel(reason);
   }
@@ -303,18 +383,31 @@ export function honestyLines(
 
 /**
  * Where the preview bitmap goes: the engine renders it as the page is oriented by its own
- * /Rotate, so only the app's view rotation on top of that is turned here.
+ * /Rotate, so only the app's view rotation on top of that is turned here. Given the bitmap
+ * and the device pixel ratio it was rendered for, it is placed on the device pixels the
+ * engine rendered (the clip's outward-rounded pixels), one bitmap pixel per device pixel, so
+ * nothing is resampled or shifted against the page.
  */
 export function previewPlacement(
   frame: PageFrame,
   clip: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+  bitmap?: { readonly width: number; readonly height: number },
+  dpr = 1,
 ): { left: number; top: number; width: number; height: number; transform?: string } {
   const box = rectToCss(frame, clip);
   const view = (((frame.rotation - (frame.intrinsicRotation ?? 0)) % 360) + 360) % 360;
-  if (view === 0) return box;
+  if (view === 0) {
+    if (!bitmap) return box;
+    return {
+      left: snapDown(box.left, dpr),
+      top: snapDown(box.top, dpr),
+      width: bitmap.width / dpr,
+      height: bitmap.height / dpr,
+    };
+  }
   const quarter = view === 90 || view === 270;
-  const width = quarter ? box.height : box.width;
-  const height = quarter ? box.width : box.height;
+  const width = bitmap ? bitmap.width / dpr : quarter ? box.height : box.width;
+  const height = bitmap ? bitmap.height / dpr : quarter ? box.width : box.height;
   return {
     left: box.left + (box.width - width) / 2,
     top: box.top + (box.height - height) / 2,
@@ -322,6 +415,16 @@ export function previewPlacement(
     height,
     transform: `rotate(${view}deg)`,
   };
+}
+
+/** A CSS length moved down onto the device pixel grid (as the engine floors the clip). */
+function snapDown(css: number, dpr: number): number {
+  return Math.floor(css * dpr + 1e-6) / dpr;
+}
+
+/** A CSS length moved up onto the device pixel grid. */
+function snapUp(css: number, dpr: number): number {
+  return Math.ceil(css * dpr - 1e-6) / dpr;
 }
 
 function readVar(element: Element | null, name: string, fallback: string): string {
@@ -350,10 +453,24 @@ export function ParagraphEditor({
   const [composition, setComposition] = useState<TextRange | null>(null);
   const [focused, setFocused] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  /** A draft kept from this session's earlier editor (its page scrolled away), once. */
+  const [kept] = useState(() => {
+    const k = useTextEditStore.getState().paragraphKept;
+    return k?.session === session ? k : null;
+  });
+  // The failure that kept the draft shows again with it.
+  const [error, setError] = useState<string | null>(() => kept?.error ?? null);
   const [glyphVersion, setGlyphVersion] = useState(0);
-  const [side, setSide] = useState<'above' | 'below'>('above');
+  const [place, setPlace] = useState<HeaderPlace>({ side: 'below', left: 0, top: 0 });
+  /**
+   * Leaving with an overlap: the choice the header offers (spec craft §4.6), for the draft it
+   * was asked about (a changed text asks again).
+   */
+  const [choiceFor, setChoiceFor] = useState<object | null>(null);
+  /** The paragraph area rendered without the paragraph: the plate under rewritten lines. */
+  const [plate, setPlate] = useState<PlateImage | null>(null);
   const preview = useTextEditStore((s) => s.paragraphPreview);
+  const keepEditingRef = useRef<HTMLButtonElement>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const mirrorRef = useRef<HTMLDivElement>(null);
@@ -370,6 +487,7 @@ export function ParagraphEditor({
   const returnFocusRef = useRef<Element | null>(null);
   const describedBy = useId();
   const honestyRef = useRef<ParagraphCommit['honesty']>(undefined);
+  const pageRef = useRef(target.position);
 
   const cache: GlyphCache = useMemo(
     () => glyphCacheFor(block.ref.source, block.ref.pageIndex, session.revision),
@@ -408,6 +526,7 @@ export function ParagraphEditor({
           input: analysis.input,
           paragraphGap: analysis.paragraphGap,
           gapBelow: analysis.gapBelow,
+          pageRoom: analysis.pageRoom,
         };
         setLoaded({ session, value: { session, setup, analysis, fns } });
       },
@@ -421,9 +540,11 @@ export function ParagraphEditor({
     };
   }, [session]);
 
-  // The model starts from the paragraph's text with the caret at the click.
+  // The model starts from the paragraph's text with the caret at the click (or from the draft
+  // kept when this session's editor last unmounted).
   const initial = useMemo(() => {
     if (!value) return null;
+    if (kept) return kept.state;
     const start = initialState(value.setup.input, value.session.caret);
     const { point } = value.session;
     if (!point) return start;
@@ -431,7 +552,48 @@ export function ParagraphEditor({
     const lines = caretLines(value.setup, start, fresh.layout);
     const local = invert(userFromText(value.setup.block.direction));
     return moveTo(start, offsetAtPoint(lines, apply(local, point)), false);
-  }, [value]);
+  }, [value, kept]);
+
+  // A kept draft is back in this editor: say so, with the failure that kept it, if any.
+  useEffect(() => {
+    if (!value || !kept) return;
+    useTextEditStore.getState().keepParagraph(null);
+    announce(
+      kept.error
+        ? `${m.paragraph_returned({ page: target.position })} ${kept.error}`
+        : m.paragraph_returned({ page: target.position }),
+    );
+  }, [value, kept, target.position]);
+
+  // The plate: the paragraph's area rendered by a dry run that empties the paragraph, once
+  // per open (the page under the text: coloured boxes, rules, what lies below).
+  useEffect(() => {
+    if (!value) return;
+    const controller = new AbortController();
+    const dpr = window.devicePixelRatio || 1;
+    getEngineService()
+      .renderParagraphPreview(
+        block.ref.source,
+        block.ref.pageIndex,
+        { ref: block.ref, text: '', caretSpan: { start: 0, end: block.text.length } },
+        frame.scale * dpr,
+        { signal: controller.signal },
+      )
+      .then(
+        (rendered) => {
+          if (controller.signal.aborted) {
+            rendered.bitmap.close();
+            return;
+          }
+          setPlate({ bitmap: rendered.bitmap, clip: rendered.clip, scale: frame.scale * dpr });
+        },
+        () => {
+          // No plate (a refusal or a cancelled run): rewritten lines sit on page white.
+        },
+      );
+    return () => controller.abort();
+  }, [value, block.ref, block.text.length, frame.scale]);
+  useEffect(() => () => plate?.bitmap.close(), [plate]);
   const state = edited !== null && edited.key === value ? edited.state : initial;
 
   // Glyph outlines of every character shown, per font, asked for once (cached per page).
@@ -476,31 +638,33 @@ export function ParagraphEditor({
   // The draft follows the text only (caret moves keep it, and its preview).
   const stateText = state?.text;
   const stateStyles = state?.styles;
+  const stateOrigins = state?.origins;
   const draft = useMemo(() => {
     if (!value || stateText === undefined || !stateStyles) return null;
-    const edit = paragraphEdit(value.setup.input.text, {
-      text: stateText,
-      styles: stateStyles,
-      anchor: 0,
-      focus: 0,
-    });
+    const edit = paragraphEdit(
+      value.setup.input.text,
+      {
+        text: stateText,
+        styles: stateStyles,
+        ...(stateOrigins ? { origins: stateOrigins } : {}),
+        anchor: 0,
+        focus: 0,
+      },
+      originalStylesOf(value.setup.input),
+    );
     return edit ? { text: stateText, edit } : null;
-  }, [value, stateText, stateStyles]);
+  }, [value, stateText, stateStyles, stateOrigins]);
   const draftRef = useRef(draft);
   const layoutRef = useRef(laid);
 
   // Publish the draft (what leaving commits) and drop a preview of older text.
   useEffect(() => {
-    useTextEditStore.getState().setParagraphDraft(
-      draft
-        ? {
-            text: draft.text,
-            caretSpan: { start: draft.edit.start, end: draft.edit.end },
-            ...(draft.edit.style === undefined ? {} : { style: draft.edit.style }),
-          }
-        : null,
-    );
+    useTextEditStore.getState().setParagraphDraft(draft ? draftPayload(draft) : null);
   }, [draft]);
+  const choice = choiceFor !== null && choiceFor === draft;
+  const setChoice = useCallback((on: boolean) => {
+    setChoiceFor(on ? draftRef.current : null);
+  }, []);
 
   const showPreview =
     preview !== null && draft !== null && preview.text === draft.text && composition === null;
@@ -517,9 +681,7 @@ export function ParagraphEditor({
           block.ref.pageIndex,
           {
             ref: block.ref,
-            text: draft.text,
-            caretSpan: { start: draft.edit.start, end: draft.edit.end },
-            ...(draft.edit.style === undefined ? {} : { style: draft.edit.style }),
+            ...draftPayload(draft),
             ...(layoutRef.current ? { layout: layoutRef.current.result.layout } : {}),
           },
           frame.scale * dpr,
@@ -585,16 +747,34 @@ export function ParagraphEditor({
       apply(cssOfText, { x: bounds.x1, y: bounds.y1 }),
       apply(cssOfText, { x: bounds.x0, y: bounds.y1 }),
     ];
-    const left = Math.floor(Math.min(...corners.map((c) => c.x)) - CANVAS_PAD);
-    const top = Math.floor(Math.min(...corners.map((c) => c.y)) - CANVAS_PAD);
-    const right = Math.ceil(Math.max(...corners.map((c) => c.x)) + CANVAS_PAD);
-    const bottom = Math.ceil(Math.max(...corners.map((c) => c.y)) + CANVAS_PAD);
+    // On the device pixel grid: one canvas pixel per device pixel, aligned with the page's.
+    const dpr = window.devicePixelRatio || 1;
+    const left = snapDown(Math.min(...corners.map((c) => c.x)) - CANVAS_PAD, dpr);
+    const top = snapDown(Math.min(...corners.map((c) => c.y)) - CANVAS_PAD, dpr);
+    const right = snapUp(Math.max(...corners.map((c) => c.x)) + CANVAS_PAD, dpr);
+    const bottom = snapUp(Math.max(...corners.map((c) => c.y)) + CANVAS_PAD, dpr);
     return { left, top, width: right - left, height: bottom - top };
   }, [scene, extent, cssOfText]);
   const paragraphBox = rectToCss(frame, block.box);
   /** On-screen angle of the writing direction (clockwise degrees): the canvas turns with it. */
   const screenAngle =
     ((Math.round((Math.atan2(cssOfText[1], cssOfText[0]) * 180) / Math.PI) % 360) + 360) % 360;
+
+  // The plate image in canvas pixels: rendered at this zoom for this device, in the page's
+  // own orientation (a view rotation on top draws the plate colour only).
+  const plateImage = useMemo(() => {
+    const dpr = window.devicePixelRatio || 1;
+    if (!plate || Math.abs(plate.scale - frame.scale * dpr) > 1e-6) return undefined;
+    if ((frame.rotation - (frame.intrinsicRotation ?? 0)) % 360 !== 0) return undefined;
+    const at = previewPlacement(frame, plate.clip, plate.bitmap, dpr);
+    return {
+      image: plate.bitmap,
+      x: Math.round((at.left - box.left) * dpr),
+      y: Math.round((at.top - box.top) * dpr),
+      width: plate.bitmap.width,
+      height: plate.bitmap.height,
+    };
+  }, [plate, frame, box]);
 
   // Draw (each keystroke, caret move, focus change, glyph arrival).
   useLayoutEffect(() => {
@@ -621,12 +801,16 @@ export function ParagraphEditor({
       },
       dpr,
       ...(showPreview && preview ? { preview: preview.clip } : {}),
+      ...(plateImage ? { plateImage } : {}),
     });
     // `glyphVersion`: outlines arrived, draw them.
-  }, [scene, box, frame, cache, textToUser, showPreview, preview, glyphVersion]);
+  }, [scene, box, frame, cache, textToUser, showPreview, preview, glyphVersion, plateImage]);
 
   // The settled preview: the dry run's bitmap at its clip.
-  const previewBox = showPreview && preview ? previewPlacement(frame, preview.clip) : null;
+  const previewBox =
+    showPreview && preview
+      ? previewPlacement(frame, preview.clip, preview.bitmap, window.devicePixelRatio || 1)
+      : null;
   useLayoutEffect(() => {
     const canvas = previewRef.current;
     if (!canvas || !showPreview || !preview) return;
@@ -772,9 +956,11 @@ export function ParagraphEditor({
 
   /**
    * Closes after leaving: opened from a run, the focus goes back to it (or, after a commit, to
-   * the run on its line once the page is located again); otherwise where it was before.
+   * the run on its line once the page is located again); otherwise where it was before. A
+   * session that is no longer the open one (another paragraph opened meanwhile) is left alone.
    */
   const finishWith = (committed: boolean) => {
+    if (!isCurrent(session)) return;
     if (session.fallback) {
       useTextEditStore.getState().finishParagraph(committed);
       return;
@@ -785,43 +971,112 @@ export function ParagraphEditor({
   const finishRef = useRef(finishWith);
 
   /** The commit of a draft: what the user saw (layout) and was told (honesty). */
-  const commitOf = (pending: NonNullable<typeof draft>, shown: typeof laid): ParagraphCommit => ({
+  const commitOf = (
+    pending: NonNullable<typeof draft>,
+    layout?: ParagraphLayout,
+  ): ParagraphCommit => ({
     target,
     block,
-    text: pending.text,
-    caretSpan: { start: pending.edit.start, end: pending.edit.end },
-    ...(pending.edit.style === undefined ? {} : { style: pending.edit.style }),
-    ...(shown ? { layout: shown.result.layout } : {}),
+    ...draftPayload(pending),
+    ...(layout ? { layout } : {}),
     ...(honestyRef.current ? { honesty: honestyRef.current } : {}),
   });
   const commitRef = useRef(commitOf);
 
-  const leave = useCallback(async () => {
-    if (finishedRef.current || busy) return;
-    const pending = draftRef.current;
-    const lastLayout = layoutRef.current;
-    if (!pending) {
+  /**
+   * Leaving commits the draft. A paragraph that would leave the page is never written (the
+   * editor keeps the text and says why); one that runs into the content below asks first:
+   * tighten the whole paragraph when that fits, let it overlap, or keep editing.
+   */
+  const leave = useCallback(
+    async (resolution?: 'tighten' | 'overlap') => {
+      if (finishedRef.current || busy) return;
+      const pending = draftRef.current;
+      const shown = layoutRef.current;
+      if (!pending) {
+        finishedRef.current = true;
+        finishRef.current(false);
+        return;
+      }
+      const decision = shown?.result.decision;
+      if (decision?.kind === 'overflow') {
+        if (decision.offPage) {
+          setChoice(false);
+          setError(m.paragraph_off_page());
+          announce(m.paragraph_off_page(), { politeness: 'assertive' });
+          mirrorRef.current?.focus({ preventScroll: true });
+          return;
+        }
+        if (resolution === undefined || (resolution === 'tighten' && !decision.fit)) {
+          setChoice(true);
+          announce(
+            decision.fit ? m.paragraph_overlap_choice() : m.paragraph_overlap_choice_no_fit(),
+            {
+              politeness: 'assertive',
+            },
+          );
+          return;
+        }
+      }
+      const fit =
+        resolution === 'tighten' && decision?.kind === 'overflow' ? decision.fit : undefined;
+      if (fit) announce(m.paragraph_tightened({ percent: formatPercent(fit.percent / 100) }));
+      setChoice(false);
+      setBusy(true);
+      setError(null);
+      // Committing: unmounting meanwhile (another editor opening) must not commit again.
       finishedRef.current = true;
-      finishRef.current(false);
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    // Committing: unmounting meanwhile (another editor opening) must not commit again.
-    finishedRef.current = true;
-    const outcome = await commitParagraphEdit(commitRef.current(pending, lastLayout));
-    if (outcome.ok) {
-      finishRef.current(true);
-      return;
-    }
-    finishedRef.current = false;
-    setBusy(false);
-    setError(outcome.message);
-    mirrorRef.current?.focus({ preventScroll: true });
-  }, [busy]);
+      const outcome = await commitParagraphEdit(
+        commitRef.current(pending, fit?.layout ?? shown?.result.layout),
+      );
+      if (outcome.ok) {
+        finishRef.current(true);
+        return;
+      }
+      if (!mountedRef.current) {
+        // The editor is gone (its page scrolled away, another paragraph opened): say so, and
+        // keep the text for its return when the session is still open.
+        const typed = stateRef.current;
+        if (typed && isCurrent(session)) {
+          useTextEditStore
+            .getState()
+            .keepParagraph({ session, state: typed, error: outcome.message });
+        }
+        announce(m.paragraph_commit_failed({ page: target.position, reason: outcome.message }), {
+          politeness: 'assertive',
+        });
+        return;
+      }
+      finishedRef.current = false;
+      setBusy(false);
+      setError(outcome.message);
+      mirrorRef.current?.focus({ preventScroll: true });
+    },
+    [busy, session, setChoice, target.position],
+  );
   const leaveRef = useRef(leave);
 
-  // Leaving by any other way (tool or document change, the page unmounting) still commits.
+  const keepEditing = () => {
+    setChoice(false);
+    mirrorRef.current?.focus({ preventScroll: true });
+  };
+  /** Esc on a button of the choice keeps editing (page shortcuts never see it). */
+  const onChoiceKey = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    keepEditing();
+  };
+
+  // The choice opens on "Keep editing", the safe default.
+  useEffect(() => {
+    if (choice) keepEditingRef.current?.focus({ preventScroll: true });
+  }, [choice]);
+
+  // Leaving by any other way (the page scrolling away, the Read lock, another paragraph):
+  // never a silent loss. A draft that runs over or off the page is not written: it is kept
+  // for this session's return (or, the session gone, discarded with an announcement). Any
+  // other draft is committed; a failure keeps it and says so.
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -833,9 +1088,41 @@ export function ParagraphEditor({
       const pending = draftRef.current;
       if (finishedRef.current || !pending) return;
       finishedRef.current = true;
-      void commitParagraphEdit(commitRef.current(pending, layoutRef.current));
+      const typed = stateRef.current;
+      const decision = layoutRef.current?.result.decision;
+      const page = pageRef.current;
+      const store = useTextEditStore.getState();
+      if (decision?.kind === 'overflow') {
+        if (typed && isCurrent(session)) {
+          store.keepParagraph({
+            session,
+            state: typed,
+            ...(decision.offPage ? { error: m.paragraph_off_page() } : {}),
+          });
+          announce(m.paragraph_kept({ page }));
+        } else {
+          announce(m.paragraph_kept_discarded({ page }));
+        }
+        return;
+      }
+      void commitParagraphEdit(commitRef.current(pending, layoutRef.current?.result.layout)).then(
+        (outcome) => {
+          if (outcome.ok) {
+            if (isCurrent(session)) useTextEditStore.getState().closeParagraph();
+            return;
+          }
+          if (typed && isCurrent(session)) {
+            useTextEditStore
+              .getState()
+              .keepParagraph({ session, state: typed, error: outcome.message });
+          }
+          announce(m.paragraph_commit_failed({ page, reason: outcome.message }), {
+            politeness: 'assertive',
+          });
+        },
+      );
     },
-    [],
+    [session],
   );
 
   // A press outside the editor leaves it.
@@ -858,8 +1145,6 @@ export function ParagraphEditor({
 
   // ---- Keys ---------------------------------------------------------------------------
 
-  const unavailable = () => announce(m.paragraph_hint_unavailable());
-
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     // Page shortcuts never fire while typing.
     event.stopPropagation();
@@ -874,15 +1159,12 @@ export function ParagraphEditor({
     };
     if (event.key === 'Escape') {
       handled();
-      void leave();
+      // Esc on the overlap choice keeps editing; otherwise it leaves.
+      if (choice) keepEditing();
+      else void leave();
       return;
     }
     if (!model || !lines) return;
-    if (event.altKey && !mod && (event.code === 'KeyJ' || event.code === 'KeyS')) {
-      handled();
-      unavailable();
-      return;
-    }
     switch (event.key) {
       case 'ArrowLeft':
       case 'ArrowRight': {
@@ -975,23 +1257,96 @@ export function ParagraphEditor({
 
   const headerKey = `${frame.scale}:${value === null}:${busy}:${error ?? ''}:${state?.text ?? ''}`;
 
-  // Above the paragraph unless the free rectangle (the viewport minus its scroll padding:
-  // the title bar and stage header sit over it) has no room; then below.
+  // The header never covers the text: in the page margin beside the paragraph when there is
+  // room, else docked above the floating bar, else below the paragraph.
+  const [scrolled, setScrolled] = useState(0);
   useLayoutEffect(() => {
     const header = headerRef.current;
     const root = rootRef.current;
     if (!header || !root) return;
-    const viewport = root.closest<HTMLElement>('[data-read-viewport]');
-    const view = viewport?.getBoundingClientRect();
-    const padding = viewport
-      ? Number.parseFloat(getComputedStyle(viewport).scrollPaddingTop) || 0
-      : 0;
-    const layer = root.getBoundingClientRect();
-    const room = layer.top + paragraphBox.top - ((view?.top ?? 0) + padding);
-    const next = room >= header.offsetHeight + 2 * HEADER_GAP ? 'above' : 'below';
-    if (next !== side) setSide(next);
-    // The header's height follows its lines; the geometry the zoom and the scroll.
-  }, [side, paragraphBox.top, headerKey]);
+    const page = rectToCss(frame, {
+      x: frame.originX,
+      y: frame.originY,
+      width: frame.size.width,
+      height: frame.size.height,
+    });
+    const textLeft = Math.min(paragraphBox.left, box.left);
+    const textRight = Math.max(paragraphBox.left + paragraphBox.width, box.left + box.width);
+    const textTop = Math.min(paragraphBox.top, box.top);
+    const textBottom = Math.max(paragraphBox.top + paragraphBox.height, box.top + box.height);
+    const right = page.left + page.width - textRight - 2 * HEADER_GAP;
+    const left = textLeft - page.left - 2 * HEADER_GAP;
+    let next: HeaderPlace;
+    if (right >= MARGIN_HEADER_WIDTH) {
+      next = {
+        side: 'right',
+        left: textRight + HEADER_GAP,
+        top: textTop,
+        maxWidth: Math.min(MAX_HEADER_WIDTH, right),
+      };
+    } else if (left >= MARGIN_HEADER_WIDTH) {
+      next = {
+        side: 'left',
+        left: textLeft - HEADER_GAP,
+        top: textTop,
+        maxWidth: Math.min(MAX_HEADER_WIDTH, left),
+      };
+    } else {
+      const layer = root.getBoundingClientRect();
+      const bar = document.querySelector<HTMLElement>('[data-bar-view]')?.getBoundingClientRect();
+      const height = header.offsetHeight;
+      const width = header.offsetWidth;
+      const docked = bar
+        ? {
+            left: bar.left + bar.width / 2 - width / 2 - layer.left,
+            top: bar.top - HEADER_GAP - height - layer.top,
+          }
+        : undefined;
+      const overText =
+        docked !== undefined &&
+        docked.top < textBottom + HEADER_GAP &&
+        docked.top + height > textTop - HEADER_GAP &&
+        docked.left < textRight &&
+        docked.left + width > textLeft;
+      next =
+        docked && !overText
+          ? { side: 'dock', left: docked.left, top: docked.top }
+          : { side: 'below', left: Math.max(0, textLeft), top: textBottom + HEADER_GAP };
+    }
+    setPlace((prev) =>
+      prev.side === next.side &&
+      prev.left === next.left &&
+      prev.top === next.top &&
+      prev.maxWidth === next.maxWidth
+        ? prev
+        : next,
+    );
+    // The header's size follows its lines; its place the zoom, the text and (docked) the scroll.
+  }, [
+    frame,
+    paragraphBox.left,
+    paragraphBox.top,
+    paragraphBox.width,
+    paragraphBox.height,
+    box,
+    headerKey,
+    scrolled,
+    choice,
+  ]);
+
+  // Docked above the bar, the header follows the scroll.
+  useEffect(() => {
+    if (place.side !== 'dock') return;
+    const viewport = rootRef.current?.closest<HTMLElement>('[data-read-viewport]');
+    if (!viewport) return;
+    const onScroll = () => setScrolled((n) => n + 1);
+    viewport.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      viewport.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [place.side]);
 
   const substitutions = useMemo(() => {
     if (preview && draft !== null && preview.text === draft.text) {
@@ -1028,12 +1383,15 @@ export function ParagraphEditor({
   const honesty = honestyLines(substitutions);
   const decision = laid?.result.decision;
   const unsupported = laid?.result.layout.unsupported ?? [];
+  const offPage = decision?.kind === 'overflow' && decision.offPage;
   const overflowLine =
     decision?.kind === 'tighten'
       ? m.paragraph_tightened({ percent: formatPercent(decision.percent / 100) })
-      : decision?.kind === 'overflow'
-        ? m.paragraph_overflow()
-        : null;
+      : offPage
+        ? m.paragraph_off_page()
+        : decision?.kind === 'overflow'
+          ? m.paragraph_overflow()
+          : null;
   const ragged = laid?.result.layout.ragged === true;
   const loadError = current && 'error' in current ? current.error : null;
   const shownError =
@@ -1062,12 +1420,8 @@ export function ParagraphEditor({
     commitRef.current = commitOf;
     finishRef.current = finishWith;
     honestyRef.current = honestyFacts;
+    pageRef.current = target.position;
   });
-
-  const headerTop =
-    side === 'above'
-      ? Math.min(paragraphBox.top, box.top) - HEADER_GAP
-      : Math.max(paragraphBox.top + paragraphBox.height, box.top + box.height) + HEADER_GAP;
 
   return (
     <div
@@ -1140,9 +1494,13 @@ export function ParagraphEditor({
         className={styles.header}
         role="group"
         aria-label={m.paragraph_panel_label()}
-        data-side={side}
+        data-side={place.side}
         data-testid="paragraph-header"
-        style={{ left: Math.max(0, Math.min(paragraphBox.left, box.left)), top: headerTop }}
+        style={{
+          left: place.left,
+          top: place.top,
+          ...(place.maxWidth === undefined ? {} : { maxWidth: place.maxWidth }),
+        }}
       >
         <div className={styles.lines}>
           {honesty.map((line) => (
@@ -1173,31 +1531,52 @@ export function ParagraphEditor({
                 : m.paragraph_hint()}
           </p>
         </div>
+        {choice && decision?.kind === 'overflow' && !decision.offPage ? (
+          <div
+            className={styles.choice}
+            role="group"
+            aria-label={m.paragraph_overflow()}
+            data-testid="paragraph-choice"
+          >
+            <p className={styles.choiceText}>
+              {decision.fit ? m.paragraph_overlap_choice() : m.paragraph_overlap_choice_no_fit()}
+            </p>
+            <div className={styles.choiceActions}>
+              {decision.fit ? (
+                <button
+                  type="button"
+                  className={styles.action}
+                  data-testid="paragraph-tighten"
+                  onKeyDown={onChoiceKey}
+                  onClick={() => void leave('tighten')}
+                >
+                  {m.paragraph_tighten_fit()}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={styles.action}
+                data-testid="paragraph-overlap"
+                onKeyDown={onChoiceKey}
+                onClick={() => void leave('overlap')}
+              >
+                {m.paragraph_let_overlap()}
+              </button>
+              <button
+                ref={keepEditingRef}
+                type="button"
+                className={styles.action}
+                data-default=""
+                data-testid="paragraph-keep-editing"
+                onKeyDown={onChoiceKey}
+                onClick={keepEditing}
+              >
+                {m.paragraph_keep_editing()}
+              </button>
+            </div>
+          </div>
+        ) : null}
         <div className={styles.actions}>
-          <Tooltip label={m.paragraph_hint_unavailable()} side="top">
-            <button
-              type="button"
-              className={styles.action}
-              aria-disabled="true"
-              aria-keyshortcuts="Alt+J"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={unavailable}
-            >
-              {m.paragraph_join()}
-            </button>
-          </Tooltip>
-          <Tooltip label={m.paragraph_hint_unavailable()} side="top">
-            <button
-              type="button"
-              className={styles.action}
-              aria-disabled="true"
-              aria-keyshortcuts="Alt+S"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={unavailable}
-            >
-              {m.paragraph_split()}
-            </button>
-          </Tooltip>
           <Popover.Root>
             <Popover.Trigger
               className={styles.info}

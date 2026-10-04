@@ -27,9 +27,9 @@
  * is reopened from its original bytes (`EngineService.reopenSource`) and the edits that
  * remain are replayed in order; redo simply applies the forward edit again. Replay
  * reproduces the same bytes (the applied payload records tier, face and size). The recorded
- * payload also carries the result's `honesty` and `fellBack` (`RecordedTextEditOutcome`),
- * which the editor ignores on replay and the export summary reports per source (spec §2.1,
- * §5.3). A recorded `redaction.apply` carries the captured strings too short to search
+ * payload also carries the result's `honesty` and `fellBack` (`RecordedTextEditOutcome`; a
+ * paragraph edit: `honesty` and `substitutions`, `RecordedParagraphEditOutcome`), which the
+ * editor ignores on replay and the export summary reports per source (spec §2.1, §5.3). A recorded `redaction.apply` carries the captured strings too short to search
  * document-wide (`areaOnlyStrings`, `RedactionCapture.skipped`) for the same summary. OCR
  * runs (`ocr.apply`, spec recognize-and-compare §1.3) are replay-required too: their payload
  * holds the recognised words, so a replay rebuilds the same layer without recognising again.
@@ -45,7 +45,13 @@
  * translated on their way to the engine, so the log and the UI keep the original id.
  */
 import type { EngineEdit, SourceId, Workspace } from '@pdf-editor/document-model';
-import type { Annotation, AppliedEdit, PdfEditor, TextEditResult } from '@pdf-editor/engine';
+import type {
+  Annotation,
+  AppliedEdit,
+  ParagraphEditResult,
+  PdfEditor,
+  TextEditResult,
+} from '@pdf-editor/engine';
 
 import { getEngineService } from '../engine/engine-service';
 import { announce } from '../shell/announcer';
@@ -257,6 +263,15 @@ export interface RecordedTextEditOutcome {
   readonly fellBack: boolean;
 }
 
+/**
+ * What a recorded `text.editParagraph` payload adds: the writer's honesty and the characters
+ * set in a substitute (the export summary discloses them, spec §2.1, §5.3).
+ */
+export interface RecordedParagraphEditOutcome {
+  readonly honesty: ParagraphEditResult['honesty'];
+  readonly substitutions: readonly { readonly char: string; readonly font: string }[];
+}
+
 /** What a recorded `redaction.apply` payload adds: captured strings kept to the areas. */
 export interface RecordedRedactionOutcome {
   /** `RedactionCapture.skipped`: too short to search document-wide, removed in the areas only. */
@@ -274,6 +289,13 @@ function withOutcome(edit: EngineEdit, result: AppliedEdit): EngineEdit {
     const outcome: RecordedTextEditOutcome = {
       honesty: result.textEdit.honesty,
       fellBack: result.textEdit.fellBack,
+    };
+    return { ...edit, payload: { ...payload, ...outcome } };
+  }
+  if (edit.kind === 'text.editParagraph' && result.paragraphEdit) {
+    const outcome: RecordedParagraphEditOutcome = {
+      honesty: result.paragraphEdit.honesty,
+      substitutions: result.paragraphEdit.substitutions.map(({ char, font }) => ({ char, font })),
     };
     return { ...edit, payload: { ...payload, ...outcome } };
   }

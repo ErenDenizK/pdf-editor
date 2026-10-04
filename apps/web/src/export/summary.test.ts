@@ -252,7 +252,12 @@ describe('text edits by font outcome (spec §2.1, §5.3)', () => {
       'text-edit-fonts-0',
       'text-edit-fonts-1',
     ]);
-    expect(items[0]?.details).toEqual(['a.pdf: 6', 'b.pdf: 1']);
+    expect(items[0]).toEqual({
+      id: 'text-edits',
+      tone: 'kept',
+      text: '7 lines of text edited',
+      details: ['Tidied up after editing: renamed fonts 2, removed unused objects 3'],
+    });
     expect(items[1]).toEqual({
       id: 'text-edit-fonts-0',
       tone: 'changed',
@@ -265,6 +270,85 @@ describe('text edits by font outcome (spec §2.1, §5.3)', () => {
       tone: 'kept',
       text: 'b.pdf: 1 in the original font.',
     });
+  });
+});
+
+describe('paragraph edits in the export summary', () => {
+  it('counts a substituted paragraph edit by its recorded outcome', () => {
+    const edit = (payload: Record<string, unknown>): EngineEdit => ({
+      ...recorded({}),
+      kind: 'text.editParagraph',
+      payload: {
+        paragraph: {
+          index: 0,
+          runs: [{ objectPath: [0], charStart: 0, charCount: 3, text: 'abc' }],
+        },
+        text: 'ağc',
+        caretSpan: { start: 1, end: 2 },
+        ...payload,
+      },
+    });
+    expect(
+      textEditFontsOf([
+        edit({ tier: 1 }),
+        edit({
+          tier: 1,
+          honesty: 'font-substituted',
+          substitutions: [{ char: 'ğ', font: 'NotoSans-Regular' }],
+        }),
+        edit({ tier: 2, honesty: 'same-font-not-embedded', substitutions: [] }),
+        edit({ tier: 2 }),
+      ]),
+    ).toEqual({
+      sameFont: 1,
+      sameFontNotEmbedded: 1,
+      substituted: { '': 1, 'NotoSans-Regular': 1 },
+      fellBack: {},
+      movedOutOfForm: 0,
+    });
+  });
+
+  it('says "1 paragraph edited", drops zero counters and empty font lines', () => {
+    const fonts = {
+      sameFont: 0,
+      sameFontNotEmbedded: 0,
+      substituted: {},
+      fellBack: {},
+      movedOutOfForm: 0,
+    };
+    const items = summarizeReport(empty, undefined, undefined, {
+      textEdits: {
+        edits: 1,
+        paragraphs: 1,
+        fontsRenamed: 0,
+        mcidsReassigned: 0,
+        unreachableRemoved: 0,
+        sources: [
+          {
+            name: 'report.pdf',
+            edits: 1,
+            paragraphs: 1,
+            fontsRenamed: 0,
+            mcidsReassigned: 0,
+            unreachableRemoved: 0,
+            fonts,
+          },
+        ],
+      },
+    });
+    expect(items).toEqual([{ id: 'text-edits', tone: 'kept', text: '1 paragraph edited' }]);
+    const both = summarizeReport(empty, undefined, undefined, {
+      textEdits: {
+        edits: 3,
+        paragraphs: 1,
+        fontsRenamed: 0,
+        mcidsReassigned: 1,
+        unreachableRemoved: 0,
+        sources: [],
+      },
+    });
+    expect(both[0]?.text).toBe('1 paragraph and 2 lines of text edited');
+    expect(both[0]?.details).toEqual(['Tidied up after editing: renumbered tags 1']);
   });
 });
 

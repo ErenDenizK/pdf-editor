@@ -19,7 +19,7 @@ import type {
   VirtualDocument,
 } from '@pdf-editor/document-model';
 
-import type { LayoutInput } from './text-edit/linebreak';
+import type { LayoutEditSpan, LayoutInput } from './text-edit/linebreak';
 
 // ---------------------------------------------------------------------------
 // Common
@@ -1300,6 +1300,11 @@ export type ParagraphLineEnd =
   | 'joined'
   /** It ends in a hyphen that is kept, with nothing added (`Jean-`/`Paul`). */
   | 'hyphen'
+  /**
+   * A hard line break the producer set (an address, a `<br>`): `\n` joins it to the next
+   * line, and a rewrap never moves words across it.
+   */
+  | 'forced'
   /** The paragraph's last line. */
   | 'end';
 
@@ -1370,6 +1375,12 @@ export interface ParagraphBlock {
   readonly direction: { readonly x: number; readonly y: number };
   /** The box's left and right edges along the line (text-space x): the measure. */
   readonly measure: { readonly left: number; readonly right: number };
+  /**
+   * The right edge (text-space x, at least `measure.right`) a rewrap may fill, when it differs
+   * from `measure.right`: for a left-aligned paragraph, the inner edge of the filled or stroked
+   * box that holds it (its padding taken equal on both sides), else the column's right edge.
+   */
+  readonly wrapRight?: number;
   /** First line's left edge minus `measure.left` (positive: first-line indent). */
   readonly indent: number;
   /** Dominant size on the page, points. */
@@ -2863,7 +2874,7 @@ export interface LayoutLine {
   readonly ragged: boolean;
   /** One word wider than the measure. */
   readonly overfull: boolean;
-  /** The line ends at a line break the user typed. */
+  /** The line ends at a line break (`\n`): one the user typed, or a hard break of the original. */
   readonly forced: boolean;
   /** The original line-end hyphen kept at this unchanged line end: where it goes, in which style. */
   readonly hyphen?: { readonly x: number; readonly style: string };
@@ -2930,6 +2941,17 @@ export type OverflowDecision =
       /** Height beyond what the gap allows (growth − room), and the part overlapping the next block. */
       readonly excess: number;
       readonly overlap: number;
+      /**
+       * The paragraph would leave the page's visible box (its CropBox): the writer refuses
+       * it, and the editor asks the user to shorten the text (spec craft §4.6).
+       */
+      readonly offPage: boolean;
+      /**
+       * The whole paragraph tightened within the same floors (every line rewrapped, the
+       * lines before the edit included), when that fits: offered to the user, never applied
+       * on its own, since it changes lines the user did not touch.
+       */
+      readonly fit?: Extract<OverflowDecision, { readonly kind: 'tighten' }>;
     };
 
 // ---------------------------------------------------------------------------
@@ -2952,7 +2974,9 @@ export type ParagraphLayoutInput = LayoutInput;
  * - `shared-object`: a text object the edit must change also draws text outside the edited
  *   lines (another paragraph, or a line the edit keeps);
  * - `shared-form`, `unreadable-encoding`: as for single-line edits (`TextEditBlocker`);
- * - `unsupported-chars`: a typed character neither the font nor a bundled face has.
+ * - `unsupported-chars`: a typed character neither the font nor a bundled face has;
+ * - `off-page`: this edit (not the paragraph) would put text outside the page's visible box
+ *   (the text grew past the page edge); shortening it makes it acceptable again.
  */
 export type ParagraphEditRefusal =
   | ParagraphRefusal
@@ -2961,7 +2985,8 @@ export type ParagraphEditRefusal =
   | 'shared-object'
   | 'shared-form'
   | 'unreadable-encoding'
-  | 'unsupported-chars';
+  | 'unsupported-chars'
+  | 'off-page';
 
 /** How a style of the paragraph is drawn (for the overlay) and its tier-1 substitute. */
 export interface ParagraphStyleInfo {
@@ -3008,6 +3033,11 @@ export interface ParagraphLayoutAnalysis {
    */
   readonly gapBelow: number;
   readonly paragraphGap: number;
+  /**
+   * The space from the paragraph's ink down to the edge of the page's visible box (CropBox,
+   * in the paragraph's own direction), points: growth beyond it leaves the page.
+   */
+  readonly pageRoom: number;
   /** Set when paragraph mode is refused; `input` then still describes the paragraph. */
   readonly refusal?: ParagraphEditRefusal;
 }
@@ -3017,6 +3047,9 @@ export interface ParagraphCaretSpan {
   readonly start: number;
   readonly end: number;
 }
+
+/** A stretch of a paragraph edit's inserted text in one style (`LayoutEditSpan`). */
+export type ParagraphEditSpan = LayoutEditSpan;
 
 /** An edit of one paragraph: its whole text afterwards and where it changed. */
 export interface ParagraphEdit {
@@ -3029,6 +3062,15 @@ export interface ParagraphEdit {
   readonly caretSpan: ParagraphCaretSpan;
   /** Style id (`ParagraphLayoutAnalysis.input.styles`) of the inserted text; default: the caret's. */
   readonly style?: string;
+  /**
+   * Per-character styles of the inserted text (offsets relative to `caretSpan.start` in
+   * `text`): typed stretches in the style before the caret when they were typed, and the
+   * original characters between separate changes with their `source` offset, so they keep
+   * their own font, size, colour and marked content. Omitted (edits recorded before it
+   * existed): the whole inserted text takes `style`. The writer refuses spans whose source
+   * characters or styles differ from the original paragraph.
+   */
+  readonly spans?: readonly ParagraphEditSpan[];
   /**
    * A layout of this edit made from the paragraph's `analyzeParagraphLayout` input (the
    * overlay's, or the one recorded for replay), written as it is. Omitted: the engine lays

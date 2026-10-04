@@ -23,6 +23,7 @@ import {
   type ParagraphState,
   paragraphEdit,
   relayout,
+  replaceRange,
   selectAll,
   selectionOf,
   selectionRects,
@@ -125,6 +126,60 @@ describe('text operations', () => {
     // Undoing the typing by hand gives no edit.
     const back = { ...state, text: original, styles: stylesOf(setup.input) };
     expect(paragraphEdit(original, back)).toBeNull();
+  });
+});
+
+describe('several changes in one session', () => {
+  it('keeps each untouched character’s style: the bold word between two fixes stays bold', () => {
+    // "The harbour master walked along the quay" with "master" in s1 (bold).
+    const text = 'The harbour master walked along the quay';
+    const styles = Array.from({ length: text.length }, (_, i) => (i >= 12 && i < 18 ? 's1' : 's0'));
+    const origins = Array.from({ length: text.length }, (_, i) => i);
+    let state: ParagraphState = { text, styles, origins, anchor: 0, focus: 0 };
+    state = replaceRange(state, { start: 0, end: 3 }, 'A');
+    const q = state.text.indexOf('quay');
+    state = replaceRange(state, { start: q, end: q + 4 }, 'pier');
+    const edit = paragraphEdit(text, state, styles);
+    expect(edit).toMatchObject({ start: 0, end: text.length, text: state.text });
+    // Typed "A", untouched " harbour ", "master" (bold), " walked along the ", typed "pier".
+    expect(edit?.spans).toEqual([
+      { start: 0, end: 1, style: 's0' },
+      { start: 1, end: 10, style: 's0', source: 3 },
+      { start: 10, end: 16, style: 's1', source: 12 },
+      { start: 16, end: 34, style: 's0', source: 18 },
+      { start: 34, end: 38, style: 's0' },
+    ]);
+    // The layout sets "master" in its own style.
+    const input = {
+      ...paragraph([text], { width: 100 * ADVANCE }).input,
+      spans: [
+        { start: 0, end: 12, style: 's0' },
+        { start: 12, end: 18, style: 's1' },
+        { start: 18, end: text.length, style: 's0' },
+      ],
+      styles: { s0: monoStyle(), s1: monoStyle() },
+    };
+    const layout = layoutParagraph(input, edit ?? { start: 0, end: 0, text: '' });
+    const runs = layout.lines.flatMap((l) => l.runs);
+    expect(runs.find((r) => r.text.includes('master'))?.style).toBe('s1');
+    expect(runs.find((r) => r.text.includes('pier'))?.style).toBe('s0');
+  });
+
+  it('typed text takes the style before the caret when typed; a retyped character in another style is a change', () => {
+    const text = 'ab';
+    const styles = ['s0', 's1'];
+    const start: ParagraphState = { text, styles, origins: [0, 1], anchor: 1, focus: 2 };
+    // Typing "b" over the bold "b" sets it in the style before the caret: a change.
+    const typed = insertText(start, 'b');
+    expect(typed.styles).toEqual(['s0', 's0']);
+    expect(typed.origins).toEqual([0, -1]);
+    expect(paragraphEdit(text, typed, styles)).toMatchObject({
+      start: 1,
+      end: 2,
+      text: 'b',
+      spans: [{ start: 0, end: 1, style: 's0' }],
+    });
+    expect(paragraphEdit(text, start, styles)).toBeNull();
   });
 });
 

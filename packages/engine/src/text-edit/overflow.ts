@@ -3,7 +3,11 @@
  * layouts: (1) same or fewer lines commit; (2) growth that fits the empty space below while
  * keeping the original gap to the next block grows; (3) else word spacing is tightened up to
  * −15 %, then the rewritten lines' leading up to −5 %, never the glyph size; (4) else the
- * text runs over with a warning. Moving text to the next page is never an outcome.
+ * text runs over with a warning, unless that would put it past the edge of the page's visible
+ * box (`offPage`: the writer refuses it). When tightening the whole paragraph (the lines
+ * before the edit included) within the same floors would fit, the run-over carries that
+ * layout as `fit`, for the editor to offer ("Tighten to fit"). Moving text to the next page
+ * is never an outcome.
  */
 import type { OverflowDecision, ParagraphLayout } from '../types';
 import { type LayoutEdit, type LayoutInput, layoutWithThresholds } from './linebreak';
@@ -24,6 +28,11 @@ export interface OverflowBox {
   readonly edit: LayoutEdit;
   /** The original gap between the paragraph and the block below it (points), kept when growing. */
   readonly paragraphGap: number;
+  /**
+   * The space from the paragraph's ink down to the edge of the page's visible box (points;
+   * `ParagraphLayoutAnalysis.pageRoom`). A run-over past it is `offPage`. Default: unbounded.
+   */
+  readonly pageRoom?: number;
 }
 
 function growthOf(layout: ParagraphLayout): number {
@@ -56,12 +65,30 @@ export function decideOverflow(
   const room = Math.max(0, gapBelow - box.paragraphGap);
   if (growth <= room + EPSILON) return { kind: 'grow', layout, growth };
 
+  const local = tightenWithin(box, room, false);
+  if (local) return local;
+  const overflow = overflowOf(layout, growth, room, gapBelow, box.pageRoom);
+  // The whole paragraph tightened (lines before the edit included) is offered, not applied:
+  // it changes lines the user did not touch.
+  const fit = tightenWithin(box, room, true);
+  return fit?.kind === 'tighten' && overflow.kind === 'overflow' ? { ...overflow, fit } : overflow;
+}
+
+/**
+ * The least tightening that makes the paragraph fit `room`: word spacing first (down to
+ * −15 %), then leading (down to −5 %), on the rewritten lines or, `whole`, on every line.
+ */
+function tightenWithin(
+  box: OverflowBox,
+  room: number,
+  whole: boolean,
+): OverflowDecision | undefined {
   // Word spacing: step down through the exact factors at which a line takes one more word,
   // largest first, so the first that fits is the least tightening that does.
   let wordSpacing = 1;
-  let current = layoutWithThresholds(box.input, box.edit, { wordSpacing });
+  let current = layoutWithThresholds(box.input, box.edit, { wordSpacing, whole });
   for (let step = 0; step < MAX_STEPS; step++) {
-    if (growthOf(current.layout) <= room + EPSILON) {
+    if (growthOf(current.layout) <= room + EPSILON && wordSpacing < 1) {
       return tighten(current.layout, wordSpacing, 1);
     }
     const below = current.thresholds.filter(
@@ -69,7 +96,7 @@ export function decideOverflow(
     );
     if (below.length === 0) break;
     wordSpacing = Math.max(MIN_WORD_SPACING, Math.max(...below));
-    current = layoutWithThresholds(box.input, box.edit, { wordSpacing });
+    current = layoutWithThresholds(box.input, box.edit, { wordSpacing, whole });
   }
 
   // Leading: the rewritten lines' steps shrink linearly with the factor.
@@ -81,18 +108,30 @@ export function decideOverflow(
     if (leading >= MIN_LEADING - EPSILON) {
       const final = layoutWithThresholds(box.input, box.edit, {
         wordSpacing,
-        leading: Math.max(MIN_LEADING, leading),
+        leading: Math.min(1, Math.max(MIN_LEADING, leading)),
+        whole,
       }).layout;
-      return tighten(final, wordSpacing, final.leading);
+      if (growthOf(final) <= room + EPSILON) return tighten(final, wordSpacing, final.leading);
     }
   }
+  return undefined;
+}
 
+/** The run-over verdict: off the page when the growth passes the room to the page edge. */
+export function overflowOf(
+  layout: ParagraphLayout,
+  growth: number,
+  room: number,
+  gapBelow: number,
+  pageRoom = Number.POSITIVE_INFINITY,
+): OverflowDecision {
   return {
     kind: 'overflow',
     layout,
     growth,
     excess: growth - room,
     overlap: Math.max(0, growth - gapBelow),
+    offPage: growth > pageRoom + EPSILON,
   };
 }
 

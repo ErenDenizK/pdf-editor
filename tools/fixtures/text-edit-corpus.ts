@@ -3,7 +3,7 @@
  *
  *   node --experimental-strip-types tools/fixtures/text-edit-corpus.ts
  *
- * Every text is fictional. Five pages are printed by headless Chromium ("Save as PDF",
+ * Every text is fictional. Six pages are printed by headless Chromium ("Save as PDF",
  * which writes a tagged PDF with embedded Liberation fonts); four of them have their
  * structure tree removed afterwards (`/StructTreeRoot`, `/MarkInfo`, `/StructParents`), so
  * detection has to use geometry, as for an untagged export. The LaTeX-like page is written
@@ -106,6 +106,26 @@ const PAGES: Record<string, { html: string; tagged: boolean }> = {
 <p>The meeting opened with a short report on the winter lantern walk, which drew more visitors than any previous year despite the rain. The treasurer thanked the bakery on Mill Street for the loan of its trestle tables.</p>
 <p>Members agreed to repaint the society's hand cart before the spring fair and to ask the town council for permission to hang lanterns along the canal path for one evening in May.</p>`,
       '.title { text-align: center; font-size: 18pt; font-weight: bold; margin-bottom: 4pt; } .date { text-align: right; margin-bottom: 16pt; }',
+    ),
+  },
+  // Two shaded boxes side by side, each address one /P with line breaks (the second box also
+  // framed), a list item with a manual break and a justified paragraph with one.
+  'address-boxes.pdf': {
+    tagged: true,
+    html: html(
+      `
+<h1>Party details</h1>
+<p>This sheet lists the two parties to the hire agreement and how to reach them. Each address is one paragraph with line breaks, as a word processor writes it.</p>
+<div class="parties">
+<p class="party">Harbour Rowing Club<br>The Boathouse, Quay Road<br>Port Allery PA3 7RW<br>secretary@harbour-rowing.example</p>
+<p class="party framed">Elena Marsh<br>14 Quayside Terrace<br>Port Allery PA2 4LN<br>elena.marsh@example.com<br>+44 20 7946 0958</p>
+</div>
+<ul>
+<li>Bring the signed copy to the boathouse,<br>or post it to the Club Secretary before the end of the month.</li>
+<li>Keep a copy for your records.</li>
+</ul>
+<p class="just">The deposit is returned within fourteen days after the event, less the cost of any cleaning or repair that the use of the room made necessary.<br>Any deduction is explained in writing. The Club keeps receipts for every repair and shows them to the Hirer on request, together with photographs of the damage taken on the day after the event.</p>`,
+      '.parties { display: flex; gap: 14pt; margin: 4pt 0 12pt; } .party { flex: 1; margin: 0; padding: 12pt 14pt; background: #eef2f6; } .framed { border: 0.75pt solid #6b7a8c; } .just { text-align: justify; }',
     ),
   },
   // A table of short cells between two paragraphs.
@@ -293,12 +313,17 @@ async function latexPage(): Promise<void> {
 
 async function main(): Promise<void> {
   if (!existsSync(OUT)) mkdirSync(OUT, { recursive: true });
+  // File names on the command line build only those (Chromium output varies by version).
+  const only = new Set(process.argv.slice(2));
+  const wanted = (file: string) => only.size === 0 || only.has(file);
   const chrome = findChrome();
   const dir = mkdtempSync(join(tmpdir(), 'text-edit-corpus-'));
   for (const [file, page] of Object.entries(PAGES)) {
+    if (!wanted(file)) continue;
     await chromePage(chrome, dir, file, page.html, page.tagged);
     console.log(`wrote ${file}`);
   }
+  if (!wanted('latex-justified.pdf')) return;
   await latexPage();
   console.log('wrote latex-justified.pdf');
 }

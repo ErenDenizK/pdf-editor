@@ -5,12 +5,14 @@
  * invisible text, tags that fail the contiguity check), the cache and the worker proxy.
  */
 import { PDFDocument, PDFName, type PDFObject, type PDFRef } from '@cantoo/pdf-lib';
-import type { SourceId } from '@pdf-editor/document-model';
+import type { Rect, SourceId } from '@pdf-editor/document-model';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
+import demoUrl from '../../../../test/fixtures/demo/demo-agreement.pdf?url';
 import markdownUrl from '../../../../test/fixtures/markdown-source.pdf?url';
 import simpleUrl from '../../../../test/fixtures/simple-text.pdf?url';
 import taggedUrl from '../../../../test/fixtures/tagged.pdf?url';
+import addressUrl from '../../../../test/fixtures/text-edit-corpus/address-boxes.pdf?url';
 import corpusCaptionsUrl from '../../../../test/fixtures/text-edit-corpus/captions.pdf?url';
 import latexUrl from '../../../../test/fixtures/text-edit-corpus/latex-justified.pdf?url';
 import tableUrl from '../../../../test/fixtures/text-edit-corpus/table.pdf?url';
@@ -21,6 +23,7 @@ import { sid, toBuffer, wasmUrl } from '../../test/helpers';
 import type { LocatedRun, ParagraphBlock } from '../types';
 import { createPdfiumProxy } from '../worker/pdfium-proxy';
 import { detectParagraphs, fontFamily, runRefusal } from './blocks';
+import { RawText } from './raw';
 import { createHarness, fixture, type Harness, runWith, span } from './test-helpers';
 
 let h: Harness;
@@ -73,6 +76,34 @@ function checkInvariants(blocks: readonly ParagraphBlock[], runs: readonly Locat
 }
 
 const lineCounts = (blocks: readonly ParagraphBlock[]) => blocks.map((b) => b.lines.length);
+const ends = (block: ParagraphBlock | undefined) => block?.lines.map((l) => l.end);
+
+/** Bounds of the filled or stroked paths of a page, as detection reads them. */
+async function paintedBoxes(id: SourceId, pageIndex = 0): Promise<Rect[]> {
+  return h.host.withRawTask(id, (access) => {
+    const raw = new RawText(access.module, access.memory);
+    const page = access.doc.acquirePage(pageIndex);
+    try {
+      return raw.paintedPathBounds(page.pagePtr);
+    } finally {
+      page.release();
+    }
+  });
+}
+
+/** The smallest box holding the block's glyphs: its inner right edge, padding equal. */
+function innerRight(block: ParagraphBlock, boxes: readonly Rect[]): number | undefined {
+  const holding = boxes
+    .filter(
+      (b) =>
+        b.x <= block.box.x + 0.5 &&
+        b.y <= block.box.y + 0.5 &&
+        b.x + b.width >= block.box.x + block.box.width - 0.5 &&
+        b.y + b.height >= block.box.y + block.box.height - 0.5,
+    )
+    .sort((a, b) => a.width * a.height - b.width * b.height)[0];
+  return holding && holding.x + holding.width - (block.measure.left - holding.x);
+}
 
 describe('corpus goldens', () => {
   test('word-tagged.pdf (Chromium, tagged): heading, two paragraphs, a list from the tags', async () => {
@@ -94,6 +125,8 @@ describe('corpus goldens', () => {
       /^The ferry left the quay at dawn, .* chimneys under a pale sky\.$/,
     );
     expect(blocks[4]?.text).toMatch(/^Keep the logbook dry, .* harbour office\.$/);
+    // Soft-wrapped, ragged-right text has no hard breaks.
+    expect(blocks.flatMap((b) => b.lines.filter((l) => l.end === 'forced'))).toEqual([]);
     // 11 pt at a line height of 1.35.
     for (const b of blocks.slice(1)) expect(b.leading).toBeCloseTo(14.85, 0);
     expect(blocks[1]?.size).toBeCloseTo(11, 1);
@@ -172,6 +205,48 @@ describe('corpus goldens', () => {
     expect(lineCounts(blocks)).toEqual([1, 1, 3, 2]);
   });
 
+  test('address-boxes.pdf (Chromium, tagged): line-broken addresses in shaded boxes keep their hard breaks; the box bounds the measure', async () => {
+    const id = await h.open(await fixture(addressUrl));
+    const blocks = await h.editor.analyzeParagraphs(id, 0);
+    checkInvariants(blocks, await h.editor.locateRuns(id, 0));
+    expect(blocks.map((b) => b.source)).toEqual(Array(7).fill('tags'));
+    expect(blocks.map((b) => b.tag)).toEqual(['H1', 'P', 'P', 'P', 'LI', 'LI', 'P']);
+    const [, intro, club, hirer, item, , justified] = blocks;
+    expect(club?.text).toBe(
+      'Harbour Rowing Club\nThe Boathouse, Quay Road\nPort Allery PA3 7RW\nsecretary@harbour-rowing.example',
+    );
+    expect(ends(club)).toEqual(['forced', 'forced', 'forced', 'end']);
+    expect(hirer?.text).toBe(
+      'Elena Marsh\n14 Quayside Terrace\nPort Allery PA2 4LN\nelena.marsh@example.com\n+44 20 7946 0958',
+    );
+    expect(ends(hirer)).toEqual(['forced', 'forced', 'forced', 'forced', 'end']);
+    // The list item's manual break; the soft-wrapped paragraph above has none.
+    expect(item?.kind).toBe('list-item');
+    expect(item?.text).toBe(
+      'Bring the signed copy to the boathouse,\nor post it to the Club Secretary before the end of the month.',
+    );
+    expect(ends(intro)).toEqual(['space', 'end']);
+    // Justified around its hard break, which stays ragged.
+    expect(justified?.align).toBe('justify');
+    expect(ends(justified)).toEqual(['space', 'forced', 'space', 'end']);
+    expect(justified?.text).toContain('made necessary.\nAny deduction');
+    expect(justified?.wrapRight).toBeUndefined();
+
+    // Measures: each box's inner edge with the left padding mirrored, not the column's edge.
+    const boxes = await paintedBoxes(id);
+    for (const block of [club, hirer] as ParagraphBlock[]) {
+      const inner = innerRight(block, boxes);
+      expect(inner).toBeDefined();
+      expect(block.wrapRight).toBeCloseTo(inner ?? 0, 3);
+      expect(block.wrapRight ?? 0).toBeGreaterThan(block.measure.right);
+    }
+    expect(club?.wrapRight).toBeCloseTo(275.51, 1);
+    expect(hirer?.wrapRight).toBeCloseTo(509.64, 1);
+    // The column's edge, outside any box: the justified paragraph's right edge.
+    expect(intro?.wrapRight).toBeCloseTo(justified?.measure.right ?? 0, 1);
+    await h.adapter.close(id);
+  });
+
   test('table.pdf (untagged): one box per cell between two paragraphs', async () => {
     const blocks = await analyse(tableUrl);
     expect(blocks).toHaveLength(22);
@@ -208,6 +283,25 @@ describe('corpus goldens', () => {
 });
 
 describe('older fixtures', () => {
+  test('demo-agreement.pdf (untagged): the party addresses keep their lines inside their shaded boxes', async () => {
+    const blocks = await analyse(demoUrl);
+    const club = blocks.find((b) => b.text.startsWith('Harbourlight Rowing Club\n'));
+    const hirer = blocks.find((b) => b.text.startsWith('14 Quayside Terrace'));
+    expect(club?.text).toBe(
+      'Harbourlight Rowing Club\nThe Boathouse, Quay Road\nPort Allery PA3 7RW\nRepresented by Tom Ashdown,\nClub Secretary',
+    );
+    expect(hirer?.text).toBe(
+      '14 Quayside Terrace\nPort Allery PA2 4LN\nelena.marsh@example.com\n+44 20 7946 0958',
+    );
+    expect(club?.source).toBe('geometry');
+    // Boxes 226.64 pt wide at x = 64 and 304.64; the text starts 14 pt in.
+    expect(club?.wrapRight).toBeCloseTo(64 + 226.64 - 14, 1);
+    expect(hirer?.wrapRight).toBeCloseTo(304.64 + 226.64 - 14, 1);
+    // Body paragraphs keep the column's edge and their soft breaks.
+    const body = blocks.find((b) => b.text.startsWith('This agreement sets out'));
+    expect(ends(body)).toEqual(['space', 'space', 'end']);
+  });
+
   test('tagged.pdf: the tagged paragraph from the tags, the untagged footer from geometry', async () => {
     for (const page of [0, 1]) {
       const blocks = await analyse(taggedUrl, page);
@@ -241,8 +335,10 @@ describe('older fixtures', () => {
     const page2 = await analyse(markdownUrl, 1);
     const left = page2.find((b) => b.text.startsWith('The left column'));
     const right = page2.find((b) => b.text.startsWith('The right column'));
+    // The fixture sets its lines by hand: "from" would have fitted after the first one, so
+    // that break is a hard one.
     expect(left?.text).toBe(
-      'The left column is read first, from top to bottom, before the reader moves to the right column.',
+      'The left column is read first,\nfrom top to bottom, before the reader moves to the right column.',
     );
     expect(right?.text).toBe(
       'The right column comes second. Its lines sit on the same baselines as the left column.',
@@ -320,6 +416,68 @@ describe('geometry rules', () => {
       tj(72, 664, LONG[3] as string),
     ];
     expect(lineCounts(await blocksOf(await page(lines)))).toEqual([2, 2]);
+  });
+
+  test('a filled or stroked box bounds the measure with equal padding; its short lines end in hard breaks', async () => {
+    const address = [
+      'Harbourlight Rowing Club',
+      'The Boathouse, Quay Road',
+      'Port Allery PA3 7RW',
+      'Represented by Tom Ashdown,',
+      'Club Secretary',
+    ];
+    for (const paint of [
+      '0.93 0.95 0.97 rg 100 560 250 100 re f 0 g',
+      '0.5 w 100 560 250 100 re S',
+    ]) {
+      const blocks = await blocksOf(
+        await page([
+          paint,
+          ...address.map((line, i) => tj(114, 640 - 15 * i, line)),
+          ...LONG.map((line, i) => tj(72, 520 - 12 * i, line)),
+        ]),
+      );
+      const box = blocks.find((b) => b.text.startsWith('Harbourlight'));
+      expect(box?.text).toBe(address.join('\n'));
+      expect(ends(box)).toEqual(['forced', 'forced', 'forced', 'forced', 'end']);
+      // 350 minus the 14 pt the text has from the box's left edge (a stroke's half width
+      // widens both sides alike).
+      expect(box?.wrapRight).toBeCloseTo(336, 1);
+      const body = blocks.find((b) => b.text.startsWith('Morning light'));
+      expect(ends(body)).toEqual(['space', 'space', 'space', 'end']);
+    }
+  });
+
+  test('a page-wide background behind two columns bounds nothing; a measure stops short of the next column', async () => {
+    const left = [
+      'Morning light came over the hills and the',
+      'valley woke slowly, one farm after another,',
+      'until the bells of the small chapel rang out',
+      'across the fields.',
+    ];
+    const right = [
+      'The carts rolled down toward the town where',
+      'the market stalls were already set out in',
+      'neat rows, and the baker had opened early to',
+      'sell bread.',
+    ];
+    const blocks = await blocksOf(
+      await page([
+        '1 g 0 0 612 792 re f 0 g',
+        ...left.map((line, i) => tj(72, 700 - 12 * i, line)),
+        ...right.map((line, i) => tj(320, 700 - 12 * i, line)),
+        tj(
+          72,
+          600,
+          'A footnote that runs right across the page under both of the columns above it.',
+        ),
+      ]),
+    );
+    const first = blocks.find((b) => b.text.startsWith('Morning'));
+    const second = blocks.find((b) => b.text.startsWith('The carts'));
+    expect(ends(first)).toEqual(['space', 'space', 'space', 'end']);
+    expect(ends(second)).toEqual(['space', 'space', 'space', 'end']);
+    expect(first?.wrapRight ?? first?.measure.right ?? 0).toBeLessThanOrEqual(320 - 10);
   });
 
   test('a list: markers start items, a hanging indent continues one', async () => {
