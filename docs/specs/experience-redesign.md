@@ -263,6 +263,11 @@ taken paths from it. Per-point widths stay parallel to their paths on both sides
 change scales them with the nominal width, and a move translates points only. The rule is
 in `annotations/lasso/split.ts`.
 
+*Amended by `craft.md` (M8, built 2026-10-04):* the lasso takes every annotation kind it
+touches (links, redaction marks and form widgets excepted) and acts on the mix in one
+history entry, with eight resize handles and a rotation grip; the split rule above is
+unchanged and also serves the partial eraser (craft §5.5–§5.6, DESIGN §4.1).
+
 ### 6.6 Input
 
 - Native pointer handlers on the page layer while the pen is armed; no React state per
@@ -280,6 +285,14 @@ in `annotations/lasso/split.ts`.
   ignored while a pen is down, for 300 ms after, and when its contact exceeds 40 CSS px.
   Before a pen is seen, touch draws (phones). The layer keeps `touch-action: none` while a
   drawing tool is armed (browsers apply it to pens too); our pan has no inertia in M6.
+
+*Amended by `craft.md` (M8, built 2026-10-04):* the outline is our own
+(`packages/engine/src/annotations/ink-outline.ts`, ADR-0018), not `perfect-freehand`, with
+round joins above 45°. A mouse draws a constant width and a finger varies by speed within
+±10 %; preview and commit share one smoothed stroke model, with our own prediction when the
+browser gives none; committed strokes wait on a dry ink layer while the page re-renders
+later, so a stroke is visible within about two frames of pointer-up (craft §5.2–§5.3,
+DESIGN §4.1).
 
 ### 6.7 Variable width in the file: spike S1
 

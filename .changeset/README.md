@@ -22,7 +22,9 @@ pre-release: `1.0.0-beta.0`, `1.0.0-beta.1`, and so on.
 - **During the beta, only fixes, performance, accessibility, documentation and translations
   land on `develop`.** Their changesets are `patch`; pre mode keeps the target at `1.0.0`.
   New features wait for 1.1 on a branch that is not merged into `develop` until pre mode
-  ends.
+  ends. The exception is a milestone the owner schedules into the beta in `docs/ROADMAP.md`
+  (M8, Craft, decided 2026-10-03): its changesets are `patch` too, so the target stays `1.0.0`
+  and the drop ships as the next `1.0.0-beta.N` when the owner says so.
 - **Breaking** for this app means a stored format changed without a migration (recipes,
   OPFS and IndexedDB layout, preferences, kept caches), files saved earlier open or export
   differently without the user asking, a feature removed, or the app's URL or origin

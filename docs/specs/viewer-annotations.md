@@ -35,6 +35,11 @@ Select (V) · Highlight (H) · Underline (U) · Strikeout (S) · Ink (P) · Shap
 O: ellipse, L: line, A: arrow) · Text box (T) · Note (N) · Stamp/Image (Shift+I) · Signature (G).
 Esc returns to Select. Tools are sticky until Esc; Shift while drawing constrains.
 
+*Amended by `craft.md` (M8, built 2026-10-04):* the tools sit in five Edit groups and a
+document is in Read (locked) or Edit (ADR-0019); H arms the Highlighter, and Highlight,
+Underline, Strikeout and Squiggly from a selection live in the text selection bar
+(ADR-0021). Keys `0`–`4` are Home, Read, Edit, Arrange and Compare.
+
 Shortcut changes in M4: E is Edit text (the eraser moved to Shift+E) and I is the Image tool
 for the page's own images (move, resize, replace, extract; M4 §3), so the stamp / image
 annotation tool moved from I to Shift+I.
@@ -54,7 +59,7 @@ appear. The inspector (formerly the right panel) is closed by default. (M6 amend
 | Kind | Creation | Geometry | Notes |
 |---|---|---|---|
 | Highlight / Underline / Strikeout / Squiggly | Select text then tool, or tool then drag over text | QuadPoints from text runs (upper-left, upper-right, lower-left, lower-right order) | Multiply blend in the AP; merges adjacent quads on one line |
-| Ink | Freehand; width from pressure (pen) or speed (mouse, touch); `/InkList` centre lines with a constant `/BS /W` (the nominal width); the varying width lives only in our appearance stream, with the per-point widths in the private `/PdfEditorInkWidths` so a later session regenerates it after an edit (ADR-0018). Viewers that redraw ink from `/InkList` show the nominal width. Strokes written in a burst share one annotation. (M6 amendment A7) | InkList paths | Straight line with Shift; eraser mode removes whole strokes |
+| Ink | Freehand; width from pressure (pen) or speed (mouse, touch); `/InkList` centre lines with a constant `/BS /W` (the nominal width); the varying width lives only in our appearance stream, with the per-point widths in the private `/PdfEditorInkWidths` so a later session regenerates it after an edit (ADR-0018). Viewers that redraw ink from `/InkList` show the nominal width. Strokes written in a burst share one annotation. (M6 amendment A7) *Amended by craft.md (M8, A12, built 2026-10-04):* a mouse draws a constant width, a finger varies by speed within ±10 %, a pen keeps pressure; preview and commit share one smoothed stroke model. The yellow preset is now the Highlighter: constant width, a tint at full opacity with Multiply, no per-point widths; along text it becomes a Highlight with quads, elsewhere (or with Alt) an Ink with `/BM /Multiply` in its appearance | InkList paths | Straight line with Shift, or by holding still for 500 ms (M8); the eraser removes whole strokes or, in Partial mode, cuts paths where it crosses them (M8) |
 | Rectangle / Ellipse / Line / Arrow | Drag | Rect / vertices | Arrow = Line with `/LE [/None /OpenArrow]`; snap to 45° with Shift |
 | Text box (FreeText) | Click or drag a box, type | Rect, `/DA` font size and color | Auto-grow height; font: bundled Inter subset embedded by the engine; no rich text in M2 |
 | Note (Text) | Click | 20×20 icon rect | Popup with author, date, text; comment icon; open state persisted |

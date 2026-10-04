@@ -140,6 +140,11 @@ Amendments after the independent M4 review (2026-09-28):
   on any mismatch fall back to Tier 1 automatically and tell the user.
 - **Tier 3 (research, M6)** — paragraph re-typesetting.
 
+*Amended by `craft.md` (M8, built 2026-10-04):* paragraph re-typesetting is built as
+Tier B of ADR-0020: the paragraph rewraps inside itself in its own font, with verification
+and replay (craft §4). Pushing later blocks down the page (Tier C) and cross-page reflow
+(Tier D) are declined.
+
 ### 2.2 Interaction
 
 - Tool: Edit text (E). Hover highlights editable runs (per line); click opens an inline
@@ -153,12 +158,29 @@ Amendments after the independent M4 review (2026-09-28):
 - Every edit is one history entry through the edit runner with an exact inverse
   (original content stream segment restored).
 
+*Amended by `craft.md` (M8, built 2026-10-04):* Edit text (E), a double-click on page text
+with Select, or "Edit text here" in the page menu open the **paragraph editor** with a caret
+at the click: several lines, Enter inserts a line break, leaving (Esc or a click outside)
+commits one history entry, and there is no font, size or colour control. Overflow follows
+the policy of craft §4.6 (grow into the gap, tighten word spacing then leading within
+floors, run over with a warning; never shrink, never the next page), which replaces the
+shrink-or-overflow choice there. The one-line editor above remains for paragraphs that
+refuse paragraph mode (text in a form, a clip, a shared object), with the reason said. The
+immediate hover fill is replaced by a 1 px outline after 400 ms (DESIGN §4.8). With Edit
+text armed, the keyboard reaches one target per paragraph.
+
 ### 2.3 Fonts
 
 Bundled Inter, JetBrains Mono and Noto Serif subsets (from M3) plus Noto Sans for wider
 Unicode coverage; family matched by name heuristics (serif/sans/mono, weight, italic);
 Local Font Access (Chromium) offered as an opt-in to use an installed font that matches
 the original name, with the file embedded as a subset.
+
+*Amended by `craft.md` (M8, built 2026-10-04):* Noto Sans Regular is now bundled. In the
+paragraph editor a missing character is set per glyph in the bundled face of the original
+font's class (serif, sans or monospaced, from the font's flags, PANOSE and name), scaled to
+its x-height, and one honesty line names the characters and the face. Local Font Access
+stays a later item (craft §4.5).
 
 ### 2.4 Tests
 

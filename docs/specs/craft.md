@@ -1,7 +1,8 @@
 # Spec: Craft (M8): modes, paragraph editing, ink, colour and glass
 
-**Status:** approved by the owner on 2026-10-03 (§14 answered; the overall approach and the
-changes accepted, questions 1–4 left to the lead, Tier C dropped) · **Milestone:** M8 (two
+**Status:** built 2026-10-04 except where §15 says otherwise (approved by the owner on
+2026-10-03: §14 answered; the overall approach and the changes accepted, questions 1–4 left
+to the lead, Tier C dropped) · **Milestone:** M8 (two
 drops; a drop is tagged `1.0.0-beta.N` only when the owner says so) · **Owner:** project lead
 
 **Inputs:** the project lead's decision brief of 2026-10-03 (binding where it differs from
@@ -694,3 +695,67 @@ lead's answers:
 
 Versioning: the two drops of §12 are planning units; a drop becomes `1.0.0-beta.1` or
 `beta.2` only when the owner says so.
+
+## 15. As built (2026-10-04)
+
+What each work package delivered, from the implementers' reports and the commits from
+`96b8cd5` to the wave-4 changes (partial eraser, Recents, fonts and goldens, accessibility).
+**Done** means the scope above is in place with tests; **partial** means a named part is
+missing; deviations are listed even where the package is done. DESIGN.md carries A8–A14 as
+built and A15 only as the Glass panels trial (DESIGN §9). Measurements are in
+`docs/qa/ink-latency-baseline.md` and `docs/research/14-glass-spike.md`.
+
+### 15.1 Home, modes and the policy
+
+| Id | Status | As built, and deviations | Evidence |
+|---|---|---|---|
+| M1 | done | `destination`, per-document `documentMode` and `lastView`; Read · Edit · Arrange with the lock glyph, Compare only while open; keys `0`–`4`; a tab click leaves Home in the document's last view and mode. No command creates a blank document, so "opens in Edit" has nothing to attach to yet; after the last document closes the store returns to its fresh start (Home's empty state either way) | `shell/ModeSwitch.test.tsx`, `state/ui-store.test.ts`, `e2e/modes.spec.ts` |
+| M2 | done | `canEdit` fails closed behind the tool store, the annotation, form, text-edit and image layers and the commands; the Read bar's Edit button; "Switch to Edit to fill"; a Read text selection bar (Copy, Mark up…) built new, as there was no selection bar. A note click in Read passes through to the text (notes are read in Review and the inspector; no read-only popover); V in Read switches to Edit like any tool key | `shell/read-lock.test.tsx`, `forms/forms.test.tsx`, `e2e/modes.spec.ts` |
+| M3 | done | Five groups; the markups have no group and live in the text selection bar, which in Edit adds Highlight, Underline, Strikeout, Squiggly and Comment; a page context menu (Rotate and Delete also in Read, as undoable page operations); the Select chip has the view-switch look, not the accent fill. The bar's Highlight uses the Highlight tool's style, while H over a selection uses the Highlighter's tint | `shell/FloatingToolbar.test.tsx`, `stage/PageContextMenu.test.tsx`, `annotations/selection-bar.test.tsx`, `e2e/tools.spec.ts` |
+| M4 | done | `viewer/hit-order.ts`; double-click opens the paragraph editor (line editor as the fallback); hover outline and one-time hint; "Pen draws in Edit" (`pdf-editor:edit-policy:v1`, also in Document menu → Appearance); eraser end and barrel button; Space pans in both modes; adding, designing and clearing fields and "Mark all matches" only in Edit. A pen's first press, before any hover, acts as a pointer once; in Select a plain press on a markup over a form field still reaches the field (the order decides double-click and hover only); annotations are ignored under Edit text but not dimmed; a Space tap steps a screen on keyup | `viewer/hit-order.test.ts`, `viewer/edit-policy.test.tsx`, `e2e/modes.spec.ts` |
+| M5 | done | Recents in IndexedDB (`pdf-editor:recents:v1`, at most 12, names, sizes, page counts and handles), reopen through the handle with a permission prompt, "Open again…" otherwise, "Clear recents" on Home, in the palette and in the privacy popover, and a line on the about page. Compare's second file and images opened as documents are not recorded; the native-picker handle path is covered by unit tests only (Playwright cannot drive the picker) | `files/recents.test.ts`, `home/HomeView.test.tsx`, `e2e/home.spec.ts` |
+| A11 | done | One keyboard target per paragraph with Edit text armed (660 glyph stops → one per paragraph on `word-tagged.pdf`); lasso handles and grip with 24 px hit areas; the Highlighter's announcement "Highlighted N lines on page P", which is also the history label; mode announcements only on change. `4` still announces when pressed in Compare | `text-edit/TextEditLayer.test.tsx`, `lasso/transform-layer.test.tsx`, `pen/highlighter-commit.test.ts`, `e2e/a11y.spec.ts` |
+
+### 15.2 Text
+
+| Id | Status | As built, and deviations | Evidence |
+|---|---|---|---|
+| T1 | done | `analyzeRun` once per run and revision, pure arithmetic per keystroke, one dry run after a 300 ms pause, caret at the click, free space bounded by the column, reads at normal priority. Engine calls for five keystrokes: 5 → 0, then one dry run | `text-edit/TextEditor.test.tsx`, `packages/engine/src/text-edit/analysis.test.ts` |
+| T2 | done | Raw wrappers, enriched `LocatedRun`, the structure-tree reader, `TJ` adjustments kept | `locate.test.ts`, `struct-tree.test.ts`, `content.test.ts` (engine `text-edit/`) |
+| T3 | done | `detectParagraphs`: tags first, then geometry, cached per page fingerprint; rules added on the corpus are listed in `blocks.ts` | `packages/engine/src/text-edit/blocks.test.ts` |
+| T4 | done | Greedy rewrap with UAX #14 (`linebreak` 1.1.0), justification within 1.5 ×, kerning harvested, overflow policy; a 2,000-character justified paragraph lays out in about 1 ms. An edit in a line's first word may restart the rewrap one line earlier; ligature reuse and `fontkit.layout()` for substitutes are not done | `packages/engine/src/text-edit/linebreak.test.ts` |
+| T5 | done | `applyParagraphEdit` with verification (read-back, 0.01 / 0.05 pt, zero pixels changed outside the paragraph) and byte-identical replay; one MCID per written line; codes re-encoded from Unicode, so subset ligatures are written as two glyphs; paragraphs in a form XObject are refused | `packages/engine/src/text-edit/paragraph-edit.test.ts` |
+| T6 | done | Glyph canvas, hidden `contenteditable` mirror, one deferred preview per pause, leaving commits. **The plate is page white** (no render without the paragraph): a coloured box under a rewritten line shows white until the preview settles. **Join with next and Split here are shown but unavailable** (detection takes no hints). The IME candidate window opens at the mirror's layout, not at the drawn caret. Typing in two places becomes one replacement | `text-edit/ParagraphEditor.test.tsx`, `paragraph-model.test.ts`, `glyph-canvas.test.ts`, `e2e/paragraph-edit.spec.ts`, `e2e/text-edit.spec.ts` |
+| T7 | done | Noto Sans Regular bundled (329 KB; the six faces total 1.23 MB); class by flags, PANOSE and names; a substitute chosen per character; the honesty line in English and Turkish. No Noto Sans Bold (size budget). The overlay refuses a character only another class's face has (an arrow in a serif paragraph); a full, non-subset embedded font can get a false honesty line for a letter never probed | `packages/engine/src/fonts/substitutes.test.ts`, `e2e/paragraph-edit.spec.ts` |
+| T8 | partial | Corpus goldens for eight edits and five class cases: read-back, untouched glyphs within 0.01 pt, zero pixels outside the box, keystroke median 0.0–0.4 ms (worst 2.7 ms). **No real Word or LibreOffice export**: LibreOffice Writer is not installed, so the corpus is Chromium and pdf-lib files. The goldens found and fixed a ligature kerning bug | `packages/engine/src/text-edit/corpus-goldens.test.ts` |
+
+### 15.3 Pen, Highlighter, lasso and colour
+
+| Id | Status | As built, and deviations | Evidence |
+|---|---|---|---|
+| P6 | done | `window.__inkStats` and `e2e/ink-latency.spec.ts` (CDP pen at 240 Hz, mouse at 125 Hz). No quiet-machine baseline: every run was on a loaded 4-core container | `pen/ink-stats.test.ts`, `docs/qa/ink-latency-baseline.md` |
+| P7 | done | §5.2 items 1–6: constant mouse width, one stroke model (committed outline within 0.5 device px of the last frame), own prediction, round joins, bake-once preview, dot cursor, no debounce on edit repaints; the prediction cap reads as `max(12 px, 4 × width)` | `annotations/pen/ink-input.test.ts`, `annotations/ink.test.ts`, `packages/engine/src/annotations/ink-outline.test.ts` |
+| P8 | done | Dry ink layer with deferred re-renders: committed visible p95 21–39 ms (burst) and 26–34 ms (mouse) at load 9–15. Tiles at high zoom still re-render at once on each revision; a 5,000-sample stroke takes 165–229 ms, spent in the release task's smoothing | `pen/dry-ink.test.ts`, `pen/dry-ink-handover.test.tsx` |
+| P9 | done | Cached per-path outlines (11–21 ms → 0.8 ms uncontended), in-place appends (25–32 ms → 6–7 ms), one listing per 12-stroke burst instead of 34, clipped repaints (0.3 ms against 16.5–19 ms). Under contention the cached operators exceed 1 ms; the appearance write stays O(paths) | `pdfium/ink-append.test.ts`, `engine/clipped-repaint.test.ts`, `pen/bursts.test.ts` |
+| P10 | done | The Highlighter snaps at 70 % (steps within 35° of the reading direction), Alt for free ink, Multiply in the file and the preview. The blend sits on the annotation layer while a stroke is live (a canvas blend has no effect inside the layer); Alt is read from a window `pointerup`; the preview does not morph into quads | `pen/highlighter.test.ts`, `pdfium/ink-blend.test.ts`, `e2e/pen.spec.ts` |
+| P11 | done | Every kind per §5.5, `{ paths, whole }`, mixed labels and one history entry per edit; width disabled when nothing taken has one | `lasso/geometry.test.ts`, `lasso/edits.test.ts`, `lasso/lasso-layer.test.tsx` |
+| P12 | done | Eight handles and a grip, Shift for aspect and 15° steps, keyboard resize and rotate on a focusable box. **Handle hit areas are 24 px** (raised from 16 px by A11, pushed outwards so they never cover the selection). Line and shape stroke widths are not scaled; stamps scale by min(sx, sy) and orbit, with the "Stamps keep their orientation" line | `lasso/transform.test.ts`, `lasso/transform-edits.test.ts`, `e2e/pen.spec.ts` |
+| P13 | done | Partial and Whole stroke eraser with four sizes, one entry per drag; hold to straighten; Shift for straight Highlighter lines. The erase filter for highlighter strokes is not built (in both modes they erase whole); no live cut preview during the drag | `pen/eraser.test.ts`, `pen/straighten.test.ts`, `pen/eraser-layer.test.tsx`, `e2e/pen.spec.ts` |
+| P14 | not started | Conditional on P6: the harness did not show presentation latency as the bottleneck (committed visibility was the commit path, now on the dry layer; event-to-draw is the wait for the next frame on a loaded machine), so `pointerrawupdate` and the Ink API wait for the owner's laptop measurement | `docs/qa/ink-latency-baseline.md` |
+| C1 | partial | `annotations/palette.ts` with every ratio tested, presets and swatches from it, the `v1` → `v2` migration, stamps on the palette. **Not done:** tag dots at full chroma and the raised `--accent-muted` / `--accent-line` alphas. Outside the palette: the redaction mark outline `#E53935`, the signature ink `#1A237E`; a redaction mark's `#000000` fill shows as "custom" | `annotations/palette.test.ts`, `pen/presets.test.ts`, `tool-styles.test.ts` |
+
+### 15.4 Glass, quality and review
+
+| Id | Status | As built, and deviations | Evidence |
+|---|---|---|---|
+| G1 | done | Full-bleed stage in Read and Edit (Arrange, Home and Compare keep the stage's box), native stand-in scroll bars, tiers 2 and 3, Glass panels and Reduce transparency in Document menu → Appearance and the palette (`pdf-editor:appearance:v1`). The 80 px gate opens at fit width, since pages sit 48–64 px from the frame | `styles/tokens.test.ts`, `shell/glass-frame.test.tsx`, `stage/read-bleed.test.tsx` |
+| S2 | partial | Contrast final for three tiers over four backdrops; `e2e/glass-perf.spec.ts` gives a headless CPU trend only (blur costs two to four times the median frame). **The owner's measurements are pending**: frame rate and GPU memory on a 2020-class GPU at DPR 2 in Chromium and Safari, and legibility. A15 stays a setting until then | `docs/research/14-glass-spike.md` |
+| QA | done | Specs rewritten for keys `1`–`4`, five groups and the Read lock (`enterEdit` after opening); new `modes`, `paragraph-edit`, `ink-latency` and `glass-perf` specs and new tests in `pen`, `home`, `text-edit`, `tools` and `a11y`. The last full Chromium run, before the wave-4 changes: 115 passed, 9 skipped by their own gates; the wave-4 specs passed on their own | the e2e specs under `apps/web/e2e/` |
+| D1 | done | DESIGN A8–A14 and the A15 trial, the M6, viewer and text-editing specs annotated, ROADMAP, a changeset. No new screenshots | `docs/DESIGN.md` §9 |
+| R | not started | The independent review, including the correctness of T5 and P9, still has to run | — |
+
+### 15.5 Not built by decision
+
+- **Tier C** (pushing later blocks down the page) was declined by the owner on 2026-10-03,
+  and **Tier D** (cross-page reflow) is declined (§4.9).
+- **P14** is conditional and was not started (§15.3).
