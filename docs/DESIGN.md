@@ -67,21 +67,39 @@ containers; and the anti-pattern of CSS-invert dark mode).
   The header row counts files and pages and carries Open files…, Arrange pages, Compare
   (exactly two selected), Close and the primary **Combine N files** ("Combine all 3 files"
   with nothing selected, "Combine 2 files" with two; not shown for one). Combining always
-  opens the merge dialog, also when one card is dragged onto another ("Combine with
-  report"); nothing merges without it. The empty state is the same view with a drop target,
-  one paragraph and three keycap shortcuts. *Amended 2026-10-01 (M6, A4).*
-  **Recents** follow the cards (and sit above the drop target in the empty state), only when
-  there are any: a "Recent" heading with a quiet "Clear recents", then up to 12 rows on the
-  canvas, newest first, each with the name, "3 pages · 6.1 KB", a relative time ("5 minutes
-  ago", "yesterday") and, where it applies, an italic hint "Needs permission" or "Open
-  again…". Files open right now are left out (their card is above). A row reopens the file
-  through the browser's file handle where one was kept (Chromium's file picker, a dropped
-  file), asking for permission first when the browser wants it, and opens it in Read;
-  without a handle it opens the file dialog and says why in one line. Rows take roving
-  focus (arrows, Home, End, Enter; Delete removes); a ⋯ button shown on hover or focus holds
-  "Remove from recents". Only names, sizes, page counts and handles are kept, in IndexedDB on
-  this device (`pdf-editor:recents:v1`), never the file's bytes or thumbnails; "Clear
-  recents" is also in the palette and in the privacy popover. *Amended 2026-10-04 (M8, A8).*
+  opens the Combine dialog, also when one card is dragged onto another ("Combine with
+  report"); nothing combines without it. **Combine keeps its sources open.** It adds a new
+  tab after the last source, titled "Combined – A + B" ("Combined – A + 2 more" for more
+  files; the title follows the order until it is edited), as one history entry, "Combine 2
+  files". An opaque toast at the bottom left, "Combined 2 files · Undo", stays while the
+  combine is the latest history step and goes after 10 s, unless the pointer or the focus
+  is on it. Arrange's "Merge all open documents" still replaces its inputs. The empty
+  state is the same view with a drop target, one paragraph and three keycap shortcuts.
+  *Amended 2026-10-01 (M6, A4); 2026-10-04 (M8 review).*
+  **Recents** follow the cards, only when there are any: a "Recent" heading with a quiet
+  "Clear recents", then up to 12 cards in one column, as wide as the open and drop card,
+  newest first. Each card has a generic page glyph (no thumbnail), the name, "3 pages ·
+  6.1 KB · 5 minutes ago" and, on the right and where it applies, an italic hint "Needs
+  permission" or "Open again…". With no file open, the open and drop card comes first, at
+  the top of the column, and the Recents follow; without Recents it sits centred. Files
+  open right now are left out (their card is above). A card reopens the file through the
+  browser's file handle where one was kept (Chromium's file picker, a dropped file), asking
+  for permission first when the browser wants it, and opens it in Read; without a handle it
+  opens the file dialog and says why in one line. Cards take roving focus (arrows, Home,
+  End, Enter; Delete removes); a ⋯ button shown on hover or focus holds "Remove from
+  recents". Only names, sizes, page counts and handles are kept, in IndexedDB on this
+  device (`pdf-editor:recents:v1`), never the file's bytes or thumbnails. "Clear recents" is
+  also in the palette and in the privacy popover; it is final, also for the stored copy
+  after a write failure, and when the stored copy cannot be cleared the section stays with
+  a one-line note and a Clear button to try again.
+  *Amended 2026-10-04 (M8, A8; M8 review).*
+- **Home's chrome is Home's own.** With files open, the navigator offers only **Files**
+  (a document's Pages, Find or Review panel stays closed and its stored view is kept), and
+  the status bar reads "N files" ("0 files" when empty), with no page, selection,
+  signature or zoom readout. No tab looks selected on Home; the × of an unselected tab
+  shows on hover or keyboard focus, not after a click. **Tabs** are as wide as their title,
+  from 112 to 220 px, and truncate only when the strip is full. *Added 2026-10-04 (M8
+  review).*
 - **Navigator** on the left: four labelled tabs, an icon with an 11 px label under it and a
   count badge (tabular numerals, hidden at 0): **Pages** (thumbnails, with a Pages ·
   Bookmarks switch for the outline), **Find**, **Review** (comments, redaction marks and
@@ -103,36 +121,54 @@ containers; and the anti-pattern of CSS-invert dark mode).
   pressed while Select is armed, with the view-switch "on" look rather than the accent fill,
   so the bar carries no accent block at rest. Write holds the three pens and the
   Highlighter (§4.1), Eraser (Shift+E), Lasso (Q) and Shapes (R, O, L, A); Text holds Edit
-  text (E), Text box (T), Note (N) and Image (I); Fill & sign and Redact are as before.
+  text (E), Text box (T), Note (N) and Image (I), and opening it arms Edit text, as opening
+  Write arms the pen (a Text tool that is already armed stays armed); Fill & sign and
+  Redact are as before.
   Picking a group morphs the capsule in place: the group's button becomes a chip with a
   chevron at the left end and the group's tools slide in beside it (one 160 ms movement,
   none under reduced motion); the chip returns to the row. The bar keeps its height,
   anchor and glass. Every tool keeps its one-letter shortcut, and arming a tool by its key
   or the palette shows its group. The text markups (Highlight, Underline U, Strikeout S,
   Squiggly) have no group: they live in the text selection bar and keep their keys and
-  palette entries, and arming one by key shows the group row with that tool's options
-  tier. Find, layout and fit live in the title bar and the palette; Crop, Rotate, Delete
-  page and Arrange live in Arrange, the page context menu and the Document menu. Arrange
-  shows only its own selection bar. *Amended 2026-10-04 (M8, A9).*
+  palette entries, and arming one by key shows the group row; pressing the key again
+  opens that tool's options tier. Find, layout and fit live in the title bar and the
+  palette; Crop, Rotate, Delete page and Arrange live in Arrange, the page context menu
+  (in Edit) and the Document menu. Arrange shows only its own selection bar. *Amended
+  2026-10-04 (M8, A9; M8 review).*
 - **Text selection bar and page context menu.** A text selection gets a glass bar above its
-  first line, on the page where it starts. In Read it offers **Copy** and **Mark up…**, which
-  enters Edit, keeps the selection and turns the bar into the Edit one; in Edit, with Select
-  armed, it offers Highlight, Underline, Strikeout, Squiggly and **Comment** (a new note at
-  the end of the selection's first line). With another tool armed it does not show; Esc or a
-  click elsewhere dismisses it. A right-click on a page, or Shift+F10 or the Menu key with the
-  focus in the pages, opens the **page context menu** for that page: "Edit text here" (Edit
-  only, first, with its E keycap), "Rotate page N left", "Rotate page N right", "Delete page
-  N" (one undo step), "Crop…" and "Arrange". The browser keeps its own menu on selected text,
-  in editors and on contextual bars. *Added 2026-10-04 (M8, A9).*
+  first line, on the page where it starts. In Read it offers **Copy**, **Edit text** and
+  **Mark up…**. Edit text switches to Edit, clears the selection and opens the paragraph
+  editor just inside the first selected glyph; Mark up… enters Edit, keeps the selection
+  and turns the bar into the Edit one. In Edit, with Select armed, the bar offers
+  Highlight, Underline, Strikeout, Squiggly and **Comment** (a new note at the end of the
+  selection's first line). With another tool armed it does not show; Esc or a click
+  elsewhere dismisses it. A right-click on a page, or Shift+F10 or the Menu key with the
+  focus in the pages, opens the **page context menu** for that page. In Edit it holds
+  "Edit text here" (first, with its E keycap), "Rotate page N left", "Rotate page N
+  right", "Delete page N" (one undo step), "Crop…" and "Arrange". In Read it has no
+  page-changing item:
+  one muted row, "Switch to Edit to change pages" (lock glyph, the 2 keycap), which is not
+  disabled and switches to Edit with "Edit mode" announced. Arrange still works in both
+  modes. The browser keeps its own menu on selected text, in editors and on contextual
+  bars. *Added 2026-10-04 (M8, A9); amended 2026-10-04 (M8 review).*
 - **Creating does not select. A tool's options live with the tool**, in a second tier
-  attached to the top of the bar while the tool is armed (the tool's colour, opacity and
-  width, as fit the tool), never over the page; the pen's presets sit in the bar itself
-  (§4.1). Changing them changes the tool, and the change is remembered. **A selection's
-  options live with the selection**, which exists only after an explicit select (Select
+  attached to the top of the bar (the tool's colour, opacity and width, as fit the tool),
+  never over the page. **The tier opens only when the armed tool is pressed again**, by its
+  button or its key; arming a tool, by any route, closes it. The armed button says "Press
+  again for options" and the press announces "{tool} options". The pen's presets sit in
+  the bar itself (§4.1). Changing them changes the tool, and the change is remembered.
+  **A selection's options live with the selection**, which exists only after an explicit select (Select
   tool, a Review row, Tab) or a lasso: then a contextual bar appears above it
   (highlight/underline/comment for text; colour/stroke/opacity for an annotation). One-shot
   tools (stamp, signature image) return to the previous tool and leave the placed object
-  unselected. *Amended 2026-10-01 (M6, A2).*
+  unselected. *Amended 2026-10-01 (M6, A2); 2026-10-04 (M8 review).*
+- **The bar gives way to a stroke.** While a drawing tool draws (pens, Highlighter,
+  Eraser, Lasso, rectangle, ellipse, line, arrow), while the pen's eraser end or barrel
+  button is down, or while a pen draws with Select armed ("Pen draws in Edit" on), and for
+  1 s after, the tool bar and its tier fade to 20 % and ignore the pointer, so a stroke
+  that crosses the bar goes on drawing on the page. Each surface fades alone, so its glass
+  keeps its own backdrop; there is no transition under reduced motion. *Added 2026-10-04
+  (M8 review).*
 - **Document menu**, a labelled "Document" button in the title bar, with section headings
   and no disabled twins: Combine and split (Merge files…, Split…, Compare with…, Rotate
   pages…) · Add to pages (page numbers, header and footer, Bates numbering, watermark; a
@@ -141,7 +177,9 @@ containers; and the anti-pattern of CSS-invert dark mode).
   2026-10-01 (M6, A4).* Every item stays available in Read: its dialogs have a preview and
   undo, and the lock guards against slips, not intent. An **Appearance ▸** submenu, one row
   before "About this app", holds three switches: Glass panels, Reduce transparency and Pen
-  draws in Edit; each is also a palette command. *Amended 2026-10-04 (M8, A10, A15).*
+  draws in Edit. Each shows a 14 px check box, empty with a border when off and an accent
+  fill with a check when on, and is also a palette command; the palette titles carry the
+  state ("Glass panels: on"). *Amended 2026-10-04 (M8, A10, A15; M8 review).*
 - **Floating chrome is frosted glass; everything docked is opaque.** Glass: the floating
   tool bar and its options tier, the contextual bars (annotation, lasso, image, Arrange,
   text selection), the crop banner, the command palette, every menu (the page context menu
@@ -155,15 +193,17 @@ containers; and the anti-pattern of CSS-invert dark mode).
 - **Glass panels (a trial, default off).** Behind the Glass panels setting (Document menu →
   Appearance, or the palette), the docked frame (title bar, navigator, inspector, status
   bar) becomes a denser glass that composites to exactly `--surface-1` over the canvas, so
-  it changes only where a page passes under it (§3). This is pending spike S2 on the
+  it changes only where a page passes under it (§3). With the setting on, all four docked
+  surfaces blur in every view; there is no geometry gate. This is pending spike S2 on the
   owner's machine ([`research/14-glass-spike.md`](research/14-glass-spike.md)); until S2
   passes and the owner approves, the rule above stands: everything docked is opaque. If S2
   fails, the setting goes and the full-bleed stage and the menu tier stay. *Added
-  2026-10-04 (M8, A15, pending S2).*
+  2026-10-04 (M8, A15, pending S2); amended 2026-10-04 (M8 review).*
 - **Command palette** (Cmd/Ctrl+K) lists every action with its shortcut, accepts
   arguments ("rotate 3-5 90", "go 42"), shows recents, and matches keywords of both UI
   languages without diacritics ("draw", "kalem" and "ciz" find the pen).
-- **Status bar** carries the privacy indicator, zoom, and selection summary.
+- **Status bar** carries the privacy indicator, zoom, and selection summary; on Home it
+  reads "N files" instead.
 - Hover states never shift layout; space is reserved. The stage keeps bottom padding so
   a page's last lines can scroll above the bar.
 
@@ -304,16 +344,22 @@ Rules:
   navigator, inspector and status bar compose `.glass-frame`: an 80 % tint over a backdrop
   blurred 40 px, saturated 1.4 and darkened to 0.6, which is exactly `--surface-1`
   (#181a1f) over the canvas and #36373c over a white page (primary 9.60:1, secondary
-  6.50:1, danger 6.10:1, the accent 3.99:1). The blur is geometry-gated: only a surface with
-  a laid-out page within 80 px gets the backdrop filter (`data-glass-near` on the shell,
-  recomputed once per frame while scrolling); the others paint the solid token, the same
-  pixels over the canvas. Filters never animate, there is no glass inside glass, and text
-  on the frame uses the glass steps while the setting is on. Contrast is final for all
+  6.50:1, danger 6.10:1, the accent 3.99:1). With the setting on, every one of the four
+  surfaces carries the backdrop filter in every view; the 80 px geometry gate was removed
+  after the M8 review. Over the canvas the blurred surface equals the solid token, so
+  nothing changes at rest. The cost is measured in
+  [`research/14-glass-spike.md`](research/14-glass-spike.md) §4.2: in Read it is as before,
+  and in Arrange the median frame is unchanged while the slow tail (p95) rises. The
+  floating bar's tier 1 stays as it is, because no lighter value passed the contrast tests
+  (§4.3 there: a lighter backdrop takes the accent fill under 3:1, and a darker tint lets
+  the bar sink into the canvas, below the 1.265:1 that `tokens.test.ts` requires). Filters
+  never animate, there is no glass inside glass, and text on the frame uses the glass
+  steps while the setting is on. Contrast is final for all
   three tiers over white, the canvas, `#808080` and black; frame rate, GPU memory and
   legibility on a 2020-class GPU at DPR 2 wait for the owner's machine
   ([`research/14-glass-spike.md`](research/14-glass-spike.md)). Without the owner's
   approval after S2, this rule does not replace "everything docked is opaque" (§2).
-  *Added 2026-10-04 (M8, A15, pending S2).*
+  *Added 2026-10-04 (M8, A15, pending S2); amended 2026-10-04 (M8 review).*
 - **Chrome colour is for state; colour enters through content.** In the chrome, accent is
   for focus, selection, the armed tool and the primary action, danger for destructive,
   warning for honesty notices (repaired file, font substituted). Colour beyond that comes
@@ -415,7 +461,9 @@ Rules:
 1. Every action has a keyboard path and appears in the command palette.
 2. Selection is the primary noun; tools act on it. Esc always clears tool and selection;
    with nothing armed, Esc on the tool bar returns to the group row. Esc never leaves
-   Edit. *Amended 2026-10-04 (M8, A10).*
+   Edit. It is a ladder: the first Esc disarms to Select, the second returns the bar to
+   the group row, and the armed tool's tooltip ends "Esc: Select". *Amended 2026-10-04
+   (M8, A10; M8 review).*
 3. Creating does not select. A tool's options live with the tool and set the next object;
    a selection's options live with the selection, which only an explicit select or a lasso
    makes. Nothing opens on its own after a stroke, a shape or a placed stamp.
@@ -438,14 +486,17 @@ that paints it.
 
 - **Presets.** The Write group holds four presets as ink dots (§3): three pens, black
   1.5 pt, blue 1.5 pt and red 2 pt, and the **Highlighter**, yellow 12 pt; then Eraser,
-  Lasso (Q) and Shapes. P arms the last used pen, H the Highlighter. Tapping a preset arms
-  it; tapping the armed one opens its editor, a popover rising from the bar: for a pen the
-  eight inks and a custom colour, width stops and a slider from 0.25 to 24 pt, and opacity;
+  Lasso (Q) and Shapes. P arms the last writing pen (with the Highlighter active, the last
+  pen rather than the Highlighter), H the Highlighter; each announces the preset ("Blue
+  pen, 1.5 pt"), and from Read in one sentence with "Edit mode". Tapping a preset arms it;
+  tapping the armed one, or pressing P again, opens its editor, a popover rising from the
+  bar: for a pen the eight
+  inks and a custom colour, width stops and a slider from 0.25 to 24 pt, and opacity;
   for the Highlighter the four tints and a custom colour and widths from 6 to 18 pt (stops
   6, 8, 10, 12, 15 and 18), with no opacity. Edits change that preset and are kept on the
   device (`pdf-editor:ui:pen-presets:v2`). Once a pen has reported pressure, the options
-  tier carries one honesty line: other viewers that redraw ink themselves show it at one
-  width. *Amended 2026-10-04 (M8, A12).*
+  tier and the preset editor carry one honesty line: other viewers that redraw ink
+  themselves show it at one width. *Amended 2026-10-04 (M8, A12; M8 review).*
 - **Width and one stroke model.** Pressure sets the width for a pen. A mouse draws the
   preset's width, constant; a finger, or a pen before it reports pressure, varies by speed
   within ±10 %. Preview and commit share one smoothed stroke model: the settled part of the
@@ -524,8 +575,9 @@ that paints it.
 Principle 8 in full. *Added 2026-10-04 (M8, A10).*
 
 - **Read is locked.** Allowed: scroll, zoom, layout, Find, select and copy text, links,
-  form values, Review, History, Undo and Redo, the Document menu, Arrange and the page
-  context menu's page operations. Annotations
+  form values, Review, History, Undo and Redo, the Document menu and Arrange. The page
+  context menu has no page-changing item in Read: one row, "Switch to Edit to change
+  pages", replaces Rotate, Delete and Crop. Arrange still works in both modes. Annotations
   cannot be selected, moved, resized, deleted or edited; notes and comments read in Review
   and the inspector, read-only. A click on a form field keeps its focus ring and shows
   "Switch to Edit to fill" with an **Edit** button (Tab from the field reaches it), never an
@@ -540,7 +592,7 @@ Principle 8 in full. *Added 2026-10-04 (M8, A10).*
 
   | Tool armed | What a press on the page does |
   |---|---|
-  | Select (V) | Selects an annotation, starts a text selection, or clears; a **double-click on page text** with a mouse, or a pen used as a pointer, opens the paragraph editor with the caret at the point (never from touch, never from a pen that draws) |
+  | Select (V) | Selects an annotation, starts a text selection, or clears; a **double-click on page text** with a mouse, or a pen used as a pointer, opens the paragraph editor with the caret at the point (never from touch, never from a pen that draws); a first plain click on page text shows the double-click hint |
   | Edit text (E) | Opens the paragraph editor at the point with one click; annotations are ignored |
   | Pens, Highlighter, Eraser, Lasso | Draw, erase or lasso over anything; text is never hit-tested |
   | Shapes, Text box, Note | Create, on text too |
@@ -555,7 +607,10 @@ Principle 8 in full. *Added 2026-10-04 (M8, A10).*
   Edit text armed, a faint run outline appears (§3), read from the text layer with no
   engine call; never from touch, never within 300 ms of a pen lift, never over an
   annotation, field or image, and not while the paragraph editor is open. Once per device a
-  small glass hint says "Double-click to edit text", until the first double-click.
+  small glass hint says "Double-click to edit text", until the first double-click. With
+  Select armed, a first plain click on page text (no drag) shows the same hint at once,
+  below the clicked line; the next press clears it. It can cover the start of the next
+  line.
 - **Pen draws in Edit.** The setting turns on by itself when a pen is first seen, and can be
   set in Document menu → Appearance or the palette; while it is on, a pen with Select armed draws with the
   armed pen preset (the first pen while the Highlighter is armed), while Edit text always
@@ -568,12 +623,41 @@ Principle 8 in full. *Added 2026-10-04 (M8, A10).*
   Its glass header carries only what applies: one honesty line naming the bundled face for
   characters the file's font lacks ("‘ğ’ uses Noto Sans because the original font in this
   file does not include it."), "Spacing tightened by N %", the overflow warning with the
-  overlap marked on the canvas, a ragged-line note, and an info popover. "Join with next"
-  and "Split here" (Alt+J, Alt+S) are shown but not available yet. Leaving (Esc, a press
-  outside, a tool or mode change) commits a change as one history entry; with no change
-  nothing happens. A paragraph that refuses paragraph mode opens the one-line editor on the
-  clicked run and says why. With Edit text armed, the keyboard reaches one target per
-  paragraph: Tab moves between paragraphs, Enter opens one, Esc returns to it.
+  overlap marked on the canvas, the page-edge refusal, a ragged-line note, and an info
+  popover. The header sits in the page margin beside the paragraph when 180 px are free
+  (right first, then left); else above the floating bar, following the scroll; else below
+  the paragraph. It never covers the text. "Join with next" and "Split here" are hidden.
+  Leaving (Esc, a press outside, the focus leaving, a tool or mode change) commits a change
+  as one history entry; with no change nothing happens. **An overlap is never committed
+  silently.** Leaving with one keeps the editor open, keeps the overlap marked and offers
+  three choices in the header: "Tighten to fit" (only when tightening the whole paragraph
+  within the floors, −15 % word spacing and −5 % leading, makes it fit), "Let it overlap"
+  and "Keep editing" (which takes the focus; Esc on the choice also keeps editing).
+  Spacing is tightened automatically only on the lines the user rewrote, and the whole
+  paragraph only on that button. Text that would cross the page edge is refused: "This
+  text no longer fits on the page; shorten it or move content". Leaving through the Read
+  lock, or by opening another paragraph, discards an overlap with an announcement. A draft
+  scrolled off screen is kept and restored when the page returns. A paragraph that refuses
+  paragraph mode opens the one-line editor on the clicked run and says why. With Edit text
+  armed, the keyboard reaches one target per paragraph: Tab moves between paragraphs,
+  Enter opens one, Esc returns to it.
+- **What the paragraph editor keeps.** Typed text takes the style of the character before
+  the caret, and untouched characters between several changes in one session keep their
+  own font, size, colour and marked content; the writer checks this and fails closed
+  rather than restyle them. A highlight or link over several lines follows its words quad
+  by quad. Hard line breaks are kept: a line that is not the last and reaches under 85 % of
+  the measure stays a line when the next word would have fitted after it, or when the next
+  line is one short word (an address, a URL). The measure is bounded by an enclosing filled
+  or stroked box, less the text's own inset, so an address in a shaded box does not rewrap
+  out to the box's edge. The plate under rewritten lines is a dry-run render of the
+  paragraph's area emptied, so coloured boxes and rules show through while typing, and the
+  settled preview sits on the device pixels, with no shift on open or on settle. The hover
+  outline under Select or Edit text shows the paragraph box, not the line. *Amended
+  2026-10-04 (M8 review).*
+- **Notes.** A note's popup saves its text on Esc and on a press outside it; only an
+  empty new note is dropped, and Cancel is the one way to throw typed text away. It stays
+  inside the visible area, flipping left or up near an edge. *Amended 2026-10-04 (M8
+  review).*
 - **Space** pans in both modes while the pages own the focus; a tap without a drag moves
   one screen. **Esc** clears the tool and the selection, then returns the bar to its group
   row; it never leaves Edit, and `1` is the way back to Read.
@@ -652,8 +736,9 @@ contrast measurements in
 
 ## 9. Craft (M8)
 
-**Built (2026-10-04)**, pending the owner's checks and the independent review. Owner
-feedback on the beta: everything works, nothing feels native yet. This pass amended §2–§5
+**Built (2026-10-04)**, pending the owner's checks. The independent review ran on the same
+day ([`DISCUSSION.md`](DISCUSSION.md) #31); its fixes are marked "M8 review" in §2–§4.8.
+Owner feedback on the beta: everything works, nothing feels native yet. This pass amended §2–§5
 with A8–A14 of the [spec](specs/craft.md) §2, as built: Home as a view and documents in Read
 (locked), Edit or Arrange with keys `1`–`4` (A8); one Edit button in Read and five groups in
 Edit, with the text selection bar and the page context menu (A9); Esc never leaving Edit
@@ -662,8 +747,9 @@ glyphs (A11); three pens and the Highlighter, a constant mouse width, one stroke
 dry ink (A12); a lasso that takes every kind, with resize and rotate (A13); one ink palette
 (A14); Recents on Home, the partial eraser and hold-to-straighten. Two parts of A14 were not
 built: tag dots stay desaturated and the accent's state alphas are unchanged. A15 (glass on
-the docked frame) is only a trial behind the Glass panels setting, default off, pending
-spike S2 on the owner's machine ([`research/14-glass-spike.md`](research/14-glass-spike.md));
+the docked frame, now with no geometry gate) is only a trial behind the Glass panels
+setting, default off, pending spike S2 on the owner's machine
+([`research/14-glass-spike.md`](research/14-glass-spike.md));
 the menu glass tier, Reduce transparency and the full-bleed stage are in place for
 everyone. What each work package delivered, and where it differs from the plan, is in the
 spec's §15; the latency measurements are in

@@ -90,7 +90,7 @@ S2 and the owner's approval):
 | A12 | DESIGN §4.1 presets, width | Yellow highlighter at 40 %; speed width for mouse and finger; one outline function | Three pens and the Highlighter; constant mouse width; finger ±10 %; one smoothed stroke model |
 | A13 | DESIGN §4.1 lasso | Ink only | Every kind (§5.5) |
 | A14 | DESIGN §3 dots, swatches, tags | Translucent preset as a capsule; tags desaturated | The Highlighter is a capsule of its tint; one palette; tag dots at full chroma |
-| A15 | DESIGN §2–§3 glass | Everything docked is opaque | With Glass panels on, the docked frame is a denser glass equal to `--surface-1` over the canvas |
+| A15 | DESIGN §2–§3 glass | Everything docked is opaque | With Glass panels on, the docked frame is a denser glass equal to `--surface-1` over the canvas, in every view, with no geometry gate (*amended 2026-10-04, M8 review*) |
 
 `docs/specs/viewer-annotations.md` (Ink row) follows A12;
 `docs/specs/redaction-and-text-editing.md` §2.2 follows §4.
@@ -107,6 +107,23 @@ view shows". A tab click on Home opens that document in its last mode; on Home t
 in Read. **Recents** (WP M5, P2): names, and reopen through a `FileSystemFileHandle` where
 the browser keeps one (`files/open-files.ts:52-80` drops it today), local only, with "Clear
 recents"; it moves to M9 (ROADMAP) if it misses M8.
+
+*Amended 2026-10-04 (M8 review).* **Home frames every file, not one document.** With files
+open, the navigator offers only the Files tab (a document's Pages, Find or Review panel
+stays closed and its view is kept) and the status bar reads "N files", with no page,
+selection, signature or zoom readout. No tab looks selected on Home. Tabs are as wide as
+their title, 112 to 220 px. **Recents** are cards in one column, as wide as the open and
+drop card: a generic page glyph (no thumbnails), the name, "pages · size · time" and the
+hint on the right; with no file open the drop card comes first. "Clear recents" is final,
+also for the copy in IndexedDB after a write failure, and says so on Home when that copy
+cannot be cleared. **Combine keeps its sources open** (`mergeDocuments` with
+`keepSources`): the result is a new tab after the last source, with copies of the pages, its
+outline retargeted and the title "Combined – A + B" ("Combined – A + 2 more"), one history
+entry "Combine N files" and a toast "Combined N files · Undo" that lasts while the combine
+is the latest step, or 10 s. Arrange's "Merge all open documents" still replaces its
+inputs. The Appearance switches show check states (an empty box, or an accent fill with a
+check), and the palette titles say "Glass panels: on". **Notes** save on Esc and on a press
+outside the popup; only an empty new note is dropped, and Cancel throws typed text away.
 
 ### 3.2 The control and the keys
 
@@ -133,13 +150,20 @@ form values, Review, History, Undo and Redo (§13 #6). Blocked, behind one store
    button, never an implicit switch;
 3. arming: a tool shortcut switches to Edit and arms the tool, visibly; nothing changes
    until the first stroke;
-4. select-then-markup: the selection bar offers Copy and "Mark up…"; H, U or S switch to
-   Edit keeping the selection, and marking needs a second press;
-5. the paragraph editor (double-click selects a word).
+4. select-then-markup: the selection bar offers Copy, **Edit text** and "Mark up…"; Edit
+   text switches to Edit, clears the selection and opens the paragraph editor at the first
+   selected glyph; H, U or S switch to Edit keeping the selection, and marking needs a
+   second press;
+5. the paragraph editor (double-click selects a word);
+6. page changes from the page context menu: in Read it has no page-changing item, only one
+   muted row, "Switch to Edit to change pages" (lock glyph, the `2` keycap), which is not
+   disabled and switches to Edit. It replaces Rotate, Delete and Crop (*amended 2026-10-04,
+   M8 review*).
 
 The **Document menu** keeps every item: page numbers, watermark, OCR apply, Apply
-redactions, Compress and Export are dialogs with preview and undo. Arrange's page
-operations stay. A signed document entering Edit shows the existing re-export notice.
+redactions, Compress and Export are dialogs with preview and undo. Arrange is a view in
+both modes, so its page operations stay. A signed document entering Edit shows the
+existing re-export notice.
 
 ### 3.4 Edit bar
 
@@ -156,6 +180,19 @@ the Document menu); the Mark up group (Underline U, Strikeout S, Squiggly and Hi
 from a selection move to the Select selection's contextual bar, keeping shortcuts and
 palette entries). `BAR_GROUP_IDS` becomes `select · write · text · fill · redact`.
 
+*Amended 2026-10-04 (M8 review).* **Behaviour of the bar:**
+
+- **Tiers open on request.** A tool's options tier opens only when the armed tool is
+  pressed again, by its button or its key (`tool-store` `optionsOpen`; arming any tool
+  closes it). The press announces "{tool} options" and the armed button carries "Press
+  again for options". Arming by key, palette or group never opens a tier by itself.
+- **Opening the Text group arms Edit text**, as opening Write arms the pen; a Text tool
+  that is already armed stays armed.
+- **Esc ladder.** The first Esc disarms the tool to Select, from any tool; the second
+  returns the bar to the group row. It never leaves Edit. The armed tool's tooltip ends
+  "Esc: Select".
+- **Out of the way of a stroke** (§5.8).
+
 ### 3.5 Interaction policy in Edit
 
 Only the armed tool creates; creating never selects; page text changes only through the
@@ -165,7 +202,7 @@ in Edit" is on; touch never shows hover affordances.
 | Tool | Click on text | Click on annotation | Click on paper | Double-click | Drag | Pen | Long press |
 |---|---|---|---|---|---|---|---|
 | **Read** (contrast) | Caret | Note read-only; link follows | — | Word | Selects | Never marks | Word; Copy, "Mark up…" |
-| **Select** (V) | Starts a selection (markups, Comment in its bar) | Selects it | Clears | **On page text: paragraph editor, caret at the point** (mouse or pen-as-pointer; never touch or a drawing pen); on a text box or note: edits it | Text: selects; annotation: moves; paper: marquee | As mouse unless "Pen draws in Edit" | Word; menu |
+| **Select** (V) | Starts a selection (markups, Comment in its bar) | Selects it | Clears | **On page text: paragraph editor, caret at the point** (mouse or pen-as-pointer; never touch or a drawing pen); on a text box or note: edits it; a first plain click on page text shows the double-click hint | Text: selects; annotation: moves; paper: marquee | As mouse unless "Pen draws in Edit" | Word; menu |
 | **U, S, Squiggly** | Marks the word | Passes through | — | Marks the word | Marks the run | As drag | After 300 ms |
 | **Edit text** (E) | Paragraph editor, caret at the point | Ignored, dimmed | — | Word in the editor | Selects in it | Clicks; never draws | Opens the editor |
 | **Pens, Highlighter** | Draws | Draws over it | Draws | — | Draws | Pressure | Fingers never draw once a pen is seen |
@@ -178,7 +215,10 @@ in Edit" is on; touch never shows hover affordances.
 **Hover hint.** After 400 ms of idle mouse or pen hover (`buttons === 0`) over page text
 with Select or Edit text armed, a faint run outline (1 px `--accent-line`) appears from the
 viewer's text model (no engine call), never within 300 ms of a stroke
-(`TOUCH_AFTER_PEN_MS`); once per device a hint says "Double-click to edit text".
+(`TOUCH_AFTER_PEN_MS`); once per device a hint says "Double-click to edit text". With Select armed, a first plain
+click on page text (`detail === 1`, no drag) shows the same hint at once below the clicked
+line, until the first double-click; the next press clears it, and it can cover the start of
+the next line.
 
 **One hit order**, annotation → form widget → image → text run → text selection, in
 `viewer/hit-order.ts`; layer roots become `pointer-events: none` with only targets live.
@@ -188,7 +228,8 @@ button a temporary lasso. "Pen draws in Edit" turns on when a pen is first seen 
 `annotations/pen/ink-input.ts:453`); then a pen with Select armed draws with the last
 preset, while Edit text always takes the pen as a pointer. Space pans in both modes; once a
 pen is seen, fingers pan and zoom and a long press is the only touch selection. Esc clears
-tool and selection, then returns the bar to its group row; it never leaves Edit.
+tool and selection, then returns the bar to its group row; it never leaves Edit (the
+ladder is in §3.4).
 
 **Strings** (`apps/web/messages/{en,tr}.json`, parity by `i18n/i18n.test.tsx:44`): the mode,
 group and Home keys (`mode_read*`, `cmd_mode_*`, `bar_group_*`, `cmd_view_home`,
@@ -217,8 +258,22 @@ Analysis runs once per page on open or first use and is cached by revision.
    - `toBlocks`' breaks also apply: size or bold change, a gap above
      `max(0.6·size, min(1.5·leading + 1, 1.3·size))`, an indent change above one size;
      `suspectedTables` give one box per cell; justified when line edges vary under 0.5 pt.
-3. **Correction**: "Join with next" and "Split here" on the box (Alt+J, Alt+S). A drop cap
-   refuses paragraph mode with its reason.
+3. **Correction**: "Join with next" and "Split here" on the box (Alt+J, Alt+S) were
+   specified but are not built: detection takes no hints, and since the M8 review the
+   header hides both buttons and their keys do nothing. A drop cap refuses paragraph mode
+   with its reason.
+4. **Hard breaks and the measure** (*added 2026-10-04, M8 review*; `blocks.ts`
+   `settleMeasures`). A line that is not the last, does not end in a hyphen and reaches
+   under 85 % of the measure is a **hard break** (`'forced'`, joined to the next line by
+   `\n`) when the next line's first word would have fitted after it, or when the next
+   line is one short word such as an address or URL (before the last line, only if the
+   block already has another hard break). Tagged and geometric blocks are treated alike,
+   and a justified `/P` with a `<br>` stays justified. The rewrap's right edge,
+   `wrapRight`, is the inner edge of the smallest filled or stroked path that holds the
+   block (the box's right edge less the text's inset from its left edge, ±0.5 pt),
+   ignored when another block inside the box overlaps the paragraph's lines vertically;
+   otherwise the column edge. It stops one size short of a block beside it, never passes
+   the page and is never less than the longest line.
 
 ### 4.2 Model, caret and style
 
@@ -227,9 +282,14 @@ render mode, marks and Tc/Tw/Tz measured by probes (PDFium cannot read them). It
 de-hyphenated: a line-end hyphen flagged by `FPDFText_IsHyphen` before a lowercase start
 joins the word; compounds keep theirs (`convert/markdown.ts`). The editor opens with a
 caret at the click, never a glyph selection; arrows cross lines, Enter inserts a line
-break, Mod+A selects the paragraph. Leaving (Esc, a click outside) commits a change as one
-history entry (§13 #9); with no change nothing happens. The caret inherits the span before
-it; there are no font, size or colour controls.
+break, Mod+A selects the paragraph. Leaving (Esc, a click outside, the focus leaving) commits a change as one
+history entry (§13 #9), unless the text overlaps what lies below it (§4.6); with no change
+nothing happens. The caret inherits the span before it; there are no font, size or colour
+controls. *Amended 2026-10-04 (M8 review).* A session with several changes keeps the
+style of every untouched character between them: the draft, the preview and the commit
+carry **spans** (`{ start, end, style, source? }`, relative to the inserted text; typed
+stretches take the style before the caret, untouched stretches carry their `source`
+offset) instead of one style for the whole replacement.
 
 ### 4.3 Rewrap, justification, kerning, hyphens
 
@@ -253,11 +313,25 @@ it; there are no font, size or colour controls.
 Rewritten lines reuse the original objects as line containers (`SetCharcodes` +
 `SetMatrix`: colour space, Tc/Tw/Tz, clip and marks survive); extra lines are new objects
 in the same `FPDF_FONT` with explicit glyph origins, at the first object's z-order, under
-the original `/P` (`finalize.ts`); links, markup quads and widgets over moved words move
-too. Verification on a fresh text page: exact read-back, glyphs within 0.01 pt and boxes
+the original `/P` (`finalize.ts`); links and markup over moved words follow
+them, **per quad** (each quad covers the characters whose box centre it holds, and a
+quad is translated when its characters share one move, else rebuilt per new line, with
+the /Rect recomputed; moved markup has its appearance regenerated; widgets are never
+split). Verification on a fresh text page: exact read-back, glyphs within 0.01 pt and boxes
 within 0.05 pt of plan, nothing outside the clip or the paragraph changed; then one
 `GenerateContent`. One `EngineEdit` (`text.editParagraph`) records run refs, texts and the
 planned layout, so reopen-and-replay undo stays byte-identical: one history entry.
+
+*Amended 2026-10-04 (M8 review).* The writer **fails closed**: the spans must tile parts
+of the inserted text in order, every character the user did not type must be laid out in
+its original style, and every written object is read back for font, size, render mode,
+MCID and fill, or the edit fails (`invalid-range`, `verification-failed`) with the bytes
+unchanged. A layout whose glyph boxes would leave the visible box (CropBox ∩ MediaBox,
+joined with the paragraph's own original box, 0.5 pt tolerance) is refused as
+`does-not-fit` (`paragraph:off-page`), early by the policy and again geometrically. The
+paragraph's recorded honesty and substitutions go into the export summary: "1 paragraph
+edited", or "1 paragraph and 2 lines of text edited". Payloads recorded before spans
+existed replay exactly as recorded.
 
 ### 4.5 Fonts and honesty
 
@@ -270,24 +344,52 @@ Local Font Access, uploaded fonts.
 
 ### 4.6 Overflow
 
+*Amended 2026-10-04 (M8 review).*
+
 1. Same or fewer lines: commit.
 2. Growth that fits the empty space below (plus the original gap to the next block): grow.
-3. Else, in order: word spacing up to −15 %, then leading up to −5 % (floor 95 %), on the
-   rewritten lines; never the glyph size. The editor says "Spacing tightened by N %".
-4. Else run over with a warning and the overlap highlighted.
+3. Else, in order: word spacing up to −15 %, then leading up to −5 % (floor 95 %), **on the
+   rewritten lines only**; never the glyph size. This is applied automatically, and the
+   editor says "Spacing tightened by N %".
+4. Else, if the same floors applied to **the whole paragraph** make it fit, the decision
+   carries that layout (`fit`) and it is applied only when the user chooses "Tighten to
+   fit", since it changes lines they did not touch. The engine writes it as a tightening.
+5. Text that would cross the page edge is never written: it is refused with "This text no
+   longer fits on the page; shorten it or move content", and the editor stays open with
+   the typed text. An overflow into content below that stays on the page keeps the
+   warning of step 6.
+6. Else it overlaps content below. **Leaving keeps the editor open**, keeps the overlap
+   marked and offers, in the header, "Tighten to fit" (only when step 4 found a fit),
+   "Let it overlap" (commits the overlap) and "Keep editing" (takes the focus; Esc on the
+   choice does the same). The choice is announced assertively. Nothing commits an overlap
+   unasked: the Read lock, or opening another paragraph, discards it with an announcement,
+   and an editor scrolled off screen keeps the text and restores it, with its error, when
+   the page returns.
 
-The next page is never offered; "Shrink to N %" leaves the editor.
+The next page is never offered. Closing a document still commits a draft that has no
+overlap, as before (ROADMAP, known behaviours).
 
 ### 4.7 Overlay
 
 A canvas at device pixel ratio draws the rewritten lines from `FPDFFont_GetGlyphPath`
 outlines (cached per font and code) on the real baselines with the full text matrix, in the
 span's colour; lines before the edit are the page itself. Under rewritten lines it paints a
-plate rendered once at open without the paragraph's text, so coloured boxes and rules
-survive (page white without one; §13 #8). Caret, selection and composition underline are
+plate: a dry-run render of the paragraph's area with the paragraph emptied (`text: ''`),
+made once at open and painted over white, so coloured boxes, rules and descenders below
+survive while typing (§13 #8; the plate covers the paragraph's original box only, so
+lines that grow below it sit on white until the preview settles). The canvas box is snapped
+to the device-pixel grid and the settled preview is placed on the device pixels the
+engine rendered, so nothing shifts or flashes on open or on settle. Caret, selection and composition underline are
 ours; a hidden `contenteditable` mirror takes keys, IME, clipboard and assistive
 technology. After a 300 ms pause one dry run renders the paragraph's clip over the canvas,
-so what settles is what will be saved. `FontFace` from the embedded font is rejected:
+so what settles is what will be saved. **The header** sits in the page margin beside the
+paragraph when at least 180 px are free (right first, then left); otherwise it docks above
+the floating bar (`[data-bar-view]`) and follows the scroll; otherwise it sits below the
+paragraph. It never sits above the paragraph or covers its text, and Join with next and
+Split here are hidden. **The hover outline** under Select or Edit text is the detected
+paragraph box (`useParagraphBoxAt`), falling back to the line until the page's paragraphs
+are known or when the paragraph refuses paragraph mode. *Amended 2026-10-04 (M8 review).*
+`FontFace` from the embedded font is rejected:
 browsers refuse incomplete fonts, and fontkit cannot read bare CFF or Type 1.
 
 ### 4.8 Performance
@@ -436,6 +538,25 @@ used, and mouse width follows §5.2 item 1. "The shape does not move at commit" 
 decision 7) held for the outline, not its input; §5.2 item 2 makes it true. §6.2's 40 %
 yellow preset becomes the Highlighter.
 
+### 5.8 The bar while writing
+
+*Added 2026-10-04 (M8 review).*
+
+- **P and H.** P arms the last writing pen; when the Highlighter is the active preset it
+  arms the last pen instead (the first pen if none was used), and announces it ("Blue pen,
+  1.5 pt", or "Edit mode. Blue pen, 1.5 pt" from Read, in one announcement). H arms the
+  Highlighter. Pressed again, either opens its preset editor.
+- **The bar fades during a stroke** (`shell/FloatingToolbar.stroke.ts`). A capture-phase
+  window listener treats a press on a page, outside page chrome, as a stroke when a drawing
+  tool is armed (pens, Highlighter, Eraser, Lasso, rectangle, ellipse, line, arrow), when
+  it is the pen's eraser end or barrel button, or when it is the pen tip with Select armed
+  and "Pen draws in Edit" on. While it lasts, and for 1 s after, the dock carries
+  `data-stroking`: the bar and its tier go to 20 % opacity with `pointer-events: none`, each
+  surface alone so its glass keeps its backdrop, and a stroke that crosses the bar keeps
+  drawing on the page. No transition under reduced motion.
+- **The pressure note** ("other viewers show the stroke at one width") is repeated in the
+  preset editor, since the tier no longer opens by itself.
+
 ## 6. Colour (ADR-0021)
 
 One module, `annotations/palette.ts`, feeds presets, the preset editor, the contextual bar,
@@ -502,9 +623,20 @@ primary 7.29 / 9.60 / 8.94, `--glass-text-secondary` 4.94 / 6.50 / 6.05, `--glas
 so nothing changes at rest; its alpha never drops below 0.78. Tier 3 replaces tier 1 for
 menus in beta.1; the setting switches tier 2 only.
 
-- Blur is geometry-gated: with no page within 80 px, tier 2 paints its solid token unfiltered,
-  pixel-identical. One filtered element per region; no glass inside glass; filters never
-  animate.
+- **No geometry gate** (*amended 2026-10-04, M8 review*). The 80 px gate and its
+  `data-glass-near` flag are removed: with Glass panels on, all four docked surfaces
+  (title bar, navigator, inspector, status bar) carry the tier 2 filter in every view, Read,
+  Edit, Arrange, Home and Compare. Over the canvas the filtered and the solid surface are
+  pixel-identical, so nothing changes at rest. The cost is in research 14 §4.2: in Read it is
+  unchanged (the gate was already open there), and in Arrange the median frame stays at
+  16.7 ms while p95 grows from 17–33 ms to 67–100 ms in the headless trend. One filtered
+  element per region; no glass inside glass; filters never animate.
+- **Tier 1 stays as it is.** No lighter value passed the contrast tests (research 14 §4.3):
+  the binding case is the accent fill on the bar over a white page, 3.03:1 today. With
+  today's tint, a brightness of 0.55 takes it to 2.67:1 and 0.6 to 2.47:1, and secondary
+  text falls under AA.
+  A darker tint can pass, but then the bar separates from the canvas by only 1.03–1.14:1
+  against the 1.265:1 that `tokens.test.ts` requires (M6 review A4).
 - **Opaque**: text inputs, in-place editors, dialogs and scrim, tooltips, toasts, Home cards,
   thumbnails.
 - **No shadow on docked glass**: a 1 px inner top highlight in `.glass-frame`, the one inset
@@ -710,10 +842,10 @@ built and A15 only as the Glass panels trial (DESIGN §9). Measurements are in
 | Id | Status | As built, and deviations | Evidence |
 |---|---|---|---|
 | M1 | done | `destination`, per-document `documentMode` and `lastView`; Read · Edit · Arrange with the lock glyph, Compare only while open; keys `0`–`4`; a tab click leaves Home in the document's last view and mode. No command creates a blank document, so "opens in Edit" has nothing to attach to yet; after the last document closes the store returns to its fresh start (Home's empty state either way) | `shell/ModeSwitch.test.tsx`, `state/ui-store.test.ts`, `e2e/modes.spec.ts` |
-| M2 | done | `canEdit` fails closed behind the tool store, the annotation, form, text-edit and image layers and the commands; the Read bar's Edit button; "Switch to Edit to fill"; a Read text selection bar (Copy, Mark up…) built new, as there was no selection bar. A note click in Read passes through to the text (notes are read in Review and the inspector; no read-only popover); V in Read switches to Edit like any tool key | `shell/read-lock.test.tsx`, `forms/forms.test.tsx`, `e2e/modes.spec.ts` |
-| M3 | done | Five groups; the markups have no group and live in the text selection bar, which in Edit adds Highlight, Underline, Strikeout, Squiggly and Comment; a page context menu (Rotate and Delete also in Read, as undoable page operations); the Select chip has the view-switch look, not the accent fill. The bar's Highlight uses the Highlight tool's style, while H over a selection uses the Highlighter's tint | `shell/FloatingToolbar.test.tsx`, `stage/PageContextMenu.test.tsx`, `annotations/selection-bar.test.tsx`, `e2e/tools.spec.ts` |
-| M4 | done | `viewer/hit-order.ts`; double-click opens the paragraph editor (line editor as the fallback); hover outline and one-time hint; "Pen draws in Edit" (`pdf-editor:edit-policy:v1`, also in Document menu → Appearance); eraser end and barrel button; Space pans in both modes; adding, designing and clearing fields and "Mark all matches" only in Edit. A pen's first press, before any hover, acts as a pointer once; in Select a plain press on a markup over a form field still reaches the field (the order decides double-click and hover only); annotations are ignored under Edit text but not dimmed; a Space tap steps a screen on keyup | `viewer/hit-order.test.ts`, `viewer/edit-policy.test.tsx`, `e2e/modes.spec.ts` |
-| M5 | done | Recents in IndexedDB (`pdf-editor:recents:v1`, at most 12, names, sizes, page counts and handles), reopen through the handle with a permission prompt, "Open again…" otherwise, "Clear recents" on Home, in the palette and in the privacy popover, and a line on the about page. Compare's second file and images opened as documents are not recorded; the native-picker handle path is covered by unit tests only (Playwright cannot drive the picker) | `files/recents.test.ts`, `home/HomeView.test.tsx`, `e2e/home.spec.ts` |
+| M2 | done | `canEdit` fails closed behind the tool store, the annotation, form, text-edit and image layers and the commands; the Read bar's Edit button; "Switch to Edit to fill"; a Read text selection bar (Copy, Mark up…) built new, as there was no selection bar; since the M8 review it also offers Edit text, which switches to Edit and opens the paragraph editor at the first selected glyph. A note click in Read passes through to the text (notes are read in Review and the inspector; no read-only popover); V in Read switches to Edit like any tool key | `shell/read-lock.test.tsx`, `forms/forms.test.tsx`, `e2e/modes.spec.ts` |
+| M3 | done | Five groups; the markups have no group and live in the text selection bar, which in Edit adds Highlight, Underline, Strikeout, Squiggly and Comment; a page context menu (since the M8 review Read has one row, "Switch to Edit to change pages", in place of Rotate, Delete and Crop; Arrange still works in both modes); opening the Text group arms Edit text, tiers open only when the armed tool is pressed again, the bar and tiers fade to 20 % during a stroke and for 1 s after, P arms the last writing pen, and Esc goes to Select, then to the group row; the Select chip has the view-switch look, not the accent fill. The bar's Highlight uses the Highlight tool's style, while H over a selection uses the Highlighter's tint | `shell/FloatingToolbar.test.tsx`, `stage/PageContextMenu.test.tsx`, `annotations/selection-bar.test.tsx`, `e2e/tools.spec.ts` |
+| M4 | done | `viewer/hit-order.ts`; double-click opens the paragraph editor (line editor as the fallback); hover outline and one-time hint; "Pen draws in Edit" (`pdf-editor:edit-policy:v1`, also in Document menu → Appearance); eraser end and barrel button; Space pans in both modes; adding, designing and clearing fields and "Mark all matches" only in Edit. A pen's first press, before any hover, acts as a pointer once; in Select a plain press on a markup over a form field still reaches the field (the order decides double-click and hover only); annotations are ignored under Edit text but not dimmed; a Space tap steps a screen on keyup. Since the M8 review a first plain click on page text with Select armed shows the double-click hint, which can cover the start of the next line | `viewer/hit-order.test.ts`, `viewer/edit-policy.test.tsx`, `e2e/modes.spec.ts` |
+| M5 | done | Recents in IndexedDB (`pdf-editor:recents:v1`, at most 12, names, sizes, page counts and handles), reopen through the handle with a permission prompt, "Open again…" otherwise, "Clear recents" on Home, in the palette and in the privacy popover, and a line on the about page. Since the M8 review the Recents are cards with a page glyph and no thumbnails, and Clear is final, also for the stored copy; Home shows only the Files rail and "N files" in the status bar; Combine keeps its sources open and makes "Combined – A + B" with an Undo toast Compare's second file and images opened as documents are not recorded; the native-picker handle path is covered by unit tests only (Playwright cannot drive the picker) | `files/recents.test.ts`, `home/HomeView.test.tsx`, `e2e/home.spec.ts` |
 | A11 | done | One keyboard target per paragraph with Edit text armed (660 glyph stops → one per paragraph on `word-tagged.pdf`); lasso handles and grip with 24 px hit areas; the Highlighter's announcement "Highlighted N lines on page P", which is also the history label; mode announcements only on change. `4` still announces when pressed in Compare | `text-edit/TextEditLayer.test.tsx`, `lasso/transform-layer.test.tsx`, `pen/highlighter-commit.test.ts`, `e2e/a11y.spec.ts` |
 
 ### 15.2 Text
@@ -723,9 +855,9 @@ built and A15 only as the Glass panels trial (DESIGN §9). Measurements are in
 | T1 | done | `analyzeRun` once per run and revision, pure arithmetic per keystroke, one dry run after a 300 ms pause, caret at the click, free space bounded by the column, reads at normal priority. Engine calls for five keystrokes: 5 → 0, then one dry run | `text-edit/TextEditor.test.tsx`, `packages/engine/src/text-edit/analysis.test.ts` |
 | T2 | done | Raw wrappers, enriched `LocatedRun`, the structure-tree reader, `TJ` adjustments kept | `locate.test.ts`, `struct-tree.test.ts`, `content.test.ts` (engine `text-edit/`) |
 | T3 | done | `detectParagraphs`: tags first, then geometry, cached per page fingerprint; rules added on the corpus are listed in `blocks.ts` | `packages/engine/src/text-edit/blocks.test.ts` |
-| T4 | done | Greedy rewrap with UAX #14 (`linebreak` 1.1.0), justification within 1.5 ×, kerning harvested, overflow policy; a 2,000-character justified paragraph lays out in about 1 ms. An edit in a line's first word may restart the rewrap one line earlier; ligature reuse and `fontkit.layout()` for substitutes are not done | `packages/engine/src/text-edit/linebreak.test.ts` |
-| T5 | done | `applyParagraphEdit` with verification (read-back, 0.01 / 0.05 pt, zero pixels changed outside the paragraph) and byte-identical replay; one MCID per written line; codes re-encoded from Unicode, so subset ligatures are written as two glyphs; paragraphs in a form XObject are refused | `packages/engine/src/text-edit/paragraph-edit.test.ts` |
-| T6 | done | Glyph canvas, hidden `contenteditable` mirror, one deferred preview per pause, leaving commits. **The plate is page white** (no render without the paragraph): a coloured box under a rewritten line shows white until the preview settles. **Join with next and Split here are shown but unavailable** (detection takes no hints). The IME candidate window opens at the mirror's layout, not at the drawn caret. Typing in two places becomes one replacement | `text-edit/ParagraphEditor.test.tsx`, `paragraph-model.test.ts`, `glyph-canvas.test.ts`, `e2e/paragraph-edit.spec.ts`, `e2e/text-edit.spec.ts` |
+| T4 | done | Greedy rewrap with UAX #14 (`linebreak` 1.1.0), justification within 1.5 ×, kerning harvested, overflow policy; a 2,000-character justified paragraph lays out in about 1 ms. **Since the M8 review:** automatic tightening applies only to the rewritten lines; tightening the whole paragraph is offered as "Tighten to fit" when it fits and applied only on that button; text that would cross the page edge is refused ("This text no longer fits on the page; shorten it or move content"); hard line breaks are kept (a line under 85 % of the measure when the next word would have fitted, or a short single-word next line) and the measure is bounded by an enclosing filled or stroked box (§4.1) An edit in a line's first word may restart the rewrap one line earlier; ligature reuse and `fontkit.layout()` for substitutes are not done | `packages/engine/src/text-edit/linebreak.test.ts` |
+| T5 | done | `applyParagraphEdit` with verification (read-back, 0.01 / 0.05 pt, zero pixels changed outside the paragraph) and byte-identical replay; one MCID per written line; codes re-encoded from Unicode, so subset ligatures are written as two glyphs; paragraphs in a form XObject are refused. **Since the M8 review:** the edit carries per-character style spans, so several changes in one session keep the style of the text between them, and the writer fails closed if a character would change style; highlights and links over several lines follow their words per quad; a paragraph edit is counted in the export summary under its recorded honesty | `packages/engine/src/text-edit/paragraph-edit.test.ts` |
+| T6 | done | Glyph canvas, hidden `contenteditable` mirror, one deferred preview per pause, leaving commits. **The plate is a dry-run render of the paragraph's area emptied**, painted over white, so a coloured box under a rewritten line stays; it covers the original box only, so a line that grows below it sits on white until the preview settles (*amended 2026-10-04, M8 review*). **Join with next and Split here are hidden** (detection takes no hints). The IME candidate window opens at the mirror's layout, not at the drawn caret. Typing in two places keeps the style of the text between them (spans). Leaving with an overlap keeps the editor open with "Tighten to fit" (when it fits), "Let it overlap" and "Keep editing"; the header sits in the page margin, else above the bar, else below the paragraph; the hover outline shows the paragraph box | `text-edit/ParagraphEditor.test.tsx`, `paragraph-model.test.ts`, `glyph-canvas.test.ts`, `e2e/paragraph-edit.spec.ts`, `e2e/text-edit.spec.ts` |
 | T7 | done | Noto Sans Regular bundled (329 KB; the six faces total 1.23 MB); class by flags, PANOSE and names; a substitute chosen per character; the honesty line in English and Turkish. No Noto Sans Bold (size budget). The overlay refuses a character only another class's face has (an arrow in a serif paragraph); a full, non-subset embedded font can get a false honesty line for a letter never probed | `packages/engine/src/fonts/substitutes.test.ts`, `e2e/paragraph-edit.spec.ts` |
 | T8 | partial | Corpus goldens for eight edits and five class cases: read-back, untouched glyphs within 0.01 pt, zero pixels outside the box, keystroke median 0.0–0.4 ms (worst 2.7 ms). **No real Word or LibreOffice export**: LibreOffice Writer is not installed, so the corpus is Chromium and pdf-lib files. The goldens found and fixed a ligature kerning bug | `packages/engine/src/text-edit/corpus-goldens.test.ts` |
 
@@ -748,11 +880,11 @@ built and A15 only as the Glass panels trial (DESIGN §9). Measurements are in
 
 | Id | Status | As built, and deviations | Evidence |
 |---|---|---|---|
-| G1 | done | Full-bleed stage in Read and Edit (Arrange, Home and Compare keep the stage's box), native stand-in scroll bars, tiers 2 and 3, Glass panels and Reduce transparency in Document menu → Appearance and the palette (`pdf-editor:appearance:v1`). The 80 px gate opens at fit width, since pages sit 48–64 px from the frame | `styles/tokens.test.ts`, `shell/glass-frame.test.tsx`, `stage/read-bleed.test.tsx` |
-| S2 | partial | Contrast final for three tiers over four backdrops; `e2e/glass-perf.spec.ts` gives a headless CPU trend only (blur costs two to four times the median frame). **The owner's measurements are pending**: frame rate and GPU memory on a 2020-class GPU at DPR 2 in Chromium and Safari, and legibility. A15 stays a setting until then | `docs/research/14-glass-spike.md` |
+| G1 | done | Full-bleed stage in Read and Edit (Arrange, Home and Compare keep the stage's box), native stand-in scroll bars, tiers 2 and 3, Glass panels and Reduce transparency in Document menu → Appearance and the palette (`pdf-editor:appearance:v1`). The 80 px gate was removed in the M8 review: with Glass panels on, all four docked surfaces blur in every view | `styles/tokens.test.ts`, `shell/glass-frame.test.tsx`, `stage/read-bleed.test.tsx` |
+| S2 | partial | Contrast final for three tiers over four backdrops; `e2e/glass-perf.spec.ts` gives a headless CPU trend only (blur costs two to four times the median frame in Read; in Arrange, without the gate, the median is unchanged and p95 rises from 17–33 ms to 67–100 ms, research 14 §4.2). The floating bar's tier 1 is unchanged: no lighter value passed the contrast tests (§4.3 there). **The owner's measurements are pending**: frame rate and GPU memory on a 2020-class GPU at DPR 2 in Chromium and Safari, and legibility. A15 stays a setting until then | `docs/research/14-glass-spike.md` |
 | QA | done | Specs rewritten for keys `1`–`4`, five groups and the Read lock (`enterEdit` after opening); new `modes`, `paragraph-edit`, `ink-latency` and `glass-perf` specs and new tests in `pen`, `home`, `text-edit`, `tools` and `a11y`. The last full Chromium run, before the wave-4 changes: 115 passed, 9 skipped by their own gates; the wave-4 specs passed on their own | the e2e specs under `apps/web/e2e/` |
 | D1 | done | DESIGN A8–A14 and the A15 trial, the M6, viewer and text-editing specs annotated, ROADMAP, a changeset. No new screenshots | `docs/DESIGN.md` §9 |
-| R | not started | The independent review, including the correctness of T5 and P9, still has to run | — |
+| R | done | The independent review ran on 2026-10-04 (`DISCUSSION.md` #31): the correctness review found 1 blocker, 3 major and 2 minor findings, the experience review 2 blockers, 6 major and 18 minor or polish items. All were fixed with regression tests except the floating glass tier (contrast) and Tier C, which stays declined. The fixes are marked "M8 review" in §3–§5 and §7, and the open ones are in ROADMAP M8 | `docs/ROADMAP.md` (M8 known behaviours) |
 
 ### 15.5 Not built by decision
 
