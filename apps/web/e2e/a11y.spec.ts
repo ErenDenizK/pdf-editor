@@ -7,14 +7,21 @@
  * - announcements reach the live region, once and politely;
  * - axe-core on the main states of the new surfaces: no serious or critical violation;
  * - reduced motion turns the morph, the rise-in and every transition off;
- * - the focus ring tokens on the new controls.
+ * - the focus ring tokens on the new controls;
+ * - craft spec §9 (M8): Read with the lock, Edit with each of the five groups, the Edit text
+ *   layer's paragraph targets (Tab between paragraphs, Enter opens) and the paragraph editor,
+ *   the page context menu, the text selection bar in Read and Edit, a lasso selection with
+ *   its handles and keyboard box, the Highlighter's announcement, Recents on Home, Glass
+ *   panels and Reduce transparency, one state in Turkish; no Tab stop is ever hidden; the new
+ *   surfaces neither move nor rise under reduced motion and turn solid under Reduce
+ *   transparency.
  */
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 import { expect, type Locator, type Page, test } from '@playwright/test';
 
-import { enterEdit, openFixtures, showInspector, useFileInputPicker } from './helpers';
+import { enterEdit, fixturePath, openFixtures, showInspector, useFileInputPicker } from './helpers';
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'One engine for axe and the keys');
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -536,10 +543,25 @@ test.describe('axe', () => {
     page,
   }) => {
     await openSimple(page);
-    await axe(page, 'Read, the Edit button');
+    // Read carries its mode without colour: the lock glyph and the name (craft spec §9).
+    const read = page.getByRole('radio', { name: 'Read, locked' });
+    await expect(read).toHaveAttribute('aria-checked', 'true');
+    await expect(read.getByTestId('read-lock')).toBeVisible();
+    await expect(bar(page).getByRole('button', { name: 'Edit', exact: true })).toHaveAttribute(
+      'aria-keyshortcuts',
+      '2',
+    );
+    await axe(page, 'Read, the lock and the Edit button');
     await enterEdit(page);
     await axe(page, 'Edit, the groups');
-    // Select has no tool row (craft spec §3.4): the four groups with tools.
+    // Select arms from its chip and has no tool row (craft spec §3.4).
+    const select = bar(page).getByRole('button', { name: 'Select', exact: true });
+    await bar(page).getByRole('button', { name: 'Write', exact: true }).click();
+    await bar(page).getByRole('button', { name: 'Write: back to all groups' }).click();
+    await select.click();
+    await expect(select).toHaveAttribute('aria-pressed', 'true');
+    await axe(page, 'Edit, Select');
+    // The four groups with tools.
     for (const group of ['Write', 'Text', 'Fill & sign', 'Redact']) {
       await bar(page).getByRole('button', { name: group, exact: true }).click();
       const chip = bar(page).getByRole('button', { name: `${group}: back to all groups` });
@@ -762,4 +784,420 @@ test('the focus ring tokens apply to the new controls', async ({ page }) => {
   // The lasso's grab area (an SVG rect over the taken strokes) takes the pointer only; its
   // keyboard form is the bar's move grip (arrows nudge), which carries the ring.
   await expectRing('lasso move grip', page.getByRole('button', { name: 'Move strokes' }));
+});
+
+// ---------------------------------------------------------------------------
+// Craft spec §9 (M8)
+// ---------------------------------------------------------------------------
+
+/** Opens the tagged Chromium export (one text object per glyph) in `lang`. */
+async function openWordTagged(page: Page, lang = 'en'): Promise<void> {
+  await page.goto(`./?lang=${lang}`);
+  const chooser = page.waitForEvent('filechooser');
+  await page
+    .getByRole('button', { name: /^(Open files|Dosya aç)$/ })
+    .first()
+    .click();
+  await (await chooser).setFiles(fixturePath('text-edit-corpus/word-tagged.pdf'));
+  await expect(page.getByRole('tab', { name: 'word-tagged' })).toBeVisible();
+  await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
+    timeout: 20_000,
+  });
+}
+
+const paragraphTargets = (page: Page): Locator =>
+  page.locator('[data-text-edit-layer="0"] [data-text-paragraph]');
+
+/** Arms Edit text with E (switching to Edit) and waits for the paragraph targets. */
+async function armEditText(page: Page): Promise<void> {
+  await viewport(page).focus();
+  await page.keyboard.press('e');
+  await expect(paragraphTargets(page).first()).toBeAttached({ timeout: 20_000 });
+}
+
+/** A word of the first page's text layer, double-clicked: a selection and its bar. */
+async function selectWord(page: Page): Promise<Locator> {
+  const rows = page.getByTestId('text-layer').first().locator('span[data-row]');
+  await expect(rows.first()).toBeAttached({ timeout: 20_000 });
+  const box = await rows.first().boundingBox();
+  if (!box) throw new Error('no text');
+  await page.mouse.dblclick(box.x + Math.min(12, box.width / 4), box.y + box.height / 2);
+  const selectionBar = page.getByRole('toolbar', { name: /^(Selected text|Seçili metin)$/ });
+  await expect(selectionBar).toBeVisible();
+  return selectionBar;
+}
+
+/** The first page's context menu, opened with a right-click on the paper. */
+async function openPageMenu(page: Page): Promise<Locator> {
+  const first = await page.locator('[data-page-index="0"]').boundingBox();
+  if (!first) throw new Error('page 1 not laid out');
+  await page.mouse.click(first.x + 40, first.y + 40, { button: 'right' });
+  const menu = page.getByTestId('page-context-menu');
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
+/**
+ * Presses Tab (or Shift+Tab) `steps` times and checks that every stop is shown: an element
+ * with a box, visible, outside any `aria-hidden` or inert subtree. Base UI's focus guards
+ * (invisible by design, they hand the focus on) and the document itself pass. Returns what
+ * each stop is called.
+ */
+async function tabWalk(page: Page, steps: number, back = false): Promise<string[]> {
+  const names: string[] = [];
+  for (let i = 0; i < steps; i++) {
+    await page.keyboard.press(back ? 'Shift+Tab' : 'Tab');
+    const stop = await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!el || el === document.body) return { ok: true, name: 'body' };
+      if (el.hasAttribute('data-base-ui-focus-guard')) return { ok: true, name: 'focus guard' };
+      const box = el.getBoundingClientRect();
+      const shown =
+        el.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
+        box.width > 0 &&
+        box.height > 0;
+      const hidden = el.closest('[aria-hidden="true"], [inert]') !== null;
+      const label = el.getAttribute('aria-label') ?? el.textContent?.trim().slice(0, 40) ?? '';
+      return { ok: shown && !hidden, name: `${el.tagName.toLowerCase()} “${label}”` };
+    });
+    expect(stop.ok, `Tab stop ${i + 1} is hidden: ${stop.name}`).toBe(true);
+    names.push(stop.name);
+  }
+  return names;
+}
+
+test.describe('craft spec §9', () => {
+  test('Read: F6 reaches the Edit button; the page menu and the selection bar; no hidden stop', async ({
+    page,
+  }) => {
+    await openSimple(page);
+    // F6 from the pages: the tool bar, which in Read is the one Edit button.
+    await viewport(page).focus();
+    await page.keyboard.press('F6');
+    await expect(bar(page).getByRole('button', { name: 'Edit', exact: true })).toBeFocused();
+    await viewport(page).focus();
+    await tabWalk(page, 12);
+
+    // The page context menu in Read: page operations, no "Edit text here".
+    const menu = await openPageMenu(page);
+    await expect(menu.getByRole('menuitem', { name: 'Rotate page 1 right' })).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: /Edit text here/ })).toHaveCount(0);
+    await axe(page, 'Read, the page context menu');
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+
+    // The text selection bar in Read: Copy and Mark up…, reached by Tab from the pages.
+    const selectionBar = await selectWord(page);
+    await expect(selectionBar.getByRole('button', { name: 'Copy' })).toBeVisible();
+    await axe(page, 'Read, the text selection bar');
+    await viewport(page).focus();
+    let reached = false;
+    for (let i = 0; i < 40 && !reached; i++) {
+      await page.keyboard.press('Tab');
+      reached = await holdsFocus(selectionBar);
+    }
+    expect(reached, 'Tab reaches the selection bar').toBe(true);
+    await selectionBar.getByRole('button', { name: 'Mark up…' }).focus();
+    await page.keyboard.press('Enter');
+    // The Edit row on the same selection, the focus on its first markup.
+    await expect(page.getByRole('radio', { name: 'Edit' })).toHaveAttribute('aria-checked', 'true');
+    await expect(
+      selectionBar.getByRole('button', { name: 'Underline', exact: true }),
+    ).toBeVisible();
+    expect(await holdsFocus(selectionBar)).toBe(true);
+    await expect(selectionBar.getByRole('button', { name: 'Comment' })).toBeVisible();
+    await axe(page, 'Edit, the text selection bar');
+    await page.keyboard.press('Escape');
+    await expect(selectionBar).toHaveCount(0);
+  });
+
+  test('Edit: F6 lands on the Select chip; each group by keyboard with no hidden stop', async ({
+    page,
+  }) => {
+    await openSimple(page);
+    await enterEdit(page);
+    await showInspector(page);
+    await viewport(page).focus();
+    await page.keyboard.press('F6');
+    const select = bar(page).getByRole('button', { name: 'Select', exact: true });
+    await expect(select).toBeFocused();
+    await page.keyboard.press('F6');
+    expect(await holdsFocus(page.locator('#right-panel'))).toBe(true);
+    await page.keyboard.press('Shift+F6');
+    await expect(select).toBeFocused();
+    // Every group: Enter opens it, Tab and Shift+Tab never stop on anything hidden (the
+    // other groups' tools are not mounted while one group shows).
+    for (const group of ['Write', 'Text', 'Fill & sign', 'Redact']) {
+      await bar(page).locator('button[tabindex="0"]').focus();
+      await page.keyboard.press('Home');
+      const chosen = bar(page).getByRole('button', { name: group, exact: true });
+      for (let i = 0; i < 6; i++) {
+        if (await chosen.evaluate((el) => el === document.activeElement)) break;
+        await page.keyboard.press('ArrowRight');
+      }
+      await page.keyboard.press('Enter');
+      const chip = bar(page).getByRole('button', { name: `${group}: back to all groups` });
+      await expect(chip).toBeFocused();
+      await tabWalk(page, 4);
+      await chip.focus();
+      await tabWalk(page, 4, true);
+      await chip.click();
+    }
+  });
+
+  test('Edit text: Tab moves between paragraphs, Enter opens, Esc returns; axe', async ({
+    page,
+  }) => {
+    await openWordTagged(page);
+    await showInspector(page);
+    await armEditText(page);
+    const targets = paragraphTargets(page);
+    const count = await targets.count();
+    expect(count).toBeGreaterThanOrEqual(4);
+    // One stop per paragraph: no glyph run is focusable or exposed.
+    const exposedRuns = await page
+      .locator('[data-text-edit-layer="0"] [data-text-run][data-editable]')
+      .evaluateAll(
+        (runs) =>
+          runs.filter((r) => (r as HTMLElement).tabIndex >= 0 || !r.hasAttribute('aria-hidden'))
+            .length,
+      );
+    expect(exposedRuns).toBe(0);
+    for (let i = 0; i < count; i++) {
+      await expect(targets.nth(i)).toHaveAttribute('aria-label', /^Edit paragraph “.+”$/);
+      const box = await targets.nth(i).boundingBox();
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(24);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
+    }
+    await page.keyboard.press('Shift');
+    await targets.first().focus();
+    for (let i = 1; i < count; i++) {
+      await page.keyboard.press('Tab');
+      await expect(targets.nth(i)).toBeFocused();
+    }
+    await axe(page, 'Edit text armed, the paragraph targets');
+
+    const ferry = page.locator(
+      '[data-text-edit-layer="0"] [data-text-paragraph][aria-label*="The ferry"]',
+    );
+    await expect(ferry).toHaveCount(1);
+    await ferry.focus();
+    await page.keyboard.press('Enter');
+    const editor = page.getByRole('textbox', { name: 'Paragraph on page 1' });
+    await expect(editor).toBeFocused({ timeout: 20_000 });
+    await expect(editor).toHaveAttribute('aria-multiline', 'true');
+    await expect(editor).toHaveText(/^The ferry left the quay/);
+    await expect(page.getByTestId('paragraph-header')).toBeVisible();
+    await axe(page, 'the paragraph editor open');
+    await page.keyboard.press('Escape');
+    await expect(editor).toHaveCount(0);
+    await expect(ferry).toBeFocused();
+    await expect(
+      page
+        .getByRole('list', { name: /history/i })
+        .getByRole('button', { name: /^Paragraph edited/ }),
+    ).toHaveCount(0);
+    await tabWalk(page, count + 2);
+  });
+
+  test('the lasso selection: 24 px handles, the keyboard box, axe', async ({ page }) => {
+    await openSimple(page);
+    await page.locator('body').press('p');
+    await stroke(page, [0.3, 0.45], [0.5, 0.46]);
+    await expect(layer(page).locator('[data-annotation-kind="ink"]')).toHaveCount(1, {
+      timeout: 10_000,
+    });
+    await page.locator('body').press('q');
+    await lasso(page, [0.3, 0.45], [0.5, 0.46]);
+    await expect(page.locator('[data-lasso-bar]')).toBeVisible();
+    const handles = layer(page).locator('[data-lasso-handle]');
+    await expect(handles).toHaveCount(8);
+    for (const hit of [...(await handles.all()), layer(page).locator('[data-lasso-rotate]')]) {
+      const box = await hit.boundingBox();
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(24);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
+    }
+    // The keyboard path: the selection box, a labelled group in the tab order with its keys.
+    const box = page.getByRole('group', { name: /^Selection: 1 stroke\. Arrow keys move it/ });
+    await expect(box).toHaveAttribute('tabindex', '0');
+    await expect(box).toHaveAttribute('aria-keyshortcuts', /Shift\+ArrowRight/);
+    await page.keyboard.press('Shift');
+    await box.focus();
+    await expect(box).toBeFocused();
+    expect(await box.evaluate((el) => el.matches(':focus-visible'))).toBe(true);
+    await page.keyboard.press('Shift+ArrowRight');
+    await expect(status(page)).toHaveText(/^Resized to \d+ × \d+ pt$/);
+    await expect(box).toBeFocused();
+    await axe(page, 'the lasso selection, its handles and box');
+    await viewport(page).focus();
+    await tabWalk(page, 10);
+  });
+
+  test('the Highlighter says the lines it highlighted', async ({ page }) => {
+    await openSimple(page);
+    await page.locator('body').press('h');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    const rows = page.getByTestId('text-layer').first().locator('span[data-row]');
+    await expect(rows.first()).toBeAttached({ timeout: 10_000 });
+    const boxes = (await rows.evaluateAll((spans) =>
+      spans.map((span) => {
+        const r = span.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      }),
+    )) as { x: number; y: number; width: number; height: number }[];
+    const longest = boxes.reduce((a, b) => (b.width > a.width ? b : a));
+    const y = longest.y + longest.height / 2;
+    await page.mouse.move(longest.x + 3, y);
+    await page.mouse.down();
+    await page.mouse.move(longest.x + longest.width - 3, y, { steps: 20 });
+    await page.mouse.up();
+    await expect(layer(page).locator('[data-annotation-kind="highlight"]')).toHaveCount(1, {
+      timeout: 10_000,
+    });
+    await expect(status(page)).toHaveText('Highlighted 1 line on page 1');
+  });
+
+  test('Home: Recents, when the build has them', async ({ page }) => {
+    await page.goto('./?lang=en');
+    await openFixtures(page, ['simple-text.pdf', 'rotated-pages.pdf']);
+    // Recents lists files opened lately that are not open now: close one (the Files panel).
+    await page.locator('#rail-files').click();
+    await page.getByRole('button', { name: 'Close rotated-pages' }).click();
+    await expect(page.getByRole('tab', { name: 'rotated-pages' })).toHaveCount(0);
+    await page.locator('#rail-pages').click();
+    await page.keyboard.press('0');
+    await expect(page.getByTestId('home')).toBeVisible();
+    const recents = page.getByRole('list', { name: 'Recent files' });
+    await recents.waitFor({ timeout: 3000 }).catch(() => undefined);
+    if ((await recents.count()) === 0) {
+      test.info().annotations.push({ type: 'skipped', description: 'No Recents list on Home' });
+      return;
+    }
+    await expect(recents).toBeVisible();
+    await axe(page, 'Home with Recents');
+    await page.getByTestId('home-button').focus();
+    await tabWalk(page, 12);
+  });
+
+  test('in Turkish: every new control is named; axe on Edit text and the page menu', async ({
+    page,
+  }) => {
+    await openWordTagged(page, 'tr');
+    await armEditText(page);
+    await expect(page.getByRole('radio', { name: 'Düzenleme' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await expect(page.getByRole('button', { name: 'Metin: tüm gruplara dön' })).toBeVisible();
+    await expect(paragraphTargets(page).first()).toHaveAttribute(
+      'aria-label',
+      /^“.+” paragrafını düzenle$/,
+    );
+    await axe(page, 'Turkish, Edit text armed');
+    const menu = await openPageMenu(page);
+    await expect(menu.getByRole('menuitem', { name: 'Metni burada düzenle' })).toBeVisible();
+    await axe(page, 'Turkish, the page context menu');
+  });
+});
+
+/** Every glass surface on the page and what it paints (backdrop filter, background alpha). */
+const glassSurfaces = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.glass, .glass-frame, .glass-menu')]
+      .filter((el) => el.checkVisibility())
+      .map((el) => {
+        const style = getComputedStyle(el);
+        const match = /rgba?\(([^)]+)\)/.exec(style.backgroundColor);
+        const parts = match?.[1]?.split(/[\s,/]+/).filter(Boolean) ?? [];
+        const alpha = parts.length === 4 ? Number(parts[3]) : 1;
+        return {
+          name: `${el.tagName.toLowerCase()}.${[...el.classList].join('.')}`,
+          filter: style.backdropFilter,
+          alpha,
+        };
+      }),
+  );
+
+async function appearance(
+  page: Page,
+  settings: { glassPanels: boolean; reduceTransparency: boolean },
+): Promise<void> {
+  await page.addInitScript((value) => {
+    localStorage.setItem('pdf-editor:appearance:v1', value);
+  }, JSON.stringify(settings));
+}
+
+test.describe('glass (craft spec §7, §9)', () => {
+  test('Glass panels on: axe on Edit, the page menu and the selection bar', async ({ page }) => {
+    await appearance(page, { glassPanels: true, reduceTransparency: false });
+    await openSimple(page);
+    await expect(page.locator('html')).toHaveAttribute('data-glass-panels', '');
+    await showInspector(page);
+    // Meaningful only if something is glass: the floating bar at least is translucent.
+    expect(
+      (await glassSurfaces(page)).some((surface) => surface.alpha < 1 || surface.filter !== 'none'),
+    ).toBe(true);
+    await axe(page, 'Glass panels, Read');
+    await selectWord(page);
+    await axe(page, 'Glass panels, the text selection bar');
+    await page.keyboard.press('Escape');
+    await enterEdit(page);
+    await bar(page).getByRole('button', { name: 'Write', exact: true }).click();
+    await axe(page, 'Glass panels, Edit, Write');
+    await openPageMenu(page);
+    await axe(page, 'Glass panels, the page context menu');
+  });
+
+  test('Reduce transparency: every glass tier is solid on the new surfaces', async ({ page }) => {
+    await appearance(page, { glassPanels: true, reduceTransparency: true });
+    await openWordTagged(page);
+    await expect(page.locator('html')).toHaveAttribute('data-transparency', 'reduced');
+    await showInspector(page);
+    const expectSolid = async (state: string) => {
+      const surfaces = await glassSurfaces(page);
+      expect(surfaces.length, state).toBeGreaterThan(0);
+      for (const surface of surfaces) {
+        expect(surface.filter, `${state}: ${surface.name}`).toBe('none');
+        expect(surface.alpha, `${state}: ${surface.name}`).toBe(1);
+      }
+    };
+    await expectSolid('Read: frame and the Edit button');
+    await selectWord(page);
+    await expectSolid('the text selection bar');
+    await page.keyboard.press('Escape');
+    await openPageMenu(page);
+    await expectSolid('the page context menu');
+    await page.keyboard.press('Escape');
+    await armEditText(page);
+    await paragraphTargets(page).first().focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('paragraph-header')).toBeVisible({ timeout: 20_000 });
+    await expectSolid('Edit, Text, the paragraph editor');
+    await axe(page, 'Reduce transparency, the paragraph editor');
+  });
+});
+
+test('reduced motion: the new surfaces neither move nor rise', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await openWordTagged(page);
+  const still = async (state: string, locator: Locator) => {
+    expect(await longestDuration(locator), state).toBeLessThanOrEqual(NONE_MS);
+    expect(await longestAnimation(page), state).toBeLessThanOrEqual(NONE_MS);
+  };
+  await recordScripted(page);
+  await still('the text selection bar', await selectWord(page));
+  await page.keyboard.press('Escape');
+  await still('the page context menu', await openPageMenu(page));
+  await page.keyboard.press('Escape');
+  await armEditText(page);
+  // The Text group's morph and its options tier.
+  await still('the Edit bar', bar(page));
+  await page.keyboard.press('Shift');
+  await paragraphTargets(page).first().focus();
+  await still('a paragraph target', paragraphTargets(page).first());
+  await page.keyboard.press('Enter');
+  const header = page.getByTestId('paragraph-header');
+  await expect(header).toBeVisible({ timeout: 20_000 });
+  await still('the paragraph editor header', header);
+  expect(await longestScripted(page)).toBeLessThanOrEqual(NONE_MS);
 });

@@ -10,8 +10,9 @@
  *   line no longer has "fox".
  * - A character the Inter subset lacks shows the honesty line naming the substitute; undo
  *   restores the line.
- * - From the keyboard, the focus returns to the run after Esc and after a commit. Enter inserts
- *   a line break in the paragraph editor (spec §4.2), so Esc is the keyboard's way out.
+ * - From the keyboard (one target per paragraph, craft spec §9), the focus returns to the
+ *   paragraph after Esc and after a commit. Enter inserts a line break in the paragraph editor
+ *   (spec §4.2), so Esc is the keyboard's way out.
  * - On a /Rotate 90 page the editor turns with the line, and an upright line is edited in
  *   place.
  * - A paragraph inside a form XObject refuses paragraph mode: the line editor opens instead.
@@ -39,6 +40,13 @@ function historyRow(page: Page, label: string | RegExp) {
 /** The run targets of a line of the fixture, in reading order (0 = Helvetica, 1 = subset). */
 function line(page: Page, index: number) {
   return page.locator(`[data-text-edit-layer="0"] [data-text-run="${FOX}"]`).nth(index);
+}
+
+/** The keyboard targets of the paragraphs reading `text` (one per line of the fixture). */
+function paragraph(page: Page, text: string) {
+  return page.locator(
+    `[data-text-edit-layer="0"] [data-text-paragraph][aria-label="Edit paragraph “${text}”"]`,
+  );
 }
 
 /** The paragraph editor's mirror: the focus target, keys and assistive technology. */
@@ -179,12 +187,16 @@ test('replace a word in the Helvetica line, export, re-open: the edited line rea
   await expect(await search(page, 'fox')).toHaveCount(foxBefore - 1);
 });
 
-test('keyboard: the focus returns to the run after Esc and after a commit', async ({ page }) => {
+test('keyboard: the focus returns to the paragraph after Esc and after a commit', async ({
+  page,
+}) => {
   await openFonts(page);
   await page.locator('[data-read-viewport]').focus();
   await page.keyboard.press('e');
-  const first = line(page, 0);
-  await expect(first).toBeVisible({ timeout: 20_000 });
+  // With Edit text armed the keyboard works by paragraph (craft spec §9): each line of the
+  // fixture is one, so its target stands for its run.
+  const first = paragraph(page, FOX).first();
+  await expect(first).toBeAttached({ timeout: 20_000 });
   const lineBox = await first.boundingBox();
   if (!lineBox) throw new Error('line not laid out');
   await first.focus();
@@ -192,7 +204,7 @@ test('keyboard: the focus returns to the run after Esc and after a commit', asyn
   const editor = paragraphEditor(page);
   await expect(editor).toBeFocused({ timeout: 20_000 });
 
-  // Esc with no change: nothing is applied, back on the same run; the tool stays armed.
+  // Esc with no change: nothing is applied, back on the same target; the tool stays armed.
   await page.keyboard.press('Escape');
   await expect(editor).toHaveCount(0);
   await expect(first).toBeFocused();
@@ -214,12 +226,12 @@ test('keyboard: the focus returns to the run after Esc and after a commit', asyn
   await page.keyboard.type('cat');
   await expect(editor).toHaveText(FOX.replace('dog', 'cat'));
 
-  // Esc commits; the line is new runs, the focus goes to the one where the edit started.
+  // Esc commits; the line is new runs and a new paragraph, the focus goes to its target.
   await page.keyboard.press('Escape');
   await expect(editor).toHaveCount(0, { timeout: 20_000 });
   await expect(historyRow(page, /^Paragraph edited/)).toHaveCount(1, { timeout: 20_000 });
-  const focused = page.locator('[data-text-edit-layer="0"] [data-text-run]:focus');
-  await expect(focused).toHaveAttribute('data-text-run', /^The quick brown fox/, {
+  const focused = page.locator('[data-text-edit-layer="0"] [data-text-paragraph]:focus');
+  await expect(focused).toHaveAttribute('aria-label', /^Edit paragraph “The quick brown fox/, {
     timeout: 20_000,
   });
   const focusedBox = await focused.boundingBox();
@@ -342,5 +354,12 @@ test('a paragraph that refuses paragraph mode opens the line editor instead', as
   ).toHaveText(/Paragraph editing is not available here: the text is inside a form/);
   await page.keyboard.press('Escape');
   await expect(lineEditor).toHaveCount(0);
-  await expect(run).toBeFocused();
+  // The focus goes to the paragraph's keyboard target (the run is a pointer target only);
+  // Enter there reaches the same line editor, as the keyboard's way in.
+  const target = page.locator('[data-text-edit-layer="0"] [data-text-paragraph]:focus');
+  await expect(target).toHaveAttribute('aria-label', new RegExp(inForm.slice(0, 12)));
+  await page.keyboard.press('Enter');
+  await expect(lineEditor).toBeFocused({ timeout: 20_000 });
+  await page.keyboard.press('Escape');
+  await expect(target).toHaveCount(1);
 });

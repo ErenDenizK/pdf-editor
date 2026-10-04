@@ -54,6 +54,28 @@
   cursor: not-allowed;
 }
 
+/*
+ * A paragraph's keyboard target (craft spec §9): over the paragraph's box, at least 24 px
+ * square; it takes no pointer (the runs under it do) and marks itself only with keyboard
+ * focus.
+ */
+.paragraph {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-page);
+  background: transparent;
+  pointer-events: none;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.paragraph:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  background: var(--accent-muted);
+}
+
 @media (hover: hover) {
   .run[data-blocked]:hover {
     background: repeating-linear-gradient(
@@ -248,7 +270,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .run {
+  .run,
+  .paragraph {
     transition: none;
   }
 }

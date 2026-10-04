@@ -148,6 +148,43 @@ describe('Read · Edit · Arrange', () => {
     });
   });
 
+  it('says a mode only when it changes: the current mode again says nothing', async () => {
+    render(<App />);
+    openTwo();
+    await screen.findByRole('tab', { name: 'report', selected: true });
+    const serial = () => useAnnouncer.getState().serial;
+
+    // Read is the mode on open: 1 and the checked segment change nothing and say nothing.
+    let before = serial();
+    await userEvent.keyboard('1');
+    await userEvent.click(segment('Read, locked'));
+    expect(serial()).toBe(before);
+    expect(checked()).toBe('read');
+
+    await userEvent.keyboard('2');
+    expect(announced()).toBe('Edit mode');
+    before = serial();
+    await userEvent.keyboard('2');
+    await userEvent.click(segment('Edit'));
+    expect(serial()).toBe(before);
+
+    await userEvent.keyboard('3');
+    expect(announced()).toBe('Arrange pages');
+    before = serial();
+    await userEvent.keyboard('3');
+    expect(serial()).toBe(before);
+
+    await userEvent.keyboard('0');
+    expect(shown()).toBe('home');
+    before = serial();
+    await userEvent.keyboard('0');
+    expect(serial()).toBe(before);
+    // A change is said again.
+    await userEvent.keyboard('1');
+    expect(announced()).toBe('Read mode, locked');
+    expect(serial()).toBe(before + 1);
+  });
+
   it('keeps Edit through Arrange, per document', async () => {
     render(<App />);
     const { report, invoice } = openTwo();

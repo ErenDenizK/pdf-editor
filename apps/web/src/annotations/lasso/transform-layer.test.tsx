@@ -219,6 +219,13 @@ function handle(layer: HTMLElement, name: string): Element {
   return el;
 }
 
+/** The drawn square of a handle (its hit area's sibling). */
+function drawn(hit: Element): Element {
+  const el = hit.previousElementSibling;
+  if (!el) throw new Error('no drawn handle');
+  return el;
+}
+
 describe('lasso group resize and rotate on the layer', () => {
   beforeEach(async () => {
     await page.viewport(1280, 900);
@@ -246,7 +253,7 @@ describe('lasso group resize and rotate on the layer', () => {
     expect(layer.querySelectorAll('[data-lasso-rotate]')).toHaveLength(1);
     // The handles take presses where they are drawn.
     const se = handle(layer, 'se');
-    const at = centre(se);
+    const at = centre(drawn(se));
     expect(document.elementFromPoint(at.x, at.y)).toBe(se);
     const count = labels().length;
 
@@ -275,7 +282,7 @@ describe('lasso group resize and rotate on the layer', () => {
     if (!frame) throw new Error('no frame');
     await waitFor(() => {
       const right = userToCss(frame, { x: 100 + after.width, y: 600 }).x;
-      const h = handle(layer, 'e').getBoundingClientRect();
+      const h = drawn(handle(layer, 'e')).getBoundingClientRect();
       const box = layer.getBoundingClientRect();
       expect(h.left + h.width / 2 - box.left).toBeCloseTo(right + 8, 0);
     });
@@ -283,6 +290,58 @@ describe('lasso group resize and rotate on the layer', () => {
     model().undo();
     await whenIdle();
     expect(span(await inks(source)).width).toBeCloseTo(before.width, 1);
+  });
+
+  it('handles and the grip take 24 px presses, never inside the selection itself', async () => {
+    const { layer, source, target } = await lassoTwoStrokes();
+    const frame = mountedLayers.get(target.pageId)?.frame;
+    if (!frame) throw new Error('no frame');
+    // The selection's own extent, CSS px from the layer's corner.
+    const points = (await inks(source)).flatMap((a) => a.paths.flat());
+    const css = points.map((p) => userToCss(frame, p));
+    const tight = {
+      left: Math.min(...css.map((p) => p.x)),
+      right: Math.max(...css.map((p) => p.x)),
+      top: Math.min(...css.map((p) => p.y)),
+      bottom: Math.max(...css.map((p) => p.y)),
+    };
+    const origin = layer.getBoundingClientRect();
+    const local = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      return {
+        left: r.left - origin.left,
+        right: r.right - origin.left,
+        top: r.top - origin.top,
+        bottom: r.bottom - origin.top,
+        width: r.width,
+        height: r.height,
+      };
+    };
+    const overlaps = (a: ReturnType<typeof local>, b: typeof tight) =>
+      a.left < b.right - 0.5 &&
+      a.right > b.left + 0.5 &&
+      a.top < b.bottom - 0.5 &&
+      a.bottom > b.top + 0.5;
+    const hits = [...layer.querySelectorAll('[data-lasso-handle]')].map(local);
+    expect(hits).toHaveLength(8);
+    for (const hit of hits) {
+      expect(hit.width).toBeGreaterThanOrEqual(24);
+      expect(hit.height).toBeGreaterThanOrEqual(24);
+      expect(overlaps(hit, tight)).toBe(false);
+    }
+    const grip = layer.querySelector('[data-lasso-rotate]');
+    if (!grip) throw new Error('no grip');
+    const g = local(grip);
+    expect(g.width).toBeGreaterThanOrEqual(24);
+    expect(g.height).toBeGreaterThanOrEqual(24);
+    expect(overlaps(g, tight)).toBe(false);
+    for (const hit of hits) expect(overlaps(g, hit)).toBe(false);
+    // Inside the selection the press is the grab area's (it moves the selection).
+    const mid = {
+      x: origin.left + (tight.left + tight.right) / 2,
+      y: origin.top + (tight.top + tight.bottom) / 2,
+    };
+    expect(document.elementFromPoint(mid.x, mid.y)).toHaveAttribute('data-lasso-grab');
   });
 
   it('Shift on a corner keeps the aspect', async () => {

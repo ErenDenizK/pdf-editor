@@ -69,15 +69,19 @@ import {
 /** How far (CSS px) around the selection a press still grabs it. */
 const GRAB_MARGIN_PX = 8;
 /**
- * The drawn size of a handle, and of the area around it that takes a press (CSS px): no
- * wider than twice the grab margin, so a handle never covers the selection itself and a
- * press on a thin selection still moves it.
+ * The drawn size of a handle, and the side of the square around it that takes a press
+ * (CSS px, the 24 px target of DESIGN §5). The square is pushed outwards from the box until
+ * its inner edge meets the selection's own extent (`handleHitBox`), so a handle never covers
+ * the selection and a press on a thin selection still moves it.
  */
 const HANDLE_PX = 8;
-const HANDLE_HIT_PX = 2 * GRAB_MARGIN_PX;
-/** How far (CSS px) the rotation grip sits from the box, and its radius. */
-const ROTATE_OFFSET_PX = 22;
+export const HANDLE_HIT_PX = 24;
+/**
+ * The rotation grip's radius, and how far (CSS px) it sits from the box: clear of the
+ * handles' hit squares, so its own 24 px target never overlaps theirs.
+ */
 const ROTATE_RADIUS_PX = 5;
+const ROTATE_OFFSET_PX = HANDLE_HIT_PX - GRAB_MARGIN_PX + HANDLE_HIT_PX / 2;
 /** Shift snaps a rotation to this step (degrees). */
 const ROTATE_SNAP_DEG = 15;
 /** Keyboard steps: 1 pt of resize, 1° of rotation. */
@@ -242,6 +246,19 @@ function followPointer(
   window.addEventListener('pointercancel', cancel);
 }
 
+/**
+ * The square that takes a press on `handle` (drawn on the dashed box `outer`, `margin` px
+ * outside the selection): `size` px, centred on the handle point and then pushed outwards,
+ * along the handle's own axes, by what it would reach into the selection.
+ */
+export function handleHitBox(outer: Box, handle: BoxHandle, margin: number, size: number): Box {
+  const p = handlePoint(outer, handle);
+  const push = Math.max(0, size / 2 - margin);
+  const dx = handle.includes('w') ? -push : handle.includes('e') ? push : 0;
+  const dy = handle.startsWith('n') ? -push : handle.startsWith('s') ? push : 0;
+  return { left: p.x + dx - size / 2, top: p.y + dy - size / 2, width: size, height: size };
+}
+
 function svgMatrix(t: Affine): string {
   return `matrix(${[t.a, t.b, t.c, t.d, t.e, t.f].map((v) => +v.toFixed(5)).join(' ')})`;
 }
@@ -347,6 +364,7 @@ function LassoHandles({
       <line className={styles.stem} x1={gripX} y1={edgeY} x2={gripX} y2={gripY} />
       {BOX_HANDLES.map((handle) => {
         const p = handlePoint(outer, handle);
+        const hit = handleHitBox(outer, handle, GRAB_MARGIN_PX, HANDLE_HIT_PX);
         return (
           <g key={handle}>
             <rect
@@ -360,10 +378,10 @@ function LassoHandles({
               className={styles.handleHit}
               data-lasso-handle={handle}
               data-annotation-keep=""
-              x={p.x - HANDLE_HIT_PX / 2}
-              y={p.y - HANDLE_HIT_PX / 2}
-              width={HANDLE_HIT_PX}
-              height={HANDLE_HIT_PX}
+              x={hit.left}
+              y={hit.top}
+              width={hit.width}
+              height={hit.height}
               onPointerDown={(e) => press(e, handle)}
             />
           </g>
@@ -394,7 +412,8 @@ export function resetLassoKeySeries(): void {
 /**
  * The selection box: the keyboard path to the selection (module header). It takes no
  * pointer; the dashed box and the handles under it do. A focusable, labelled group that
- * handles keys: jsx-a11y classifies the role as static, so its two rules are off here.
+ * handles keys: jsx-a11y classifies the role as static, so its two rules are off here; axe
+ * accepts it, focused, with no violation (`e2e/a11y.spec.ts`, the lasso selection).
  */
 /* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */
 function LassoBox({

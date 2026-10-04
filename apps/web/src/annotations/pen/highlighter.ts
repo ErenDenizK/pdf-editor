@@ -538,7 +538,13 @@ export function commitHighlighterStroke(
         // A highlight is its own entry: the next free stroke starts a new burst.
         closeBurst();
         const draft = markupDraft('highlight', target.pageIndex, outcome.quads, style.color, 1);
-        committed = (await createAnnotations(target, [draft], { select: false })) !== undefined;
+        // Said, and listed in History, by the lines it covers (craft spec §9).
+        const label = m.highlighter_highlighted_lines({
+          count: outcome.lines,
+          page: target.position,
+        });
+        committed =
+          (await createAnnotations(target, [draft], { select: false, label })) !== undefined;
       } else {
         committed = await commitPenStroke({
           target,

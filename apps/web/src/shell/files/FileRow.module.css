@@ -22,7 +22,9 @@
   flex: none;
   width: 14px;
   height: 14px;
-  margin: 0 0 0 var(--space-2);
+  /* 14 px box with clearance: the 24 px circle around it touches no other target (WCAG
+     2.2 target size, spacing exception; the row's 2 px gap adds to the 4 px here). */
+  margin: 0 var(--space-1) 0 var(--space-2);
   accent-color: var(--accent);
   opacity: 0;
 }

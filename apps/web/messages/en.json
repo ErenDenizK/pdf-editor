@@ -215,6 +215,16 @@
   "tool_select": "Select",
   "tool_highlight": "Highlight",
   "tool_highlighter": "Highlighter",
+  "highlighter_highlighted_lines": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Highlighted {count} line on page {page}",
+        "countPlural=*": "Highlighted {count} lines on page {page}"
+      }
+    }
+  ],
   "tool_ink": "Pen",
   "tool_text": "Text",
   "tool_shapes": "Shapes",
@@ -1299,6 +1309,13 @@
   "tool_strikeout": "Strikeout",
   "tool_squiggly": "Squiggly underline",
   "tool_eraser": "Eraser",
+  "eraser_mode_label": "Eraser mode",
+  "eraser_mode_stroke": "Whole stroke",
+  "eraser_mode_stroke_tooltip": "Erases every stroke it touches, whole",
+  "eraser_mode_partial": "Partial",
+  "eraser_mode_partial_tooltip": "Erases only the parts of pen strokes under the eraser. Highlighter strokes and highlights are erased whole.",
+  "eraser_size_label": "Eraser size",
+  "eraser_size_option": "{size} px",
   "tool_rectangle": "Rectangle",
   "tool_ellipse": "Ellipse",
   "tool_line": "Line",
@@ -1340,6 +1357,7 @@
   "text_edit_layer_label": "Editable text of page {page}",
   "text_edit_run": "Edit “{text}”",
   "text_edit_run_blocked": "“{text}” is not editable: {reason}",
+  "text_edit_paragraph": "Edit paragraph “{text}”",
   "text_edit_editor_label": "Line text",
   "text_edit_panel_label": "Text edit",
   "text_edit_reason_type3": "Type3 font (its glyphs are drawings)",
@@ -3573,6 +3591,20 @@
       }
     }
   ],
+  "recents_heading": "Recent",
+  "recents_list_label": "Recent files",
+  "recents_clear": "Clear recents",
+  "cmd_clear_recents": "Clear recents",
+  "cmd_file_clear_recents_keywords": "recent, recently opened, history, forget, privacy",
+  "recents_hint_permission": "Needs permission",
+  "recents_hint_open_again": "Open again…",
+  "recents_more": "More actions for {name}",
+  "recents_remove": "Remove from recents",
+  "recents_note_open_again": "This browser doesn’t keep access to files: choose “{name}” in the file dialog.",
+  "recents_note_unavailable": "“{name}” could not be reopened: it was moved, or access was not given. Open again… to choose it.",
+  "recents_announce_removed": "{name} removed from recents",
+  "recents_announce_cleared": "Recents cleared",
+  "privacy_recents": "Recent files are remembered on this device only.",
   "bar_group_fill": "Fill & sign",
   "bar_group_redact": "Redact",
   "bar_group_select": "Select",

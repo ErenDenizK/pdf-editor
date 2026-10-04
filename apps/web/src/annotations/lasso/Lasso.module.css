@@ -81,7 +81,8 @@
 
 /*
  * Group resize and rotate (craft spec §5.5): handles are page white with a 1.5 px accent
- * stroke (DESIGN §3); a wider transparent area around each takes the press.
+ * stroke (DESIGN §3); a transparent 24 px square around each takes the press (DESIGN §5),
+ * pushed outwards so it never reaches into the selection (LassoSelection `handleHitBox`).
  */
 .handle {
   fill: var(--page-background);

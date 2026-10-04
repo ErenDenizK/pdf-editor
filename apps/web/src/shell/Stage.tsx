@@ -143,7 +143,8 @@ const SEGMENTS: readonly {
 
 /**
  * Read · Edit · Arrange (· Compare): a segmented control, APG radio group; arrows move and
- * select. Each segment runs its command (1–4), which also announces the change.
+ * select. Each segment runs its command (1–4), which also announces the change; the checked
+ * segment does nothing.
  */
 export function ModeSwitch() {
   const active = useWorkspaceStore((s) => s.workspace.activeDocument);
@@ -162,6 +163,8 @@ export function ModeSwitch() {
   const ref = useRef<HTMLDivElement>(null);
 
   const choose = (id: ModeSegment) => {
+    // The checked segment again changes nothing, so it says nothing (craft spec §9).
+    if (id === segment) return;
     const command = SEGMENTS.find((item) => item.id === id)?.command;
     if (command !== undefined) void commandRegistry.execute(command);
   };

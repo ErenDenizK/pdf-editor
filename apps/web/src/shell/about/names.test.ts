@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import viteConfigSource from '../../../vite.config.ts?raw';
 import recipesStoreSource from '../../batch/recipes-store.ts?raw';
 import openFilesSource from '../../files/open-files.ts?raw';
+import recentsSource from '../../files/recents.ts?raw';
 import { PRODUCT_NAME, REPOSITORY_URL } from './build-info';
 
 /** Every application source file (not tests, not generated messages), as text. */
@@ -56,6 +57,10 @@ describe('names kept by ADR-0015 §3', () => {
     expect(recipesStoreSource).toMatch(/getDirectoryHandle\('recipes'/);
   });
 
+  it('keeps the recents IndexedDB database name', () => {
+    expect(recentsSource).toMatch(/export const RECENTS_DB_NAME = 'pdf-editor:recents:v1';/);
+  });
+
   it('keeps the recipe format identifier that shared recipe files carry', () => {
     expect(RECIPE_FORMAT).toBe('pdf-editor-recipe');
   });
@@ -83,6 +88,8 @@ describe('names kept by ADR-0015 §3', () => {
       'pdf-editor:dev:ink-stats',
       'pdf-editor:edit-policy:v1',
       'pdf-editor:locale:v1',
+      'pdf-editor:recents:v1',
+      'pdf-editor:ui:eraser:v1',
       'pdf-editor:ui:pen-presets:v1',
       'pdf-editor:ui:pen-presets:v2',
       'pdf-editor:ui:tool-styles:v1',
