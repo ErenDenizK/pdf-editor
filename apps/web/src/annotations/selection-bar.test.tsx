@@ -3,7 +3,8 @@
  * mode with the Read view and real PDFium: with Select armed in Edit it offers the four
  * markups, which mark through `markupFromSelection` in the tool's remembered style, and
  * Comment, which opens a note's editor at the selection; Esc dismisses it; in Read it stays
- * Copy and "Mark up…"; with another tool armed it does not show.
+ * Copy, "Edit text" (to Edit, with the paragraph editor at the selection) and "Mark up…";
+ * with another tool armed it does not show.
  */
 import '../styles/tokens.css';
 import '../styles/reset.css';
@@ -24,6 +25,7 @@ import { ReadView } from '../stage/ReadView';
 import { useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
+import { useTextEditStore } from '../text-edit/text-edit-store';
 import { resetToolStore, useToolStore } from '../viewer/tool-store';
 import {
   resetAnnotationStore,
@@ -181,9 +183,29 @@ describe('the text selection bar', () => {
     const bar = await selectionBar();
     expect(within(bar).getByRole('button', { name: /Copy/ })).toBeVisible();
     expect(within(bar).getByRole('button', { name: /Mark up/ })).toBeVisible();
+    expect(within(bar).getByRole('button', { name: /Edit text/ })).toBeVisible();
     expect(within(bar).queryByRole('button', { name: 'Underline' })).toBeNull();
     await whenIdle();
     expect(await readAnnotations(source, 0)).toEqual([]);
+  });
+
+  it('in Read, "Edit text" switches to Edit and opens the editor at the selection', async () => {
+    const { container } = await mount(false);
+    await selectSomeText(container);
+    const bar = await selectionBar();
+    await userEvent.click(within(bar).getByRole('button', { name: /Edit text/ }));
+    const id = useWorkspaceStore.getState().workspace.activeDocument;
+    expect(id === undefined ? undefined : useUiStore.getState().documentMode[id]).toBe('edit');
+    // The selection gives way to the editor, with a caret and no change yet.
+    await waitFor(
+      () => {
+        const store = useTextEditStore.getState();
+        expect(store.paragraph !== null || store.session !== null).toBe(true);
+      },
+      { timeout: 10_000 },
+    );
+    expect(window.getSelection()?.isCollapsed ?? true).toBe(true);
+    expect(useToolStore.getState().mode).toBe('select');
   });
 
   it('does not show while another tool is armed in Edit', async () => {

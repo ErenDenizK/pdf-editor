@@ -16,7 +16,9 @@
  *   direction (at most 35° off it) over hit glyphs make up at least 70 % of its length
  *   there, and of its whole length. It then becomes a **Highlight** whose quads run from the first to the last hit
  *   glyph of each line (`quads.ts`), in the tint, `/CA 1`, Multiply (the engine writes
- *   highlights with Multiply). Otherwise it is **free ink with Multiply**
+ *   highlights with Multiply). At either end of a line the highlight extends to the word's
+ *   boundary when the stroke covers more than half of that word (`extendToWords`), so it never
+ *   stops at "tha|t". Otherwise it is **free ink with Multiply**
  *   (`blendMode: 'multiply'`, constant `/BS /W`, no per-point widths) that joins pen bursts
  *   like any stroke. **Alt** at release forces free ink; a page without text always gives
  *   it. A snapped highlight never joins a burst. Each is one history entry ("Highlight on
@@ -77,6 +79,13 @@ const WORD_GAP_SHARE = 0.6;
  * (radians): a stroke at 45° over dense text crosses it, it does not mark it.
  */
 export const ALONG_MAX_ANGLE = (35 * Math.PI) / 180;
+/**
+ * A word ends at a whitespace glyph or at a gap between neighbouring glyphs wider than this
+ * share of the glyph's font size (files that draw no space glyphs).
+ */
+const WORD_BREAK_SHARE = 0.2;
+/** A partly covered word at a line's end is taken whole above this covered share. */
+export const WORD_COVER_SHARE = 0.5;
 /** Points sampled across a glyph's height. */
 const GLYPH_SAMPLES = 9;
 /** The stroke is walked in steps of at most this length (points). */
@@ -275,11 +284,16 @@ export function snapHighlighter(
     along >= SNAP_COVERAGE * total - 1e-9 &&
     crossed.every((s) => s.hits.length > 0 && s.along >= SNAP_COVERAGE * s.arc - 1e-9);
   if (!snaps) return { kind: 'ink', reason: 'off-text' };
-  // From the first to the last hit glyph of each line, in reading order.
+  // From the first to the last hit glyph of each line, in reading order, out to the word's
+  // boundary at either end when more than half of that word is covered.
   const selected: GlyphRef[] = [];
   for (const state of crossed) {
-    const first = Math.min(...state.hits.map((h) => h.flat));
-    const last = Math.max(...state.hits.map((h) => h.flat));
+    const order = lineGlyphs(runs, state.line, offsets);
+    const [first, last] = extendToWords(
+      order,
+      Math.min(...state.hits.map((h) => h.flat)),
+      Math.max(...state.hits.map((h) => h.flat)),
+    );
     for (const r of state.line.runs) {
       const run = runs[r] as TextRun;
       run.glyphs.forEach((_, g) => {
@@ -292,6 +306,93 @@ export function snapHighlighter(
   const quads = quadsForGlyphs(runs, selected);
   if (quads.length === 0) return { kind: 'ink', reason: 'off-text' };
   return { kind: 'highlight', quads, lines: crossed.length };
+}
+
+/** A glyph of a line in reading order: its flat index, extent and text. */
+export interface LineGlyph {
+  readonly flat: number;
+  readonly lo: number;
+  readonly hi: number;
+  readonly text: string;
+  readonly fontSize: number;
+}
+
+/** The glyphs of `line` in reading order along its axis. */
+function lineGlyphs(
+  runs: readonly TextRun[],
+  line: TextLine,
+  offsets: readonly number[],
+): LineGlyph[] {
+  const out: LineGlyph[] = [];
+  for (const r of line.runs) {
+    const run = runs[r] as TextRun;
+    run.glyphs.forEach((glyph, g) => {
+      const rect = glyph.rect;
+      const [lo, hi] =
+        line.dir === 'h' ? [rect.x, rect.x + rect.width] : [rect.y, rect.y + rect.height];
+      out.push({ flat: (offsets[r] ?? 0) + g, lo, hi, text: glyph.text, fontSize: glyph.fontSize });
+    });
+  }
+  return out.sort((a, b) => a.lo - b.lo || a.flat - b.flat);
+}
+
+const isSpace = (g: LineGlyph) => /^\s*$/u.test(g.text);
+
+/** Whether a word ends between neighbouring glyphs `a` and `b` (in reading order). */
+function wordBreak(a: LineGlyph, b: LineGlyph): boolean {
+  if (isSpace(a) || isSpace(b)) return true;
+  const size = Math.max(a.fontSize, b.fontSize, a.hi - a.lo, b.hi - b.lo);
+  return b.lo - a.hi > WORD_BREAK_SHARE * size;
+}
+
+/** The positions in `order` of the word holding position `at`: [start, end], inclusive. */
+function wordAround(order: readonly LineGlyph[], at: number): [number, number] {
+  let start = at;
+  let end = at;
+  while (start > 0 && !wordBreak(order[start - 1] as LineGlyph, order[start] as LineGlyph)) start--;
+  while (end + 1 < order.length && !wordBreak(order[end] as LineGlyph, order[end + 1] as LineGlyph))
+    end++;
+  return [start, end];
+}
+
+/** The glyphs' total extent along the line. */
+function extentOf(order: readonly LineGlyph[], from: number, to: number): number {
+  let sum = 0;
+  for (let i = from; i <= to; i++) {
+    const g = order[i] as LineGlyph;
+    sum += Math.max(0, g.hi - g.lo);
+  }
+  return sum;
+}
+
+/**
+ * The highlight's first and last glyphs on a line (flat indices), extended to the word's
+ * boundary at either end when the highlight covers more than `WORD_COVER_SHARE` of that
+ * word's extent; a word covered less stays as it was. `order` is the line's glyphs in
+ * reading order.
+ */
+export function extendToWords(
+  order: readonly LineGlyph[],
+  first: number,
+  last: number,
+): [number, number] {
+  const from = order.findIndex((g) => g.flat === first);
+  const to = order.findIndex((g) => g.flat === last);
+  if (from < 0 || to < 0 || from > to) return [first, last];
+  let start = from;
+  let end = to;
+  if (!isSpace(order[from] as LineGlyph)) {
+    const [s, e] = wordAround(order, from);
+    const covered = extentOf(order, from, Math.min(e, to));
+    if (s < from && covered > WORD_COVER_SHARE * extentOf(order, s, e)) start = s;
+  }
+  if (!isSpace(order[to] as LineGlyph)) {
+    const [s, e] = wordAround(order, to);
+    const covered = extentOf(order, Math.max(s, from), to);
+    if (e > to && covered > WORD_COVER_SHARE * extentOf(order, s, e)) end = e;
+  }
+  const flats = order.slice(start, end + 1).map((g) => g.flat);
+  return [Math.min(first, ...flats), Math.max(last, ...flats)];
 }
 
 // ---------------------------------------------------------------------------

@@ -33,7 +33,9 @@ import { registerAppCommands } from '../commands/app-commands';
 import { commandRegistry } from '../commands/registry';
 import { useShortcuts } from '../commands/use-shortcuts';
 import { ReadView } from '../stage/ReadView';
-import { useUiStore } from '../state/ui-store';
+import { highlighterIndex } from '../annotations/pen/highlighter';
+import { presetLabel } from '../annotations/pen/presets';
+import { canEditActive, useUiStore } from '../state/ui-store';
 import { useViewStore } from '../state/view-store';
 import { resetWorkspace, useWorkspaceStore } from '../state/workspace-store';
 import { resetToolStore, useToolStore } from '../viewer/tool-store';
@@ -402,16 +404,23 @@ describe('tool bar (mounted)', () => {
     expect(within(bar()).getByRole('button', { name: 'Write' })).toHaveFocus();
   });
 
-  it('U, S and the palette arm the text markups, which show the row and their options', async () => {
+  it('U, S and the palette arm the text markups, which show the row; U again shows their options', async () => {
     await mount();
     await userEvent.click(within(bar()).getByRole('button', { name: 'Text' }));
     await userEvent.keyboard('u');
     await waitFor(() => expect(useToolStore.getState().mode).toBe('underline'));
-    // No group holds them: the row, with the tool's options above it.
+    // No group holds them: the row. Arming opens no options tier (review finding 5).
     expect(useToolStore.getState().barGroup).toBeNull();
     expect(groupNames()).toEqual(GROUPS);
+    expect(screen.queryByTestId('options-tier')).toBeNull();
+    // The armed tool's key again asks for its options, and again hides them.
+    await userEvent.keyboard('u');
     const tier = await screen.findByRole('toolbar', { name: 'Underline options' });
     expect(await within(tier).findAllByRole('radio')).not.toHaveLength(0);
+    expect(useAnnouncer.getState().message).toBe('Underline options');
+    await userEvent.keyboard('u');
+    await waitFor(() => expect(screen.queryByTestId('options-tier')).toBeNull());
+    expect(useToolStore.getState().mode).toBe('underline');
     await userEvent.keyboard('s');
     await waitFor(() => expect(useToolStore.getState().mode).toBe('strikeout'));
     // The palette entries stay, the Highlight tool's and Squiggly's included (no key).
@@ -422,6 +431,125 @@ describe('tool bar (mounted)', () => {
     expect(useToolStore.getState().mode).toBe('squiggly');
     await commandRegistry.execute('tool.highlight');
     expect(useToolStore.getState().mode).toBe('highlight');
+  });
+
+  it('picking Text arms Edit text, as Write arms the pen; a Text tool armed stays', async () => {
+    await mount();
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Text' }));
+    expect(useToolStore.getState().mode).toBe('edit-text');
+    expect(within(bar()).getByRole('button', { name: 'Edit text' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(useAnnouncer.getState().message).toBe('Text tools');
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Text: back to all groups' }));
+    act(() => {
+      useToolStore.getState().setMode('note');
+      useToolStore.getState().showGroup(null);
+    });
+    await userEvent.click(within(bar()).getByRole('button', { name: 'Text' }));
+    expect(useToolStore.getState().mode).toBe('note');
+  });
+
+  it('Esc from the page: the first disarms to Select (the eraser and lasso too), the second returns to the row', async () => {
+    await mount();
+    for (const [key, mode] of [
+      ['{Shift>}e{/Shift}', 'eraser'],
+      ['q', 'lasso'],
+      ['p', 'ink'],
+      ['r', 'rectangle'],
+    ] as const) {
+      (document.activeElement as HTMLElement | null)?.blur();
+      await userEvent.keyboard(key);
+      await waitFor(() => expect(useToolStore.getState().mode).toBe(mode));
+      expect(useToolStore.getState().barGroup).toBe('write');
+      await userEvent.keyboard('{Escape}');
+      expect(useToolStore.getState().mode).toBe('select');
+      expect(useToolStore.getState().barGroup).toBe('write');
+      await userEvent.keyboard('{Escape}');
+      expect(useToolStore.getState().barGroup).toBeNull();
+      // Esc never leaves Edit.
+      expect(canEditActive()).toBe(true);
+    }
+  });
+
+  it('the armed tool says "Esc: Select", and that pressing it again shows its options', async () => {
+    await mount();
+    await userEvent.keyboard('{Shift>}e{/Shift}');
+    const eraser = within(bar()).getByRole('button', { name: 'Eraser' });
+    expect(eraser).toHaveAttribute('aria-description', 'Press again for options');
+    expect(within(bar()).getByRole('button', { name: 'Lasso' })).not.toHaveAttribute(
+      'aria-description',
+    );
+    await userEvent.hover(eraser);
+    await waitFor(() => expect(screen.getByText('Eraser · Esc: Select')).toBeVisible(), {
+      timeout: 3000,
+    });
+  });
+
+  it('P arms the last writing pen, never the Highlighter, and H the Highlighter; each is said', async () => {
+    await mount();
+    const label = (i: 0 | 1 | 2 | 3) =>
+      presetLabel(i, useAnnotationStore.getState().pen.presets[i]);
+    const highlighter = highlighterIndex(useAnnotationStore.getState().pen) ?? 3;
+    act(() => useAnnotationStore.getState().armPreset(1));
+    await userEvent.keyboard('p');
+    expect(useToolStore.getState().mode).toBe('ink');
+    expect(useAnnotationStore.getState().pen.active).toBe(1);
+    expect(useAnnouncer.getState().message).toBe(label(1));
+    await userEvent.keyboard('h');
+    await waitFor(() => expect(useAnnotationStore.getState().pen.active).toBe(highlighter));
+    expect(useAnnouncer.getState().message).toBe(label(highlighter));
+    // P after H: the blue pen again, not the Highlighter, and no options tier.
+    await userEvent.keyboard('p');
+    expect(useAnnotationStore.getState().pen.active).toBe(1);
+    expect(useAnnouncer.getState().message).toBe(label(1));
+    expect(screen.queryByTestId('options-tier')).toBeNull();
+    // From Read: the switch and the pen in one announcement.
+    const id = useWorkspaceStore.getState().workspace.activeDocument;
+    if (id === undefined) throw new Error('no document');
+    act(() => useUiStore.getState().setDocumentMode(id, 'read'));
+    act(() => useAnnotationStore.getState().armPreset(highlighter));
+    await userEvent.keyboard('p');
+    expect(useToolStore.getState().mode).toBe('ink');
+    expect(useAnnotationStore.getState().pen.active).toBe(1);
+    expect(useAnnouncer.getState().message).toBe(`Edit mode. ${label(1)}`);
+  });
+
+  it('fades the bar and lets the pointer through while a stroke is in progress, and a second after', async () => {
+    const { layer } = await mount();
+    const dock = bar().parentElement as HTMLElement;
+    const box = layer.getBoundingClientRect();
+    const init = {
+      bubbles: true,
+      cancelable: true,
+      clientX: box.left + 60,
+      clientY: box.top + 60,
+      button: 0,
+      pointerId: 7,
+      isPrimary: true,
+      pointerType: 'mouse',
+    };
+    // With Select, a press on the page is not a stroke.
+    layer.dispatchEvent(new PointerEvent('pointerdown', { ...init, buttons: 1 }));
+    window.dispatchEvent(new PointerEvent('pointerup', { ...init, buttons: 0 }));
+    expect(dock).not.toHaveAttribute('data-stroking');
+
+    await userEvent.keyboard('{Shift>}e{/Shift}');
+    await waitFor(() => expect(layer).toHaveAttribute('data-tool', 'eraser'));
+    layer.dispatchEvent(new PointerEvent('pointerdown', { ...init, buttons: 1 }));
+    await waitFor(() => expect(dock).toHaveAttribute('data-stroking'));
+    expect(getComputedStyle(bar()).pointerEvents).toBe('none');
+    // A stroke passing over the bar reaches what is beneath it, never a preset.
+    const b = bar().getBoundingClientRect();
+    const under = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+    expect(under === null || !bar().contains(under)).toBe(true);
+    window.dispatchEvent(new PointerEvent('pointerup', { ...init, buttons: 0 }));
+    // It lingers for a second, then the bar takes the pointer again.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(dock).toHaveAttribute('data-stroking');
+    await waitFor(() => expect(dock).not.toHaveAttribute('data-stroking'), { timeout: 2500 });
+    expect(getComputedStyle(bar()).pointerEvents).toBe('auto');
   });
 
   it('is one Tab stop; arrows move between groups and tools', async () => {
@@ -491,8 +619,11 @@ describe('options tier', () => {
   it('shows the armed tool options above the bar; changing them changes the tool', async () => {
     const { target } = await mount();
     expect(screen.queryByTestId('options-tier')).toBeNull();
-    // The Highlight markup tool (H arms the Highlighter preset since craft spec §5.4).
+    // The Highlight markup tool (H arms the Highlighter preset since craft spec §5.4), its
+    // options asked for (the tool pressed again).
     act(() => useToolStore.getState().setMode('highlight'));
+    expect(screen.queryByTestId('options-tier')).toBeNull();
+    act(() => useToolStore.getState().setOptionsOpen(true));
     const tier = await screen.findByRole('toolbar', { name: 'Highlight options' });
     // Attached to the top of the bar, not over the page.
     expect(tier.getBoundingClientRect().bottom).toBeLessThanOrEqual(
@@ -506,7 +637,10 @@ describe('options tier', () => {
       'true',
     );
     expect(await readAnnotations(target.source, 0)).toEqual([]);
-    // Shapes have a width; a tool without a style has no tier.
+    // Shapes have a width; arming one closes the tier, and R again opens it.
+    await userEvent.keyboard('r');
+    await waitFor(() => expect(useToolStore.getState().mode).toBe('rectangle'));
+    expect(screen.queryByTestId('options-tier')).toBeNull();
     await userEvent.keyboard('r');
     const shapes = await screen.findByRole('toolbar', { name: 'Rectangle options' });
     expect(within(shapes).getByRole('slider', { name: /^Stroke width/ })).toBeInTheDocument();
@@ -529,7 +663,7 @@ describe('options tier', () => {
     ]);
     const id = created?.[0]?.id;
     if (id === undefined) throw new Error('not created');
-    await userEvent.keyboard('r');
+    await userEvent.keyboard('rr');
     const tier = await screen.findByRole('toolbar', { name: 'Rectangle options' });
     // An explicit select (a Review row, Tab) while the tool is armed.
     useAnnotationStore.getState().select({ ...target, ids: [id] });
@@ -555,7 +689,10 @@ describe('options tier', () => {
     await userEvent.click(within(bar()).getByRole('button', { name: 'Blue pen' }));
     expect(useToolStore.getState().mode).toBe('ink');
     expect(within(bar()).queryByRole('button', { name: 'Pen' })).toBeNull();
-    // The pen's own style is in the tier until a preset editor plugs in there too.
+    // The pen's own style is in the tier until a preset editor plugs in there too, shown on
+    // request: P with that pen armed.
+    expect(screen.queryByTestId('options-tier')).toBeNull();
+    await userEvent.keyboard('p');
     expect(await screen.findByRole('toolbar', { name: 'Pen options' })).toBeInTheDocument();
     dispose();
     expect(await within(bar()).findByRole('button', { name: 'Pen' })).toBeInTheDocument();

@@ -16,6 +16,10 @@
  * Alt and an arrow rotate it by 1°, each announced; a series of presses is one history
  * entry.
  *
+ * Multiply ink (the Highlighter's free strokes) and Highlights are not tinted: an accent tint
+ * multiplied with a yellow reads olive (review finding 20). They show an accent outline just
+ * outside their own shape (a ring cut out of a wider trace by a mask) and the handles.
+ *
  * A split moves the taken paths to a new Ink; the selection follows once the page cache
  * holds it (`followPaths`), so the highlight and the bar never lose their paths meanwhile.
  */
@@ -25,6 +29,7 @@ import { Move, Trash2 } from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -114,6 +119,48 @@ function tinted(a: Annotation): boolean {
   );
 }
 
+/** Multiply ink (the Highlighter's free strokes): outlined, never tinted (module header). */
+function outlinedInk(a: Annotation): boolean {
+  return a.kind === 'ink' && a.blendMode === 'multiply';
+}
+
+/** The width of the accent ring around an outlined stroke (CSS px). */
+const OUTLINE_RING_PX = 2;
+
+/**
+ * An accent ring just outside a stroke of `width` CSS px along `points`: a trace `2 ×
+ * OUTLINE_RING_PX` wider than the stroke with the stroke's own width cut out by a mask, so
+ * the ink under it shows in its own colour.
+ */
+function OutlinedPath({
+  id,
+  points: line,
+  width,
+  ...data
+}: {
+  readonly id: string;
+  readonly points: string;
+  readonly width: number;
+  readonly 'data-lasso-path': string;
+}) {
+  const outer = width + 2 * OUTLINE_RING_PX;
+  return (
+    <g data-lasso-outlined="">
+      <mask id={id} maskUnits="userSpaceOnUse" x="0" y="0" width="100%" height="100%">
+        <polyline className={styles.maskShow} points={line} strokeWidth={outer} />
+        <polyline className={styles.maskHide} points={line} strokeWidth={width} />
+      </mask>
+      <polyline
+        {...data}
+        className={styles.outlined}
+        points={line}
+        strokeWidth={outer}
+        mask={`url(#${id})`}
+      />
+    </g>
+  );
+}
+
 /**
  * `annotations` are the selected ones: the inks of `picks` (only their taken paths are
  * traced) and every other one, taken whole.
@@ -128,6 +175,7 @@ export function LassoHighlight({
   readonly frame: PageFrame;
 }) {
   const rootRef = useRef<SVGGElement>(null);
+  const maskId = useId();
   // The layer element: the selection box (keyboard) lives there, outside the hidden SVG.
   const [host, setHost] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
@@ -176,6 +224,17 @@ export function LassoHighlight({
           ) : null}
           {shown.map(({ annotation, index, path }) => {
             const width = annotation.kind === 'ink' ? annotation.strokeWidth : 1;
+            if (outlinedInk(annotation)) {
+              return (
+                <OutlinedPath
+                  key={`${annotation.id}:${index}`}
+                  id={`${maskId}-${annotation.id}-${index}`.replace(/[^\w-]/g, '_')}
+                  data-lasso-path={`${annotation.id}:${index}`}
+                  points={points(path, frame)}
+                  width={width * frame.scale}
+                />
+              );
+            }
             return (
               <polyline
                 key={`${annotation.id}:${index}`}
@@ -188,7 +247,15 @@ export function LassoHighlight({
           {whole.map(({ annotation: a, outlines }) => (
             <g key={a.id} data-lasso-whole={a.id}>
               {outlines.map((outline, i) =>
-                tinted(a) ? (
+                a.kind === 'highlight' ? (
+                  // A Highlight multiplies too: outlined, never tinted (module header).
+                  <polygon
+                    key={i}
+                    className={styles.outlinedArea}
+                    data-lasso-outlined=""
+                    points={points(outline, frame)}
+                  />
+                ) : tinted(a) ? (
                   <polygon key={i} points={points(outline, frame)} />
                 ) : (
                   <polyline

@@ -275,6 +275,50 @@ describe('the Edit policy (mounted)', () => {
     await waitFor(() => expect(editorInput(container)).not.toBeNull(), { timeout: 10_000 });
   });
 
+  it('a single click on page text with Select shows the hint at once, until the first double-click', async () => {
+    const { container } = await mount();
+    const span = await foxSpan(container);
+    const click = () =>
+      span.dispatchEvent(
+        new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          clientX: centre(span).x,
+          clientY: centre(span).y,
+          detail: 1,
+        }),
+      );
+    const hint = () => container.querySelector('[data-text-click-hint] [role="status"]');
+    // Read: a click is a caret, nothing more.
+    click();
+    await sleep(50);
+    expect(hint()).toBeNull();
+
+    enterEdit();
+    await sleep(50);
+    click();
+    await waitFor(() => expect(hint()).toHaveTextContent('Double-click to edit text'));
+    // Below the clicked line, not over it.
+    const shown = hint()?.firstElementChild as HTMLElement;
+    expect(shown.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+      span.getBoundingClientRect().bottom - 1,
+    );
+    // The next press takes it away.
+    document.body.dispatchEvent(pointer('pointerdown', { x: 1, y: 1 }, { pointerType: 'mouse' }));
+    await waitFor(() => expect(hint()).toBeNull());
+    // Edit text opens on one click: no hint there.
+    useToolStore.getState().setMode('edit-text');
+    await sleep(50);
+    expect(hint()).toBeNull();
+    useToolStore.getState().setMode('select');
+    // After the first double-click it never shows again.
+    useEditPolicyStore.getState().markEditTextHintShown();
+    await sleep(50);
+    click();
+    await sleep(50);
+    expect(hint()).toBeNull();
+  });
+
   it('the idle hover outline after 400 ms, never within 300 ms of a pen stroke, never touch; the hint once', async () => {
     const { container } = await mount();
     enterEdit();

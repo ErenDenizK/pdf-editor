@@ -214,7 +214,7 @@ describe('pen bursts on the annotation layer', () => {
     expect(sent.annotation.widths?.map((w) => w.length)).toEqual(
       sent.annotation.paths.map((p) => p.length),
     );
-    expect(model().history.present.label).toBe('Erase pen strokes');
+    expect(model().history.present.label).toBe('Erased 1 stroke');
 
     eraserDrag(layer, 130, 285, 315);
     await waitFor(async () => expect(strokesOf(await inks(source))).toEqual([1]));

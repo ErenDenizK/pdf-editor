@@ -24,6 +24,7 @@ import {
 import { readAnnotations, resetEditRunner, whenIdle } from './edit-runner';
 import { INK, TINT } from './palette';
 import { LEGACY_PEN_PRESETS_STORAGE_KEY, PEN_PRESETS_STORAGE_KEY } from './pen/presets';
+import { strokeWidthText } from './StyleControls';
 
 const store = () => useAnnotationStore.getState();
 
@@ -210,5 +211,14 @@ describe('tool styles', () => {
     const target = await openSimple();
     const created = await createAnnotations(target, [stroke('#000000')], { select: true });
     expect(store().selection?.ids).toEqual(created?.map((a) => a.id));
+  });
+});
+
+describe('stroke width readout', () => {
+  it('rounds to 0.1 pt, as the lasso bar, the contextual bar and the inspector show it', () => {
+    expect(strokeWidthText(1.2999999523162842)).toBe('1.3 pt');
+    expect(strokeWidthText(2)).toBe('2 pt');
+    expect(strokeWidthText(0.25)).toBe('0.3 pt');
+    expect(strokeWidthText(11.96)).toBe('12 pt');
   });
 });

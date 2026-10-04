@@ -22,7 +22,10 @@
  * The options tier (`PenTier`) holds one honesty note, and only once a pen with pressure has
  * been seen: the variable width lives in the stroke's appearance, and viewers that redraw
  * ink themselves show one width (spec §6.7, §13 decision 9). Otherwise the tier stays empty
- * and hidden.
+ * and hidden. Tiers open only on request (P again, review finding 5), so the preset editor
+ * repeats the note, where a tap on the armed preset leads.
+ *
+ * The armed preset's tooltip says how to leave it ("Black pen, 1.5 pt · Esc: Select").
  *
  * The eraser's options tier (`EraserTier`, craft spec §5.6): Whole stroke or Partial, and the
  * eraser's size (a hollow circle per size; the cursor is that circle on the page). Both are
@@ -181,7 +184,11 @@ export function PenBar({ armed, arm }: PenBarProps) {
           const label = presetLabel(i, preset);
           const active = i === pen.active;
           return (
-            <Tooltip key={i} label={label} side="top">
+            <Tooltip
+              key={i}
+              label={armed && active ? m.bar_tool_escape({ tool: label }) : label}
+              side="top"
+            >
               <button
                 type="button"
                 role="radio"
@@ -242,6 +249,7 @@ function PresetEditor({
   const stops = presetWidthStops(preset);
   const limits = presetWidthLimits(preset);
   const stopChosen = stops.some((stop) => stop === preset.width);
+  const pressure = usePressureSeen();
 
   return (
     <Popover.Root
@@ -363,6 +371,12 @@ function PresetEditor({
                 <span className={styles.value}>{formatPercent(preset.opacity)}</span>
               </label>
             )}
+
+            {pressure && !highlighter ? (
+              <p className={styles.note} data-testid="pen-editor-width-note">
+                {m.pen_width_note()}
+              </p>
+            ) : null}
 
             <button
               type="button"

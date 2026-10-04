@@ -1,10 +1,14 @@
 /**
  * The page context menu (ADR-0019 §4, craft spec §3.4): right-click, the Menu key or
- * Shift+F10 on a page in Read or Edit. It carries the page operations that left the tool bar
- * with the Pages group: Rotate page left and right, Delete page, Crop… and Arrange, and in
- * Edit "Edit text here", which arms Edit text. Every item acts on the page it was opened on,
+ * Shift+F10 on a page in Read or Edit. In Edit it carries the page operations that left the
+ * tool bar with the Pages group: Rotate page left and right, Delete page, Crop… and Arrange,
+ * and "Edit text here", which arms Edit text. Every item acts on the page it was opened on,
  * and Rotate and Delete say which ("Rotate page 3 left"). The Document menu keeps "Rotate
  * pages…" and "Crop…" for many pages.
+ *
+ * Read is locked (ADR-0019 §3, review finding 4): nothing in the menu changes a page there.
+ * Rotate, Delete and Crop give way to one quiet row, "Switch to Edit to change pages", which
+ * switches to Edit when chosen (an explicit choice, never implicit); Arrange stays.
  *
  * One menu for the page view, mounted with the tool bar: it listens on the document for a
  * `contextmenu` over a page of the Read viewport, and for Shift+F10 or the Menu key with the
@@ -16,12 +20,13 @@
  */
 import { Menu } from '@base-ui/react/menu';
 import { findPageLocation, type PageId } from '@pdf-editor/document-model';
-import { Crop, LayoutGrid, RotateCcw, RotateCw, TextCursorInput, Trash2 } from 'lucide-react';
+import { Crop, LayoutGrid, Lock, RotateCcw, RotateCw, TextCursorInput, Trash2 } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { activateTool } from '../annotations/commands';
 import { toolDefinition } from '../annotations/tools';
 import { commandRegistry } from '../commands/registry';
+import { showDocumentMode } from '../home/home-actions';
 import { currentPlatform, type ParsedShortcut } from '../commands/shortcuts';
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
@@ -123,15 +128,22 @@ function Item({
   label,
   icon,
   shortcut,
+  quiet,
   onClick,
 }: {
   readonly label: string;
   readonly icon: ReactNode;
   readonly shortcut?: ParsedShortcut | undefined;
+  /** Looks unavailable (the Read row), but can still be chosen. */
+  readonly quiet?: boolean;
   readonly onClick: () => void;
 }) {
   return (
-    <Menu.Item className={menuStyles.item} onClick={onClick}>
+    <Menu.Item
+      className={quiet ? `${menuStyles.item} ${styles.quiet}` : menuStyles.item}
+      data-quiet={quiet ? '' : undefined}
+      onClick={onClick}
+    >
       {icon}
       <span className={menuStyles.label}>{label}</span>
       {shortcut ? <Keycaps shortcut={shortcut} tone="quiet" /> : null}
@@ -254,27 +266,42 @@ export function PageContextMenu() {
                     <Menu.Separator className={menuStyles.separator} />
                   </>
                 ) : null}
-                <Item
-                  label={m.page_menu_rotate_left({ number })}
-                  icon={<RotateCcw aria-hidden="true" className={styles.icon} />}
-                  onClick={run((id) => rotatePage(id, -90))}
-                />
-                <Item
-                  label={m.page_menu_rotate_right({ number })}
-                  icon={<RotateCw aria-hidden="true" className={styles.icon} />}
-                  onClick={run((id) => rotatePage(id, 90))}
-                />
-                <Item
-                  label={m.page_menu_delete({ number })}
-                  icon={<Trash2 aria-hidden="true" className={styles.icon} />}
-                  onClick={run(deletePage)}
-                />
-                <Menu.Separator className={menuStyles.separator} />
-                <Item
-                  label={m.page_menu_crop()}
-                  icon={<Crop aria-hidden="true" className={styles.icon} />}
-                  onClick={run(cropPage)}
-                />
+                {editable ? (
+                  <>
+                    <Item
+                      label={m.page_menu_rotate_left({ number })}
+                      icon={<RotateCcw aria-hidden="true" className={styles.icon} />}
+                      onClick={run((id) => rotatePage(id, -90))}
+                    />
+                    <Item
+                      label={m.page_menu_rotate_right({ number })}
+                      icon={<RotateCw aria-hidden="true" className={styles.icon} />}
+                      onClick={run((id) => rotatePage(id, 90))}
+                    />
+                    <Item
+                      label={m.page_menu_delete({ number })}
+                      icon={<Trash2 aria-hidden="true" className={styles.icon} />}
+                      onClick={run(deletePage)}
+                    />
+                    <Menu.Separator className={menuStyles.separator} />
+                    <Item
+                      label={m.page_menu_crop()}
+                      icon={<Crop aria-hidden="true" className={styles.icon} />}
+                      onClick={run(cropPage)}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Item
+                      label={m.page_menu_switch_to_edit()}
+                      icon={<Lock aria-hidden="true" className={styles.icon} />}
+                      shortcut={commandRegistry.get('mode.edit')?.shortcuts[0]}
+                      quiet
+                      onClick={() => showDocumentMode('edit')}
+                    />
+                    <Menu.Separator className={menuStyles.separator} />
+                  </>
+                )}
                 <Item
                   label={m.mode_arrange()}
                   icon={<LayoutGrid aria-hidden="true" className={styles.icon} />}

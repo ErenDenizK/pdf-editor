@@ -17,6 +17,7 @@ import type { ToolDefinition } from '../tools';
 import {
   activateHighlighter,
   armedHighlighter,
+  extendToWords,
   glyphHit,
   HighlighterPreview,
   highlighterIndex,
@@ -125,13 +126,54 @@ describe('snapping rule', () => {
       quads: [{ x: LEFT, y: LINES[0], width: RIGHT - LEFT, height: GLYPH_H }],
       lines: 1,
     });
-    // Starting in the middle of the third word: the quad starts at its first hit glyph.
-    const start = LEFT + 2 * 33 + 14;
+    // Starting in the third word with less than half of it covered (its last two glyphs): the
+    // quad starts at its first hit glyph.
+    const start = LEFT + 2 * 33 + 20;
     const partial = snapHighlighter(RUNS, along(0, start, RIGHT - 1), WIDTH);
     expect(partial.kind).toBe('highlight');
     if (partial.kind !== 'highlight') return;
-    expect(partial.quads[0]?.x).toBe(LEFT + 2 * 33 + 12);
+    expect(partial.quads[0]?.x).toBe(LEFT + 2 * 33 + 18);
     expect(partial.quads[0]?.x).toBeLessThanOrEqual(start);
+  });
+
+  it('a highlight extends to the word boundary when more than half of the word is covered', () => {
+    // Three of the third word's five glyphs at the start, four of the last word's at the end.
+    const start = LEFT + 2 * 33 + 14;
+    const end = RIGHT - GLYPH_W - 2;
+    const result = snapHighlighter(RUNS, along(0, start, end), WIDTH);
+    expect(result.kind).toBe('highlight');
+    if (result.kind !== 'highlight') return;
+    const quad = result.quads[0];
+    expect(quad?.x).toBe(LEFT + 2 * 33);
+    expect((quad?.x ?? 0) + (quad?.width ?? 0)).toBe(RIGHT);
+    // Two of the last word's glyphs (less than half): the end stays at the last hit glyph.
+    const short = snapHighlighter(RUNS, along(0, LEFT + 1, RIGHT - 3 * GLYPH_W - 2), WIDTH);
+    expect(short.kind).toBe('highlight');
+    if (short.kind !== 'highlight') return;
+    const q = short.quads[0];
+    expect((q?.x ?? 0) + (q?.width ?? 0)).toBe(RIGHT - 3 * GLYPH_W);
+  });
+
+  it('words end at spaces or, without space glyphs, at wide gaps; the wider share counts', () => {
+    // "we" "ok": no space glyphs, a 4 pt gap between the words; 'w' is wider than 'e'.
+    const g = (flat: number, lo: number, hi: number, text: string) => ({
+      flat,
+      lo,
+      hi,
+      text,
+      fontSize: 10,
+    });
+    const order = [g(0, 0, 7, 'w'), g(1, 7, 11, 'e'), g(2, 15, 20, 'o'), g(3, 20, 25, 'k')];
+    // Only 'w' hit: 7 of 11 covered, so the word is taken whole.
+    expect(extendToWords(order, 0, 0)).toEqual([0, 1]);
+    // Only 'e' hit: 4 of 11, so it stays.
+    expect(extendToWords(order, 1, 1)).toEqual([1, 1]);
+    // 'e' to 'o': 'e' alone at the start (stays), 'o' is half of "ok" (not more): stays.
+    expect(extendToWords(order, 1, 2)).toEqual([1, 2]);
+    // A space glyph ends a word even without a gap.
+    const spaced = [g(0, 0, 5, 'a'), g(1, 5, 5, ' '), g(2, 5, 10, 'b'), g(3, 10, 15, 'c')];
+    expect(extendToWords(spaced, 0, 3)).toEqual([0, 3]);
+    expect(extendToWords(spaced, 2, 2)).toEqual([2, 2]);
   });
 
   it('a slightly wavy or sloped stroke along a line still snaps', () => {

@@ -29,6 +29,36 @@
   pointer-events: auto;
 }
 
+/*
+ * While a stroke is in progress on a page and for a second after (FloatingToolbar.stroke.ts),
+ * the bar and its tier fade to 20 % and let the pointer through to the page, so a stroke near
+ * the bottom of the view never lands on a preset. Each surface fades itself: an opacity on
+ * the dock would make it the backdrop root of the glass. The fade back is quick but visible;
+ * under reduced motion both changes are instant.
+ */
+.toolbar,
+.tier {
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.dock[data-stroking] > .toolbar,
+.dock[data-stroking] > .tier {
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+.dock[data-stroking] > .toolbar *,
+.dock[data-stroking] > .tier * {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toolbar,
+  .tier {
+    transition: none;
+  }
+}
+
 .toolbar {
   composes: glass from global;
   display: flex;

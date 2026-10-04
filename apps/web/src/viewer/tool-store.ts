@@ -13,6 +13,10 @@
  * Edit (`1`, another tab in Read). Callers that arm from Read switch to Edit first
  * (`activateTool`).
  *
+ * The armed tool's options tier opens only on request (`optionsOpen`): pressing the armed tool
+ * again (its button or its key) toggles it, and arming another tool closes it, so nothing
+ * rises over the page on its own (craft spec §3.5, review finding 5).
+ *
  * The eraser's options (craft spec §5.6) live here too: Stroke or Partial (`eraserMode`) and
  * the eraser's diameter on screen (`eraserSize`), persisted per device beside the pen
  * presets (`ERASER_STORAGE_KEY`).
@@ -103,7 +107,11 @@ interface ToolState {
   readonly lastGroup: BarGroup | null;
   readonly eraserMode: EraserMode;
   readonly eraserSize: EraserSize;
+  /** Whether the armed tool's options tier is shown (only on request; closed on arming). */
+  readonly optionsOpen: boolean;
   setMode: (mode: ToolMode) => void;
+  /** Shows or hides the armed tool's options tier. */
+  setOptionsOpen: (open: boolean) => void;
   /** Stroke or Partial; remembered per device. */
   setEraserMode: (mode: EraserMode) => void;
   /** The eraser's diameter on screen; remembered per device. */
@@ -128,13 +136,20 @@ export const useToolStore = create<ToolState>()((set, get) => ({
   previousMode: 'select',
   barGroup: null,
   lastGroup: null,
+  optionsOpen: false,
   ...readEraserSettings(),
   setMode: (mode) =>
     set((s) =>
       s.mode === mode || (mode !== 'select' && locked())
         ? s
-        : { mode, previousMode: ONE_SHOT_MODES.has(s.mode) ? s.previousMode : s.mode },
+        : {
+            mode,
+            previousMode: ONE_SHOT_MODES.has(s.mode) ? s.previousMode : s.mode,
+            optionsOpen: false,
+          },
     ),
+  setOptionsOpen: (optionsOpen) =>
+    set((s) => (s.optionsOpen === optionsOpen ? s : { optionsOpen })),
   showGroup: (group) =>
     set((s) => (s.barGroup === group ? s : { barGroup: group, lastGroup: group ?? s.lastGroup })),
   setEraserMode: (eraserMode) => {
@@ -174,6 +189,7 @@ export function resetToolStore(): void {
     previousMode: 'select',
     barGroup: null,
     lastGroup: null,
+    optionsOpen: false,
     ...readEraserSettings(),
   });
 }

@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import simpleUrl from '../../../../../test/fixtures/simple-text.pdf?url';
 import { fixtureFile } from '../../../test/store-harness';
+import { useAnnouncer } from '../../shell/announcer';
 import { resetWorkspace, useWorkspaceStore } from '../../state/workspace-store';
 import { createAnnotations } from '../actions';
 import { type PageTarget, resetAnnotationStore } from '../annotation-store';
@@ -28,6 +29,7 @@ import {
   commitErase,
   eraseInk,
   erasePath,
+  eraseLabel,
   erasePlan,
   eraserCursor,
   type EraserSweep,
@@ -160,6 +162,7 @@ describe('Partial', () => {
     expect(eraseInk(ink([line(0, 10, 0)]), pass(5, -20, 20, 8), 'partial')).toEqual({
       remove: true,
       count: 1,
+      cut: 0,
     });
     // A dot (one point) under the circle goes.
     expect(eraseInk(ink([[{ x: 3, y: 3 }]]), pass(3, 0, 6, 1), 'partial')?.remove).toBe(true);
@@ -221,12 +224,33 @@ describe('Partial', () => {
     );
     expect(plan.removals.map((a) => a.id)).toEqual(['hl-1']);
     expect(plan.updates.map((a) => a.id)).toEqual(['ink-1']);
+    // The free Multiply stroke goes whole, as does the highlight: two strokes, nothing cut.
+    expect({ strokes: plan.strokes, cuts: plan.cuts }).toEqual({ strokes: 2, cuts: 0 });
     expect(
       sweepTouchesQuads(
         highlight.kind === 'highlight' ? highlight.quads : [],
         pass(150, 0, 100, 3),
       ),
     ).toBe(false);
+  });
+});
+
+describe('labels', () => {
+  it('names an erase by what it did, in the plural where it counts', () => {
+    expect(eraseLabel({ strokes: 1, cuts: 0 })).toBe('Erased 1 stroke');
+    expect(eraseLabel({ strokes: 3, cuts: 0 })).toBe('Erased 3 strokes');
+    expect(eraseLabel({ strokes: 0, cuts: 1 })).toBe('Erased part of a stroke');
+    expect(eraseLabel({ strokes: 1, cuts: 1 })).toBe('Erased parts of 2 strokes');
+  });
+
+  it('counts a cut path apart from a path erased whole', () => {
+    const short = [
+      { x: 4, y: 20 },
+      { x: 6, y: 20 },
+    ];
+    const outcome = eraseInk(ink([line(0, 100, 0), short]), pass(5, -20, 30, 2), 'partial');
+    // The long path is cut near its start (a piece remains); the short one goes whole.
+    expect(outcome).toMatchObject({ count: 2, cut: 1 });
   });
 });
 
@@ -322,7 +346,9 @@ describe('erasing with the engine', () => {
     await whenIdle();
     const after = await readAnnotations(source, 0);
     expect(labels()).toHaveLength(entries + 1);
-    expect(labels().at(-1)).toBe('Erase pen strokes');
+    // Two burst paths cut, the short ink and the highlight whole: parts of four strokes.
+    expect(labels().at(-1)).toBe('Erased parts of 4 strokes');
+    expect(useAnnouncer.getState().message).toBe('Erased parts of 4 strokes');
     expect(after.filter((a) => a.kind === 'highlight')).toEqual([]);
     const inks = after.filter((a): a is InkAnnotation => a.kind === 'ink');
     expect(inks.map((a) => a.id)).toEqual([burstId]);

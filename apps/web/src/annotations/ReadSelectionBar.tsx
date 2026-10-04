@@ -1,9 +1,11 @@
 /**
  * The contextual bar of a text selection (ADR-0019 §3 item 4 and §4, craft spec §3.4–§3.5).
  *
- * - **Read** (the Read row): Copy, and "Mark up…", which switches the document to Edit and
- *   keeps the selection, so the Edit bar below takes over (and H, U or S marks it with the
- *   next press). Nothing is marked from Read.
+ * - **Read** (the Read row): Copy; "Edit text", which switches the document to Edit and opens
+ *   the paragraph editor at the start of the selection (`openTextEditorAt`, review finding
+ *   15), the way from reading a sentence to changing it; and "Mark up…", which switches the
+ *   document to Edit and keeps the selection, so the Edit bar below takes over (and H, U or S
+ *   marks it with the next press). Nothing is marked or changed from Read.
  * - **Edit, with Select armed** (the Select row): Highlight, Underline, Strikeout, Squiggly,
  *   each through `markupFromSelection` with the tool's remembered style, and Comment, which
  *   opens a new note's editor at the end of the selection's first line.
@@ -12,7 +14,7 @@
  * starts, above its first line (below it near the top of the page), once the pointer is up.
  * A click elsewhere ends the selection and the bar; Esc clears the selection.
  */
-import { ClipboardCopy, MessageSquarePlus, Pencil } from 'lucide-react';
+import { ClipboardCopy, MessageSquarePlus, Pencil, TextCursorInput } from 'lucide-react';
 import { type PointerEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { commandRegistry } from '../commands/registry';
@@ -24,6 +26,7 @@ import { registerPageOverlay, type PageOverlayProps } from '../stage/page-overla
 import { useCanEdit } from '../state/ui-store';
 import { IconButton } from '../ui/IconButton';
 import { Tooltip } from '../ui/Tooltip';
+import { openTextEditorAt } from '../text-edit/entry';
 import { selectionCopyText } from '../viewer/text-model';
 import { useToolStore } from '../viewer/tool-store';
 import { useAnnotationStore } from './annotation-store';
@@ -71,6 +74,27 @@ function commentOnSelection(props: PageOverlayProps): boolean {
     rect: { x: Math.round(p.x), y: Math.round(p.y - 20), width: 20, height: 20 },
     text: '',
   });
+  return true;
+}
+
+/**
+ * "Edit text" from Read (review finding 15): switches the document to Edit and opens the
+ * paragraph editor with the caret at the start of the selection on this page. The selection
+ * goes; nothing changes until a key is typed.
+ */
+function editTextAtSelection(props: PageOverlayProps): boolean {
+  const layer = mountedLayers.get(props.pageId);
+  const first = selectedRects()[0];
+  if (!layer || !first) return false;
+  const bounds = layer.element.getBoundingClientRect();
+  // Just inside the first selected glyph, at the middle of its line.
+  const point = cssPointToUser(layer.frame, {
+    x: first.left - bounds.left + Math.min(1, first.width / 2),
+    y: first.top - bounds.top + first.height / 2,
+  });
+  globalThis.getSelection?.()?.removeAllRanges();
+  showDocumentMode('edit');
+  void openTextEditorAt(layer.target, point);
   return true;
 }
 
@@ -254,6 +278,18 @@ export function TextSelectionBar(props: PageOverlayProps) {
                 <ClipboardCopy aria-hidden="true" />
                 {m.action_copy()}
               </button>
+              <Tooltip label={m.selection_edit_text_tooltip()} side="top">
+                <button
+                  type="button"
+                  className={styles.action}
+                  data-edit-text=""
+                  onPointerDown={keep}
+                  onClick={() => void editTextAtSelection(props)}
+                >
+                  <TextCursorInput aria-hidden="true" />
+                  {m.tool_edit_text()}
+                </button>
+              </Tooltip>
               <Tooltip label={m.selection_mark_up_tooltip()} side="top">
                 <button
                   type="button"

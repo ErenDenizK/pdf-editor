@@ -62,8 +62,16 @@
   background: var(--ink);
 }
 
+/* A dark ink (black, and any below 3:1 on the bar): the ring sits outside a fill of 70 % of
+   the dot's diameter, with the bar showing between them, so the dot reads as filled and not
+   as an empty ring at 1x (review finding 22). Border 1 px + padding = 15 % of the diameter. */
 .mark[data-ring] {
   border-color: var(--glass-text-secondary);
+}
+
+.mark[data-ring][data-shape='dot'] {
+  padding: calc(var(--dot) * 0.15 - 1px);
+  background-clip: content-box;
 }
 
 .mark[data-shape='capsule'] {

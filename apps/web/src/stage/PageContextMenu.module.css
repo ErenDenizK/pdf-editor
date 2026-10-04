@@ -6,3 +6,9 @@
   stroke-width: 1.5;
   color: inherit;
 }
+
+/* Read's "Switch to Edit to change pages": it looks unavailable (the page operations are
+   locked) but can be chosen, and highlights like any item. */
+.quiet:not([data-highlighted]) {
+  color: var(--text-tertiary);
+}

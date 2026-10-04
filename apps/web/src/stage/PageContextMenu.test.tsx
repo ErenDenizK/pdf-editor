@@ -2,7 +2,8 @@
  * The page context menu (ADR-0019 §4, craft spec §3.4), Vitest browser mode with the Read
  * view, the tool bar (which mounts the menu) and real PDFium: it opens on a right-click and
  * on Shift+F10, its items act on the page it was opened on and name it, "Edit text here" is
- * Edit's only, and a right-click on selected text keeps the browser's menu.
+ * Edit's only, Read offers no page change (one quiet row switches to Edit instead), and a
+ * right-click on selected text keeps the browser's menu.
  */
 import '../styles/tokens.css';
 import '../styles/reset.css';
@@ -127,7 +128,7 @@ describe('page context menu', () => {
     resetWorkspace();
   });
 
-  it('opens on a right-click in Read, names the clicked page, and rotates that page', async () => {
+  it('in Read offers no page change: one quiet row switches to Edit, Arrange stays', async () => {
     const { container, doc } = await mount();
     const kept = rightClick(pageElement(container, 1));
     expect(kept).toBe(false);
@@ -137,14 +138,49 @@ describe('page context menu', () => {
       .getAllByRole('menuitem')
       .map((item) => item.textContent?.trim());
     expect(names).toEqual([
+      expect.stringMatching(/^Switch to Edit to change pages/),
+      expect.stringMatching(/^Arrange/),
+    ]);
+    // Neither Edit's own item nor a page operation is offered in Read (ADR-0019 §3).
+    for (const name of ['Edit text here', /^Rotate page/, /^Delete page/, 'Crop…']) {
+      expect(within(popup).queryByRole('menuitem', { name })).toBeNull();
+    }
+    const row = within(popup).getByRole('menuitem', { name: /^Switch to Edit to change pages/ });
+    // It looks unavailable but can be chosen; choosing it is the explicit switch to Edit.
+    expect(row).toHaveAttribute('data-quiet');
+    expect(row).not.toHaveAttribute('aria-disabled');
+    expect(useUiStore.getState().documentMode[doc.id] ?? 'read').toBe('read');
+    await userEvent.click(row);
+    expect(useUiStore.getState().documentMode[doc.id]).toBe('edit');
+    expect(useAnnouncer.getState().message).toBe('Edit mode');
+    expect(activeDoc().pages.map((p) => p.rotation)).toEqual(doc.pages.map((p) => p.rotation));
+    await closed();
+
+    // In Edit the page operations are back.
+    rightClick(pageElement(container, 1));
+    const edit = await menu();
+    expect(within(edit).getByRole('menuitem', { name: 'Rotate page 2 right' })).toBeVisible();
+    expect(within(edit).queryByRole('menuitem', { name: /^Switch to Edit/ })).toBeNull();
+    await userEvent.keyboard('{Escape}');
+    await closed();
+  });
+
+  it('in Edit names the clicked page and rotates that page', async () => {
+    const { container, doc } = await mount(true);
+    rightClick(pageElement(container, 1));
+    const popup = await menu();
+    expect(popup).toHaveAccessibleName('Page 2');
+    const names = within(popup)
+      .getAllByRole('menuitem')
+      .map((item) => item.textContent?.trim());
+    expect(names).toEqual([
+      expect.stringMatching(/^Edit text here/),
       'Rotate page 2 left',
       'Rotate page 2 right',
       'Delete page 2',
       'Crop…',
       expect.stringMatching(/^Arrange/),
     ]);
-    // Edit's own item is not offered in Read.
-    expect(within(popup).queryByRole('menuitem', { name: 'Edit text here' })).toBeNull();
 
     await userEvent.click(within(popup).getByRole('menuitem', { name: 'Rotate page 2 right' }));
     const before = doc.pages[1]?.rotation ?? 0;
@@ -162,7 +198,7 @@ describe('page context menu', () => {
   });
 
   it('Delete, Crop… and Arrange act on the clicked page', async () => {
-    const { container, doc } = await mount();
+    const { container, doc } = await mount(true);
     const second = doc.pages[1]?.id;
     const third = doc.pages[2]?.id;
     if (second === undefined || third === undefined) throw new Error('pages missing');
@@ -204,7 +240,7 @@ describe('page context menu', () => {
   });
 
   it('opens on Shift+F10 in the viewport for the current page; Esc closes it and returns the focus', async () => {
-    const { container } = await mount();
+    const { container } = await mount(true);
     const viewport = container.querySelector<HTMLElement>('[data-read-viewport]');
     if (!viewport) throw new Error('no viewport');
     viewport.focus();

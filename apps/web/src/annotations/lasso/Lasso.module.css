@@ -59,6 +59,33 @@
   stroke: none;
 }
 
+/* Multiply ink and Highlights (review finding 20): an accent ring outside their own shape, no
+   tint, so a yellow stroke keeps its colour. The mask's traces show and hide the ring. */
+.highlight .outlined {
+  stroke: var(--accent);
+}
+
+.highlight .maskShow {
+  fill: none;
+  stroke: #fff;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.highlight .maskHide {
+  fill: none;
+  stroke: #000;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.highlight .outlinedArea {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+
 /* The grab area, one dashed box around the selection: a press inside it moves it. */
 .grab {
   fill: transparent;

@@ -8,9 +8,14 @@
  * fresh. The fourth view, Compare (`compare/CompareView`, loaded on first use), brings its
  * own bar; its segment shows only while a comparison is open (being set up, running or kept
  * after leaving the view; spec recognize-and-compare §2.2).
+ *
+ * The page view's focus ring shows only when the focus reached it by Tab or F6
+ * (`watchStageFocusRing`, review finding 23): a click on the pages, or a key such as `2`
+ * pressed while they have the focus, would otherwise turn on `:focus-visible` and frame the
+ * whole stage as if the page were selected.
  */
 import { Lock } from 'lucide-react';
-import { type KeyboardEvent, lazy, Suspense, useRef } from 'react';
+import { type KeyboardEvent, lazy, Suspense, useEffect, useRef } from 'react';
 
 import { commandRegistry } from '../commands/registry';
 import { currentPlatform, type ParsedShortcut, toAriaKeyShortcut } from '../commands/shortcuts';
@@ -32,7 +37,48 @@ import { useCommandShortcut } from './use-command-shortcut';
 // The Compare view (spec recognize-and-compare §2.2) loads with its first use.
 const CompareView = lazy(() => import('../compare/CompareView'));
 
+/** Keys after which the stage shows its focus ring: Tab (and Shift+Tab) and F6. */
+const NAVIGATION_KEYS: ReadonlySet<string> = new Set(['Tab', 'F6']);
+/** A focus change this soon after a navigation key came from it (ms). */
+const NAVIGATION_FOCUS_MS = 500;
+/** On the stage while the focus inside it arrived by Tab or F6 (ReadView.module.css). */
+export const STAGE_FOCUS_RING_ATTR = 'data-focus-ring';
+
+/**
+ * Marks the stage with `data-focus-ring` while the focus in it arrived by Tab or F6, and
+ * clears it on any other focus change and on a press, so the pages' ring shows only after
+ * keyboard navigation (module header). Returns a disposer.
+ */
+export function watchStageFocusRing(doc: Document = document): () => void {
+  let navigatedAt = Number.NEGATIVE_INFINITY;
+  const stage = () => doc.getElementById(STAGE_ID);
+  const onKeyDown = (event: globalThis.KeyboardEvent) => {
+    navigatedAt = NAVIGATION_KEYS.has(event.key) ? performance.now() : Number.NEGATIVE_INFINITY;
+  };
+  const onFocusIn = (event: FocusEvent) => {
+    const main = stage();
+    if (!main || !(event.target instanceof Node) || !main.contains(event.target)) return;
+    main.toggleAttribute(
+      STAGE_FOCUS_RING_ATTR,
+      performance.now() - navigatedAt <= NAVIGATION_FOCUS_MS,
+    );
+  };
+  const onPointerDown = () => {
+    navigatedAt = Number.NEGATIVE_INFINITY;
+    stage()?.removeAttribute(STAGE_FOCUS_RING_ATTR);
+  };
+  doc.addEventListener('keydown', onKeyDown, true);
+  doc.addEventListener('focusin', onFocusIn, true);
+  doc.addEventListener('pointerdown', onPointerDown, true);
+  return () => {
+    doc.removeEventListener('keydown', onKeyDown, true);
+    doc.removeEventListener('focusin', onFocusIn, true);
+    doc.removeEventListener('pointerdown', onPointerDown, true);
+  };
+}
+
 export function Stage({ dragging }: { readonly dragging: boolean }) {
+  useEffect(() => watchStageFocusRing(), []);
   const hasDocuments = useHasDocuments();
   const opening = useWorkspaceStore((s) => s.opening);
   const doc = useActiveDocument();

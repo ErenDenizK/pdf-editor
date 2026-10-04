@@ -20,8 +20,10 @@
  * - **Whole objects.** Highlighter free ink (Multiply, constant width) and Highlight
  *   annotations erase whole in both modes: a Multiply path the circle touches goes, and a
  *   Highlight whose quads it touches is deleted.
- * - **History.** Everything one drag erases on a page is one history entry (`commitErase`):
- *   "Erase pen strokes" when a path was cut or removed from a burst, else the delete label.
+ * - **History.** Everything one drag erases on a page is one history entry (`commitErase`),
+ *   said and listed by what it did (`eraseLabel`, review finding 26): "Erased 1 stroke",
+ *   "Erased 3 strokes" when only whole strokes went, "Erased part of a stroke" or "Erased
+ *   parts of 2 strokes" when one was cut.
  */
 import type { EngineEdit, Rect } from '@pdf-editor/document-model';
 import type { Annotation, InkAnnotation } from '@pdf-editor/engine';
@@ -33,7 +35,6 @@ import { type PageTarget, useAnnotationStore } from '../annotation-store';
 import { type ActionResult, executeEdit, readAnnotations, runAction } from '../edit-runner';
 import { cssPointToUser, type PageFrame } from '../geometry';
 import type { Point } from '../ink';
-import { deleteLabel } from '../labels';
 import { alignedWidths, splitInk } from '../lasso/split';
 
 /** Pieces of a cut path shorter than this (points) are erased with it. */
@@ -325,10 +326,18 @@ function widthPaths(ink: InkAnnotation): WidthPoint[][] {
   );
 }
 
-/** What erasing does to one Ink: unchanged (undefined), removed, or updated (same id). */
+/**
+ * What erasing does to one Ink: unchanged (undefined), removed, or updated (same id).
+ * `count` paths were touched, `cut` of them only in part (pieces remain).
+ */
 export type InkErase =
-  | { readonly remove: true; readonly count: number }
-  | { readonly remove: false; readonly update: InkAnnotation; readonly count: number };
+  | { readonly remove: true; readonly count: number; readonly cut: number }
+  | {
+      readonly remove: false;
+      readonly update: InkAnnotation;
+      readonly count: number;
+      readonly cut: number;
+    };
 
 /**
  * The sweep applied to one Ink by the split rule (module header). Stroke, and any Multiply
@@ -349,6 +358,7 @@ export function eraseInk(
   const paths: (readonly Point[])[] = [];
   const widths: (readonly number[])[] = [];
   const taken: number[] = [];
+  let cut = 0;
   widthPaths(ink).forEach((path, i) => {
     const original = ink.paths[i] ?? [];
     const pieces = erasePath(path, sweep, reach);
@@ -364,6 +374,7 @@ export function eraseInk(
       return;
     }
     if (!whole) {
+      if (pieces.length > 0) cut++;
       for (const piece of pieces) {
         add(
           piece.map((p) => ({ x: p.x, y: p.y })),
@@ -381,8 +392,8 @@ export function eraseInk(
   const { widths: _old, ...base } = ink;
   const expanded: InkAnnotation = { ...base, paths, ...(aligned ? { widths } : {}) };
   const outcome = splitInk(expanded, taken, { kind: 'delete' }, '');
-  if (outcome.remove || !outcome.update) return { remove: true, count: taken.length };
-  return { remove: false, update: outcome.update, count: taken.length };
+  if (outcome.remove || !outcome.update) return { remove: true, count: taken.length, cut };
+  return { remove: false, update: outcome.update, count: taken.length, cut };
 }
 
 /** What one erase drag does on a page. */
@@ -391,6 +402,20 @@ export interface ErasePlan {
   readonly updates: readonly InkAnnotation[];
   /** Annotations that go whole: inks with nothing left, Highlights. */
   readonly removals: readonly Annotation[];
+  /** Strokes erased whole: ink paths and Highlights. */
+  readonly strokes: number;
+  /** Strokes cut, with pieces left (Partial). */
+  readonly cuts: number;
+}
+
+/**
+ * What an erase drag is called in History and said (review finding 26): "Erased 2 strokes"
+ * when only whole strokes went, else "Erased part of a stroke" / "Erased parts of 3 strokes"
+ * (every stroke touched, whole or cut).
+ */
+export function eraseLabel(plan: Pick<ErasePlan, 'strokes' | 'cuts'>): string {
+  if (plan.cuts > 0) return m.pen_erased_parts({ count: plan.cuts + plan.strokes });
+  return m.pen_erased_strokes({ count: plan.strokes });
 }
 
 /** The plan of an erase drag over `annotations` (user space sweep). */
@@ -401,19 +426,24 @@ export function erasePlan(
 ): ErasePlan {
   const updates: InkAnnotation[] = [];
   const removals: Annotation[] = [];
-  if (sweep.points.length === 0) return { updates, removals };
+  let strokes = 0;
+  let cuts = 0;
+  if (sweep.points.length === 0) return { updates, removals, strokes, cuts };
   for (const a of annotations) {
     if (!erasable(a)) continue;
     if (a.kind === 'ink') {
       const outcome = eraseInk(a, sweep, mode);
       if (!outcome) continue;
+      strokes += outcome.count - outcome.cut;
+      cuts += outcome.cut;
       if (outcome.remove) removals.push(a);
       else updates.push(outcome.update);
     } else if (a.kind === 'highlight' && sweepTouchesQuads(a.quads, sweep)) {
       removals.push(a);
+      strokes++;
     }
   }
-  return { updates, removals };
+  return { updates, removals, strokes, cuts };
 }
 
 /**
@@ -484,7 +514,8 @@ export function commitErase(
 ): Promise<number | undefined> {
   return runAction(async (ctx): Promise<ActionResult<number> | undefined> => {
     const list = await readAnnotations(target.source, target.pageIndex, ctx);
-    const { updates, removals } = erasePlan(list, sweep, mode);
+    const plan = erasePlan(list, sweep, mode);
+    const { updates, removals } = plan;
     const edits: EngineEdit[] = [];
     for (const a of removals) {
       const done = await executeEdit(
@@ -505,9 +536,9 @@ export function commitErase(
       edits.push(done.recorded);
     }
     if (edits.length === 0) return undefined;
-    const label = updates.length > 0 ? m.history_annot_erase() : deleteLabel(removals);
+    const label = eraseLabel(plan);
+    announce(label);
     if (removals.length > 0) {
-      announce(label);
       const store = useAnnotationStore.getState();
       const ids = new Set(removals.map((a) => a.id));
       if (

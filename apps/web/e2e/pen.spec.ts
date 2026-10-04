@@ -719,6 +719,65 @@ test.describe('pen: width changes, zoom, Draw, lines and undo', () => {
     expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(2);
   });
 
+  test('a stroke under the bar draws: the bar fades and lets it through, then comes back', async ({
+    page,
+  }) => {
+    await openSimple(page);
+    await page.locator('body').press('p');
+    await expect(layer(page)).toHaveAttribute('data-tool', 'ink');
+    const bar = page.getByRole('toolbar', { name: 'Tools', exact: true });
+    const page1 = await layer(page).boundingBox();
+    const barBox = await bar.boundingBox();
+    if (!page1 || !barBox) throw new Error('not laid out');
+    // From the page beside the bar, straight across it, to the page on its other side.
+    const y = barBox.y + barBox.height / 2;
+    expect(y).toBeLessThan(page1.y + page1.height);
+    const from = Math.max(page1.x + 8, barBox.x - 60);
+    const to = Math.min(page1.x + page1.width - 8, barBox.x + barBox.width + 60);
+    await page.mouse.move(from, y);
+    await page.mouse.down();
+    await expect(bar).toHaveCSS('opacity', '0.2');
+    await expect(bar).toHaveCSS('pointer-events', 'none');
+    await page.mouse.move(to, y, { steps: 24 });
+    await page.mouse.up();
+    // One stroke, the whole way across; no preset was pressed and no editor opened.
+    const ink = layer(page).locator('[data-annotation-kind="ink"]');
+    await expect(ink).toHaveCount(1, { timeout: 10_000 });
+    const [path] = await inkPoints(page);
+    const xs = (path ?? []).map((p) => p[0] ?? 0);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan((to - from) * 0.9);
+    await expect(page.getByTestId('pen-preset-editor')).toHaveCount(0);
+    await expect(bar.getByRole('radio', { name: 'Black pen, 1.5 pt' })).toHaveAttribute(
+      'data-armed',
+      '',
+    );
+    // A second after the stroke, the bar is back.
+    await expect(bar).toHaveCSS('opacity', '1', { timeout: 3000 });
+    await expect(bar).toHaveCSS('pointer-events', 'auto');
+  });
+
+  test('P arms the last writing pen, never the Highlighter; H the Highlighter; both are said', async ({
+    page,
+  }) => {
+    await openSimple(page);
+    const bar = page.getByRole('toolbar', { name: 'Tools', exact: true });
+    const said = (text: string) => page.getByRole('status').filter({ hasText: text });
+    await page.locator('body').press('p');
+    await bar.getByRole('radio', { name: 'Blue pen, 1.5 pt' }).click();
+    await page.locator('body').press('h');
+    await expect(bar.getByRole('radio', { name: 'Yellow highlighter, 12 pt' })).toHaveAttribute(
+      'data-armed',
+      '',
+    );
+    await expect(said('Yellow highlighter, 12 pt')).toHaveCount(1);
+    await page.locator('body').press('p');
+    await expect(bar.getByRole('radio', { name: 'Blue pen, 1.5 pt' })).toHaveAttribute(
+      'data-armed',
+      '',
+    );
+    await expect(said('Blue pen, 1.5 pt')).toHaveCount(1);
+  });
+
   test('picking Draw arms the pen: the first stroke draws', async ({ page }) => {
     await openSimple(page);
     const bar = page.getByRole('toolbar', { name: 'Tools' });
@@ -787,10 +846,13 @@ test.describe('eraser and straight lines (craft spec §5.6)', () => {
     const cut = { x: midX - 3, y: y - 6, width: 6, height: 12 };
     expect(await darkShare(page, cut)).toBeGreaterThan(0.1);
 
-    // The eraser's tier: Partial, remembered.
+    // The eraser's tier, asked for (Shift+E again: tiers open only on request): Partial,
+    // remembered.
     await page.locator('body').press('Shift+E');
     await expect(layer(page)).toHaveAttribute('data-tool', 'eraser');
     const tier = page.getByRole('toolbar', { name: 'Eraser options' });
+    await expect(tier).toHaveCount(0);
+    await page.locator('body').press('Shift+E');
     await tier.getByRole('radio', { name: 'Partial' }).click();
     await expect(tier.getByRole('radio', { name: 'Partial' })).toHaveAttribute(
       'aria-checked',

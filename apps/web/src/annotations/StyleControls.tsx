@@ -15,7 +15,7 @@ import type { Annotation } from '@pdf-editor/engine';
 import { ChevronDown, MessageSquare, Plus, Trash2 } from 'lucide-react';
 import { type CSSProperties, Fragment, type ReactNode, useRef, useState } from 'react';
 
-import { formatPercent, m } from '../i18n';
+import { formatNumber, formatPercent, m } from '../i18n';
 import { IconButton } from '../ui/IconButton';
 import { Range } from '../ui/Range';
 import { deleteAnnotations } from './actions';
@@ -240,7 +240,7 @@ export function StyleControls(props: StyleControlsProps) {
             step={0.5}
             disabled={disabled || strokeOff}
             value={shown.strokeWidth ?? toolStyle?.strokeWidth ?? 1}
-            valueText={(v) => m.annot_points({ value: v })}
+            valueText={strokeWidthText}
             onValue={setStroke}
           />
         </label>
@@ -323,6 +323,16 @@ export function StyleControls(props: StyleControlsProps) {
       )}
     </div>
   );
+}
+
+/**
+ * A stroke width as shown (review finding 12): rounded to 0.1 pt in the locale's digits, so
+ * a width read back as 1.2999999523162842 says "1.3 pt".
+ */
+export function strokeWidthText(width: number): string {
+  return m.annot_points({
+    value: formatNumber(Math.round(width * 10) / 10, { maximumFractionDigits: 1 }),
+  });
 }
 
 /**

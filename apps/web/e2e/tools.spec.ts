@@ -144,9 +144,12 @@ test('the tool bar walks its five groups by mouse and keyboard', async ({ page }
     await expect(bar.getByRole('button', { name, exact: true })).toBeVisible();
   }
   await bar.getByRole('button', { name: 'Text: back to all groups' }).click();
-  // Picking Write armed the pen, so Select is off; Select disarms it and the row stays (it
-  // has no tool row).
-  await expect(page.locator('[data-annotation-layer="0"]')).toHaveAttribute('data-tool', 'ink');
+  // Picking Write armed the pen and picking Text Edit text (review finding 3), so Select is
+  // off; Select disarms it and the row stays (it has no tool row).
+  await expect(page.locator('[data-annotation-layer="0"]')).toHaveAttribute(
+    'data-tool',
+    'edit-text',
+  );
   await expect(select).toHaveAttribute('aria-pressed', 'false');
   await select.click();
   await expect(select).toHaveAttribute('aria-pressed', 'true');
@@ -193,10 +196,39 @@ test('the tool bar walks its five groups by mouse and keyboard', async ({ page }
   await expect(bar.getByRole('button')).toHaveText(groups);
   await expect(bar.getByRole('button', { name: 'Write', exact: true })).toBeFocused();
 
-  // U arms Underline from the keyboard: no group holds it, so the row shows with its options.
+  // U arms Underline from the keyboard: no group holds it, so the row shows. Its options open
+  // only on request: U again (review finding 5).
+  await page.locator('body').press('u');
+  await expect(page.locator('[data-annotation-layer="0"]')).toHaveAttribute(
+    'data-tool',
+    'underline',
+  );
+  await expect(bar.getByRole('button')).toHaveText(groups);
+  await expect(page.getByTestId('options-tier')).toHaveCount(0);
   await page.locator('body').press('u');
   await expect(page.getByRole('toolbar', { name: 'Underline options' })).toBeVisible();
-  await expect(bar.getByRole('button')).toHaveText(groups);
+  await page.locator('body').press('Escape');
+  await expect(page.getByTestId('options-tier')).toHaveCount(0);
+
+  // The Esc ladder from the page (craft spec §3.5): the first Esc disarms to Select, the
+  // Eraser and the Lasso included; the second returns the bar to the row. The armed tool's
+  // tooltip says so.
+  for (const key of ['Shift+E', 'q']) {
+    await page.locator('body').press(key);
+    await expect(bar).toHaveAttribute('data-bar-view', 'write');
+    await page.locator('body').press('Escape');
+    await expect(page.locator('[data-annotation-layer="0"]')).toHaveAttribute(
+      'data-tool',
+      'select',
+    );
+    await expect(bar).toHaveAttribute('data-bar-view', 'write');
+    await page.locator('body').press('Escape');
+    await expect(bar).toHaveAttribute('data-bar-view', 'groups');
+  }
+  await page.locator('body').press('Shift+E');
+  await bar.getByRole('button', { name: 'Eraser', exact: true }).hover();
+  await expect(page.getByText('Eraser · Esc: Select')).toBeVisible();
+  await page.locator('body').press('Escape');
   await page.locator('body').press('Escape');
 
   // A shortcut arms its tool and shows its group.

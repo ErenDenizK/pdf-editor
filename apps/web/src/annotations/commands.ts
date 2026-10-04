@@ -8,6 +8,14 @@
  * document is in Read switches it to Edit and arms the tool, announced "Edit mode. Pen
  * tool"; over selected text a markup or redact key only switches, keeping the selection, so
  * marking takes a second press. Delete does nothing in Read.
+ *
+ * Pressing the armed tool again (its button or its key) toggles its options tier: tiers open
+ * only on request (review finding 5). `P` arms the last writing pen, never the Highlighter,
+ * and `H` the Highlighter (DESIGN §4.1); each says the preset it armed ("Black pen, 1.5 pt").
+ *
+ * The Esc ladder (craft spec §3.5): the first Esc disarms to Select and clears the selection
+ * (`selection.clear`, `clearAnnotationTools`); with nothing armed, the next Esc returns the
+ * bar to its group row (shell/FloatingToolbar.tsx). Esc never leaves Edit.
  */
 // Registers the Edit text page layer (the tool itself is in ANNOTATION_TOOLS).
 import '../text-edit';
@@ -30,10 +38,11 @@ import { deleteAnnotations } from './actions';
 import { commitOpenEditor } from './InlineEditors';
 import { deleteLassoSelection } from './lasso/edits';
 import { activateHighlighter } from './pen/highlighter';
+import { isHighlighter, PRESET_INDICES, type PresetIndex, presetLabel } from './pen/presets';
 import { activePathSelection, useAnnotationStore } from './annotation-store';
 import { hasTextSelection, markupFromSelection } from './selection-markup';
 import { BUILTIN_STAMPS, builtinPendingStamp, imageStamp } from './stamps';
-import { ANNOTATION_TOOLS, isMarkupMode, type ToolDefinition } from './tools';
+import { ANNOTATION_TOOLS, isMarkupMode, type ToolDefinition, toolDefinition } from './tools';
 
 const readMode = () =>
   isPageView(useUiStore.getState()) &&
@@ -100,10 +109,54 @@ export async function activateTool(tool: ToolDefinition): Promise<void> {
       return;
     }
   }
+  // The armed tool again: its options tier, on request. The pen's presets handle their own
+  // (`activatePen`, PenBar.tsx), so arming another preset never toggles it.
+  if (tool.mode !== 'select' && tool.mode !== 'ink' && tools.mode === tool.mode) {
+    const open = !tools.optionsOpen;
+    tools.setOptionsOpen(open);
+    if (open) announce(m.bar_options({ tool: tool.title() }), { key: 'tool' });
+    return;
+  }
   if (tool.mode !== 'select') store.select(null);
   tools.setMode(tool.mode);
   // Keyed: a more precise word said with it (the armed pen preset) replaces it.
   announce(m.announce_tool({ tool: tool.title() }), { key: 'tool' });
+}
+
+/** The writing pen armed last this session (never the Highlighter); P arms it again. */
+let lastPen: PresetIndex | undefined;
+useAnnotationStore.subscribe((state, previous) => {
+  const { active, presets } = state.pen;
+  if (active !== previous.pen.active && !isHighlighter(presets[active])) lastPen = active;
+});
+
+/** The pen preset P arms: the active one when it is a pen, else the last pen used. */
+export function writingPenIndex(): PresetIndex {
+  const { active, presets } = useAnnotationStore.getState().pen;
+  if (!isHighlighter(presets[active])) return active;
+  if (lastPen !== undefined && !isHighlighter(presets[lastPen])) return lastPen;
+  return PRESET_INDICES.find((i) => !isHighlighter(presets[i])) ?? active;
+}
+
+/**
+ * P: arms the pen with the last writing pen, never the Highlighter (DESIGN §4.1), and says
+ * which ("Black pen, 1.5 pt"; from Read, "Edit mode. Black pen, 1.5 pt"). P again with that
+ * pen armed toggles its options tier. Synchronous, so everything is said in one message.
+ */
+export function activatePen(): void {
+  const tools = useToolStore.getState();
+  const index = writingPenIndex();
+  const store = useAnnotationStore.getState();
+  if (tools.mode === 'ink' && canEditActive() && store.pen.active === index) {
+    tools.setOptionsOpen(!tools.optionsOpen);
+    return;
+  }
+  // The pen's path through `activateTool` never awaits, so it has armed when this returns.
+  void activateTool(toolDefinition('ink'));
+  if (useToolStore.getState().mode !== 'ink') return;
+  useAnnotationStore.getState().armPreset(index);
+  // Said instead of the generic "Pen tool" (same key).
+  announce(presetLabel(index, useAnnotationStore.getState().pen.presets[index]), { key: 'tool' });
 }
 
 export function registerAnnotationCommands(registry: CommandRegistry): () => void {
@@ -116,7 +169,7 @@ export function registerAnnotationCommands(registry: CommandRegistry): () => voi
         ...(tool.shortcut === undefined ? {} : { shortcut: tool.shortcut }),
         keywords: ['tool', 'annotate', 'annotation', ...(tool.keywords ?? [])],
         when: readMode,
-        run: () => activateTool(tool),
+        run: () => (tool.mode === 'ink' ? activatePen() : activateTool(tool)),
       }),
     ),
     // Highlight (H) arms the Highlighter preset (craft spec §5.4, pen/highlighter.ts).

@@ -2,7 +2,10 @@
  * Read and Edit (ADR-0019 §2–§3, craft spec §3.2–§3.3, §10): a file opens in Read with the
  * lock; nothing moves, fills or arms there; `2` enters Edit and the tool bar appears; a tab
  * click leaves Home in the document's last mode; `1` returns to Read and the bar collapses
- * to one Edit button; a tool key in Read switches to Edit and arms the tool.
+ * to one Edit button; a tool key in Read switches to Edit and arms the tool. Read's page menu
+ * changes no page (one row switches to Edit), and a Read selection's "Edit text" opens the
+ * paragraph editor in Edit; in Edit, a first click on text shows "Double-click to edit text",
+ * and the Text group arms Edit text, so one click opens a paragraph.
  */
 import { expect, type Page, test } from '@playwright/test';
 
@@ -244,4 +247,69 @@ test('a pen stroke over text never opens the editor', async ({ page }) => {
   await expect(editor).toHaveCount(0);
   expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('');
   await expect(layer).toHaveAttribute('data-tool', 'select');
+});
+
+test("Read's page menu changes no page: one row switches to Edit, where the page operations are", async ({
+  page,
+}) => {
+  await openFixtures(page, ['simple-text.pdf']);
+  const first = page.locator('[data-page-index="0"]');
+  await expect(first.locator('canvas[data-state="rendered"]')).toBeAttached({ timeout: 20_000 });
+  const box = await first.boundingBox();
+  if (!box) throw new Error('page 1 not laid out');
+  const pages = await page.locator('[data-page-index]').count();
+  await page.mouse.click(box.x + 40, box.y + 40, { button: 'right' });
+  const menu = page.getByTestId('page-context-menu');
+  await expect(menu.getByRole('menuitem')).toHaveCount(2);
+  for (const name of [/^Rotate page/, /^Delete page/, /^Crop/]) {
+    await expect(menu.getByRole('menuitem', { name })).toHaveCount(0);
+  }
+  await expect(menu.getByRole('menuitem', { name: /^Arrange/ })).toBeVisible();
+  await menu.getByRole('menuitem', { name: /^Switch to Edit to change pages/ }).click();
+  await expect(modeRadio(page, 'Edit')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('[data-page-index]')).toHaveCount(pages);
+  await page.mouse.click(box.x + 40, box.y + 40, { button: 'right' });
+  await expect(menu.getByRole('menuitem', { name: 'Delete page 1' })).toBeVisible();
+  await page.keyboard.press('Escape');
+});
+
+test('a Read selection offers "Edit text": Edit, with the paragraph editor at the selection', async ({
+  page,
+}) => {
+  const at = await openFontsFixture(page);
+  await page.mouse.dblclick(at.x, at.y);
+  const selectionBar = page.getByRole('toolbar', { name: 'Selected text' });
+  await expect(selectionBar).toBeVisible();
+  await selectionBar.getByRole('button', { name: 'Edit text' }).click();
+  await expect(modeRadio(page, 'Edit')).toHaveAttribute('aria-checked', 'true');
+  const editor = page.getByRole('textbox', { name: /^(Line text|Paragraph on page 1)$/ });
+  await expect(editor).toBeFocused({ timeout: 20_000 });
+  // Nothing changed yet; Esc leaves it as it was.
+  await editor.press('Escape');
+  await expect(editor).toHaveCount(0);
+  await expect(foxLine(page)).toHaveText(FOX);
+});
+
+test('in Edit a first click on text says "Double-click to edit text"; the Text group opens it in one click', async ({
+  page,
+}) => {
+  const at = await openFontsFixture(page);
+  await enterEdit(page);
+  await page.mouse.click(at.x, at.y);
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Double-click to edit text' }),
+  ).toBeVisible();
+  const editor = page.getByRole('textbox', { name: /^(Line text|Paragraph on page 1)$/ });
+  await expect(editor).toHaveCount(0);
+
+  // Text arms Edit text, as Write arms the pen: one click opens the paragraph.
+  await bar(page).getByRole('button', { name: 'Text', exact: true }).click();
+  await expect(bar(page).getByRole('button', { name: 'Edit text', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.mouse.click(at.x, at.y);
+  await expect(editor).toBeFocused({ timeout: 20_000 });
+  await editor.press('Escape');
+  await expect(editor).toHaveCount(0);
 });

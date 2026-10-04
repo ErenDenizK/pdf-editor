@@ -5,7 +5,8 @@
  * - Select is the idle tool: its chip in the row arms it and shows no tool row.
  * - Arming a tool (its button, its shortcut or the palette) shows the tool's group; a tool
  *   without one (the text markups, armed by U, S or the palette) shows the row.
- * - Picking Write arms the pen with its active preset (`pickBarGroup`).
+ * - Picking Write arms the pen with its active preset, and picking Text arms Edit text, so a
+ *   single click on a paragraph opens it there (`pickBarGroup`).
  * - One-shot tools (stamp, signature image) return to the previous tool once their object
  *   is placed, and the placed object is not selected.
  *
@@ -141,7 +142,8 @@ export function barGroupLabelOfCommand(id: string): string | undefined {
  * Picks a group (its button, or Enter on it) and says so ("Write tools", spec §10). Select
  * arms the idle tool and keeps the row ("Select tool"). Write arms the pen with its active
  * preset unless one of its tools is armed already, so the first stroke after picking it
- * draws (spec §6.2); Esc then disarms as for any tool.
+ * draws (spec §6.2); Text arms Edit text the same way, so the first click on a paragraph
+ * opens it (review finding 3). Esc then disarms as for any tool.
  */
 export function pickBarGroup(group: BarGroup): void {
   const tools = useToolStore.getState();
@@ -156,6 +158,10 @@ export function pickBarGroup(group: BarGroup): void {
     const annotations = useAnnotationStore.getState();
     annotations.armPreset(annotations.pen.active);
     useToolStore.getState().setMode('ink');
+  } else if (group === 'text' && barGroupOfMode(tools.mode) !== 'text') {
+    const annotations = useAnnotationStore.getState();
+    if (annotations.selection !== null) annotations.select(null);
+    useToolStore.getState().setMode('edit-text');
   }
   announce(m.bar_group_tools({ group: barGroupDefinition(group).label() }));
 }

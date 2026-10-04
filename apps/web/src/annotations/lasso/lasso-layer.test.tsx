@@ -40,6 +40,7 @@ import {
   TOOL_STYLES_STORAGE_KEY,
   useAnnotationStore,
 } from '../annotation-store';
+import { markupDraft } from '../drafts';
 import { readAnnotations, resetEditRunner, whenIdle } from '../edit-runner';
 import { userToCss } from '../geometry';
 import type { Point } from '../ink';
@@ -379,6 +380,69 @@ describe('lasso on the annotation layer', () => {
     expect(useAnnotationStore.getState().selection).toBeNull();
     expect(useToolStore.getState().mode).toBe('lasso');
     await waitFor(() => expect(layer.querySelector('[data-lasso-bar]')).toBeNull());
+  });
+
+  it('Multiply ink and Highlights show an outline, never a tint; widths read to 0.1 pt', async () => {
+    const { layer, target } = await mountLayer();
+    await createAnnotations(target, [inkDraft([stroke(100, 600)])]);
+    const free = stroke(100, 570);
+    await createAnnotations(target, [
+      {
+        kind: 'ink',
+        pageIndex: 0,
+        rect: { x: 0, y: 0, width: 1, height: 1 },
+        color: '#FFE500',
+        opacity: 1,
+        strokeWidth: 12,
+        paths: [free.path],
+        blendMode: 'multiply',
+      },
+    ]);
+    await createAnnotations(target, [
+      markupDraft('highlight', 0, [{ x: 100, y: 530, width: 60, height: 12 }], '#FFE500', 1),
+    ]);
+    await cachedInks(2);
+
+    await armLasso(layer);
+    lasso(layer, { x: 80, y: 620 }, { x: 190, y: 520 });
+    await waitFor(() => expect(layer.querySelectorAll('[data-lasso-path]')).toHaveLength(2));
+    // The pen stroke is traced in the accent's highlight alpha as before; the Multiply one
+    // gets an accent ring cut out around its own width by a mask, and the highlight an
+    // unfilled accent outline.
+    await waitFor(() => expect(layer.querySelectorAll('[data-lasso-outlined]')).toHaveLength(2));
+    const ring = layer.querySelector<SVGPolylineElement>(
+      '[data-lasso-outlined] polyline[data-lasso-path]',
+    );
+    if (!ring) throw new Error('no outlined path');
+    const mask = ring.getAttribute('mask') ?? '';
+    expect(mask).toMatch(/^url\(#.+\)$/);
+    const id = mask.slice(5, -1);
+    expect(layer.querySelector(`mask[id="${id}"]`)?.querySelectorAll('polyline')).toHaveLength(2);
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    const probe = document.createElement('span');
+    probe.style.color = accent;
+    document.body.append(probe);
+    const accentRgb = getComputedStyle(probe).color;
+    probe.remove();
+    expect(getComputedStyle(ring).stroke).toBe(accentRgb);
+    const area = layer.querySelector<SVGPolygonElement>('polygon[data-lasso-outlined]');
+    if (!area) throw new Error('no outlined highlight');
+    expect(getComputedStyle(area).fill).toBe('none');
+    expect(getComputedStyle(area).stroke).toBe(accentRgb);
+    // The handles are there to resize and turn it.
+    expect(layer.querySelectorAll('[data-lasso-handle]').length).toBeGreaterThan(0);
+
+    // A width read back from the file as a float shows rounded to 0.1 pt.
+    useAnnotationStore.getState().applyStyle({ strokeWidth: 1.3 });
+    await whenIdle();
+    const bar = await waitFor(() => {
+      const b = layer.querySelector<HTMLElement>('[data-lasso-bar]');
+      if (!b) throw new Error('no bar');
+      return b;
+    });
+    await new Promise((r) => setTimeout(r, 1200));
+    await waitFor(() => expect(bar.textContent).toContain('1.3 pt'));
+    expect(bar.textContent).not.toMatch(/1\.\d{2,} pt/);
   });
 
   it('a width change on a whole two-stroke ink keeps every point; widths scale', async () => {

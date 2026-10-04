@@ -10,12 +10,19 @@
  * and glass; arming a tool by its shortcut or the palette shows its group.
  *
  * While a tool with a style is armed, its options sit in a second tier attached to the top
- * of the bar (never over the page): the controls of the inspector's tool style, through
- * `applyStyle` (a selection wins, else the tool). The pen plugs its presets in through
- * FloatingToolbar.slots.ts.
+ * of the bar: the controls of the inspector's tool style, through `applyStyle` (a selection
+ * wins, else the tool). The tier opens only on request, when the armed tool is pressed again
+ * (its button or its key), never on arming (`optionsOpen`, review finding 5). The pen plugs
+ * its presets in through FloatingToolbar.slots.ts.
  *
- * Both are toolbars with a roving tabindex. Esc disarms the tool and clears the selection
- * (the global Escape command); with nothing armed, Esc on the bar returns to the row.
+ * While a stroke is in progress on a page, and for a second after, the bar and the tier fade
+ * to 20 % and take no pointer (FloatingToolbar.stroke.ts), so writing near the bottom of the
+ * view never lands on a preset; under reduced motion the change is instant.
+ *
+ * Both are toolbars with a roving tabindex. The Esc ladder (craft spec §3.5): the first Esc
+ * disarms the tool to Select and clears the selection (the global Escape command, or the bar
+ * itself when it has the focus); the next returns the bar to the row. The armed tool's
+ * tooltip says so ("Esc: Select").
  * Arrange shows only its own selection bar, so this bar is Read-only.
  *
  * A document in Read (ADR-0019 §3) shows the same capsule with one Edit button (`2`):
@@ -44,6 +51,7 @@ import {
   type ReactElement,
   type ReactNode,
   type RefObject,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -63,6 +71,7 @@ import { BUILTIN_STAMPS, builtinPendingStamp } from '../annotations/stamps';
 import { StyleControls } from '../annotations/StyleControls';
 import { toolDefinition } from '../annotations/tools';
 import { commandRegistry } from '../commands/registry';
+import { isEditableTarget } from '../commands/use-shortcuts';
 import { useCommands } from '../commands/use-commands';
 import { FIELD_KINDS, kindName } from '../forms/create';
 import { useFormStore } from '../forms/form-store';
@@ -70,7 +79,7 @@ import { m } from '../i18n';
 import { useApplyDialogStore } from '../redaction/apply-store';
 import { showRedactionsPanel } from '../redaction/commands';
 import { PageContextMenu } from '../stage/PageContextMenu';
-import { useCanEdit, useUiStore } from '../state/ui-store';
+import { canEditActive, useCanEdit, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
 import iconButtonStyles from '../ui/IconButton.module.css';
@@ -92,6 +101,7 @@ import {
 import styles from './FloatingToolbar.module.css';
 import { useRovingTabindex } from './FloatingToolbar.roving';
 import { usePenSlots } from './FloatingToolbar.slots';
+import { useStrokeInProgress } from './FloatingToolbar.stroke';
 
 /** The morph (spec §5.2): one movement. */
 const MORPH_MS = 160;
@@ -142,7 +152,7 @@ function ReadDock() {
             }}
           >
             <Pencil aria-hidden="true" className={styles.groupIcon} />
-            <span className={styles.groupLabel}>{m.mode_edit()}</span>
+            <span className={styles.groupLabel}>{m.mode_edit_button()}</span>
           </button>
         </Tooltip>
       </div>
@@ -151,10 +161,12 @@ function ReadDock() {
 }
 
 function Dock() {
+  // Faded and out of the pointer's way while a stroke is in progress (module header).
+  const stroking = useStrokeInProgress();
   return (
     // The bar first, so Tab goes from the bar to its options (spec §10); the dock stacks
     // them bottom-up, so the tier still sits on top of the bar.
-    <div className={styles.dock}>
+    <div className={styles.dock} data-stroking={stroking ? '' : undefined}>
       <Bar />
       <OptionsTier />
     </div>
@@ -199,6 +211,25 @@ function Bar() {
   // Esc on the bar (spec §5.2): disarm the tool and clear the selection, as the global Escape
   // does; with nothing armed, back to the row. In the capture phase, so the focused button's
   // tooltip (which claims Esc) cannot take it; keys from the bar's menus (portals) are theirs.
+  // The ladder's second step from anywhere (craft spec §3.5): with nothing armed or selected
+  // (the global Escape disarmed it), Esc returns the bar to the row. In the bubble phase on
+  // the document, so a widget that takes Esc (an editor, a menu, the lasso, a dialog) claims
+  // it first, and before the window's shortcut listener, which disarms on the first Esc.
+  useEffect(() => {
+    if (group === null) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      const target = event.target;
+      if (isEditableTarget(target)) return;
+      if (target instanceof Element && target.closest('[aria-modal="true"]')) return;
+      if (target instanceof Node && ref.current?.contains(target)) return;
+      if (hasAnnotationToolState() || !canEditActive()) return;
+      showBarGroups();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [group]);
+
   const onKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
     if (!(event.target instanceof Node) || !ref.current?.contains(event.target)) return;
@@ -403,17 +434,29 @@ function BarItemView({ item }: { readonly item: BarItem }): ReactNode {
 
 const shortcutOf = (id: string) => commandRegistry.get(id)?.shortcuts[0];
 
+/** Whether a tool has an options tier, which pressing it again while armed opens. */
+function hasOptionsTier(mode: ToolMode): boolean {
+  return mode === 'eraser' || toolStyleGroup(mode) !== undefined;
+}
+
+/** The armed tool's tooltip says how to leave it (craft spec §3.5): "Eraser · Esc: Select". */
+function armedTooltip(text: string, armed: boolean): string {
+  return armed ? m.bar_tool_escape({ tool: text }) : text;
+}
+
 function ToolButton({ tool }: { readonly tool: ToolDefinition }) {
   const armed = useToolStore((s) => s.mode === tool.mode);
+  const label = tool.barTitle?.() ?? tool.title();
   return (
     <IconButton
       size="toolbar"
       tooltipSide="top"
-      label={tool.barTitle?.() ?? tool.title()}
-      tooltip={tool.tooltip?.()}
+      label={label}
+      tooltip={armedTooltip(tool.tooltip?.() ?? label, armed)}
       icon={<tool.Icon />}
       shortcut={shortcutOf(`tool.${tool.mode}`)}
       aria-pressed={armed}
+      aria-description={armed && hasOptionsTier(tool.mode) ? m.bar_options_hint() : undefined}
       data-tool={tool.mode}
       onClick={() => void activateTool(tool)}
     />
@@ -431,12 +474,15 @@ function PenEntry({ tool }: { readonly tool: ToolDefinition }) {
 /** A bar menu button: icon, a small chevron, and a menu rising from it. */
 function MenuButton({
   label,
+  tooltip,
   icon,
   pressed,
   tool,
   children,
 }: {
   readonly label: string;
+  /** The tooltip when it says more than the name (the armed shape's "Esc: Select"). */
+  readonly tooltip?: string;
   readonly icon: ReactNode;
   readonly pressed?: boolean;
   /** `data-tool` when the menu arms a tool (the armed look). */
@@ -445,7 +491,7 @@ function MenuButton({
 }) {
   return (
     <Menu.Root>
-      <Tooltip label={label} side="top">
+      <Tooltip label={tooltip ?? label} side="top">
         <Menu.Trigger
           className={`${iconButtonStyles.button} ${styles.menuTrigger}`}
           data-size="toolbar"
@@ -476,11 +522,13 @@ function ShapesMenu({ shapes }: { readonly shapes: readonly ToolDefinition[] }) 
     shapes.find((t) => t.mode === mode) ?? shapes.find((t) => t.mode === lastShape) ?? shapes[0];
   if (!shown) return null;
   const label = m.tool_shapes_menu({ shape: shown.title() });
+  const armed = shapes.some((t) => t.mode === mode);
   return (
     <MenuButton
       label={label}
+      tooltip={armedTooltip(label, armed)}
       icon={<shown.Icon />}
-      pressed={shapes.some((t) => t.mode === mode)}
+      pressed={armed}
       tool="shapes"
     >
       {shapes.map((tool) => (
@@ -596,11 +644,16 @@ function CommandButton({ id }: { readonly id: string }) {
 // The options tier
 // ---------------------------------------------------------------------------
 
-/** The armed tool's options, attached to the top of the bar (spec §5.2). */
+/**
+ * The armed tool's options, attached to the top of the bar (spec §5.2), shown only on
+ * request: the armed tool pressed again (`optionsOpen`).
+ */
 function OptionsTier() {
   const mode = useToolStore((s) => s.mode);
+  const open = useToolStore((s) => s.optionsOpen);
   const { EraserTier } = usePenSlots();
   const group = toolStyleGroup(mode);
+  if (!open) return null;
   if (mode === 'eraser' && EraserTier) return <Tier mode={mode} content={<EraserTier />} />;
   if (group === undefined) return null;
   return <Tier mode={mode} group={group} />;

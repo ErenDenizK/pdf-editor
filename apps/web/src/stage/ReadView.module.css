@@ -28,9 +28,15 @@
   outline-offset: -2px;
 }
 
+/* The pages' ring shows only when the focus reached them by Tab or F6 (shell/Stage.tsx,
+   `data-focus-ring` on the stage), never after a click or a mode key (review finding 23). */
+:global(main:not([data-focus-ring])) .viewport:focus-visible {
+  outline: none;
+}
+
 /* The viewport's own ring runs along the shell's edges, mostly under the frame; the visible ring
    is drawn again around the unobscured rectangle, where the viewport's ring used to be. */
-.frame:has(> .viewport:focus-visible)::after {
+:global(main[data-focus-ring]) .frame:has(> .viewport:focus-visible)::after {
   content: '';
   position: absolute;
   inset: 0;

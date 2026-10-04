@@ -301,6 +301,42 @@ describe('pen bar', () => {
     expect(needsDotRing({ color: TINT.yellow, width: 1.5, opacity: 1 })).toBe(false);
   });
 
+  it('a ringed dot is filled to 70 % of its diameter, the ring outside the fill', () => {
+    render(<Harness />);
+    const marks = within(presets())
+      .getAllByRole('radio')
+      .map((r) => r.querySelector<HTMLElement>('span') as HTMLElement);
+    for (const mark of marks.slice(0, 3)) {
+      const style = getComputedStyle(mark);
+      const outer = Number.parseFloat(style.width);
+      const inner =
+        outer -
+        2 * Number.parseFloat(style.borderLeftWidth) -
+        2 * Number.parseFloat(style.paddingLeft);
+      expect(inner / outer).toBeCloseTo(0.7, 2);
+      expect(style.backgroundClip).toBe('content-box');
+    }
+    // The capsule (the Highlighter) and unringed dots keep a full fill.
+    expect(getComputedStyle(marks[3] as HTMLElement).backgroundClip).toBe('border-box');
+  });
+
+  it('the armed preset says "Esc: Select"; the editor repeats the pressure note', async () => {
+    render(<Harness />);
+    act(() => useToolStore.getState().setMode('ink'));
+    const black = dot('Black pen, 1.5 pt');
+    await userEvent.hover(black);
+    await waitFor(() => expect(screen.getByText('Black pen, 1.5 pt · Esc: Select')).toBeVisible(), {
+      timeout: 3000,
+    });
+    penSession().pressureSeen = true;
+    window.dispatchEvent(new PointerEvent('pointerup'));
+    await userEvent.click(black);
+    const editor = await screen.findByTestId('pen-preset-editor');
+    expect(within(editor).getByTestId('pen-editor-width-note').textContent).toMatch(
+      /Viewers that redraw ink themselves show it at one width/,
+    );
+  });
+
   it('the preset ring shows only while the pen is armed, not with another Draw tool', () => {
     render(<Harness />);
     const ringOf = (el: HTMLElement) => getComputedStyle(el, '::before').borderTopColor;

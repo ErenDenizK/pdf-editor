@@ -168,6 +168,9 @@ describe('the eraser', () => {
         </div>,
       );
       act(() => useToolStore.getState().setMode('eraser'));
+      // Only on request (the eraser pressed again), never on arming.
+      expect(screen.queryByRole('toolbar', { name: 'Eraser options' })).toBeNull();
+      act(() => useToolStore.getState().setOptionsOpen(true));
       const tier = await screen.findByRole('toolbar', { name: 'Eraser options' });
       const modes = within(tier).getByRole('radiogroup', { name: 'Eraser mode' });
       const whole = within(modes).getByRole('radio', { name: 'Whole stroke' });
@@ -234,7 +237,7 @@ describe('the eraser', () => {
     await waitFor(async () => expect((await inks(source))[0]?.paths).toHaveLength(2));
     await whenIdle();
     expect(model().history.past.length).toBe(before + 1);
-    expect(model().history.present.label).toBe('Erase pen strokes');
+    expect(model().history.present.label).toBe('Erased part of a stroke');
     const [ink] = await inks(source);
     const [left, right] = ink?.paths ?? [];
     // 12 px eraser at 100 %: 6 pt of reach plus half the stroke's width either side.
