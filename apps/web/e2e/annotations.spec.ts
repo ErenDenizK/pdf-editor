@@ -163,7 +163,7 @@ test.describe('annotations', () => {
     await page.locator('body').press('Shift+E');
     await drag(page, 0, [0.45, 0.4], [0.45, 0.52]);
     await expect(layer(page).locator('[data-annotation-kind="ink"]')).toHaveCount(0);
-    await expect(historyRow(page, /Delete (ink|pen)/)).toBeVisible();
+    await expect(historyRow(page, /Erased 1 stroke/)).toBeVisible();
 
     // Built-in stamp from the Fill & sign group's menu: a one-shot tool, so the eraser comes
     // back and the stamp is not selected (experience-redesign spec §5.2).
