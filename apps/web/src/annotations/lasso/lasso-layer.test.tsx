@@ -402,6 +402,14 @@ describe('lasso on the annotation layer', () => {
       markupDraft('highlight', 0, [{ x: 100, y: 530, width: 60, height: 12 }], '#FFE500', 1),
     ]);
     await cachedInks(2);
+    // The lasso picks its selection once, on release, from the store: the highlight must be
+    // listed there too before the loop is drawn, or the selection misses it for good.
+    await waitFor(() => {
+      const pages = Object.values(useAnnotationStore.getState().pages);
+      expect(
+        pages.flatMap((p) => p.annotations).filter((a) => a.kind === 'highlight'),
+      ).toHaveLength(1);
+    });
 
     await armLasso(layer);
     lasso(layer, { x: 80, y: 620 }, { x: 190, y: 520 });
