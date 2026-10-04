@@ -7,22 +7,19 @@
 //   test file in a same-origin iframe of one browser, so they share one localStorage; a
 //   file that leaves a fixture remembered at a later page would otherwise make the next
 //   file's Read view open there, with page 1 off screen and its annotation layer unloaded.
-// - Keeps Recents in memory, empty at the start of every test. Every open records a Recent,
-//   so with the default IndexedDB store each of the many test iframes opened and wrote one
-//   shared database; under that load CI's Chromium 153 browser process crashed (SIGTRAP)
-//   part-way through the suite. recents.test.ts opens its own databases where IndexedDB
-//   itself is under test.
+// - Clears Recents (IndexedDB) before every test for the same reason.
 import '@testing-library/jest-dom/vitest';
 
 import { cleanup } from '@testing-library/react';
 import { afterEach, beforeEach } from 'vitest';
 
-import { memoryRecentsBackend, setRecentsBackend } from '../src/files/recents';
+import { clearRecents } from '../src/files/recents';
 import { POSITIONS_KEY } from '../src/viewer/navigation';
 
-beforeEach(() => {
-  // A file opened by one test never shows as a Recent row on another test's Home.
-  setRecentsBackend(memoryRecentsBackend());
+beforeEach(async () => {
+  // Recents (IndexedDB, shared by every file like localStorage) start empty in each test, so
+  // a file opened by one test never shows as a Recent row on another test's Home.
+  await clearRecents();
   localStorage.removeItem(POSITIONS_KEY);
   // Per-device settings written by a test (pen seen, presets, appearance) must not leak
   // into the next file either.
