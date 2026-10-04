@@ -1,6 +1,7 @@
 /**
  * Clip 1, "Open many PDFs at once" (spec §6): three files dragged in from the desktop and
- * dropped on Home, then Arrange shows them as three sections on one light table.
+ * dropped on Home, then Home's "Arrange pages" shows them as three sections on one light
+ * table.
  */
 import { expect } from '@playwright/test';
 
@@ -41,7 +42,11 @@ scene({
     await stage.rendered(cards, FIXTURES.length);
     await stage.hold();
 
-    await cursor.click(page.getByRole('radio', { name: 'Arrange' }), 460);
+    // The dropped cards are selected, so "Arrange pages" lays all three on the table.
+    await cursor.click(
+      page.getByTestId('home').getByRole('button', { name: 'Arrange pages' }),
+      460,
+    );
     const sections = page.getByRole('grid');
     await expect(sections).toHaveCount(FIXTURES.length);
     await stage.rendered(sections, 6);

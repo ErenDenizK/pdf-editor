@@ -21,7 +21,8 @@ scene({
   async prepare(stage) {
     const { page } = stage;
     await stage.openFixtures(FIXTURES);
-    await expect(page.getByRole('radio', { name: 'Read', exact: true })).toBeChecked();
+    // One file opens in its document, in Read (ADR-0019 §2).
+    await expect(page.getByRole('radio', { name: 'Read, locked' })).toBeChecked();
     // The Review tab on its Marks filter, where "Find sensitive data" is ("Show redactions"
     // from the palette: the filter's chip only shows once there are marks).
     await page.keyboard.press('ControlOrMeta+k');

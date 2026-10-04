@@ -18,9 +18,11 @@ scene({
   async prepare(stage) {
     const { page } = stage;
     await stage.openFixtures(FIXTURES);
-    // 3 is the Compare view; its setup chooses the two documents.
-    await page.getByRole('radio', { name: 'Read', exact: true }).click();
-    await page.keyboard.press('3');
+    // Two files opened together land on Home (ADR-0019 §1): 1 shows the active document in
+    // Read, and 4 is the Compare view; its setup chooses the two documents.
+    await page.keyboard.press('1');
+    await expect(page.getByRole('radio', { name: 'Read, locked' })).toBeChecked();
+    await page.keyboard.press('4');
     const setup = page.getByTestId('compare-setup');
     await expect(setup).toBeVisible();
     await setup.getByLabel('Original (A)').selectOption({ label: ORIGINAL });

@@ -21,7 +21,9 @@ scene({
   async prepare(stage) {
     const { page } = stage;
     await stage.openFixtures(FIXTURES);
-    await page.getByRole('radio', { name: 'Arrange' }).click();
+    // Two files opened together land on Home (ADR-0019 §1); its "Arrange pages" lays both
+    // on the table.
+    await page.getByTestId('home').getByRole('button', { name: 'Arrange pages' }).click();
     await expect(page.getByRole('grid')).toHaveCount(FIXTURES.length);
     await stage.rendered(page.getByRole('grid'), 14);
     await stage.cursor.place(1240, 600);

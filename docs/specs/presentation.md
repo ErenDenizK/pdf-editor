@@ -255,7 +255,7 @@ Many files → one table → real changes → honest results. Names follow the M
 | 3 | Redact, and the text is gone | find sensitive data → apply → IBAN search: none | 6.5 s |
 | 4 | Recognise a scan | OCR, English → cut ("shortened") → Good → line selected | 6.5 s |
 | 5 | Compare two versions | changed areas → onion skin → J to the changed word | 7 s |
-| 6 | Edit a line of text | click a line → "2024" to "2025" → "Same font, verified" | 5.5 s |
+| 6 | Edit a line of text | click a line → "2024" to "2025" → settled preview, no substitute-font line | 5.5 s |
 | 7 | Sign, and see what was checked | Sign… with test certificate → reopen → "Intact" | 6 s |
 | 8 | Pages to Markdown | Convert pp. 2–4 → preview with headings → Copy | 5.5 s |
 
