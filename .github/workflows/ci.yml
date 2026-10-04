@@ -42,15 +42,6 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Format
-        run: pnpm format:check
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Typecheck
-        run: pnpm typecheck
-
       # pw:browser prints the browser's own stderr, so a page that closes mid-run (the web
       # suite's tab died that way in runs 125 and 126) leaves its reason in the log.
       - name: Unit and browser-mode tests

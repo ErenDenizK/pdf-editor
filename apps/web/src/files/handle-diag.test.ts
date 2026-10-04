@@ -8,7 +8,7 @@ let root: FileSystemDirectoryHandle;
 let handle: FileSystemFileHandle;
 const name = `diag-${crypto.randomUUID()}.pdf`;
 const dbName = `diag-${crypto.randomUUID()}`;
-let parsed: RecentEntry | undefined;
+let parsed: RecentEntry | null | undefined;
 
 it('step 1: writes an OPFS file', async () => {
   root = await navigator.storage.getDirectory();
