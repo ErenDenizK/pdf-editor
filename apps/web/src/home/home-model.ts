@@ -4,6 +4,8 @@
  */
 import type { DocumentId, SourceId, VirtualPage, Workspace } from '@pdf-editor/document-model';
 
+import { m } from '../i18n';
+import { MAX_TITLE_LENGTH } from '../stage/operation-plans';
 import type { SourceFileInfo } from '../state/workspace-store';
 
 export interface HomeCardData {
@@ -193,6 +195,27 @@ export function middleTruncate(text: string, max: number): string {
   const keep = max - 1;
   const head = Math.floor(keep / 2);
   return `${chars.slice(0, head).join('')}…${chars.slice(chars.length - (keep - head)).join('')}`;
+}
+
+/**
+ * The default title of a combined document (review F8): "Combined – A + B" for two files,
+ * "Combined – A + 2 more" for more, in the active language; never longer than a title may
+ * be (the first name is shortened in the middle when it has to be).
+ */
+export function combinedTitle(titles: readonly string[]): string {
+  const [first = '', second = ''] = titles;
+  const make = (name: string) =>
+    titles.length > 2
+      ? m.combined_title_more({ first: name, count: titles.length - 1 })
+      : m.combined_title_two({ first: name, second });
+  const full = make(first);
+  const over = Array.from(full).length - MAX_TITLE_LENGTH;
+  if (over <= 0) return full;
+  const room = Math.max(5, Array.from(first).length - over);
+  const shortened = make(middleTruncate(first, room));
+  return Array.from(shortened).length <= MAX_TITLE_LENGTH
+    ? shortened
+    : Array.from(shortened).slice(0, MAX_TITLE_LENGTH).join('');
 }
 
 /**

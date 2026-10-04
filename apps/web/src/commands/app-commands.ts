@@ -159,10 +159,13 @@ function rememberOpened(
   }
 }
 
-/** "Clear recents": forgets every recent file and handle on this device. */
+/**
+ * "Clear recents": forgets every recent file and handle on this device, and says so, or
+ * says (assertively) that the copy stored on this device could not be deleted.
+ */
 export async function clearRecentFiles(): Promise<void> {
-  await clearRecents();
-  announce(m.recents_announce_cleared());
+  if (await clearRecents()) announce(m.recents_announce_cleared());
+  else announce(m.recents_clear_failed(), { politeness: 'assertive' });
 }
 
 /**

@@ -18,6 +18,7 @@ import { openDocuments } from '../commands/app-commands';
 import { commandRegistry } from '../commands/registry';
 import { useShortcuts } from '../commands/use-shortcuts';
 import { dragHasFiles, filesFromDataTransfer, isOpenableFile } from '../files/open-files';
+import { CombinedToast } from '../home/CombinedToast';
 import { showOpened } from '../home/home-actions';
 import { m } from '../i18n';
 import { useAppearanceRoot } from '../state/appearance-store';
@@ -107,6 +108,7 @@ export function AppShell() {
       <ShortcutOverlay />
       <AboutDialog />
       <PasswordDialog />
+      <CombinedToast />
       <LiveRegion />
     </TooltipProvider>
   );

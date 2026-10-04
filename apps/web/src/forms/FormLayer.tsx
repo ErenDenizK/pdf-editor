@@ -311,7 +311,7 @@ function EditNotice({ box, onEdit }: { readonly box: Box; readonly onEdit: () =>
         onClick={onEdit}
       >
         <Pencil aria-hidden="true" />
-        {m.mode_edit()}
+        {m.mode_edit_button()}
       </button>
     </div>
   );

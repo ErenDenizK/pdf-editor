@@ -1,18 +1,10 @@
 /**
  * The full-bleed stage's arithmetic (craft spec §7): which scroll bars the page column needs,
- * the glass gate, and how the gate reaches the shell.
+ * and the free rectangle measured against the shell.
  */
 import { describe, expect, it } from 'vitest';
 
-import {
-  type Box,
-  GLASS_GATE_PX,
-  type Insets,
-  measureStageBleed,
-  scrollbarsNeeded,
-  surfacesNearPages,
-  writeGlassNear,
-} from './stage-bleed';
+import { measureStageBleed, scrollbarsNeeded } from './stage-bleed';
 
 describe('scrollbarsNeeded', () => {
   const view = { width: 800, height: 600 };
@@ -51,62 +43,6 @@ describe('scrollbarsNeeded', () => {
       vertical: true,
       horizontal: false,
     });
-  });
-});
-
-describe('surfacesNearPages (the glass gate)', () => {
-  const area = { width: 1440, height: 900 };
-  // Title bar 40, navigator 312, inspector 300, status bar 28.
-  const frame: Insets = { top: 40, left: 312, right: 300, bottom: 28 };
-  const page = (left: number, top: number, width = 600, height = 800): Box => ({
-    left,
-    top,
-    width,
-    height,
-  });
-
-  it('blurs nothing without a page', () => {
-    expect(surfacesNearPages([], area, frame)).toEqual([]);
-  });
-
-  it('opens a surface for a page under it or within 80 px of it, not beyond', () => {
-    // Centred in the free column, 120 px from both panels, from 300 px down to the bottom.
-    const centred = page(312 + 120, 300, 1440 - 312 - 300 - 240);
-    expect(surfacesNearPages([centred], area, frame)).toEqual(['status']);
-    // 80 px from the navigator: the gate is inclusive of the blur's reach, exclusive past it.
-    expect(surfacesNearPages([page(312 + GLASS_GATE_PX - 1, 300)], area, frame)).toContain('left');
-    expect(surfacesNearPages([page(312 + GLASS_GATE_PX, 300)], area, frame)).not.toContain('left');
-    // Under the title bar while scrolling.
-    expect(surfacesNearPages([page(500, -200, 400)], area, frame)).toEqual(['title']);
-    // Zoomed in: under both panels.
-    expect(surfacesNearPages([page(100, 100, 1300, 300)], area, frame)).toEqual([
-      'title',
-      'left',
-      'right',
-    ]);
-  });
-
-  it('skips surfaces that are not there (inspector closed)', () => {
-    expect(surfacesNearPages([page(1300, 200, 400)], area, { ...frame, right: 0 })).not.toContain(
-      'right',
-    );
-  });
-
-  it('ignores pages scrolled far away from a surface', () => {
-    expect(surfacesNearPages([page(500, 2000)], area, frame)).toEqual([]);
-  });
-});
-
-describe('writeGlassNear', () => {
-  it('writes the list on the shell only when it changes, and clears it', () => {
-    const shell = document.createElement('div');
-    writeGlassNear(shell, ['title', 'left']);
-    expect(shell.getAttribute('data-glass-near')).toBe('title left');
-    writeGlassNear(shell, ['title', 'left']);
-    expect(shell.getAttribute('data-glass-near')).toBe('title left');
-    writeGlassNear(shell, []);
-    expect(shell.hasAttribute('data-glass-near')).toBe(false);
-    expect(() => writeGlassNear(null, ['title'])).not.toThrow();
   });
 });
 

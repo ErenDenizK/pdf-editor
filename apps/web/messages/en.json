@@ -62,6 +62,7 @@
   "selection_bar_label": "Selected text",
   "selection_mark_up": "Mark up…",
   "selection_mark_up_tooltip": "Switch to Edit to mark up the selection",
+  "selection_edit_text_tooltip": "Switch to Edit and change this text",
   "selection_mark_up_hint": "Highlight with H, underline with U, strike out with S",
   "selection_copied": "Text copied",
   "drop_no_pdfs": "No PDF or image files found in the drop",
@@ -1410,6 +1411,16 @@
   "paragraph_honesty_many": "{chars} use {family} because the original font in this file does not include them.",
   "paragraph_tightened": "Spacing tightened by {percent}",
   "paragraph_overflow": "The paragraph now runs into the content below it",
+  "paragraph_off_page": "This text no longer fits on the page; shorten it or move content",
+  "paragraph_overlap_choice": "The paragraph now runs into the content below it. Tighten it, let it overlap or keep editing.",
+  "paragraph_overlap_choice_no_fit": "The paragraph now runs into the content below it, and tightening the spacing is not enough. Let it overlap or keep editing.",
+  "paragraph_tighten_fit": "Tighten to fit",
+  "paragraph_let_overlap": "Let it overlap",
+  "paragraph_keep_editing": "Keep editing",
+  "paragraph_kept": "Your edit of the paragraph on page {page} is kept until you return to it",
+  "paragraph_kept_discarded": "Your unsaved edit of the paragraph on page {page} was discarded",
+  "paragraph_commit_failed": "The paragraph edit on page {page} was not saved: {reason}",
+  "paragraph_returned": "Your edit of the paragraph on page {page} is open again",
   "paragraph_ragged": "Some lines could not stay justified",
   "paragraph_unsupported": "No available font has {chars}",
   "paragraph_info_label": "About paragraph editing",
@@ -1832,6 +1843,26 @@
       "match": {
         "countPlural=one": "Delete {count} pen stroke",
         "countPlural=*": "Delete {count} pen strokes"
+      }
+    }
+  ],
+  "pen_erased_strokes": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Erased {count} stroke",
+        "countPlural=*": "Erased {count} strokes"
+      }
+    }
+  ],
+  "pen_erased_parts": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Erased part of a stroke",
+        "countPlural=*": "Erased parts of {count} strokes"
       }
     }
   ],
@@ -2851,24 +2882,31 @@
     }
   ],
   "summary_redaction_unverified": "Kept attachments, not verified: {names}",
-  "summary_text_edits": [
+  "summary_text_edits_paragraphs": [
     {
-      "declarations": [
-        "input count",
-        "input countText",
-        "input fonts",
-        "input mcids",
-        "input objects",
-        "local countPlural = count: plural"
-      ],
+      "declarations": ["input count", "input countText", "local countPlural = count: plural"],
       "selectors": ["countPlural"],
       "match": {
-        "countPlural=one": "Text edits: {countText} (fonts renamed: {fonts}, marked-content ids repaired: {mcids}, unused objects removed: {objects}).",
-        "countPlural=*": "Text edits: {countText} (fonts renamed: {fonts}, marked-content ids repaired: {mcids}, unused objects removed: {objects})."
+        "countPlural=one": "{countText} paragraph",
+        "countPlural=*": "{countText} paragraphs"
       }
     }
   ],
-  "summary_text_edits_source": "{name}: {count}",
+  "summary_text_edits_lines": [
+    {
+      "declarations": ["input count", "input countText", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{countText} line of text",
+        "countPlural=*": "{countText} lines of text"
+      }
+    }
+  ],
+  "summary_text_edits_edited": "{what} edited",
+  "summary_text_edits_tidied": "Tidied up after editing: {parts}",
+  "summary_text_edits_tidied_fonts": "renamed fonts {countText}",
+  "summary_text_edits_tidied_tags": "renumbered tags {countText}",
+  "summary_text_edits_tidied_objects": "removed unused objects {countText}",
   "summary_text_edits_fonts": "{name}: {parts}.",
   "summary_text_edits_same_font": "{countText} in the original font",
   "summary_text_edits_same_font_not_embedded": "{countText} in the original font (not embedded)",
@@ -3570,6 +3608,46 @@
     }
   ],
   "home_drop_combine": "Combine with {title}",
+  "combined_title_two": "Combined – {first} + {second}",
+  "combined_title_more": "Combined – {first} + {count} more",
+  "home_combine_description": "Pages are joined in this order into a new document; the files stay open. Use the arrows to change the order.",
+  "history_combine": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Combine {count} file",
+        "countPlural=*": "Combine {count} files"
+      }
+    }
+  ],
+  "announce_combined": [
+    {
+      "declarations": [
+        "input count",
+        "input title",
+        "input shortcut",
+        "local countPlural = count: plural"
+      ],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Combined {count} file into {title}. Undo with {shortcut}",
+        "countPlural=*": "Combined {count} files into {title}. Undo with {shortcut}"
+      }
+    }
+  ],
+  "combined_toast": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Combined {count} file",
+        "countPlural=*": "Combined {count} files"
+      }
+    }
+  ],
+  "home_combine_confirm": "Combine",
+  "combined_toast_dismiss": "Dismiss",
   "home_modified": "Modified {date}",
   "home_announce_closed": [
     {
@@ -3604,6 +3682,7 @@
   "recents_note_unavailable": "“{name}” could not be reopened: it was moved, or access was not given. Open again… to choose it.",
   "recents_announce_removed": "{name} removed from recents",
   "recents_announce_cleared": "Recents cleared",
+  "recents_clear_failed": "Recents were cleared from the list, but the copy kept on this device could not be deleted. Try Clear recents again, or clear this site’s data in your browser.",
   "privacy_recents": "Recent files are remembered on this device only.",
   "bar_group_fill": "Fill & sign",
   "bar_group_redact": "Redact",
@@ -3616,6 +3695,7 @@
   "page_menu_rotate_right": "Rotate page {number} right",
   "page_menu_delete": "Delete page {number}",
   "page_menu_crop": "Crop…",
+  "page_menu_switch_to_edit": "Switch to Edit to change pages",
   "page_menu_rotated_left": "Rotated page {number} left",
   "page_menu_rotated_right": "Rotated page {number} right",
   "page_menu_deleted": "Deleted page {number}. Undo with {shortcut}",
@@ -3625,6 +3705,8 @@
   "bar_group_back": "{group}: back to all groups",
   "bar_back_tooltip": "Back to all groups",
   "bar_options": "{tool} options",
+  "bar_options_hint": "Press again for options",
+  "bar_tool_escape": "{tool} · Esc: Select",
   "bar_redact_mark": "Mark for redaction",
   "bar_mark_matches": "Mark search matches",
   "bar_mark_matches_none": "Find text first: there are no search matches to mark",
@@ -3737,12 +3819,15 @@
   "appearance_heading": "Appearance",
   "appearance_glass_panels": "Glass panels",
   "appearance_reduce_transparency": "Reduce transparency",
-  "cmd_view_glass_panels": "Toggle glass panels",
-  "cmd_view_reduce_transparency": "Toggle reduced transparency",
   "announce_glass_panels_on": "Glass panels on",
   "announce_glass_panels_off": "Glass panels off",
   "announce_reduce_transparency_on": "Reduced transparency on",
   "announce_reduce_transparency_off": "Reduced transparency off",
+  "cmd_view_glass_panels_on": "Glass panels: on",
+  "cmd_view_glass_panels_off": "Glass panels: off",
+  "cmd_view_reduce_transparency_on": "Reduce transparency: on",
+  "cmd_view_reduce_transparency_off": "Reduce transparency: off",
+  "mode_edit_button": "Edit",
   "edit_text_hint": "Double-click to edit text",
   "pen_draws_in_edit": "Pen draws in Edit",
   "cmd_view_pen_draws_in_edit": "Toggle pen draws in Edit",

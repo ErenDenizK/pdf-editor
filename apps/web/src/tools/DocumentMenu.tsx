@@ -15,7 +15,7 @@
  */
 import { Menu } from '@base-ui/react/menu';
 import { getActiveDocument, type PageId } from '@pdf-editor/document-model';
-import { ChevronRight, FileCog } from 'lucide-react';
+import { Check, ChevronRight, FileCog } from 'lucide-react';
 import { Fragment, lazy, Suspense, useSyncExternalStore } from 'react';
 
 import { BatchDialogHost } from '../batch/BatchDialogHost';
@@ -316,8 +316,9 @@ function DocumentMenuItems() {
 
 /**
  * "Appearance ▸": the appearance settings and "Pen draws in Edit" as checkbox items (role
- * menuitemcheckbox). The pen setting shows its effective value: "auto" is on once a pen has
- * been seen; a click makes an explicit choice.
+ * menuitemcheckbox), each with a visible box that reads off as well as on (review F21). The
+ * pen setting shows its effective value: "auto" is on once a pen has been seen; a click makes
+ * an explicit choice.
  */
 function AppearanceSubmenu() {
   const glassPanels = useAppearanceStore((s) => s.glassPanels);
@@ -338,7 +339,7 @@ function AppearanceSubmenu() {
               onCheckedChange={setGlassPanels}
               closeOnClick={false}
             >
-              <span className={menuStyles.check} aria-hidden="true" />
+              <SwitchBox on={glassPanels} />
               <span className={menuStyles.label}>{m.appearance_glass_panels()}</span>
             </Menu.CheckboxItem>
             <Menu.CheckboxItem
@@ -347,7 +348,7 @@ function AppearanceSubmenu() {
               onCheckedChange={setReduceTransparency}
               closeOnClick={false}
             >
-              <span className={menuStyles.check} aria-hidden="true" />
+              <SwitchBox on={reduceTransparency} />
               <span className={menuStyles.label}>{m.appearance_reduce_transparency()}</span>
             </Menu.CheckboxItem>
             <Menu.CheckboxItem
@@ -356,13 +357,22 @@ function AppearanceSubmenu() {
               onCheckedChange={setPenDrawsInEdit}
               closeOnClick={false}
             >
-              <span className={menuStyles.check} aria-hidden="true" />
+              <SwitchBox on={penDraws} />
               <span className={menuStyles.label}>{m.pen_draws_in_edit()}</span>
             </Menu.CheckboxItem>
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>
     </Menu.SubmenuRoot>
+  );
+}
+
+/** A switch's state as a check box: empty when off, a check on the accent when on. */
+function SwitchBox({ on }: { readonly on: boolean }) {
+  return (
+    <span className={styles.switchBox} data-on={on || undefined} aria-hidden="true">
+      {on ? <Check /> : null}
+    </span>
   );
 }
 

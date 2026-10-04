@@ -36,7 +36,6 @@ import { m } from '../i18n';
 import { PageCanvas } from '../pages/PageCanvas';
 import { CSS_PX_PER_PT, displaySize, rotationPhrase } from '../pages/page-geometry';
 import { needsTiles, TiledPage } from '../pages/TiledPage';
-import { useAppearanceStore } from '../state/appearance-store';
 import { useSelectionStore } from '../state/selection-store';
 import { MAX_ZOOM, MIN_ZOOM, useUiStore } from '../state/ui-store';
 import { type ReadLayout, useViewStore } from '../state/view-store';
@@ -58,16 +57,7 @@ import { PageOverlays } from './page-overlays';
 import readStyles from './ReadView.module.css';
 import { type ContentFrame, contentFrame, ResizedContent } from './ResizedContent';
 import { ScrollProxies } from './ScrollProxies';
-import {
-  type Box as BleedBox,
-  type FrameSurface,
-  type Insets,
-  scrollbarSize,
-  scrollbarsNeeded,
-  surfacesNearPages,
-  useStageBleed,
-  writeGlassNear,
-} from './stage-bleed';
+import { type Insets, scrollbarSize, scrollbarsNeeded, useStageBleed } from './stage-bleed';
 
 const PAD_X = 48;
 const PAD_TOP = 16;
@@ -255,14 +245,6 @@ export function ReadView({ doc }: { readonly doc: VirtualDocument }) {
     right: bleed.insets.right + (bars.vertical ? barSize : 0),
     bottom: bleed.insets.bottom + (bars.horizontal ? barSize : 0),
   };
-  const glassPanels = useAppearanceStore((s) => s.glassPanels);
-  const bleedElement = bleed.element;
-  const onGlassNear = useCallback(
-    (near: readonly FrameSurface[]) => writeGlassNear(bleedElement, near),
-    [bleedElement],
-  );
-  // Without the Read view no page passes under the frame: it paints its solid token.
-  useEffect(() => () => writeGlassNear(bleedElement, []), [bleedElement]);
 
   // Fit width / fit page follow the unobscured rectangle: the window and the panels' sizes.
   useEffect(() => {
@@ -350,9 +332,6 @@ export function ReadView({ doc }: { readonly doc: VirtualDocument }) {
             fingerprint={fingerprint}
             fitting={fitMode !== null}
             view={view}
-            frame={bleed.frame}
-            glassPanels={glassPanels}
-            onGlassNear={onGlassNear}
           />
         ) : null}
         <GoToPageDialog doc={doc} />
@@ -411,9 +390,6 @@ function PageColumn({
   fingerprint,
   fitting,
   view,
-  frame,
-  glassPanels,
-  onGlassNear,
 }: {
   readonly doc: VirtualDocument;
   readonly ws: Workspace;
@@ -440,11 +416,6 @@ function PageColumn({
    * to inside it.
    */
   readonly view: Insets;
-  /** The docked frame alone (title bar, navigator, inspector, status bar), for the glass gate. */
-  readonly frame: Insets;
-  /** "Glass panels" is on: tell the shell which frame surfaces have a page near. */
-  readonly glassPanels: boolean;
-  readonly onGlassNear: (near: readonly FrameSurface[]) => void;
 }) {
   'use no memo'; // TanStack Virtual mutates its instance; the React Compiler must not cache it.
   const setCurrentPage = useViewStore((s) => s.setCurrentPage);
@@ -513,27 +484,6 @@ function PageColumn({
     return found;
   };
 
-  /**
-   * The glass gate (craft spec §7): the frame surfaces with a laid-out row within 80 px, in
-   * the viewport's coordinates, which are the shell's. Arithmetic on the layout only.
-   */
-  const nearSurfaces = (
-    el: HTMLElement,
-    items: readonly { readonly index: number; readonly start: number }[],
-  ): FrameSurface[] => {
-    const centre = columnCentre(el);
-    const boxes: BleedBox[] = items.map((item) => {
-      const width = rowCssWidth(item.index);
-      return {
-        left: centre - width / 2 - el.scrollLeft,
-        top: item.start - el.scrollTop,
-        width,
-        height: heightOf(item.index),
-      };
-    });
-    return surfacesNearPages(boxes, { width: el.clientWidth, height: el.clientHeight }, frame);
-  };
-
   // Pending navigation target: cleared once the programmatic scroll goes quiet.
   const settleTimer = useRef(0);
   const armSettle = () => {
@@ -581,8 +531,6 @@ function PageColumn({
       const top = el.scrollTop + view.top;
       const bottom = el.scrollTop + el.clientHeight - view.bottom;
       const items = virtualizer.getVirtualItems();
-      if (glassPanels) onGlassNear(nearSurfaces(el, items));
-      else onGlassNear([]);
       // Current: the most visible row (the first on ties, so short pages read 1, 2, …).
       let current: (typeof items)[number] | undefined;
       let currentVisible = -1;

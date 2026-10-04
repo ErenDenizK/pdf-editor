@@ -27,6 +27,7 @@ import {
 } from '@pdf-editor/document-model';
 
 import { targetPages } from '../commands/app-commands';
+import { currentPlatform } from '../commands/shortcuts';
 import { inDocumentOrder } from '../dnd/drop';
 import {
   decodeImageFile,
@@ -159,24 +160,47 @@ export function mergeInto(sourceId: DocumentId, targetId: DocumentId): DocumentI
   return created;
 }
 
-/** "Merge all open documents": concatenates `order` into one document titled `title`. */
-export function mergeAll(order: readonly DocumentId[], title: string): DocumentId | undefined {
+/**
+ * "Merge all open documents": concatenates `order` into one document titled `title`. With
+ * `keepSources` (Combine on Home, review F8) the inputs stay open and the result is a new
+ * document made of copies of their pages; either way it is one history entry.
+ */
+export function mergeAll(
+  order: readonly DocumentId[],
+  title: string,
+  options: { readonly keepSources?: boolean } = {},
+): DocumentId | undefined {
   const checked = validateTitle(title);
   if (!checked.ok || order.length < 2) return undefined;
+  const keepSources = options.keepSources === true;
   let created: DocumentId | undefined;
   const shown = isShown(order);
   const committed = model().applyOperation(
     (ws, ids) => {
-      const next = mergeDocuments(ws, { documentIds: order, title: checked.title }, ids);
+      const next = mergeDocuments(
+        ws,
+        { documentIds: order, title: checked.title, keepSources },
+        ids,
+      );
       created = next.activeDocument;
       return next;
     },
-    m.history_merge_all({ count: order.length }),
+    keepSources
+      ? m.history_combine({ count: order.length })
+      : m.history_merge_all({ count: order.length }),
   );
   if (!committed || created === undefined) return undefined;
   keepShown(shown, [created]);
-  announce(m.announce_merged_all({ count: order.length, title: checked.title }));
+  announce(
+    keepSources
+      ? m.announce_combined({ count: order.length, title: checked.title, shortcut: undoHint() })
+      : m.announce_merged_all({ count: order.length, title: checked.title }),
+  );
   return created;
+}
+
+function undoHint(): string {
+  return currentPlatform === 'mac' ? m.undo_hint_mac() : m.undo_hint_other();
 }
 
 // ---------------------------------------------------------------------------

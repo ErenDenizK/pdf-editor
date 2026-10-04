@@ -7,8 +7,8 @@
  * resize re-fits.
  *
  * Also here: which scroll bars the page column needs (the container hides its own, which would
- * sit under the frame, and `ScrollProxies` draws them in the unobscured rectangle), and the
- * geometry gate for the tier-2 glass: only frame surfaces with a page within 80 px blur.
+ * sit under the frame, and `ScrollProxies` draws them in the unobscured rectangle). With
+ * "Glass panels" on, every frame surface is glass (global.css); there is no geometry gate.
  */
 import { type RefObject, useLayoutEffect, useState } from 'react';
 
@@ -21,14 +21,6 @@ export interface Insets {
 }
 
 export interface Size {
-  readonly width: number;
-  readonly height: number;
-}
-
-/** A rectangle in the bleed area's coordinates, CSS px. */
-export interface Box {
-  readonly left: number;
-  readonly top: number;
   readonly width: number;
   readonly height: number;
 }
@@ -169,70 +161,4 @@ export function scrollbarsNeeded(
     horizontal = over(content.width, view.width - (vertical ? size : 0));
   }
   return { vertical, horizontal };
-}
-
-/** A surface of the docked frame. */
-export type FrameSurface = 'title' | 'left' | 'right' | 'status';
-
-/**
- * A docked surface blurs only with a page this close (twice the tier-2 blur radius, research
- * 13 §4.2); further away its backdrop is the bare canvas, and the solid token paints the same
- * pixels for free.
- */
-export const GLASS_GATE_PX = 80;
-
-/**
- * The frame surfaces with a page within `gate` px. `pages` and the surfaces share the bleed
- * area's coordinates; `area` is its size and `frame` the docked frame's insets in it.
- */
-export function surfacesNearPages(
-  pages: readonly Box[],
-  area: Size,
-  frame: Insets,
-  gate: number = GLASS_GATE_PX,
-): FrameSurface[] {
-  const { width, height } = area;
-  const middleTop = frame.top;
-  const middleBottom = height - frame.bottom;
-  const surfaces: readonly (readonly [FrameSurface, Box])[] = [
-    ['title', { left: 0, top: 0, width, height: frame.top }],
-    ['left', { left: 0, top: middleTop, width: frame.left, height: middleBottom - middleTop }],
-    [
-      'right',
-      {
-        left: width - frame.right,
-        top: middleTop,
-        width: frame.right,
-        height: middleBottom - middleTop,
-      },
-    ],
-    ['status', { left: 0, top: middleBottom, width, height: frame.bottom }],
-  ];
-  const near: FrameSurface[] = [];
-  for (const [name, surface] of surfaces) {
-    if (surface.width <= 0 || surface.height <= 0) continue;
-    const hit = pages.some(
-      (page) =>
-        page.width > 0 &&
-        page.height > 0 &&
-        page.left - gate < surface.left + surface.width &&
-        page.left + page.width + gate > surface.left &&
-        page.top - gate < surface.top + surface.height &&
-        page.top + page.height + gate > surface.top,
-    );
-    if (hit) near.push(name);
-  }
-  return near;
-}
-
-/**
- * Publishes the gate's result on the bleed area as `data-glass-near` (global.css reads it,
- * and only while "Glass panels" is on). Writes only on a change: one attribute, no layout.
- */
-export function writeGlassNear(area: HTMLElement | null, near: readonly FrameSurface[]): void {
-  if (!area) return;
-  const value = near.join(' ');
-  if ((area.getAttribute('data-glass-near') ?? '') === value) return;
-  if (value === '') area.removeAttribute('data-glass-near');
-  else area.setAttribute('data-glass-near', value);
 }

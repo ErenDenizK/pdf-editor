@@ -1,7 +1,8 @@
 /**
  * What Home's cards and buttons do (experience-redesign §3), and how the shell moves between
  * Home and a document (ADR-0019 §1–§2). Combining always goes through the merge dialog, card
- * drops included (§13 decision 2): nothing merges without it.
+ * drops included (§13 decision 2): nothing merges without it. Combining keeps the files open
+ * and makes a new document of them (review F8).
  */
 import {
   closeDocument,
@@ -24,8 +25,10 @@ import {
 import { m } from '../i18n';
 import { announce } from '../shell/announcer';
 import { openOperationDialog } from '../stage/operation-dialogs-store';
+import { mergeAll } from '../stage/section-operations';
 import { type DocumentMode, useUiStore } from '../state/ui-store';
 import { useWorkspaceStore } from '../state/workspace-store';
+import { showCombinedToast } from './combined-toast';
 import { liveSelection } from './home-model';
 
 const ui = () => useUiStore.getState();
@@ -139,6 +142,17 @@ export function combine(ids: readonly DocumentId[]): void {
   const live = liveSelection(order(), ids);
   if (live.length < 2) return;
   openOperationDialog({ kind: 'merge-all', order: live });
+}
+
+/**
+ * The Combine dialog's confirm (review F8): a new document of the files in `ids`, in that
+ * order, titled `title` ("Combined – A + B" by default); the files stay open. One history
+ * entry, announced with its undo shortcut and shown as "Combined 2 files · Undo".
+ */
+export function combineInto(ids: readonly DocumentId[], title: string): DocumentId | undefined {
+  const created = mergeAll(ids, title, { keepSources: true });
+  if (created !== undefined) showCombinedToast(ids.length);
+  return created;
 }
 
 /** Compare with A and B chosen: the first and second selected cards. */

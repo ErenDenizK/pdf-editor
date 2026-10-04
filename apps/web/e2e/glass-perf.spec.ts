@@ -2,8 +2,10 @@
  * Spike S2 measurements for "Glass panels" (craft spec §7, docs/research/14-glass-spike.md),
  * Chromium only. A generated 50-page document of alternating text and image pages, both
  * panels open, scrolled frame by frame at fit width (pages beside the panels) and zoomed in
- * (pages under them), with the setting off and on. Each run records the interval between
- * animation frames and prints p50, p95, p99, the worst, and the share of frames over 16.7 ms.
+ * (pages under them), and the light table in Arrange (nothing under the frame), with the
+ * setting off and on. Each run records the interval between animation frames and prints p50,
+ * p95, p99, the worst, and the share of frames over 16.7 ms. Since review F7 there is no
+ * geometry gate: with the setting on every docked surface blurs, in every view.
  *
  * It reports and never fails on the numbers: headless Chromium here renders on the CPU
  * (SwiftShader), so the figures are a trend between the two settings on one machine, not
@@ -119,22 +121,35 @@ interface FrameStats {
   readonly pageWidth: number;
 }
 
-/** Scrolls the Read viewport one step per animation frame and records frame intervals. */
-async function scrollRun(page: Page): Promise<FrameStats> {
+/**
+ * Scrolls a view (the Read viewport, or the light table) one step per animation frame and
+ * records frame intervals, and which docked surfaces carry a backdrop filter meanwhile.
+ */
+async function scrollRun(page: Page, selector = '[data-read-viewport]'): Promise<FrameStats> {
   return page.evaluate(
-    async ({ frames, step }) => {
-      const viewport = document.querySelector<HTMLElement>('[data-read-viewport]');
-      if (!viewport) throw new Error('no Read viewport');
+    async ({ frames, step, selector }) => {
+      const viewport = document.querySelector<HTMLElement>(selector);
+      if (!viewport) throw new Error(`no ${selector}`);
       viewport.scrollTop = 0;
       const shell = document.querySelector('[data-stage-bleed]');
+      const surfaces: readonly (readonly [string, string])[] = [
+        ['title', ':scope > header'],
+        ['left', ':scope > [data-region="navigator"]'],
+        ['right', ':scope > #right-panel'],
+        ['status', ':scope > footer'],
+      ];
       const near = new Set<string>();
       const times: number[] = [];
       await new Promise<void>((resolve) => {
         let n = 0;
         const tick = (now: number) => {
           times.push(now);
-          for (const s of (shell?.getAttribute('data-glass-near') ?? '').split(' ')) {
-            if (s) near.add(s);
+          if (n === 0) {
+            for (const [name, query] of surfaces) {
+              const el = shell?.querySelector(query);
+              const filter = el ? getComputedStyle(el).backdropFilter : 'none';
+              if (filter && filter !== 'none') near.add(name);
+            }
           }
           if (n++ >= frames) {
             resolve();
@@ -164,7 +179,7 @@ async function scrollRun(page: Page): Promise<FrameStats> {
         ),
       };
     },
-    { frames: SCROLL_FRAMES, step: SCROLL_STEP_PX },
+    { frames: SCROLL_FRAMES, step: SCROLL_STEP_PX, selector },
   );
 }
 
@@ -234,6 +249,12 @@ test('S2: frame times while scrolling 50 pages under both panels, Glass panels o
     const shot = testInfo.outputPath(`glass-zoomed-${label}.png`);
     await page.screenshot({ path: shot });
     await testInfo.attach(`zoomed in, setting ${label}`, { path: shot, contentType: 'image/png' });
+    // Arrange: nothing passes under the frame here; without the old 80 px gate (review F7)
+    // the frame blurs all the same, so this run shows what that costs.
+    await page.keyboard.press('3');
+    await expect(page.getByTestId('light-table')).toBeVisible();
+    await page.waitForTimeout(800);
+    results[`arrange, setting ${label}`] = await scrollRun(page, '[data-testid="light-table"]');
   }
 
   const summary = JSON.stringify(results, null, 2);

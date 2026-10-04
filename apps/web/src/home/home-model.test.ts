@@ -5,7 +5,10 @@
 import type { DocumentId } from '@pdf-editor/document-model';
 import { describe, expect, it } from 'vitest';
 
+import { setLocale } from '../i18n';
+import { MAX_TITLE_LENGTH } from '../stage/operation-plans';
 import {
+  combinedTitle,
   clickSelection,
   combineScope,
   dropOrder,
@@ -200,5 +203,31 @@ describe('Recents', () => {
       '3',
     ]);
     expect(visibleRecents(entries, [])).toEqual(entries);
+  });
+});
+
+describe('combinedTitle (review F8)', () => {
+  it('names two files, and the first of more with a count', () => {
+    expect(combinedTitle(['A', 'B'])).toBe('Combined – A + B');
+    expect(combinedTitle(['A', 'B', 'C'])).toBe('Combined – A + 2 more');
+    expect(combinedTitle(['report', 'scan', 'notes', 'annex'])).toBe('Combined – report + 3 more');
+  });
+
+  it('speaks Turkish', () => {
+    setLocale('tr');
+    try {
+      expect(combinedTitle(['A', 'B'])).toBe('Birleştirilmiş – A + B');
+      expect(combinedTitle(['A', 'B', 'C'])).toBe('Birleştirilmiş – A + 2 dosya daha');
+    } finally {
+      setLocale('en');
+    }
+  });
+
+  it('stays a valid title for very long names', () => {
+    const long = 'x'.repeat(MAX_TITLE_LENGTH);
+    const title = combinedTitle([long, 'B', 'C']);
+    expect(Array.from(title).length).toBeLessThanOrEqual(MAX_TITLE_LENGTH);
+    expect(title.startsWith('Combined – x')).toBe(true);
+    expect(title.endsWith(' + 2 more')).toBe(true);
   });
 });

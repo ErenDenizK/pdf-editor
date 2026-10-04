@@ -33,7 +33,7 @@ import {
   sliceLabels,
 } from './labels';
 import { fieldsWithin, joinFields, pruneFields, withDocumentFields } from './fields';
-import { pruneOutline, restrictOutline, wrapOutline } from './outline';
+import { mapOutline, pruneOutline, restrictOutline, wrapOutline } from './outline';
 import { assertResize, type ResizeRequest, resizeForPage, resizeProblem } from './resize';
 import { pageDisplaySize } from './selectors';
 import type {
@@ -813,10 +813,20 @@ export function splitDocument(
  * flow through); otherwise each input's effective labels are frozen into ranges so every
  * page keeps the label it showed before. Inputs are consumed; the result takes the first
  * input's tab slot and its metadata, security and form policy.
+ *
+ * With `keepSources` the inputs stay open, untouched: the result is made of copies of their
+ * pages (fresh ids, the same references, rotation, crop, resize and overlays, as
+ * `duplicatePages` makes them), its outline points at the copies, and it goes in a new tab
+ * right after the last input in tab order. Created form fields stay with the inputs (field
+ * names must stay unique, as for duplicated pages).
  */
 export function mergeDocuments(
   ws: Workspace,
-  args: { readonly documentIds: readonly DocumentId[]; readonly title: string },
+  args: {
+    readonly documentIds: readonly DocumentId[];
+    readonly title: string;
+    readonly keepSources?: boolean;
+  },
   ids: IdGenerator,
 ): Workspace {
   const title = assertTitle(args.title);
@@ -830,16 +840,29 @@ export function mergeDocuments(
   const first = docs[0];
   if (first === undefined) throw new DocumentModelError('invalid-argument', 'Nothing to merge');
 
-  const pages = docs.flatMap((d) => d.pages);
+  const keep = args.keepSources === true;
+  // Kept inputs lend copies of their pages; `copied` maps each original id to its copy.
+  const copied = new Map<PageId, PageId>();
+  const pages = docs.flatMap((d) =>
+    keep
+      ? d.pages.map((page) => {
+          const copy: VirtualPage = { ...page, id: ids.page() };
+          copied.set(page.id, copy.id);
+          return copy;
+        })
+      : d.pages,
+  );
   const outline: OutlineNode[] = [];
   for (const d of docs) {
     const firstPage = d.pages[0];
     if (firstPage === undefined && d.outline.length === 0) continue;
+    const firstId =
+      firstPage === undefined ? undefined : (copied.get(firstPage.id) ?? firstPage.id);
     outline.push(
       wrapOutline(
         d.title,
-        d.outline,
-        firstPage === undefined ? {} : { destination: { kind: 'page', page: firstPage.id } },
+        keep ? retargetOutline(d.outline, copied) : d.outline,
+        firstId === undefined ? {} : { destination: { kind: 'page', page: firstId } },
       ),
     );
   }
@@ -865,18 +888,46 @@ export function mergeDocuments(
       labels,
       clean: false,
     },
-    pruneFields(
-      docs.reduce<readonly CreatedField[] | undefined>(
-        (all, d) => joinFields(all, d.fields),
-        undefined,
-      ),
-      live,
-    ),
+    keep
+      ? undefined
+      : pruneFields(
+          docs.reduce<readonly CreatedField[] | undefined>(
+            (all, d) => joinFields(all, d.fields),
+            undefined,
+          ),
+          live,
+        ),
   );
+  if (keep) {
+    const inputs = new Set(docs.map((d) => d.id));
+    const last = [...ws.documentOrder].reverse().find((id) => inputs.has(id)) ?? first.id;
+    return replaceDocumentsInOrder(ws, [], [merged], last, true);
+  }
   return replaceDocumentsInOrder(
     ws,
     docs.map((d) => d.id),
     [merged],
     first.id,
   );
+}
+
+/** Points an outline's page destinations (and remembered ones) at the pages' copies. */
+function retargetOutline(
+  nodes: readonly OutlineNode[],
+  copied: ReadonlyMap<PageId, PageId>,
+): readonly OutlineNode[] {
+  return mapOutline(nodes, (node) => {
+    const dest = node.destination;
+    if (dest?.kind === 'page') {
+      const page = copied.get(dest.page);
+      return page === undefined ? node : { ...node, destination: { ...dest, page } };
+    }
+    if (dest?.kind === 'unresolved' && dest.previous !== undefined) {
+      const page = copied.get(dest.previous.page);
+      return page === undefined
+        ? node
+        : { ...node, destination: { ...dest, previous: { ...dest.previous, page } } };
+    }
+    return node;
+  });
 }

@@ -1,8 +1,8 @@
 /**
  * The docked frame's paint (craft spec §7; Vitest browser mode, real style sheets): with
- * "Glass panels" off it is exactly the old opaque --surface-1 frame; with it on, only the
- * surfaces the Read view lists as near a page blur, in the tier-2 glass, and "Reduce
- * transparency" makes them solid again. The palette offers both settings.
+ * "Glass panels" off it is exactly the old opaque --surface-1 frame; with it on, every frame
+ * surface is the tier-2 glass (no geometry gate, review F7), and "Reduce transparency" makes
+ * them solid again. The palette offers both settings, titled with their state.
  */
 import '../styles/tokens.css';
 import '../styles/reset.css';
@@ -47,11 +47,10 @@ describe('the docked frame', () => {
     useAppearanceStore.setState(DEFAULT_APPEARANCE);
   });
 
-  it('stays the opaque --surface-1 frame with Glass panels off, even with a page near', () => {
+  it('stays the opaque --surface-1 frame with Glass panels off', () => {
     render(<App />);
     const { shell, title, navigator, status } = frame();
     expect(shell).toHaveAttribute('data-stage-bleed');
-    shell.setAttribute('data-glass-near', 'title left status');
     for (const style of [title, navigator, status]) {
       expect(style.backgroundColor).toBe(SURFACE_1);
       expect(['', 'none']).toContain(blurOf(style));
@@ -61,19 +60,16 @@ describe('the docked frame', () => {
     expect(title.zIndex).toBe('1');
   });
 
-  it('blurs only the surfaces with a page near while Glass panels is on', async () => {
+  it('makes every frame surface glass while Glass panels is on, with no page near too', async () => {
     render(<App />);
     act(() => useAppearanceStore.getState().setGlassPanels(true));
     await waitFor(() => expect(document.documentElement).toHaveAttribute('data-glass-panels'));
-    const { shell } = frame();
-    shell.setAttribute('data-glass-near', 'title');
-    const { title, navigator, status } = frame();
-    expect(blurOf(title)).toBe('blur(40px) saturate(1.4) brightness(0.6)');
-    expect(title.backgroundColor).toBe('rgba(29, 31, 37, 0.8)');
-    // No page near: the solid token, which is the same pixels over the bare canvas.
-    for (const style of [navigator, status]) {
-      expect(['', 'none']).toContain(blurOf(style));
-      expect(style.backgroundColor).toBe(SURFACE_1);
+    const { shell, title, navigator, status } = frame();
+    // Nothing is open: no page anywhere, and the frame is glass all the same (review F7).
+    expect(shell.hasAttribute('data-glass-near')).toBe(false);
+    for (const style of [title, navigator, status]) {
+      expect(blurOf(style)).toBe('blur(40px) saturate(1.4) brightness(0.6)');
+      expect(style.backgroundColor).toBe('rgba(29, 31, 37, 0.8)');
     }
     // No shadow on docked glass: the inner top highlight only, on every surface.
     for (const style of [title, navigator, status]) {
@@ -92,19 +88,25 @@ describe('the docked frame', () => {
     expect(reduced.title.boxShadow).not.toBe('none');
   });
 
-  it('lists both settings in the palette, and they toggle', async () => {
+  it('lists both settings in the palette with their state, and they toggle', async () => {
     render(<App />);
-    const glass = commandRegistry.get('view.glassPanels');
-    const reduce = commandRegistry.get('view.reduceTransparency');
-    expect(glass?.title).toBe('Toggle glass panels');
-    expect(reduce?.title).toBe('Toggle reduced transparency');
+    const title = (id: string) => commandRegistry.get(id)?.title;
+    expect(title('view.glassPanels')).toBe('Glass panels: off');
+    expect(title('view.reduceTransparency')).toBe('Reduce transparency: off');
     await act(async () => {
       await commandRegistry.execute('view.glassPanels');
     });
     expect(useAppearanceStore.getState().glassPanels).toBe(true);
+    expect(title('view.glassPanels')).toBe('Glass panels: on');
     await act(async () => {
       await commandRegistry.execute('view.reduceTransparency');
     });
     expect(useAppearanceStore.getState().reduceTransparency).toBe(true);
+    expect(title('view.reduceTransparency')).toBe('Reduce transparency: on');
+    // Changed elsewhere (the Document menu): the palette follows.
+    act(() => useAppearanceStore.getState().setGlassPanels(false));
+    expect(title('view.glassPanels')).toBe('Glass panels: off');
+    // Still found by the old wording.
+    expect(commandRegistry.get('view.glassPanels')?.keywords).toContain('toggle');
   });
 });

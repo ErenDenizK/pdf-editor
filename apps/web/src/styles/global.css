@@ -204,12 +204,11 @@ textarea,
  * --glass-frame-solid (--surface-1), exactly what those surfaces painted before, unless the
  * "Glass panels" setting is on (`data-glass-panels` on the root, appearance-store.ts).
  *
- * With the setting on, the frame takes the glass text steps and its 1px inner top highlight
- * at once, so neither jumps when the blur turns on; the backdrop filter itself is
- * geometry-gated: the Read view lists the surfaces that have a page within 80px in the shell's
- * `data-glass-near` (stage/stage-bleed.ts), and only those blur. Elsewhere the frame paints the
- * solid token, which is pixel-identical to the tier-2 glass over the bare canvas. Docked glass
- * has no shadow and no ring; the highlight is the one inset rule besides --elevation-float.
+ * With the setting on, every frame surface is the tier-2 glass, with the glass text steps and
+ * its 1px inner top highlight: whatever passes under it shows through (review F7 removed the
+ * 80px geometry gate, which left the frame solid where the owner looked; over the bare canvas
+ * the glass is the solid token's colour anyway). Docked glass has no shadow and no ring; the
+ * highlight is the one inset rule besides --elevation-float.
  * The filter never animates and no glass surface sits inside another (menus are portalled).
  */
 .glass-frame {
@@ -225,13 +224,7 @@ textarea,
 }
 
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-  :root[data-glass-panels]
-    :where(
-      [data-glass-near~='title'] > header,
-      [data-glass-near~='left'] > [data-region='navigator'],
-      [data-glass-near~='right'] > #right-panel,
-      [data-glass-near~='status'] > footer
-    ).glass-frame {
+  :root[data-glass-panels] .glass-frame {
     background: var(--glass-frame);
     -webkit-backdrop-filter: var(--glass-frame-filter);
     backdrop-filter: var(--glass-frame-filter);

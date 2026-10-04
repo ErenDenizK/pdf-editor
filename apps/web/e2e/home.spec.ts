@@ -3,7 +3,9 @@
  * actions, dropped or opened with "Open files" (every click, key press, drop and file
  * dialog choice is counted), the Files tab's selection, Combine and "Show Home", a card
  * dragged onto another opens the merge dialog as [target, dragged], the keyboard path
- * through the cards, and the navigator collapsed while no file is open. Drops use a
+ * through the cards, the navigator collapsed while no file is open, and Home's chrome (no
+ * document's navigator, status or selected tab). Combine keeps the files open and makes a
+ * new document "Combined – A + B" (review F8). Drops use a
  * script-built DataTransfer, which Chromium accepts (as in batch.spec).
  */
 import { readFile } from 'node:fs/promises';
@@ -91,17 +93,31 @@ test('a new user merges two dropped files in under five actions', async ({ page 
   await expect(dialog.getByTestId('merge-row')).toHaveCount(2);
   await expect(dialog.getByTestId('merge-row').nth(0)).toContainText('simple-text');
 
+  // A new document's name, not the first file's (review F8).
+  await expect(dialog.getByRole('textbox', { name: 'Title of the merged document' })).toHaveValue(
+    'Combined – simple-text + rotated-pages',
+  );
+
   // 3. Confirm the dialog's default.
-  await user.click(dialog.getByRole('button', { name: 'Merge', exact: true }));
+  await user.click(dialog.getByRole('button', { name: 'Combine', exact: true }));
   await expect(dialog).toBeHidden();
 
-  // One document with every page, in Read.
-  await expect(documentTabs(page)).toHaveCount(1);
-  await expect(documentTabs(page).first()).toHaveAccessibleName(/simple-text/);
+  // A new document with every page, in Read; the two files stay open.
+  await expect(documentTabs(page)).toHaveCount(3);
+  await expect(
+    documentTabs(page).and(page.getByRole('tab', { selected: true })),
+  ).toHaveAccessibleName('Combined – simple-text + rotated-pages');
   await expect(page.getByTestId('home')).toHaveCount(0);
   await expect(page.getByTestId('status-pages')).toHaveText('Page 1 of 7');
   expect(user.actions).toBeLessThanOrEqual(5);
   expect(user.actions).toBe(3);
+
+  // "Combined 2 files · Undo": one step back.
+  const toast = page.getByTestId('combined-toast');
+  await expect(toast).toContainText('Combined 2 files');
+  await toast.getByRole('button', { name: 'Undo' }).click();
+  await expect(toast).toHaveCount(0);
+  await expect(documentTabs(page)).toHaveCount(2);
 });
 
 test('a new user merges two files opened with "Open files" in under five actions', async ({
@@ -128,10 +144,10 @@ test('a new user merges two files opened with "Open files" in under five actions
   await user.click(page.getByRole('button', { name: 'Combine 2 files' }));
   const dialog = page.getByTestId('merge-all-dialog');
   await expect(dialog.getByTestId('merge-row')).toHaveCount(2);
-  await user.click(dialog.getByRole('button', { name: 'Merge', exact: true }));
+  await user.click(dialog.getByRole('button', { name: 'Combine', exact: true }));
   await expect(dialog).toBeHidden();
 
-  await expect(documentTabs(page)).toHaveCount(1);
+  await expect(documentTabs(page)).toHaveCount(3);
   await expect(page.getByTestId('status-pages')).toHaveText('Page 1 of 7');
   expect(user.actions).toBeLessThanOrEqual(5);
   expect(user.actions).toBe(4);
@@ -238,10 +254,43 @@ test('a card dragged onto another opens the merge dialog with the target first',
     page.locator('[role="tablist"][aria-label="Open documents"] [role="tab"]'),
   ).toHaveCount(2);
 
-  await dialog.getByRole('button', { name: 'Merge', exact: true }).click();
-  await expect(documentTabs(page)).toHaveCount(1);
-  await expect(documentTabs(page).first()).toHaveAccessibleName(/rotated-pages/);
+  await dialog.getByRole('button', { name: 'Combine', exact: true }).click();
+  await expect(documentTabs(page)).toHaveCount(3);
+  await expect(
+    documentTabs(page).and(page.getByRole('tab', { selected: true })),
+  ).toHaveAccessibleName('Combined – rotated-pages + simple-text');
   await expect(page.getByTestId('status-pages')).toHaveText('Page 1 of 7');
+});
+
+test('Home frames every file, not one document (review F16, F25)', async ({ page }) => {
+  await useFileInputPicker(page);
+  await page.goto('./?lang=en');
+  await openFixtures(page, ['simple-text.pdf', 'rotated-pages.pdf']);
+  await expect(page.getByTestId('home')).toBeVisible();
+  const rail = page.getByRole('tablist', { name: 'Navigator views' });
+  // The navigator offers Files only, the status bar no page or zoom, and no tab looks active.
+  await expect(rail.getByRole('tab')).toHaveCount(1);
+  await expect(rail.getByRole('tab', { name: /^Files/ })).toBeVisible();
+  await expect(page.locator('#left-panel')).toHaveCount(0);
+  await expect(page.getByTestId('status-pages')).toHaveText('2 files');
+  await expect(page.getByRole('button', { name: /^Zoom/ })).toHaveCount(0);
+  await page.mouse.move(700, 600);
+  for (const tab of await documentTabs(page).all()) {
+    await expect(tab).toHaveAttribute('aria-selected', 'false');
+    await expect(tab.locator('xpath=..')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  }
+  // Tabs take their title's width (up to 220 px): nothing truncated with room to spare.
+  for (const tab of await documentTabs(page).all()) {
+    const fits = await tab.evaluate((el) => {
+      const name = el.querySelector('span:nth-child(2)') as HTMLElement;
+      return name.scrollWidth <= name.clientWidth;
+    });
+    expect(fits).toBe(true);
+  }
+  // In a document the navigator and the status are the document's again.
+  await documentTabs(page).first().click();
+  await expect(rail.getByRole('tab')).toHaveCount(4);
+  await expect(page.getByTestId('status-pages')).toHaveText(/^Page 1 of /);
 });
 
 test('the keyboard path: Tab to the cards, arrows, Space and Enter', async ({ page }) => {
@@ -306,6 +355,13 @@ test('Recents remember a closed file across a reload, open it again and clear', 
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Recent' })).toBeVisible();
   await expect(row).toHaveAccessibleName(/^simple-text\.pdf, 3 pages · .+, Open again…$/);
+  // One column: the open and drop card, then the recents as cards with a page glyph, never a
+  // thumbnail (review F17).
+  const dropBox = await page.getByRole('heading', { name: 'Drop PDFs to start' }).boundingBox();
+  const rowBox = await row.boundingBox();
+  expect((dropBox?.y ?? 0) + (dropBox?.height ?? 0)).toBeLessThan(rowBox?.y ?? 0);
+  await expect(row.locator('svg')).toHaveCount(1);
+  await expect(recents.locator('canvas, img')).toHaveCount(0);
 
   // The file dialog opens and one line says why.
   const chooser = page.waitForEvent('filechooser');

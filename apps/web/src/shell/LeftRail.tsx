@@ -6,7 +6,8 @@
  * chosen tab; choosing the open tab again collapses it (as in VS Code). State persists via
  * the UI store (`ui:v2`). With no file open the panel stays collapsed, since every tab would
  * only say "No document open" (M6 review A1); the stored state is kept, so it reopens as it
- * was when a file opens, and a tab picked meanwhile opens it.
+ * was when a file opens, and a tab picked meanwhile opens it. On Home, which shows every open
+ * file rather than one document, only Files is offered (review F16).
  *
  * Keyboard: a vertical tablist with roving tabindex; Up / Down (Home / End) move between
  * tabs, Enter / Space open; Tab moves into the panel. The accessible name carries the
@@ -44,6 +45,9 @@ const TABS: readonly Tab[] = [
   { id: 'review', label: m.nav_tab_review, Icon: MessageSquareText },
   { id: 'files', label: m.nav_tab_files, Icon: Files },
 ];
+
+/** On Home: the open files, nothing tied to one document (review F16). */
+const HOME_TABS: readonly Tab[] = TABS.filter((t) => t.id === 'files');
 
 /** Shown only in the Compare view, after the four (spec recognize-and-compare §2.2). */
 const CHANGES_TAB: Tab = { id: 'changes', label: m.compare_changes, Icon: FileDiff };
@@ -86,7 +90,10 @@ export function LeftRail() {
   // Collapsed while no file is open, unless a tab was picked since (`peek`).
   const [peek, setPeek] = useState(false);
   if (hasDocuments && peek) setPeek(false);
-  const open = stored && (hasDocuments || peek);
+  // On Home a document's tab (Pages, Find, Review) stays closed; the stored view is kept for
+  // the document views.
+  const homeHides = useUiStore((s) => s.destination === 'home' && s.leftPanelView !== 'files');
+  const open = stored && (hasDocuments || peek) && !homeHides;
   const width = useUiStore((s) => s.leftPanelWidth);
   const showView = useUiStore((s) => s.showLeftPanelView);
   const setWidth = useUiStore((s) => s.setLeftPanelWidth);
@@ -94,12 +101,14 @@ export function LeftRail() {
   const shortcutsShortcut = useCommandShortcut('help.shortcuts');
   const railRef = useRef<HTMLDivElement>(null);
   const comparing = useUiStore((s) => stageView(s) === 'compare');
-  const tabs = comparing ? [...TABS, CHANGES_TAB] : TABS;
+  // Home shows every open file, not one document: only Files, which lists them (review F16).
+  const onHome = useUiStore((s) => s.destination === 'home');
+  const tabs = onHome ? HOME_TABS : comparing ? [...TABS, CHANGES_TAB] : TABS;
   const counts = useTabCounts();
 
   // Roving tabindex: the tab last moved to with the arrows, else the shown view's tab.
   const [roving, setRoving] = useState<LeftPanelView | null>(null);
-  const stop = [roving, view].find((id) => tabs.some((t) => t.id === id)) ?? 'pages';
+  const stop = [roving, view].find((id) => tabs.some((t) => t.id === id)) ?? tabs[0]?.id;
   const onRailKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     // Tab from a tab goes into the open panel (APG tabs), past the rail's footer button.
     if (event.key === 'Tab' && !event.shiftKey && !event.altKey && !event.ctrlKey) {

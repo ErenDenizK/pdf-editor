@@ -1,6 +1,6 @@
 /**
  * Status bar: page, selection summary and the privacy indicator on the left; zoom on the
- * right. The view switch lives once, over the stage (experience-redesign §1, A1), so the
+ * right. On Home only the number of open files and the privacy indicator show. The view switch lives once, over the stage (experience-redesign §1, A1), so the
  * bar does not repeat Read / Arrange. Numerals are tabular so counts never jitter
  * (DESIGN.md §3).
  */
@@ -85,15 +85,20 @@ export function StatusBar() {
   const hasDocuments = useHasDocuments();
   const doc = useActiveDocument();
   const opening = useWorkspaceStore((s) => s.opening);
-  // Home shows the page count, as Arrange does; only a document view has a current page.
+  // Arrange shows the page count; only a document view has a current page.
   const viewMode = useUiStore(stageView);
   const currentPage = useViewStore((s) => s.currentPage);
   const workspace = useWorkspaceStore((s) => s.workspace);
   const selection = useSelectionSummary();
   const pageCount = doc?.pages.length ?? 0;
+  // Home shows every open file, not one document: no page, zoom, selection or signature of
+  // the active one (review F16), only how many files are open.
+  const onHome = viewMode === 'home';
   let summary: string;
-  if (!doc) {
-    summary = opening > 0 ? m.status_opening({ count: opening }) : m.documents_count({ count: 0 });
+  if (onHome && doc) {
+    summary = m.files_count({ count: workspace.documentOrder.length });
+  } else if (!doc) {
+    summary = opening > 0 ? m.status_opening({ count: opening }) : m.files_count({ count: 0 });
   } else if (viewMode === 'read' && pageCount > 0) {
     const current = Math.min(currentPage, pageCount - 1);
     const label = documentLabels(workspace, doc)[current];
@@ -111,7 +116,7 @@ export function StatusBar() {
         </span>
         {viewMode === 'arrange' ? <ArrangeShown /> : null}
         {viewMode === 'read' ? <SearchCount /> : null}
-        {selection ? (
+        {selection && !onHome ? (
           <>
             <span className={styles.dot} aria-hidden="true">
               ·
@@ -128,13 +133,13 @@ export function StatusBar() {
           </>
         ) : null}
         <OcrStatus separator={styles.dot} />
-        {doc ? <SignatureStatusBadge separator={styles.dot} /> : null}
+        {doc && !onHome ? <SignatureStatusBadge separator={styles.dot} /> : null}
         <span className={styles.dot} aria-hidden="true">
           ·
         </span>
         <PrivacyIndicator />
       </div>
-      {hasDocuments ? (
+      {hasDocuments && !onHome ? (
         <div className={styles.right}>
           <ZoomControls />
         </div>

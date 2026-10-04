@@ -46,3 +46,27 @@
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
 }
+
+/* Appearance switches (review F21): a box that shows off as well as on, so the state reads
+   before anything is turned on. */
+.switchBox {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-1);
+  color: var(--tool-active-ink);
+}
+
+.switchBox[data-on] {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.switchBox svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.5;
+}

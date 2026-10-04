@@ -550,15 +550,13 @@ describe('tokens.css', () => {
       expect(on).toMatch(/--text-secondary:\s*var\(--glass-text-secondary\)/);
       expect(on).toMatch(/--text-tertiary:\s*var\(--glass-text-secondary\)/);
       expect(on).toMatch(/--danger:\s*var\(--glass-danger\)/);
-      // The blur only where the geometry gate lists a page near, behind the support gate.
+      // Every frame surface blurs while the setting is on (no geometry gate, review F7), behind
+      // the support check.
       const live =
-        /@supports[^{]*\{\s*:root\[data-glass-panels\]\s*:where\(([^)]*)\)\.glass-frame\s*\{([^{}]*)\}/.exec(
-          css,
-        );
-      expect(live?.[1]).toMatch(/data-glass-near~='title'/);
-      expect(live?.[1]).toMatch(/data-glass-near~='status'/);
-      expect(live?.[2]).toMatch(/backdrop-filter:\s*var\(--glass-frame-filter\)/);
-      expect(live?.[2]).toMatch(/background:\s*var\(--glass-frame\)/);
+        /@supports[^{]*\{\s*:root\[data-glass-panels\] \.glass-frame\s*\{([^{}]*)\}/.exec(css);
+      expect(live?.[1]).toMatch(/backdrop-filter:\s*var\(--glass-frame-filter\)/);
+      expect(live?.[1]).toMatch(/background:\s*var\(--glass-frame\)/);
+      expect(css).not.toMatch(/data-glass-near/);
       // Filters never animate.
       expect(css).not.toMatch(/transition[^;]*(?:backdrop-filter|filter)/);
     });

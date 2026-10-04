@@ -24,6 +24,8 @@ import {
 } from '../state/workspace-store';
 import { IconButton } from '../ui/IconButton';
 import { useRetained } from '../ui/use-retained';
+import { combineInto } from '../home/home-actions';
+import { combinedTitle } from '../home/home-model';
 import { Actions, Frame } from './OperationDialogFrame';
 import local from './OperationDialogs.module.css';
 import {
@@ -445,8 +447,11 @@ function MergeAllDialog({ order: given }: { readonly order?: readonly DocumentId
       : given.filter((id) => initialTabs.some((t) => t.id === id)),
   );
   const tabs = order.every((id) => liveTabs.some((t) => t.id === id)) ? liveTabs : initialTabs;
-  const [title, setTitle] = useState(
-    () => tabs.find((t) => t.id === order[0])?.title ?? tabs[0]?.title ?? '',
+  // Combine (opened from Home with an order) keeps the files open and makes a new document,
+  // "Combined – A + B" until the title is edited (review F8); "Merge all" joins the tabs.
+  const combining = given !== undefined;
+  const [edited, setTitle] = useState<string | null>(() =>
+    combining ? null : (tabs.find((t) => t.id === order[0])?.title ?? tabs[0]?.title ?? ''),
   );
   const [touched, setTouched] = useState(false);
   const listRef = useRef<HTMLOListElement>(null);
@@ -454,6 +459,7 @@ function MergeAllDialog({ order: given }: { readonly order?: readonly DocumentId
   const errorId = useId();
 
   const rows = order.flatMap((id) => tabs.find((t) => t.id === id) ?? []);
+  const title = edited ?? combinedTitle(rows.map((r) => r.title));
   const total = rows.reduce((sum, t) => sum + t.pageCount, 0);
   const checked = validateTitle(title);
   const ready = rows.length >= 2 && checked.ok;
@@ -474,13 +480,8 @@ function MergeAllDialog({ order: given }: { readonly order?: readonly DocumentId
     event.preventDefault();
     setTouched(true);
     if (!ready) return;
-    if (
-      mergeAll(
-        rows.map((r) => r.id),
-        title,
-      ) === undefined
-    )
-      return;
+    const ids = rows.map((r) => r.id);
+    if ((combining ? combineInto(ids, title) : mergeAll(ids, title)) === undefined) return;
     closeOperationDialog();
     // Combined from Home: the new document opens in Read (experience-redesign §3).
     if (useUiStore.getState().destination === 'home') useUiStore.getState().setViewMode('read');
@@ -491,7 +492,9 @@ function MergeAllDialog({ order: given }: { readonly order?: readonly DocumentId
   return (
     <Frame title={dialogTitle} testId="merge-all-dialog" wide>
       <form className={styles.body} onSubmit={submit}>
-        <p className={styles.description}>{m.merge_all_description()}</p>
+        <p className={styles.description}>
+          {combining ? m.home_combine_description() : m.merge_all_description()}
+        </p>
         <ol ref={listRef} className={local.list} aria-label={m.merge_all_order_label()}>
           {rows.map((tab, index) => (
             <li key={tab.id} className={local.listRow} data-testid="merge-row">
@@ -542,7 +545,10 @@ function MergeAllDialog({ order: given }: { readonly order?: readonly DocumentId
         <p className={local.preview} role="status" data-ok={ready || undefined}>
           {m.merge_all_preview({ count: rows.length, pages: pagesPhrase(total) })}
         </p>
-        <Actions confirm={m.merge_confirm()} disabled={!ready} />
+        <Actions
+          confirm={combining ? m.home_combine_confirm() : m.merge_confirm()}
+          disabled={!ready}
+        />
       </form>
     </Frame>
   );

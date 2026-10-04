@@ -45,11 +45,13 @@
   display: none;
 }
 
+/* A tab is as wide as its title up to 220px, and truncates only when the strip runs out of
+   room (review F25): the basis is its content, so the strip's width is the titles' width. */
 .tabWrap {
   position: relative;
   display: flex;
   align-items: center;
-  flex: 0 1 200px;
+  flex: 0 1 auto;
   min-width: 112px;
   max-width: 220px;
   height: var(--control-height);
@@ -131,9 +133,11 @@
   stroke-width: 1.75;
 }
 
+/* Only a keyboard focus shows the close affordance on an unselected tab: on Home, where no
+   tab is selected, focus left on a tab by a click must not make it look active (review F16). */
 .tabWrap[data-selected] .close,
 .tabWrap:hover .close,
-.tabWrap:focus-within .close {
+.tabWrap:has(:focus-visible) .close {
   opacity: 1;
 }
 

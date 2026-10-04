@@ -265,6 +265,26 @@ describe('mergeDocuments', () => {
     expect(outlineTitles(next, must(next.activeDocument))).toEqual(['A', '  A p1', '  A p2', 'B']);
   });
 
+  it('keeps the inputs open with keepSources: copies of their pages in a new tab after the last', () => {
+    const next = check(
+      mergeDocuments(ws, { documentIds: [b, a], title: 'Combined', keepSources: true }, ids),
+    );
+    const merged = must(next.activeDocument);
+    expect(next.documentOrder).toEqual([a, b, merged, c]);
+    expect(names(next, merged)).toEqual(['B1', 'B2', 'A1', 'A2']);
+    // The inputs are untouched; the result holds fresh page ids.
+    expect(getDocument(next, a)).toBe(getDocument(ws, a));
+    expect(getDocument(next, b)).toBe(getDocument(ws, b));
+    const copies = pageIds(next, merged);
+    for (const id of [...pageIds(ws, a), ...pageIds(ws, b)]) expect(copies).not.toContain(id);
+    // The outline points at the copies, wrappers included.
+    expect(outlineTitles(next, merged)).toEqual(['B', 'A', '  A p1', '  A p2']);
+    const wrapper = getDocument(next, merged).outline[1];
+    expect(wrapper?.destination).toEqual({ kind: 'page', page: copies[2] });
+    expect(wrapper?.children[1]?.destination).toMatchObject({ kind: 'page', page: copies[3] });
+    expect(getDocument(next, merged).title).toBe('Combined');
+  });
+
   it('validates input', () => {
     expectCode(() => mergeDocuments(ws, { documentIds: [a], title: 'M' }, ids), 'invalid-argument');
     expectCode(() => mergeDocuments(ws, { documentIds: [a, a], title: 'M' }, ids), 'duplicate-id');

@@ -21,7 +21,7 @@ import { resetPenSession } from '../annotations/pen/ink-input';
 import { registerAppCommands } from '../commands/app-commands';
 import { type Command, commandRegistry } from '../commands/registry';
 import { registerDocumentCommands } from '../document/document-commands';
-import { m } from '../i18n';
+import { m, setLocale } from '../i18n';
 import { registerOutlineCommands } from '../outline/outline-commands';
 import { registerSignatureCommands } from '../signatures/signature-commands';
 import { registerArrangeCommands } from '../stage/arrange-commands';
@@ -162,10 +162,22 @@ describe('Document menu', () => {
       const reduce = screen.getByRole('menuitemcheckbox', { name: 'Reduce transparency' });
       expect(glass).toHaveAttribute('aria-checked', 'false');
       expect(reduce).toHaveAttribute('aria-checked', 'false');
+      // Every switch shows a box, off as well as on (review F21).
+      const box = (item: HTMLElement) => item.querySelector<HTMLElement>('[data-on], span');
+      for (const item of screen.getAllByRole('menuitemcheckbox')) {
+        const indicator = box(item);
+        expect(indicator).not.toBeNull();
+        expect(indicator?.hasAttribute('data-on')).toBe(false);
+        const style = getComputedStyle(indicator as HTMLElement);
+        expect(style.width).toBe('14px');
+        expect(style.borderTopStyle).toBe('solid');
+      }
 
       await userEvent.click(glass);
       expect(useAppearanceStore.getState().glassPanels).toBe(true);
       await waitFor(() => expect(glass).toHaveAttribute('aria-checked', 'true'));
+      expect(box(glass)?.hasAttribute('data-on')).toBe(true);
+      expect(box(glass)?.querySelector('svg')).not.toBeNull();
       await userEvent.click(reduce);
       expect(useAppearanceStore.getState().reduceTransparency).toBe(true);
       expect(screen.getByRole('menuitemcheckbox', { name: 'Glass panels' })).toBeInTheDocument();
@@ -183,6 +195,24 @@ describe('Document menu', () => {
     } finally {
       useAppearanceStore.setState(DEFAULT_APPEARANCE);
       resetEditPolicyStore();
+    }
+  });
+
+  it('names the submenu "Görünüş" in Turkish, not "Görünüm" (View) (review F24)', () => {
+    setLocale('tr');
+    try {
+      expect(m.appearance_heading()).toBe('Görünüş');
+      expect(m.group_view()).toBe('Görünüm');
+      // The Edit button is a verb; the mode is a noun.
+      expect(m.mode_edit_button()).toBe('Düzenle');
+      // The mode control keeps its nouns: Okuma · Düzenleme · Sıralama.
+      expect([m.mode_read(), m.mode_edit(), m.mode_arrange()]).toEqual([
+        'Okuma',
+        'Düzenleme',
+        'Sıralama',
+      ]);
+    } finally {
+      setLocale('en');
     }
   });
 });

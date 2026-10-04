@@ -9,14 +9,15 @@
  * Shift+arrows extend from the anchor, Space toggles, Mod+A selects all, Enter opens, Esc
  * clears the selection.
  *
- * Recents (craft §3.1, WP M5): under the cards (above the drop area when no file is open), a
- * compact list of the files opened lately, kept on this device only, with "Clear recents".
+ * Recents (craft §3.1, WP M5): under the cards (under the open and drop card when no file is
+ * open), one column of cards for the files opened lately, each with a generic page glyph (no
+ * thumbnail is ever stored), kept on this device only, with "Clear recents" (review F17).
  * Nothing shows when the list is empty. Rows have a roving tabindex: Up and Down move, Enter
  * opens, Delete removes, Right reaches the row's ⋯ menu.
  */
 import { Menu } from '@base-ui/react/menu';
 import type { DocumentId, SourceId, VirtualPage, Workspace } from '@pdf-editor/document-model';
-import { MoreHorizontal } from 'lucide-react';
+import { FileText, MoreHorizontal } from 'lucide-react';
 import {
   type DragEvent,
   type KeyboardEvent,
@@ -90,10 +91,11 @@ export function HomeView({ dragging }: { readonly dragging: boolean }) {
         data-variant="empty"
         data-dragging={dragging || undefined}
       >
-        <RecentFiles variant="empty" />
+        {/* One column: opening and dropping first, then the files opened lately (F17). */}
         <div className={styles.emptyArea}>
           <EmptyState dragging={dragging} />
         </div>
+        <RecentFiles variant="empty" />
       </section>
     );
   }
@@ -466,6 +468,7 @@ function RecentFiles({ variant }: { readonly variant: 'cards' | 'empty' }) {
   const entries = useRecentsStore((s) => s.entries);
   const access = useRecentsStore((s) => s.access);
   const note = useRecentsStore((s) => s.note);
+  const clearFailed = useRecentsStore((s) => s.clearFailed);
   const open = useOpenFiles();
   const visible = useMemo(() => visibleRecents(entries, open), [entries, open]);
   const [focused, setFocused] = useState<string | null>(null);
@@ -478,7 +481,8 @@ function RecentFiles({ variant }: { readonly variant: 'cards' | 'empty' }) {
     void loadRecents();
   }, []);
 
-  if (visible.length === 0) return null;
+  // A Clear that could not delete the stored copy keeps the section, to say so.
+  if (visible.length === 0 && !clearFailed) return null;
   const tabbable = visible.some((e) => e.id === focused) ? focused : (visible[0]?.id ?? null);
 
   const focusRow = (id: string | undefined) => {
@@ -554,25 +558,32 @@ function RecentFiles({ variant }: { readonly variant: 'cards' | 'empty' }) {
           {m.recents_clear()}
         </button>
       </div>
-      <ul
-        ref={listRef}
-        className={styles.recentList}
-        aria-label={m.recents_list_label()}
-        data-testid="recent-files"
-      >
-        {visible.map((entry) => (
-          <RecentRow
-            key={entry.id}
-            entry={entry}
-            hint={recentHint(entry, access[entry.id])}
-            time={relativeTime(entry.openedAt, now, locale)}
-            locale={locale}
-            tabbable={entry.id === tabbable}
-            onFocus={() => setFocused(entry.id)}
-            onKeyDown={onKeyDown}
-          />
-        ))}
-      </ul>
+      {visible.length > 0 ? (
+        <ul
+          ref={listRef}
+          className={styles.recentList}
+          aria-label={m.recents_list_label()}
+          data-testid="recent-files"
+        >
+          {visible.map((entry) => (
+            <RecentRow
+              key={entry.id}
+              entry={entry}
+              hint={recentHint(entry, access[entry.id])}
+              time={relativeTime(entry.openedAt, now, locale)}
+              locale={locale}
+              tabbable={entry.id === tabbable}
+              onFocus={() => setFocused(entry.id)}
+              onKeyDown={onKeyDown}
+            />
+          ))}
+        </ul>
+      ) : null}
+      {clearFailed ? (
+        <p className={styles.recentNote} data-testid="recent-clear-failed">
+          {m.recents_clear_failed()}
+        </p>
+      ) : null}
       {note !== null ? (
         <p className={styles.recentNote} data-testid="recent-note">
           {note.kind === 'open-again'
@@ -631,20 +642,20 @@ function RecentRow({
         // No await before openRecent: the permission prompt needs this click's activation.
         onClick={() => void openRecent(entry)}
       >
-        <span className={styles.recentName} aria-hidden="true">
-          {middleTruncate(entry.name, RECENT_NAME_LENGTH)}
+        {/* A generic page: thumbnails are never stored (the privacy promise, F17). */}
+        <span className={styles.recentGlyph} aria-hidden="true">
+          <FileText />
         </span>
-        <span className={styles.recentDetails} aria-hidden="true">
-          {details}
-        </span>
-        <span className={styles.recentTime} aria-hidden="true">
-          {time}
-        </span>
-        {hint === undefined ? null : (
-          <span className={styles.recentHint} aria-hidden="true">
-            {hint}
+        <span className={styles.recentText} aria-hidden="true">
+          <span className={styles.recentName}>
+            {middleTruncate(entry.name, RECENT_NAME_LENGTH)}
           </span>
-        )}
+          <span className={styles.recentMeta}>
+            <span className={styles.recentDetails}>{details}</span>
+            <span className={styles.recentTime}>{time}</span>
+            {hint === undefined ? null : <span className={styles.recentHint}>{hint}</span>}
+          </span>
+        </span>
       </button>
       <Menu.Root>
         <Menu.Trigger

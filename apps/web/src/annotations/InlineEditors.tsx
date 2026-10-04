@@ -179,6 +179,61 @@ function FreeTextEditor({
   );
 }
 
+/** A rectangle in client (viewport) coordinates, CSS px. */
+export interface ClientBox {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+/** Space between a note's icon and its popup, CSS px. */
+const NOTE_POPUP_GAP = 8;
+
+/**
+ * Where the note popup goes, in client coordinates: to the right of its anchor, top edges
+ * aligned; to the left where the right side has no room; upward (bottom edges aligned) where
+ * it would run off the bottom; and always inside `bounds` as far as it fits.
+ */
+export function placeNotePopup(
+  anchor: ClientBox,
+  size: { readonly width: number; readonly height: number },
+  bounds: ClientBox,
+  gap: number = NOTE_POPUP_GAP,
+): { left: number; top: number } {
+  let left = anchor.right + gap;
+  if (left + size.width > bounds.right) {
+    const flipped = anchor.left - gap - size.width;
+    left = flipped >= bounds.left ? flipped : bounds.right - size.width;
+  }
+  left = Math.max(bounds.left, left);
+  let top = anchor.top;
+  if (top + size.height > bounds.bottom) top = Math.min(top, anchor.bottom - size.height);
+  top = Math.min(top, bounds.bottom - size.height);
+  top = Math.max(bounds.top, top);
+  return { left, top };
+}
+
+/**
+ * The part of the screen a popover on a page must stay inside: the Read view's unobscured
+ * rectangle (its full-bleed viewport less the scroll padding the docked frame takes), within
+ * the window.
+ */
+function visibleBounds(el: HTMLElement): ClientBox {
+  const windowBox = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+  const viewport = el.closest<HTMLElement>('[data-read-viewport]');
+  if (!viewport) return windowBox;
+  const r = viewport.getBoundingClientRect();
+  const cs = getComputedStyle(viewport);
+  const px = (v: string) => Number.parseFloat(v) || 0;
+  return {
+    left: Math.max(windowBox.left, r.left + px(cs.scrollPaddingLeft)),
+    top: Math.max(windowBox.top, r.top + px(cs.scrollPaddingTop)),
+    right: Math.min(windowBox.right, r.right - px(cs.scrollPaddingRight)),
+    bottom: Math.min(windowBox.bottom, r.bottom - px(cs.scrollPaddingBottom)),
+  };
+}
+
 function NoteEditor({
   editor,
   frame,
@@ -197,19 +252,54 @@ function NoteEditor({
   );
   const [text, setText] = useState(editor.text);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const done = useRef(false);
   // A note's popup hangs off its drawn icon; other annotations' comments off their rect.
   const iconic = editor.id === undefined || existing?.kind === 'text';
   const box = rectToCss(frame, iconic ? noteIconRect(frame, editor.rect) : editor.rect);
+  const [position, setPosition] = useState({ left: box.left + box.width + 8, top: box.top });
 
   useEffect(() => {
-    ref.current?.focus();
+    ref.current?.focus({ preventScroll: true });
   }, []);
 
-  const close = () => useAnnotationStore.getState().setEditor(null);
+  // Inside the visible part of the screen: flipped to the left near the right edge, upward
+  // near the bottom (review F6: a note by the right edge opened half off-screen).
+  useLayoutEffect(() => {
+    const el = popupRef.current;
+    const parent = el?.offsetParent;
+    if (!el || !(parent instanceof HTMLElement)) return;
+    const origin = parent.getBoundingClientRect();
+    const anchor: ClientBox = {
+      left: origin.left + box.left,
+      top: origin.top + box.top,
+      right: origin.left + box.left + box.width,
+      bottom: origin.top + box.top + box.height,
+    };
+    const placed = placeNotePopup(
+      anchor,
+      { width: el.offsetWidth, height: el.offsetHeight },
+      visibleBounds(el),
+    );
+    const next = { left: placed.left - origin.left, top: placed.top - origin.top };
+    setPosition((previous) =>
+      Math.abs(previous.left - next.left) < 0.5 && Math.abs(previous.top - next.top) < 0.5
+        ? previous
+        : next,
+    );
+  }, [box.left, box.top, box.width, box.height]);
+
+  const close = () => {
+    done.current = true;
+    useAnnotationStore.getState().setEditor(null);
+  };
+  /** Saves the text; a new note left empty is dropped (nothing was created yet). */
   const save = () => {
-    close();
+    if (done.current) return;
     const value = text.trim();
+    close();
     if (editor.id === undefined) {
+      if (value === '') return;
       void createAnnotations(editor.target, [
         {
           kind: 'text',
@@ -229,36 +319,55 @@ function NoteEditor({
     });
   };
 
-  useOpenCommit(() => {
-    if (editor.id === undefined && text.trim() === '') close();
-    else save();
+  useOpenCommit(save);
+
+  // A press anywhere outside the popup saves it (review F6), after the press's own handlers:
+  // a drawing press commits through `commitOpenEditor` first and goes on with the stroke.
+  const latestSave = useRef(save);
+  useLayoutEffect(() => {
+    latestSave.current = save;
   });
+  useEffect(() => {
+    // Not the press that opened the popup, if its effects ran while it was dispatched.
+    const openedAt = performance.now();
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.timeStamp < openedAt) return;
+      const target = event.target;
+      if (target instanceof Node && popupRef.current?.contains(target)) return;
+      latestSave.current();
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, []);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Escape') {
+    // Esc saves, as a click away does; Cancel is the one way to drop what was typed.
+    if (event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey))) {
       event.preventDefault();
       event.stopPropagation();
-      close();
-    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
       save();
     }
   };
 
+  // The author from settings, or nothing: a header that says "No author" tells nobody anything.
   const who = existing?.author ?? author;
   const when = existing?.modified;
   return (
     <div
+      ref={popupRef}
       role="dialog"
       aria-label={editor.id === undefined ? m.annot_new_note() : m.annot_edit_comment()}
       className={styles.notePopup}
       data-annotation-keep=""
-      style={{ left: box.left + box.width + 8, top: box.top }}
+      data-testid="note-popup"
+      style={{ left: position.left, top: position.top }}
     >
-      <div className={styles.noteMeta}>
-        <span>{who === '' ? m.annot_no_author() : who}</span>
-        {when ? <time dateTime={when}>{new Date(when).toLocaleString()}</time> : null}
-      </div>
+      {who !== '' || when ? (
+        <div className={styles.noteMeta}>
+          {who !== '' ? <span>{who}</span> : <span />}
+          {when ? <time dateTime={when}>{new Date(when).toLocaleString()}</time> : null}
+        </div>
+      ) : null}
       <textarea
         ref={ref}
         className={styles.noteText}

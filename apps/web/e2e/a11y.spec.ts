@@ -110,6 +110,7 @@ test.describe('keyboard', () => {
     // armed tool. (T, the Text box in the Text group: the text markups have no bar entry since
     // craft spec §3.4, and H arms the Highlighter preset, whose tier is empty.)
     await page.locator('body').press('t');
+    await page.locator('body').press('t');
     await expect(page.getByTestId('options-tier')).toBeVisible();
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
@@ -290,9 +291,15 @@ test.describe('keyboard', () => {
     await page.keyboard.press('Enter');
     await expect(note).toHaveAttribute('aria-pressed', 'true');
     await expect(status(page)).toHaveText('Note tool');
+    // Its options open only on request: Enter on the armed tool again (review finding 5).
+    const tier = page.getByRole('toolbar', { name: 'Note options' });
+    await expect(tier).toHaveCount(0);
+    await expect(note).toHaveAttribute('aria-description', 'Press again for options');
+    await page.keyboard.press('Enter');
+    await expect(tier).toBeVisible();
+    await expect(status(page)).toHaveText('Note options');
 
     // Tab goes from the bar to its options tier: one Tab stop, arrows, and keys that work.
-    const tier = page.getByRole('toolbar', { name: 'Note options' });
     await page.keyboard.press('Tab');
     expect(await holdsFocus(tier)).toBe(true);
     await expect(tier.locator('[tabindex="0"]')).toHaveCount(1);
@@ -487,7 +494,9 @@ interface AxeViolation {
 const ACCEPTED: Readonly<Record<string, string>> = {};
 
 async function axe(page: Page, name: string): Promise<void> {
-  // Settled first: a dialog fading in would be measured at part opacity (color-contrast).
+  // Settled first: a dialog fading in would be measured at part opacity (color-contrast), and
+  // so would the tool bar, faded while a stroke is in progress and a second after.
+  await expect(page.locator('[data-stroking]')).toHaveCount(0, { timeout: 3000 });
   await page.waitForFunction(() =>
     document.getAnimations().every((animation) => animation.playState !== 'running'),
   );
@@ -577,6 +586,7 @@ test.describe('axe', () => {
     await axe(page, 'Edit, the page context menu');
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('page-context-menu')).toHaveCount(0);
+    await page.locator('body').press('u');
     await page.locator('body').press('u');
     await expect(page.getByTestId('options-tier')).toBeVisible();
     await axe(page, 'Edit, Underline options');
@@ -708,7 +718,8 @@ test.describe('reduced motion', () => {
     expect(await longestDuration(editor)).toBeLessThanOrEqual(NONE_MS);
     expect(await longestAnimation(page)).toBeLessThanOrEqual(NONE_MS);
     await page.keyboard.press('Escape');
-    // So does the options tier.
+    // So does the options tier (asked for: U again).
+    await page.locator('body').press('u');
     await page.locator('body').press('u');
     const tier = page.getByTestId('options-tier');
     await expect(tier).toBeVisible();
@@ -769,7 +780,13 @@ test('the focus ring tokens apply to the new controls', async ({ page }) => {
   await expect(page.locator('canvas[data-state="rendered"]').first()).toBeAttached({
     timeout: 20_000,
   });
-  await expectRing('page viewport', viewport(page));
+  // The pages' ring shows only when F6 or Tab brought the focus there (review finding 23).
+  for (let i = 0; i < 8; i++) {
+    if (await viewport(page).evaluate((el) => el === document.activeElement)) break;
+    await page.keyboard.press('F6');
+  }
+  await expect(viewport(page)).toBeFocused();
+  expect(await viewport(page).evaluate((el) => getComputedStyle(el).outlineStyle)).toBe('solid');
   await enterEdit(page);
   await expectRing('bar group', bar(page).getByRole('button', { name: 'Write', exact: true }));
   await bar(page).getByRole('button', { name: 'Write', exact: true }).click();
@@ -867,6 +884,31 @@ async function tabWalk(page: Page, steps: number, back = false): Promise<string[
 }
 
 test.describe('craft spec §9', () => {
+  test('the pages show their focus ring after Tab or F6 only, never after a click or a mode key', async ({
+    page,
+  }) => {
+    await openSimple(page);
+    const frame = viewport(page).locator('xpath=..');
+    const ring = () => frame.evaluate((el) => getComputedStyle(el, '::after').content);
+    const box = await page.locator('[data-page-index="0"]').boundingBox();
+    if (!box) throw new Error('page 1 not laid out');
+    // A click on the pages, then a mode key (review finding 23): no frame around the stage.
+    await page.mouse.click(box.x + box.width / 2, box.y + 60);
+    await expect(viewport(page)).toBeFocused();
+    await page.keyboard.press('2');
+    expect(await ring()).toBe('none');
+    await page.keyboard.press('1');
+    expect(await ring()).toBe('none');
+    // F6 between the regions reaches the pages: the ring shows.
+    await bar(page).getByRole('button', { name: 'Edit', exact: true }).focus();
+    for (let i = 0; i < 8; i++) {
+      if (await viewport(page).evaluate((el) => el === document.activeElement)) break;
+      await page.keyboard.press('F6');
+    }
+    await expect(viewport(page)).toBeFocused();
+    expect(await ring()).not.toBe('none');
+  });
+
   test('Read: F6 reaches the Edit button; the page menu and the selection bar; no hidden stop', async ({
     page,
   }) => {
@@ -878,9 +920,13 @@ test.describe('craft spec §9', () => {
     await viewport(page).focus();
     await tabWalk(page, 12);
 
-    // The page context menu in Read: page operations, no "Edit text here".
+    // The page context menu in Read: no page operation and no "Edit text here"; one quiet row
+    // switches to Edit (review finding 4).
     const menu = await openPageMenu(page);
-    await expect(menu.getByRole('menuitem', { name: 'Rotate page 1 right' })).toBeVisible();
+    await expect(
+      menu.getByRole('menuitem', { name: /^Switch to Edit to change pages/ }),
+    ).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: 'Rotate page 1 right' })).toHaveCount(0);
     await expect(menu.getByRole('menuitem', { name: /Edit text here/ })).toHaveCount(0);
     await axe(page, 'Read, the page context menu');
     await page.keyboard.press('Escape');
@@ -1064,7 +1110,8 @@ test.describe('craft spec §9', () => {
     await page.locator('#rail-files').click();
     await page.getByRole('button', { name: 'Close rotated-pages' }).click();
     await expect(page.getByRole('tab', { name: 'rotated-pages' })).toHaveCount(0);
-    await page.locator('#rail-pages').click();
+    // On Home the navigator offers Files only (review F16): its tab again collapses the panel.
+    await page.locator('#rail-files').click();
     await page.keyboard.press('0');
     await expect(page.getByTestId('home')).toBeVisible();
     const recents = page.getByRole('list', { name: 'Recent files' });

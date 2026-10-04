@@ -2,15 +2,15 @@
  * The full-bleed Read view (craft spec §7; Vitest browser mode, Chromium, real PDFium): inside
  * a shell with a title bar, navigator, inspector and status bar, the page viewport covers the
  * whole shell while the fitted page and its centring use the rectangle the panels leave free,
- * and a panel resize re-fits. The stand-in scroll bars follow the viewport both ways, and with
- * "Glass panels" on the shell learns which panels have a page near.
+ * and a panel resize re-fits. The stand-in scroll bars follow the viewport both ways, and pages
+ * pass under the title bar and the status bar (the top and bottom insets are scroll padding).
  */
 import '../styles/tokens.css';
 import '../styles/reset.css';
 import '../styles/global.css';
 
 import type { VirtualDocument } from '@pdf-editor/document-model';
-import { act, render, waitFor } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { page } from 'vitest/browser';
 
@@ -165,28 +165,33 @@ describe('Read mode: full-bleed stage', () => {
     await waitFor(() => expect(viewport.scrollTop).toBeCloseTo(900, 0));
   }, 60_000);
 
-  it('tells the shell which panels have a page near while Glass panels is on', async () => {
+  it('lets pages pass under the title bar and the status bar at fit width (review F7)', async () => {
     useUiStore.getState().zoomFit();
-    const { container, unmount } = render(<Shell doc={activeDocument()} left={200} />);
-    const shell = container.querySelector<HTMLElement>('[data-testid="shell"]');
+    const { container } = render(<Shell doc={activeDocument()} left={200} />);
+    const viewport = viewportOf(container);
     await waitFor(() => expect(firstPage(container)).not.toBeNull());
-    // Off: nothing is published.
-    expect(shell?.hasAttribute('data-glass-near')).toBe(false);
-
-    act(() => useAppearanceStore.getState().setGlassPanels(true));
-    // Fitted to the width, the page sits 48 px from the navigator and runs under the status
-    // bar; PAD_X and the stand-in bar keep it within 80 px of the inspector too.
+    // The top and bottom insets are scroll padding, not a smaller viewport.
+    const style = getComputedStyle(viewport);
+    expect(Number.parseFloat(style.scrollPaddingTop)).toBe(TITLE + HEADER);
+    expect(Number.parseFloat(style.scrollPaddingBottom)).toBeGreaterThanOrEqual(STATUS);
+    const shellBox = container.querySelector('[data-testid="shell"]')?.getBoundingClientRect();
+    const box = viewport.getBoundingClientRect();
+    expect(box.top).toBeCloseTo(shellBox?.top ?? 0, 0);
+    expect(box.bottom).toBeCloseTo(shellBox?.bottom ?? 0, 0);
+    // At rest the first page sits clear of the title bar and the stage header…
+    await waitFor(() => {
+      const top = firstPage(container)?.getBoundingClientRect().top ?? 0;
+      expect(Math.abs(top - (TITLE + HEADER + 16))).toBeLessThanOrEqual(1);
+    });
+    // …the pages run on under the status bar; scrolled, the first one's top edge passes under
+    // the title bar.
+    const pages = [
+      ...container.querySelectorAll<HTMLElement>('[data-read-viewport] [data-page-index]'),
+    ].map((el) => el.getBoundingClientRect());
+    expect(pages.some((r) => r.top < SHELL.height && r.bottom > SHELL.height - STATUS)).toBe(true);
+    viewport.scrollTop = 120;
     await waitFor(() =>
-      expect(shell?.getAttribute('data-glass-near')).toBe('title left right status'),
+      expect(firstPage(container)?.getBoundingClientRect().top ?? 0).toBeLessThan(TITLE),
     );
-
-    act(() => useAppearanceStore.getState().setGlassPanels(false));
-    await waitFor(() => expect(shell?.hasAttribute('data-glass-near')).toBe(false));
-
-    act(() => useAppearanceStore.getState().setGlassPanels(true));
-    await waitFor(() => expect(shell?.hasAttribute('data-glass-near')).toBe(true));
-    // Leaving the Read view leaves the frame solid.
-    unmount();
-    expect(shell?.hasAttribute('data-glass-near')).toBe(false);
   }, 60_000);
 });

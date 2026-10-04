@@ -202,23 +202,43 @@ describe('Home', () => {
       within(dialog).getByRole('heading', { name: 'Combine 2 documents' }),
     ).toBeInTheDocument();
     expect(dialogRows(dialog)).toEqual(['mixed-sizes', 'simple-text']);
-    expect(
-      within(dialog).getByRole('textbox', { name: 'Title of the merged document' }),
-    ).toHaveValue('mixed-sizes');
+    // A new document's name, not the first file's (review F8); it follows the order until edited.
+    const name = within(dialog).getByRole('textbox', { name: 'Title of the merged document' });
+    expect(name).toHaveValue('Combined – mixed-sizes + simple-text');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Move simple-text up' }));
+    expect(name).toHaveValue('Combined – simple-text + mixed-sizes');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Move simple-text down' }));
+    expect(name).toHaveValue('Combined – mixed-sizes + simple-text');
 
-    // Confirming merges and opens the new document in Read.
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Merge' }));
+    // Confirming makes a new document, keeps the files open and shows it in Read.
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Combine' }));
     await waitFor(() => {
       expect(shown()).toBe('read');
     });
-    expect(
-      ws()
-        .documentOrder.map((id) => titleOf(id))
-        .sort(),
-    ).toEqual(['mixed-sizes', 'rotated-pages']);
+    expect(ws().documentOrder.map((id) => titleOf(id))).toEqual([
+      'simple-text',
+      'rotated-pages',
+      'mixed-sizes',
+      'Combined – mixed-sizes + simple-text',
+    ]);
     expect(ws().documents[ws().activeDocument ?? ('' as DocumentId)]?.pages).toHaveLength(
       (await pageCount('mixed-sizes')) + 3,
     );
+    expect(useAnnouncer.getState().message).toBe(
+      `Combined 2 files into Combined – mixed-sizes + simple-text. Undo with ${
+        currentPlatform === 'mac' ? 'Command Z' : 'Control Z'
+      }`,
+    );
+    // "Combined 2 files · Undo": one step back to the three files.
+    const toast = await screen.findByTestId('combined-toast');
+    expect(toast).toHaveTextContent('Combined 2 files');
+    await userEvent.click(within(toast).getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(screen.queryByTestId('combined-toast')).toBeNull());
+    expect(ws().documentOrder.map((id) => titleOf(id))).toEqual([
+      'simple-text',
+      'rotated-pages',
+      'mixed-sizes',
+    ]);
   });
 
   it('opens the merge dialog with [target, dragged] when a card is dropped on another', async () => {
@@ -600,7 +620,7 @@ describe('Recents on Home', () => {
     expect(within(home).queryByRole('list', { name: 'Recent files' })).toBeNull();
   });
 
-  it('lists recents above the drop area with no file open: name, pages, size and time', async () => {
+  it('lists recents under the drop area with no file open: name, pages, size and time', async () => {
     const now = Date.now();
     await recordRecent({ name: 'report.pdf', size: 6246, pages: 6, now: now - 5 * 60_000 });
     await recordRecent({ name: 'invoice.pdf', size: 812, now: now - 86_400_000 - 3_600_000 });
@@ -616,9 +636,9 @@ describe('Recents on Home', () => {
     );
     expect(row('invoice.pdf')).toHaveAccessibleName('invoice.pdf, 812 B, yesterday, Open again…');
     expect(row('scan.pdf')).toHaveTextContent('now');
-    // Above the drop area.
+    // One column: the open and drop card first, the recents under it (review F17).
     const drop = within(home).getByRole('heading', { name: 'Drop PDFs to start' });
-    expect(heading.compareDocumentPosition(drop) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(heading.compareDocumentPosition(drop) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     expect(within(home).getByRole('button', { name: 'Clear recents' })).toBeVisible();
   });
 
@@ -727,6 +747,38 @@ describe('Recents on Home', () => {
       await commandRegistry.execute('file.clearRecents');
     });
     expect(screen.queryByRole('list', { name: 'Recent files' })).toBeNull();
+  });
+
+  it('says so, on Home and out loud, when the stored copy cannot be cleared', async () => {
+    // Review F6: a stored database that refuses to clear (the only backend, no fallback).
+    const memory = memoryRecentsBackend();
+    let refuse = true;
+    setRecentsBackend(
+      {
+        ...memory,
+        clear: () => (refuse ? Promise.reject(new Error('InvalidStateError')) : memory.clear()),
+      },
+      { memoryFallback: false },
+    );
+    await recordRecent({ name: 'a.pdf', size: 1 });
+    render(<App />);
+    await screen.findByRole('list', { name: 'Recent files' });
+    await userEvent.click(screen.getByRole('button', { name: 'Clear recents' }));
+    const message =
+      'Recents were cleared from the list, but the copy kept on this device could not be deleted. Try Clear recents again, or clear this site’s data in your browser.';
+    const note = await screen.findByTestId('recent-clear-failed');
+    expect(note).toBeVisible();
+    expect(note).toHaveTextContent(message);
+    expect(screen.queryByRole('list', { name: 'Recent files' })).toBeNull();
+    expect(useAnnouncer.getState().alert).toBe(message);
+    // Clear again, now that the database lets it: the section goes.
+    refuse = false;
+    await userEvent.click(screen.getByRole('button', { name: 'Clear recents' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Recent' })).toBeNull();
+    });
+    expect(useAnnouncer.getState().message).toBe('Recents cleared');
+    expect(await memory.list()).toEqual([]);
   });
 
   it('reopens through a kept handle, in Read, asking for permission within the click', async () => {
